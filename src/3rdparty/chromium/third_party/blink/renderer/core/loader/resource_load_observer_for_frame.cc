@@ -4,14 +4,18 @@
 
 #include "third_party/blink/renderer/core/loader/resource_load_observer_for_frame.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
 #include "components/power_scheduler/power_mode_arbiter.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
 #include "services/network/public/mojom/cors.mojom-forward.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/security/address_space_feature.h"
+#include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_probes_inl.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/core/frame/attribution_src_loader.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -73,9 +77,14 @@ void RecordAddressSpaceFeature(LocalFrame* client_frame,
   }
 
   LocalDOMWindow* window = client_frame->DomWindow();
-  absl::optional<WebFeature> feature =
-      AddressSpaceFeature(FetchType::kSubresource, window->AddressSpace(),
-                          window->IsSecureContext(), response.AddressSpace());
+
+  if (response.RemoteIPEndpoint().address().IsZero()) {
+    UseCounter::Count(window, WebFeature::kPrivateNetworkAccessNullIpAddress);
+  }
+
+  absl::optional<WebFeature> feature = AddressSpaceFeature(
+      FetchType::kSubresource, response.ClientAddressSpace(),
+      window->IsSecureContext(), response.AddressSpace());
   if (!feature.has_value()) {
     return;
   }
@@ -89,41 +98,6 @@ void RecordAddressSpaceFeature(LocalFrame* client_frame,
   } else {
     UseCounter::Count(window, *feature);
   }
-}
-
-// Same as above, for cases where the fetch failed.
-// Does nothing if the fetch failed due to an error other than a failed Private
-// Network Access check.
-void RecordAddressSpaceFeature(LocalFrame* client_frame,
-                               const ResourceError& error) {
-  if (!client_frame) {
-    return;
-  }
-
-  absl::optional<network::CorsErrorStatus> status = error.CorsErrorStatus();
-  if (!status.has_value() ||
-      status->cors_error !=
-          network::mojom::CorsError::kInsecurePrivateNetwork) {
-    // Not the right kind of error, ignore.
-    return;
-  }
-
-  LocalDOMWindow* window = client_frame->DomWindow();
-  absl::optional<WebFeature> feature = AddressSpaceFeature(
-      FetchType::kSubresource, window->AddressSpace(),
-      window->IsSecureContext(), status->resource_address_space);
-  if (!feature.has_value()) {
-    return;
-  }
-
-  // This WebFeature encompasses all private network requests.
-  UseCounter::Count(window,
-                    WebFeature::kMixedContentPrivateHostnameInPublicHostname);
-
-  // Count the feature but do not log it as a deprecation, since its use is
-  // forbidden and has resulted in the fetch failing. In other words, the
-  // document only *attempted* to use a feature that is no longer available.
-  UseCounter::Count(window, *feature);
 }
 
 }  // namespace
@@ -179,6 +153,10 @@ void ResourceLoadObserverForFrame::WillSendRequest(
     frame->Loader().Progress().WillStartLoading(request.InspectorId(),
                                                 request.Priority());
   }
+
+  frame->GetAttributionSrcLoader()->MaybeRegisterTrigger(request,
+                                                         redirect_response);
+
   probe::WillSendRequest(
       GetProbe(), document_loader_,
       fetcher_properties_->GetFetchClientSettingsObject().GlobalObjectUrl(),
@@ -202,6 +180,50 @@ void ResourceLoadObserverForFrame::DidChangePriority(
                                    identifier, priority);
 }
 
+namespace {
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+//
+// Must remain in sync with LinkPrefetchMimeType in
+// tools/metrics/histograms/enums.xml.
+enum class LinkPrefetchMimeType {
+  kUnknown = 0,
+  kHtml = 1,
+  kScript = 2,
+  kStyle = 3,
+  kFont = 4,
+  kImage = 5,
+  kMedia = 6,
+  kMaxValue = kMedia,
+};
+
+void LogLinkPrefetchMimeTypeHistogram(const AtomicString& mime) {
+  // Loosely based on https://mimesniff.spec.whatwg.org/#mime-type-groups.
+  // This could be done properly if needed, but this is just to gather
+  // approximate data.
+  LinkPrefetchMimeType type = LinkPrefetchMimeType::kUnknown;
+  if (mime == "text/html" || mime == "application/xhtml+xml") {
+    type = LinkPrefetchMimeType::kHtml;
+  } else if (mime == "application/javascript" || mime == "text/javascript") {
+    type = LinkPrefetchMimeType::kScript;
+  } else if (mime == "text/css") {
+    type = LinkPrefetchMimeType::kStyle;
+  } else if (mime.StartsWith("font/") || mime.StartsWith("application/font-") ||
+             mime == "application/vnd.ms-fontobject" ||
+             mime == "application/vnd.ms-opentype") {
+    type = LinkPrefetchMimeType::kFont;
+  } else if (mime.StartsWith("image/")) {
+    type = LinkPrefetchMimeType::kImage;
+  } else if (mime.StartsWith("audio/") || mime.StartsWith("video/") ||
+             mime == "application/ogg") {
+    type = LinkPrefetchMimeType::kMedia;
+  }
+  UMA_HISTOGRAM_ENUMERATION("Blink.Prefetch.LinkPrefetchMimeType", type);
+}
+
+}  // namespace
+
 void ResourceLoadObserverForFrame::DidReceiveResponse(
     uint64_t identifier,
     const ResourceRequest& request,
@@ -217,16 +239,6 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
     subresource_filter->ReportAdRequestId(response.RequestId());
 
   DCHECK(frame_client);
-  if (response.GetCTPolicyCompliance() ==
-      ResourceResponse::kCTPolicyDoesNotComply) {
-    CountUsage(
-        frame->IsMainFrame()
-            ? WebFeature::
-                  kCertificateTransparencyNonCompliantSubresourceInMainFrame
-            : WebFeature::
-                  kCertificateTransparencyNonCompliantResourceInSubframe);
-  }
-
   if (response_source == ResponseSource::kFromMemoryCache) {
     ResourceRequest resource_request(resource->GetResourceRequest());
 
@@ -237,7 +249,8 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
           resource_request.Url(),
           String::FromUTF8(resource_request.HttpMethod().Utf8()),
           String::FromUTF8(response.MimeType().Utf8()),
-          resource_request.GetRequestDestination());
+          resource_request.GetRequestDestination(),
+          response.RequestIncludeCredentials());
     }
 
     // Note: probe::WillSendRequest needs to precede before this probe method.
@@ -268,6 +281,9 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
     }
   }
 
+  if (resource->GetType() == ResourceType::kLinkPrefetch)
+    LogLinkPrefetchMimeTypeHistogram(response.MimeType());
+
   PreloadHelper::CanLoadResources resource_loading_policy =
       response_source == ResponseSource::kFromMemoryCache
           ? PreloadHelper::kDoNotLoadResources
@@ -290,6 +306,8 @@ void ResourceLoadObserverForFrame::DidReceiveResponse(
         response.CurrentRequestUrl(), true /* is_subresource */,
         resource->GetResourceRequest().IsAdResource());
   }
+
+  frame->GetAttributionSrcLoader()->MaybeRegisterTrigger(request, response);
 
   frame->Loader().Progress().IncrementProgress(identifier, response);
   probe::DidReceiveResourceResponse(GetProbe(), identifier, document_loader_,
@@ -359,8 +377,6 @@ void ResourceLoadObserverForFrame::DidFailLoading(
 
   probe::DidFailLoading(GetProbe(), identifier, document_loader_, error,
                         frame->GetDevToolsFrameToken());
-
-  RecordAddressSpaceFeature(frame, error);
 
   // Notification to FrameConsole should come AFTER InspectorInstrumentation
   // call, DevTools front-end relies on this.

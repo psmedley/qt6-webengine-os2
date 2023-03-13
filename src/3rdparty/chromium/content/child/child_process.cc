@@ -11,8 +11,10 @@
 #include "base/lazy_instance.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/process/process_handle.h"
-#include "base/single_thread_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/threading/hang_watcher.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_local.h"
 #include "build/build_config.h"
@@ -30,15 +32,29 @@
 #include "base/test/clang_profiling.h"
 #endif
 
-#if defined(OS_ANDROID)
-#include "components/power_scheduler/power_scheduler.h"
-#endif
-
 namespace content {
 
 namespace {
 base::LazyInstance<base::ThreadLocalPointer<ChildProcess>>::DestructorAtExit
     g_lazy_child_process_tls = LAZY_INSTANCE_INITIALIZER;
+
+class ChildIOThread : public base::Thread {
+ public:
+  ChildIOThread() : base::Thread("Chrome_ChildIOThread") {}
+  ChildIOThread(const ChildIOThread&) = delete;
+  ChildIOThread(ChildIOThread&&) = delete;
+  ChildIOThread& operator=(const ChildIOThread&) = delete;
+  ChildIOThread& operator=(ChildIOThread&&) = delete;
+
+  void Run(base::RunLoop* run_loop) override {
+    base::ScopedClosureRunner unregister_thread_closure;
+    if (base::HangWatcher::IsIOThreadHangWatchingEnabled()) {
+      unregister_thread_closure = base::HangWatcher::RegisterThread(
+          base::HangWatcher::ThreadType::kIOThread);
+    }
+    base::Thread::Run(run_loop);
+  }
+};
 }
 
 ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority,
@@ -48,11 +64,11 @@ ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority,
     : ref_count_(0),
       shutdown_event_(base::WaitableEvent::ResetPolicy::MANUAL,
                       base::WaitableEvent::InitialState::NOT_SIGNALED),
-      io_thread_("Chrome_ChildIOThread") {
+      io_thread_(std::make_unique<ChildIOThread>()) {
   DCHECK(!g_lazy_child_process_tls.Pointer()->Get());
   g_lazy_child_process_tls.Pointer()->Set(this);
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
   const bool is_embedded_in_browser_process =
@@ -87,20 +103,17 @@ ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority,
     initialized_thread_pool_ = true;
   }
 
-  tracing::InitTracingPostThreadPoolStartAndFeatureList();
+  tracing::InitTracingPostThreadPoolStartAndFeatureList(
+      /* enable_consumer */ false);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   SetupCpuTimeMetrics();
-  // For child processes, this requires allowing of the sched_setaffinity()
-  // syscall in the sandbox (baseline_policy_android.cc). When this call is
-  // removed, the sandbox allowlist should be updated too.
-  power_scheduler::PowerScheduler::GetInstance()->Setup();
 #endif
 
   // We can't recover from failing to start the IO thread.
   base::Thread::Options thread_options(base::MessagePumpType::IO, 0);
   thread_options.priority = io_thread_priority;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // TODO(reveman): Remove this in favor of setting it explicitly for each type
   // of process.
   if (base::FeatureList::IsEnabled(
@@ -108,7 +121,7 @@ ChildProcess::ChildProcess(base::ThreadPriority io_thread_priority,
     thread_options.priority = base::ThreadPriority::DISPLAY;
   }
 #endif
-  CHECK(io_thread_.StartWithOptions(std::move(thread_options)));
+  CHECK(io_thread_->StartWithOptions(std::move(thread_options)));
 }
 
 ChildProcess::~ChildProcess() {
@@ -132,7 +145,8 @@ ChildProcess::~ChildProcess() {
   }
 
   g_lazy_child_process_tls.Pointer()->Set(nullptr);
-  io_thread_.Stop();
+  io_thread_->Stop();
+  io_thread_.reset();
 
   if (initialized_thread_pool_) {
     DCHECK(base::ThreadPoolInstance::Get());

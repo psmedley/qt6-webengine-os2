@@ -77,6 +77,10 @@ class ExtensionDownloaderTestHelper {
  public:
   ExtensionDownloaderTestHelper();
 
+  ExtensionDownloaderTestHelper(const ExtensionDownloaderTestHelper&) = delete;
+  ExtensionDownloaderTestHelper& operator=(
+      const ExtensionDownloaderTestHelper&) = delete;
+
   ~ExtensionDownloaderTestHelper();
 
   MockExtensionDownloaderDelegate& delegate() { return delegate_; }
@@ -87,6 +91,9 @@ class ExtensionDownloaderTestHelper {
   network::TestURLLoaderFactory& test_url_loader_factory() {
     return test_url_loader_factory_;
   }
+
+  // Adds a fetch request directly to the internal downloader.
+  void StartUpdateCheck(std::unique_ptr<ManifestFetchData> fetch_data);
 
   // Returns a request that URL loader factory has received (or nullptr if it
   // didn't receive enough requests).
@@ -107,8 +114,6 @@ class ExtensionDownloaderTestHelper {
   data_decoder::test::InProcessDataDecoder in_process_data_decoder_;
   MockExtensionDownloaderDelegate delegate_;
   ExtensionDownloader downloader_;
-
-  DISALLOW_COPY_AND_ASSIGN(ExtensionDownloaderTestHelper);
 };
 
 }  // namespace extensions

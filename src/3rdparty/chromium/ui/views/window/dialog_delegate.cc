@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "build/build_config.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -30,7 +31,7 @@
 #include "ui/views/window/dialog_client_view.h"
 #include "ui/views/window/dialog_observer.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/base/win/shell.h"
 #endif
 
@@ -78,12 +79,12 @@ Widget* DialogDelegate::CreateDialogWidget(
 
 // static
 bool DialogDelegate::CanSupportCustomFrame(gfx::NativeView parent) {
-#if (defined(OS_LINUX) || defined(OS_CHROMEOS)) && \
+#if (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)) && \
     BUILDFLAG(ENABLE_DESKTOP_AURA)
   // The new style doesn't support unparented dialogs on Linux desktop.
   return parent != nullptr;
 #else
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // The new style doesn't support unparented dialogs on Windows Classic themes.
   if (!ui::win::IsAeroGlassEnabled())
     return parent != nullptr;
@@ -109,7 +110,7 @@ Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
   if (!dialog || dialog->use_custom_frame()) {
     params.opacity = Widget::InitParams::WindowOpacity::kTranslucent;
     params.remove_standard_frame = true;
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
     // Except on Mac, the bubble frame includes its own shadow; remove any
     // native shadowing. On Mac, the window server provides the shadow.
     params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
@@ -117,7 +118,7 @@ Widget::InitParams DialogDelegate::GetDialogWidgetInitParams(
   }
   params.context = context;
   params.parent = parent;
-#if !defined(OS_APPLE)
+#if !BUILDFLAG(IS_APPLE)
   // Web-modal (ui::MODAL_TYPE_CHILD) dialogs with parents are marked as child
   // widgets to prevent top-level window behavior (independent movement, etc).
   // On Mac, however, the parent may be a native window (not a views::Widget),
@@ -235,6 +236,13 @@ void DialogDelegate::WindowWillClose() {
   // client code could (eg) call Accept() from inside the cancel callback, which
   // could lead to multiple callbacks being delivered from this class.
   already_started_close_ = true;
+}
+
+bool DialogDelegate::EscShouldCancelDialog() const {
+  // Use cancel as the Esc action if there's no defined "close" action. If the
+  // delegate has either specified a closing action or a close-x they can expect
+  // it to be called on Esc.
+  return !close_callback_ && !ShouldShowCloseButton();
 }
 
 // static
@@ -415,9 +423,12 @@ void DialogDelegate::AcceptDialog() {
 }
 
 void DialogDelegate::CancelDialog() {
-  // Note: don't DCHECK(IsDialogButtonEnabled(ui::DIALOG_BUTTON_CANCEL)) here;
-  // CancelDialog() is *always* reachable via Esc closing the dialog, even if
-  // the cancel button is disabled or there is no cancel button at all.
+  // If there's a close button available, this callback should only be reachable
+  // if the cancel button is available. Otherwise this can be reached through
+  // closing the dialog via Esc.
+  if (ShouldShowCloseButton())
+    DCHECK(IsDialogButtonEnabled(ui::DIALOG_BUTTON_CANCEL));
+
   if (already_started_close_ || !Cancel())
     return;
 
@@ -437,7 +448,7 @@ ax::mojom::Role DialogDelegate::GetAccessibleWindowRole() {
 }
 
 int DialogDelegate::GetCornerRadius() const {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // TODO(crbug.com/1116680): On Mac MODAL_TYPE_WINDOW is implemented using
   // sheets which causes visual artifacts when corner radius is increased for
   // modal types. Remove this after this issue has been addressed.

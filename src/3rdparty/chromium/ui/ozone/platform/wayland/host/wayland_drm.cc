@@ -17,21 +17,24 @@
 namespace ui {
 
 namespace {
-constexpr uint32_t kMinWlDrmVersion = 2;
+constexpr uint32_t kMinVersion = 2;
 }
 
 // static
-void WaylandDrm::Register(WaylandConnection* connection) {
-  connection->RegisterGlobalObjectFactory("wl_drm", &WaylandDrm::Instantiate);
-}
+constexpr char WaylandDrm::kInterfaceName[];
 
 // static
 void WaylandDrm::Instantiate(WaylandConnection* connection,
                              wl_registry* registry,
                              uint32_t name,
+                             const std::string& interface,
                              uint32_t version) {
-  if (connection->drm_ || version < kMinWlDrmVersion)
+  DCHECK_EQ(interface, kInterfaceName);
+
+  if (connection->drm_ ||
+      !wl::CanBind(interface, version, kMinVersion, kMinVersion)) {
     return;
+  }
 
   auto wl_drm = wl::Bind<struct wl_drm>(registry, name, version);
   if (!wl_drm) {
@@ -63,7 +66,7 @@ bool WaylandDrm::SupportsDrmPrime() const {
   return authenticated_ && !!wl_drm_;
 }
 
-void WaylandDrm::CreateBuffer(base::ScopedFD fd,
+void WaylandDrm::CreateBuffer(const base::ScopedFD& fd,
                               const gfx::Size& size,
                               const std::vector<uint32_t>& strides,
                               const std::vector<uint32_t>& offsets,

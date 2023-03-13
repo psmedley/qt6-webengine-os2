@@ -27,11 +27,13 @@
 
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/modules/mediastream/focusable_media_stream_track.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track_event.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_track_impl.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 
 namespace blink {
@@ -126,7 +128,7 @@ MediaStream::MediaStream(ExecutionContext* context,
   uint32_t number_of_audio_tracks = descriptor_->NumberOfAudioComponents();
   audio_tracks_.ReserveCapacity(number_of_audio_tracks);
   for (uint32_t i = 0; i < number_of_audio_tracks; i++) {
-    auto* new_track = MakeGarbageCollected<MediaStreamTrack>(
+    auto* new_track = MakeGarbageCollected<MediaStreamTrackImpl>(
         context, descriptor_->AudioComponent(i));
     new_track->RegisterMediaStream(this);
     audio_tracks_.push_back(new_track);
@@ -135,10 +137,11 @@ MediaStream::MediaStream(ExecutionContext* context,
   uint32_t number_of_video_tracks = descriptor_->NumberOfVideoComponents();
   video_tracks_.ReserveCapacity(number_of_video_tracks);
   for (uint32_t i = 0; i < number_of_video_tracks; i++) {
-    auto* new_track = MakeGarbageCollected<MediaStreamTrack>(
+    MediaStreamTrack* const new_track = MediaStreamTrackImpl::Create(
         context, descriptor_->VideoComponent(i),
         WTF::Bind(&MediaStream::OnMediaStreamTrackInitialized,
-                  WrapPersistent(this)));
+                  WrapPersistent(this)),
+        descriptor_->Id());
     new_track->RegisterMediaStream(this);
     video_tracks_.push_back(new_track);
   }
@@ -432,8 +435,8 @@ void MediaStream::AddTrackByComponentAndFireEvents(
   DCHECK(component);
   if (!GetExecutionContext())
     return;
-  auto* track =
-      MakeGarbageCollected<MediaStreamTrack>(GetExecutionContext(), component);
+  auto* track = MakeGarbageCollected<MediaStreamTrackImpl>(
+      GetExecutionContext(), component);
   AddTrackAndFireEvents(track, event_timing);
 }
 

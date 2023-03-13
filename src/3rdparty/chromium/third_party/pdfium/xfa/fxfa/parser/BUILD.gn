@@ -676,6 +676,12 @@ source_set("parser") {
     "xfa_utils.cpp",
     "xfa_utils.h",
   ]
+  allow_circular_includes_from = [ "../../../fxjs" ]
+  configs += [
+    "../../../:pdfium_strict_config",
+    "../../../:pdfium_noshorten_config",
+    "../../:xfa_warnings",
+  ]
   deps = [
     "../../../core/fxcodec",
     "../../../core/fxcrt",
@@ -687,17 +693,13 @@ source_set("parser") {
     "../../fgas/font",
     "../../fgas/graphics",
   ]
-  allow_circular_includes_from = [ "../../../fxjs" ]
-  configs += [
-    "../../../:pdfium_strict_config",
-    "../../:xfa_warnings",
-  ]
   visibility = [ "../../../*" ]
 }
 
 pdfium_unittest_source_set("unittests") {
   sources = [
     "cxfa_document_builder_unittest.cpp",
+    "cxfa_document_unittest.cpp",
     "cxfa_localevalue_unittest.cpp",
     "cxfa_measurement_unittest.cpp",
     "cxfa_node_unittest.cpp",

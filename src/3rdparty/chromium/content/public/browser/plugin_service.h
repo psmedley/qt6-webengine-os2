@@ -23,10 +23,6 @@ namespace base {
 class FilePath;
 }
 
-namespace url {
-class Origin;
-}
-
 namespace content {
 
 class BrowserContext;
@@ -78,7 +74,6 @@ class CONTENT_EXPORT PluginService {
   virtual bool GetPluginInfo(int render_process_id,
                              int render_frame_id,
                              const GURL& url,
-                             const url::Origin& main_frame_origin,
                              const std::string& mime_type,
                              bool allow_wildcard,
                              bool* is_stale,

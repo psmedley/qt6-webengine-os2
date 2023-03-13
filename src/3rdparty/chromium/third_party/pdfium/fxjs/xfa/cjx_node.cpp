@@ -19,6 +19,7 @@
 #include "fxjs/fxv8.h"
 #include "fxjs/js_resources.h"
 #include "fxjs/xfa/cfxjse_engine.h"
+#include "v8/include/v8-object.h"
 #include "xfa/fxfa/cxfa_eventparam.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
@@ -180,7 +181,7 @@ CJS_Result CJX_Node::isPropertySpecified(
     return CJS_Result::Failure(JSMessage::kParamError);
 
   WideString expression = runtime->ToWideString(params[0]);
-  Optional<XFA_ATTRIBUTEINFO> attr =
+  absl::optional<XFA_ATTRIBUTEINFO> attr =
       XFA_GetAttributeByName(expression.AsStringView());
   if (attr.has_value() && HasAttribute(attr.value().attribute))
     return CJS_Result::Success(runtime->NewBoolean(true));
@@ -214,7 +215,7 @@ CJS_Result CJX_Node::loadXML(CFX_V8* runtime,
   if (params.size() >= 2)
     bIgnoreRoot = runtime->ToBoolean(params[1]);
 
-  bool bOverwrite = 0;
+  bool bOverwrite = false;
   if (params.size() >= 3)
     bOverwrite = runtime->ToBoolean(params[2]);
 
@@ -405,7 +406,7 @@ void CJX_Node::ns(v8::Isolate* pIsolate,
                   bool bSetting,
                   XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   *pValue = fxv8::NewStringHelper(
@@ -417,7 +418,7 @@ void CJX_Node::model(v8::Isolate* pIsolate,
                      bool bSetting,
                      XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   *pValue = GetDocument()->GetScriptContext()->GetOrCreateJSBindingFromMap(
@@ -429,7 +430,7 @@ void CJX_Node::isContainer(v8::Isolate* pIsolate,
                            bool bSetting,
                            XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   *pValue = fxv8::NewBooleanHelper(pIsolate, GetXFANode()->IsContainerNode());
@@ -440,7 +441,7 @@ void CJX_Node::isNull(v8::Isolate* pIsolate,
                       bool bSetting,
                       XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   if (GetXFANode()->GetElementType() == XFA_Element::Subform) {
@@ -455,7 +456,7 @@ void CJX_Node::oneOfChild(v8::Isolate* pIsolate,
                           bool bSetting,
                           XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 

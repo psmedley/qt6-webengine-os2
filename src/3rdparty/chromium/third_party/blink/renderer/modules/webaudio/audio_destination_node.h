@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_DESTINATION_NODE_H_
 
 #include <atomic>
+#include "base/notreached.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 
 namespace blink {
@@ -37,7 +38,7 @@ namespace blink {
 // of the context.
 class AudioDestinationHandler : public AudioHandler {
  public:
-  AudioDestinationHandler(AudioNode&);
+  explicit AudioDestinationHandler(AudioNode&);
   ~AudioDestinationHandler() override;
 
   // The method MUST NOT be invoked when rendering a graph because the
@@ -111,7 +112,7 @@ class AudioDestinationNode : public AudioNode {
   void ReportWillBeDestroyed() final;
 
  protected:
-  AudioDestinationNode(BaseAudioContext&);
+  explicit AudioDestinationNode(BaseAudioContext&);
 };
 
 }  // namespace blink

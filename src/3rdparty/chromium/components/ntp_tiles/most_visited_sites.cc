@@ -5,6 +5,7 @@
 #include "components/ntp_tiles/most_visited_sites.h"
 
 #include <algorithm>
+#include <cctype>
 #include <iterator>
 #include <memory>
 #include <utility>
@@ -15,18 +16,28 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/metrics/user_metrics.h"
+#include "base/observer_list.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "components/ntp_tiles/constants.h"
+#include "components/ntp_tiles/deleted_tile_type.h"
 #include "components/ntp_tiles/features.h"
 #include "components/ntp_tiles/icon_cacher.h"
+#include "components/ntp_tiles/metrics.h"
 #include "components/ntp_tiles/pref_names.h"
 #include "components/ntp_tiles/switches.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/search/ntp_features.h"
+#include "components/webapps/common/constants.h"
+#include "extensions/buildflags/buildflags.h"
+
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+// GN doesn't understand conditional includes, so we need nogncheck here.
+#include "extensions/common/constants.h"  // nogncheck
+#endif
 
 using history::TopSites;
 
@@ -53,11 +64,6 @@ const char* kKnownGenericPagePrefixes[] = {
 // |num_tiles| tiles.
 bool NeedPopularSites(const PrefService* prefs, int num_tiles) {
   return prefs->GetInteger(prefs::kNumPersonalTiles) < num_tiles;
-}
-
-bool AreURLsEquivalent(const GURL& url1, const GURL& url2) {
-  return url1.host_piece() == url2.host_piece() &&
-         url1.path_piece() == url2.path_piece();
 }
 
 bool HasHomeTile(const NTPTilesVector& tiles) {
@@ -120,13 +126,15 @@ MostVisitedSites::MostVisitedSites(
     std::unique_ptr<PopularSites> popular_sites,
     std::unique_ptr<CustomLinksManager> custom_links,
     std::unique_ptr<IconCacher> icon_cacher,
-    std::unique_ptr<MostVisitedSitesSupervisor> supervisor)
+    std::unique_ptr<MostVisitedSitesSupervisor> supervisor,
+    bool is_default_chrome_app_migrated)
     : prefs_(prefs),
       top_sites_(top_sites),
       popular_sites_(std::move(popular_sites)),
       custom_links_(std::move(custom_links)),
       icon_cacher_(std::move(icon_cacher)),
       supervisor_(std::move(supervisor)),
+      is_default_chrome_app_migrated_(is_default_chrome_app_migrated),
       max_num_sites_(0u),
       mv_source_(TileSource::TOP_SITES),
       is_observing_(false) {
@@ -444,16 +452,6 @@ void MostVisitedSites::InitiateTopSitesQuery() {
                      top_sites_weak_ptr_factory_.GetWeakPtr()));
 }
 
-base::FilePath MostVisitedSites::GetAllowlistLargeIconPath(const GURL& url) {
-  if (supervisor_) {
-    for (const auto& allowlist : supervisor_->GetAllowlists()) {
-      if (AreURLsEquivalent(allowlist.entry_point, url))
-        return allowlist.large_icon_path;
-    }
-  }
-  return base::FilePath();
-}
-
 void MostVisitedSites::OnMostVisitedURLsAvailable(
     const history::MostVisitedURLList& visited_list) {
   // Ignore the event if tiles are provided by custom links, which take
@@ -476,7 +474,6 @@ void MostVisitedSites::OnMostVisitedURLsAvailable(
         custom_links_ ? GenerateShortTitle(visited.title) : visited.title;
     tile.url = visited.url;
     tile.source = TileSource::TOP_SITES;
-    tile.allowlist_icon_path = GetAllowlistLargeIconPath(visited.url);
     // MostVisitedURL.title is either the title or the URL which is treated
     // exactly as the title. Differentiating here is not worth the overhead.
     tile.title_source = TileTitleSource::TITLE_TAG;
@@ -497,43 +494,6 @@ void MostVisitedSites::BuildCurrentTiles() {
 
   mv_source_ = TileSource::TOP_SITES;
   InitiateTopSitesQuery();
-}
-
-NTPTilesVector MostVisitedSites::CreateAllowlistEntryPointTiles(
-    const std::set<std::string>& used_hosts,
-    size_t num_actual_tiles) {
-  if (!supervisor_) {
-    return NTPTilesVector();
-  }
-
-  NTPTilesVector allowlist_tiles;
-  for (const auto& allowlist : supervisor_->GetAllowlists()) {
-    if (allowlist_tiles.size() + num_actual_tiles >= GetMaxNumSites())
-      break;
-
-    // Skip blocked sites.
-    if (top_sites_ && top_sites_->IsBlocked(allowlist.entry_point))
-      continue;
-
-    // Skip tiles already present.
-    if (used_hosts.find(allowlist.entry_point.host()) != used_hosts.end())
-      continue;
-
-    // Skip allowlist entry points that are manually blocked.
-    if (supervisor_->IsBlocked(allowlist.entry_point))
-      continue;
-
-    NTPTile tile;
-    tile.title = allowlist.title;
-    tile.url = allowlist.entry_point;
-    tile.source = TileSource::ALLOWLIST;
-    // User-set. Might be the title but we cannot be sure.
-    tile.title_source = TileTitleSource::UNKNOWN;
-    tile.allowlist_icon_path = allowlist.large_icon_path;
-    allowlist_tiles.push_back(std::move(tile));
-  }
-
-  return allowlist_tiles;
 }
 
 std::map<SectionType, NTPTilesVector>
@@ -747,17 +707,13 @@ void MostVisitedSites::MergeMostVisitedTiles(NTPTilesVector personal_tiles) {
   }
   AddToHostsAndTotalCount(personal_tiles, &used_hosts, &num_actual_tiles);
 
-  NTPTilesVector allowlist_tiles =
-      CreateAllowlistEntryPointTiles(used_hosts, num_actual_tiles);
-  AddToHostsAndTotalCount(allowlist_tiles, &used_hosts, &num_actual_tiles);
-
   std::map<SectionType, NTPTilesVector> sections =
       CreatePopularSitesSections(used_hosts, num_actual_tiles);
   AddToHostsAndTotalCount(sections[SectionType::PERSONALIZED], &used_hosts,
                           &num_actual_tiles);
 
   NTPTilesVector new_tiles =
-      MergeTiles(std::move(personal_tiles), std::move(allowlist_tiles),
+      MergeTiles(std::move(personal_tiles),
                  std::move(sections[SectionType::PERSONALIZED]), explore_tile);
 
   SaveTilesAndNotify(std::move(new_tiles), std::move(sections));
@@ -766,8 +722,19 @@ void MostVisitedSites::MergeMostVisitedTiles(NTPTilesVector personal_tiles) {
 void MostVisitedSites::SaveTilesAndNotify(
     NTPTilesVector new_tiles,
     std::map<SectionType, NTPTilesVector> sections) {
-  if (!current_tiles_.has_value() || (*current_tiles_ != new_tiles)) {
-    current_tiles_.emplace(std::move(new_tiles));
+  // TODO(https://crbug.com/1266574):
+  // Remove this after preinstalled apps are migrated.
+
+  NTPTilesVector fixed_tiles = is_default_chrome_app_migrated_
+                                   ? RemoveInvalidPreinstallApps(new_tiles)
+                                   : new_tiles;
+
+  if (fixed_tiles.size() != new_tiles.size()) {
+    metrics::RecordsMigratedDefaultAppDeleted(
+        DeletedTileType::kMostVisitedSite);
+  }
+  if (!current_tiles_.has_value() || (*current_tiles_ != fixed_tiles)) {
+    current_tiles_.emplace(std::move(fixed_tiles));
 
     int num_personal_tiles = 0;
     for (const auto& tile : *current_tiles_) {
@@ -787,15 +754,48 @@ void MostVisitedSites::SaveTilesAndNotify(
 }
 
 // static
+bool MostVisitedSites::IsNtpTileFromPreinstalledApp(GURL url) {
+#if BUILDFLAG(ENABLE_EXTENSIONS)
+  return url.is_valid() && url.SchemeIs(extensions::kExtensionScheme) &&
+         extension_misc::IsPreinstalledAppId(url.host());
+#else
+  return false;
+#endif
+}
+
+// static
+bool MostVisitedSites::WasNtpAppMigratedToWebApp(PrefService* prefs, GURL url) {
+  const base::Value* migrated_apps =
+      prefs->GetList(webapps::kWebAppsMigratedPreinstalledApps);
+  if (!migrated_apps)
+    return false;
+  for (const auto& val : migrated_apps->GetListDeprecated()) {
+    if (val.is_string() && val.GetString() == url.host())
+      return true;
+  }
+  return false;
+}
+
+NTPTilesVector MostVisitedSites::RemoveInvalidPreinstallApps(
+    NTPTilesVector new_tiles) {
+  new_tiles.erase(
+      std::remove_if(new_tiles.begin(), new_tiles.end(),
+                     [this](NTPTile ntp_tile) {
+                       return MostVisitedSites::IsNtpTileFromPreinstalledApp(
+                                  ntp_tile.url) &&
+                              MostVisitedSites::WasNtpAppMigratedToWebApp(
+                                  prefs_, ntp_tile.url);
+                     }),
+      new_tiles.end());
+  return new_tiles;
+}
+
 NTPTilesVector MostVisitedSites::MergeTiles(
     NTPTilesVector personal_tiles,
-    NTPTilesVector allowlist_tiles,
     NTPTilesVector popular_tiles,
     absl::optional<NTPTile> explore_tile) {
   NTPTilesVector merged_tiles;
   std::move(personal_tiles.begin(), personal_tiles.end(),
-            std::back_inserter(merged_tiles));
-  std::move(allowlist_tiles.begin(), allowlist_tiles.end(),
             std::back_inserter(merged_tiles));
   std::move(popular_tiles.begin(), popular_tiles.end(),
             std::back_inserter(merged_tiles));

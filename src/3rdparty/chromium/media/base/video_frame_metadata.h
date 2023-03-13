@@ -10,11 +10,14 @@
 #include "build/build_config.h"
 #include "media/base/media_export.h"
 #include "media/base/video_transformation.h"
+#include "media/gpu/buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace media {
 
+// NOTE: When adding new VideoFrameMetadata fields, please ensure you update the
+// MergeMetadataFrom() method.
 struct MEDIA_EXPORT VideoFrameMetadata {
   VideoFrameMetadata();
   ~VideoFrameMetadata() = default;
@@ -70,6 +73,19 @@ struct MEDIA_EXPORT VideoFrameMetadata {
   // fully contained within visible_rect().
   absl::optional<gfx::Rect> capture_update_rect;
 
+  // If cropping was applied due to Region Capture to produce this frame,
+  // then this reflects where the frame's contents originate from in the
+  // original uncropped frame.
+  absl::optional<gfx::Rect> region_capture_rect;
+
+  // Whenever cropTo() is called, Blink increments the crop_version and records
+  // a Promise as associated with that crop_version.
+  // When Blink observes a frame with this new version or a later one,
+  // Blink resolves the Promise.
+  // Frames associated with a source which cannot be cropped will always
+  // have this value set to zero.
+  uint32_t crop_version = 0;
+
   // If not null, it indicates how video frame mailbox should be copied to a
   // new mailbox.
   absl::optional<CopyMode> copy_mode;
@@ -118,8 +134,8 @@ struct MEDIA_EXPORT VideoFrameMetadata {
   // instead.  This lets us figure out when SurfaceViews are appropriate.
   bool texture_owner = false;
 
-  // Android only: if set, then this frame's resource would like to be
-  // notified about its promotability to an overlay.
+  // Android & Windows only: if set, then this frame's resource would like to
+  // be notified about its promotability to an overlay.
   bool wants_promotion_hint = false;
 
   // Windows only: set when frame is backed by a dcomp surface handle.
@@ -132,9 +148,21 @@ struct MEDIA_EXPORT VideoFrameMetadata {
   // PROTECTED_VIDEO is also set to true.
   bool hw_protected = false;
 
-  // Identifier used to query if a HW protected video frame can still be
-  // properly displayed or not. Non-zero when valid.
-  uint32_t hw_protected_validation_id = 0;
+  // This video frame's shared image backing can support zero-copy WebGPU
+  // import.
+  bool is_webgpu_compatible = false;
+
+#if BUILDFLAG(USE_VAAPI)
+  // The ID of the VA-API protected session used to decode this frame, if
+  // applicable. The proper type is VAProtectedSessionID. However, in order to
+  // avoid including the VA-API headers in this file, we use the underlying
+  // type. Users of this field are expected to have compile-time assertions to
+  // ensure it's safe to use this as a VAProtectedSessionID.
+  //
+  // Notes on IPC: this field should not be copied to the Mojo version of
+  // VideoFrameMetadata because it should not cross process boundaries.
+  absl::optional<unsigned int> hw_va_protected_session_id;
+#endif
 
   // An UnguessableToken that identifies VideoOverlayFactory that created
   // this VideoFrame. It's used by Cast to help with video hole punch.

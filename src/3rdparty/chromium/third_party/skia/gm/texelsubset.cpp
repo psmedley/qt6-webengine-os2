@@ -18,12 +18,12 @@
 #include "include/core/SkString.h"
 #include "include/private/SkTArray.h"
 #include "src/core/SkCanvasPriv.h"
-#include "src/gpu/GrDirectContextPriv.h"
-#include "src/gpu/GrProxyProvider.h"
-#include "src/gpu/GrSamplerState.h"
-#include "src/gpu/SkGr.h"
-#include "src/gpu/effects/GrTextureEffect.h"
-#include "src/gpu/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrProxyProvider.h"
+#include "src/gpu/ganesh/GrSamplerState.h"
+#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/effects/GrTextureEffect.h"
+#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #include "tools/Resources.h"
 #include "tools/gpu/TestOps.h"
 
@@ -214,9 +214,9 @@ protected:
     }
 
 private:
-    static constexpr SkISize kImageSize = {128, 88};
-    static constexpr SkScalar kDrawPad = 10.f;
-    static constexpr SkScalar kTestPad = 10.f;
+    inline static constexpr SkISize kImageSize = {128, 88};
+    inline static constexpr SkScalar kDrawPad = 10.f;
+    inline static constexpr SkScalar kTestPad = 10.f;
     SkBitmap fBitmap;
     Filter fFilter;
     MipmapMode fMipmapMode;

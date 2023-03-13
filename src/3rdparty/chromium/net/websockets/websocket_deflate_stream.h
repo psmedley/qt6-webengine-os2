@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
+#include "net/log/net_log_with_source.h"
 #include "net/websockets/websocket_deflater.h"
 #include "net/websockets/websocket_frame.h"
 #include "net/websockets/websocket_inflater.h"
@@ -43,6 +43,10 @@ class NET_EXPORT_PRIVATE WebSocketDeflateStream : public WebSocketStream {
   WebSocketDeflateStream(std::unique_ptr<WebSocketStream> stream,
                          const WebSocketDeflateParameters& params,
                          std::unique_ptr<WebSocketDeflatePredictor> predictor);
+
+  WebSocketDeflateStream(const WebSocketDeflateStream&) = delete;
+  WebSocketDeflateStream& operator=(const WebSocketDeflateStream&) = delete;
+
   ~WebSocketDeflateStream() override;
 
   // WebSocketStream functions.
@@ -53,6 +57,7 @@ class NET_EXPORT_PRIVATE WebSocketDeflateStream : public WebSocketStream {
   void Close() override;
   std::string GetSubProtocol() const override;
   std::string GetExtensions() const override;
+  const NetLogWithSource& GetNetLogWithSource() const override;
 
  private:
   enum ReadingState {
@@ -106,8 +111,6 @@ class NET_EXPORT_PRIVATE WebSocketDeflateStream : public WebSocketStream {
   std::vector<scoped_refptr<IOBufferWithSize>> deflater_outputs_;
   // References of Inflater outputs kept until next ReadFrames().
   std::vector<scoped_refptr<IOBufferWithSize>> inflater_outputs_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebSocketDeflateStream);
 };
 
 }  // namespace net

@@ -17,9 +17,9 @@
 #include <set>
 #include <vector>
 
+#include "api/field_trials_view.h"
 #include "modules/include/module_common_types.h"
 #include "modules/include/module_common_types_public.h"
-#include "modules/utility/include/process_thread.h"
 #include "modules/video_coding/decoding_state.h"
 #include "modules/video_coding/event_wrapper.h"
 #include "modules/video_coding/include/video_coding.h"
@@ -27,7 +27,6 @@
 #include "modules/video_coding/inter_frame_delay.h"
 #include "modules/video_coding/jitter_buffer_common.h"
 #include "modules/video_coding/jitter_estimator.h"
-#include "rtc_base/constructor_magic.h"
 #include "rtc_base/synchronization/mutex.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -71,9 +70,14 @@ class FrameList
 
 class VCMJitterBuffer {
  public:
-  VCMJitterBuffer(Clock* clock, std::unique_ptr<EventWrapper> event);
+  VCMJitterBuffer(Clock* clock,
+                  std::unique_ptr<EventWrapper> event,
+                  const FieldTrialsView& field_trials);
 
   ~VCMJitterBuffer();
+
+  VCMJitterBuffer(const VCMJitterBuffer&) = delete;
+  VCMJitterBuffer& operator=(const VCMJitterBuffer&) = delete;
 
   // Initializes and starts jitter buffer.
   void Start();
@@ -265,8 +269,6 @@ class VCMJitterBuffer {
   // average_packets_per_frame converges fast if we have fewer than this many
   // frames.
   int frame_counter_;
-
-  RTC_DISALLOW_COPY_AND_ASSIGN(VCMJitterBuffer);
 };
 }  // namespace webrtc
 

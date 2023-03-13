@@ -16,10 +16,16 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkImageInfo.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkYUVAPixmaps.h"
 #include "ui/gfx/display_color_spaces.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
+
+class SkBitmap;
+class SkColorSpace;
+struct SkISize;
 
 namespace blink {
 class VideoFrame;
@@ -276,13 +282,13 @@ class CC_PAINT_EXPORT PaintImage {
   // Skia internally buffers commands and flushes them as necessary but there
   // are some cases where we need to force a flush.
   void FlushPendingSkiaOps();
-  int width() const;
-  int height() const;
+  int width() const { return GetSkImageInfo().width(); }
+  int height() const { return GetSkImageInfo().height(); }
   SkColorSpace* color_space() const {
     return paint_worklet_input_ ? nullptr : GetSkImageInfo().colorSpace();
   }
 
-  gfx::ContentColorUsage GetContentColorUsage() const;
+  gfx::ContentColorUsage GetContentColorUsage(bool* is_hlg = nullptr) const;
 
   // Returns whether this image will be decoded and rendered from YUV data
   // and fills out |info|. |supported_data_types| indicates the bit depths and
@@ -293,8 +299,8 @@ class CC_PAINT_EXPORT PaintImage {
              SkYUVAPixmapInfo* info = nullptr) const;
 
   // Get metadata associated with this image.
-  SkColorType GetColorType() const;
-  SkAlphaType GetAlphaType() const;
+  SkColorType GetColorType() const { return GetSkImageInfo().colorType(); }
+  SkAlphaType GetAlphaType() const { return GetSkImageInfo().alphaType(); }
 
   // Returns general information about the underlying image. Returns nullptr if
   // there is no available |paint_image_generator_|.
@@ -320,7 +326,7 @@ class CC_PAINT_EXPORT PaintImage {
     return paint_worklet_input_;
   }
 
-  bool IsOpaque() const { return GetSkImageInfo().isOpaque(); }
+  bool IsOpaque() const;
 
   std::string ToString() const;
 
@@ -336,6 +342,7 @@ class CC_PAINT_EXPORT PaintImage {
   friend class PlaybackImageProvider;
   friend class DrawImageRectOp;
   friend class DrawImageOp;
+  friend class DrawSkottieOp;
 
   // TODO(crbug.com/1031051): Remove these once GetSkImage()
   // is fully removed.

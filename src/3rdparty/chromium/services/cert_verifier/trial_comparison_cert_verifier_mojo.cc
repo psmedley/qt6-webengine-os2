@@ -13,14 +13,18 @@
 #include "net/der/encode_values.h"
 #include "net/der/parse_values.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "net/cert/cert_verify_proc_mac.h"
 #include "net/cert/internal/trust_store_mac.h"
 #endif
 
+#if BUILDFLAG(IS_WIN)
+#include "net/cert/cert_verify_proc_win.h"
+#endif
+
 namespace {
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 cert_verifier::mojom::CertVerifierDebugInfo::MacTrustImplType
 TrustImplTypeToMojom(net::TrustStoreMac::TrustImplType input) {
   switch (input) {
@@ -33,9 +37,9 @@ TrustImplTypeToMojom(net::TrustStoreMac::TrustImplType input) {
     case net::TrustStoreMac::TrustImplType::kSimple:
       return cert_verifier::mojom::CertVerifierDebugInfo::MacTrustImplType::
           kSimple;
-    case net::TrustStoreMac::TrustImplType::kMruCache:
+    case net::TrustStoreMac::TrustImplType::kLruCache:
       return cert_verifier::mojom::CertVerifierDebugInfo::MacTrustImplType::
-          kMruCache;
+          kLruCache;
   }
 }
 #endif
@@ -98,7 +102,8 @@ void TrialComparisonCertVerifierMojo::OnSendTrialReport(
     const net::CertVerifyResult& trial_result) {
   mojom::CertVerifierDebugInfoPtr debug_info =
       mojom::CertVerifierDebugInfo::New();
-#if defined(OS_MAC)
+
+#if BUILDFLAG(IS_MAC)
   auto* mac_platform_debug_info =
       net::CertVerifyProcMac::ResultDebugData::Get(&primary_result);
   if (mac_platform_debug_info) {
@@ -125,7 +130,21 @@ void TrialComparisonCertVerifierMojo::OnSendTrialReport(
     debug_info->mac_trust_impl =
         TrustImplTypeToMojom(mac_trust_debug_info->trust_impl());
   }
-#endif
+#endif  // BUILDFLAG(IS_MAC)
+
+#if BUILDFLAG(IS_WIN)
+  auto* win_platform_debug_info =
+      net::CertVerifyProcWin::ResultDebugData::Get(&primary_result);
+  if (win_platform_debug_info) {
+    debug_info->win_platform_debug_info =
+        mojom::WinPlatformVerifierDebugInfo::New();
+    debug_info->win_platform_debug_info->authroot_this_update =
+        win_platform_debug_info->authroot_this_update();
+    debug_info->win_platform_debug_info->authroot_sequence_number =
+        win_platform_debug_info->authroot_sequence_number();
+  }
+#endif  // BUILDFLAG(IS_WIN)
+
   auto* cert_verify_proc_builtin_debug_data =
       net::CertVerifyProcBuiltinResultDebugData::Get(&trial_result);
   if (cert_verify_proc_builtin_debug_data) {

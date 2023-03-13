@@ -9,14 +9,15 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "net/http/bidirectional_stream_request_info.h"
 #include "net/http/http_util.h"
 #include "net/socket/next_proto.h"
 #include "net/spdy/spdy_http_utils.h"
-#include "net/third_party/quiche/src/quic/core/quic_connection.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_header_block.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_connection.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_header_block.h"
 #include "quic_http_stream.h"
 
 namespace net {
@@ -32,7 +33,7 @@ class ScopedBoolSaver {
   ~ScopedBoolSaver() { *var_ = old_val_; }
 
  private:
-  bool* var_;
+  raw_ptr<bool> var_;
   bool old_val_;
 };
 }  // namespace

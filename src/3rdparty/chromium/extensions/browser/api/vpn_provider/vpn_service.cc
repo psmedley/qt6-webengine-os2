@@ -14,11 +14,10 @@
 #include "base/guid.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chromeos/dbus/shill/shill_third_party_vpn_driver_client.h"
@@ -57,6 +56,10 @@ class VpnService::VpnConfiguration : public ShillThirdPartyVpnObserver {
                    const std::string& configuration_name,
                    const std::string& key,
                    base::WeakPtr<VpnService> vpn_service);
+
+  VpnConfiguration(const VpnConfiguration&) = delete;
+  VpnConfiguration& operator=(const VpnConfiguration&) = delete;
+
   ~VpnConfiguration() override;
 
   const std::string& extension_id() const { return extension_id_; }
@@ -89,8 +92,6 @@ class VpnService::VpnConfiguration : public ShillThirdPartyVpnObserver {
   std::string service_path_;
 
   base::WeakPtr<VpnService> vpn_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(VpnConfiguration);
 };
 
 VpnService::VpnConfiguration::VpnConfiguration(
@@ -159,6 +160,9 @@ class VpnService::VpnServiceProxyImpl : public content::VpnServiceProxy {
  public:
   explicit VpnServiceProxyImpl(base::WeakPtr<VpnService> vpn_service);
 
+  VpnServiceProxyImpl(const VpnServiceProxyImpl&) = delete;
+  VpnServiceProxyImpl& operator=(const VpnServiceProxyImpl&) = delete;
+
   void Bind(const std::string& extension_id,
             const std::string& configuration_id,
             const std::string& configuration_name,
@@ -173,8 +177,6 @@ class VpnService::VpnServiceProxyImpl : public content::VpnServiceProxy {
 
  private:
   base::WeakPtr<VpnService> vpn_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(VpnServiceProxyImpl);
 };
 
 VpnService::VpnServiceProxyImpl::VpnServiceProxyImpl(
@@ -559,8 +561,7 @@ void VpnService::OnCreateConfigurationSuccess(
 void VpnService::OnCreateConfigurationFailure(
     VpnService::FailureCallback callback,
     VpnConfiguration* configuration,
-    const std::string& error_name,
-    std::unique_ptr<base::DictionaryValue> error_data) {
+    const std::string& error_name) {
   DestroyConfigurationInternal(configuration);
   std::move(callback).Run(error_name, std::string());
 }
@@ -572,8 +573,7 @@ void VpnService::OnRemoveConfigurationSuccess(
 
 void VpnService::OnRemoveConfigurationFailure(
     VpnService::FailureCallback callback,
-    const std::string& error_name,
-    std::unique_ptr<base::DictionaryValue> error_data) {
+    const std::string& error_name) {
   std::move(callback).Run(error_name, std::string());
 }
 

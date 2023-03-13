@@ -4,10 +4,6 @@
 
 #include "ui/gl/gl_image_egl.h"
 
-#include "base/metrics/histogram_macros.h"
-#include "base/time/time.h"
-#include "base/timer/elapsed_timer.h"
-#include "base/timer/timer.h"
 #include "ui/gl/egl_util.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_enums.h"
@@ -47,6 +43,10 @@ gfx::Size GLImageEGL::GetSize() {
   return size_;
 }
 
+void* GLImageEGL::GetEGLImage() const {
+  return egl_image_;
+}
+
 GLImageEGL::BindOrCopy GLImageEGL::ShouldBindOrCopy() {
   return egl_image_ == EGL_NO_IMAGE_KHR ? COPY : BIND;
 }
@@ -56,19 +56,8 @@ bool GLImageEGL::BindTexImage(unsigned target) {
   DCHECK_EQ(BIND, ShouldBindOrCopy());
 
   glEGLImageTargetTexture2DOES(target, egl_image_);
-  base::ElapsedTimer thread_blocked_timer;
-  const GLenum error = glGetError();
-  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
-      "Gpu.GL.GetErrorDuration.GLImageEGL.BindTexImage",
-      thread_blocked_timer.Elapsed(), base::TimeDelta::FromMicroseconds(10),
-      base::TimeDelta::FromMilliseconds(16), 100);
-
-  DLOG_IF(ERROR, error != GL_NO_ERROR)
-      << "Error binding EGLImage: " << GLEnums::GetStringError(error);
-
-  UMA_HISTOGRAM_BOOLEAN("Gpu.GL.GetErrorResult.GLImageEGL.BindTexImage",
-                        error != GL_NO_ERROR);
-  return error == GL_NO_ERROR;
+  DCHECK_EQ(static_cast<GLenum>(GL_NO_ERROR), glGetError());
+  return true;
 }
 
 }  // namespace gl

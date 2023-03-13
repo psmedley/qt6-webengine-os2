@@ -99,7 +99,8 @@ const uniformSamplerLocations = new Map<WebGLProgram, WebGLUniformLocation|null>
 
 const imageForTexture = new Map<WebGLTexture, HTMLImageElement>();
 
-export class Layers3DView extends UI.Widget.VBox implements LayerView {
+export class Layers3DView extends Common.ObjectWrapper.eventMixin<EventTypes, typeof UI.Widget.VBox>(UI.Widget.VBox)
+    implements LayerView {
   private readonly failBanner: UI.Widget.VBox;
   private readonly layerViewHost: LayerViewHost;
   private transformController: TransformController;
@@ -182,7 +183,7 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
       this.update();
       return;
     }
-    UI.UIUtils.loadImage(imageURL).then(image => {
+    void UI.UIUtils.loadImage(imageURL).then(image => {
       const texture = image && LayerTextureManager.createTextureForImage(this.gl || null, image);
       this.layerTexture = texture ? {layer: layer, texture: texture} : null;
       this.update();
@@ -230,8 +231,7 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
     if (selection.type() === Type.Snapshot) {
       const snapshotWithRect = (selection as SnapshotSelection).snapshot();
       snapshotWithRect.snapshot.addReference();
-      return /** @type {!Promise<?SDK.PaintProfiler.SnapshotWithRect>} */ Promise.resolve(snapshotWithRect) as
-          Promise<SDK.PaintProfiler.SnapshotWithRect|null>;
+      return Promise.resolve(snapshotWithRect);
     }
     if (selection.layer()) {
       const promise = selection.layer().snapshots()[0];
@@ -239,8 +239,7 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
         return promise;
       }
     }
-    return /** @type {!Promise<?SDK.PaintProfiler.SnapshotWithRect>} */ Promise.resolve(null) as
-        Promise<SDK.PaintProfiler.SnapshotWithRect|null>;
+    return Promise.resolve(null);
   }
 
   private initGL(canvas: HTMLCanvasElement): WebGLRenderingContext|null {
@@ -252,7 +251,7 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
     gl.enable(gl.BLEND);
     gl.clearColor(0.0, 0.0, 0.0, 0.0);
     gl.enable(gl.DEPTH_TEST);
-    return /** @type {!WebGLRenderingContext} */ gl as WebGLRenderingContext;
+    return gl;
   }
 
   private createShader(type: number, script: string): void {
@@ -407,7 +406,7 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
 
   private initChromeTextures(): void {
     function loadChromeTexture(this: Layers3DView, index: ChromeTexture, url: string): void {
-      UI.UIUtils.loadImage(url).then(image => {
+      void UI.UIUtils.loadImage(url).then(image => {
         this.chromeTextures[index] =
             image && LayerTextureManager.createTextureForImage(this.gl || null, image) || undefined;
       });
@@ -433,7 +432,6 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
   }
 
   private calculateDepthsAndVisibility(): void {
-    /** @type {!Map<string, number>} */
     this.depthByLayerId = new Map();
     let depth = 0;
     const showInternalLayers = this.layerViewHost.showInternalLayersSetting().get();
@@ -448,7 +446,6 @@ export class Layers3DView extends UI.Widget.VBox implements LayerView {
 
     const queue = [root];
     this.depthByLayerId.set(root.id(), 0);
-    /** @type {!Set<!SDK.LayerTreeBase.Layer>} */
     this.visibleLayers = new Set();
     while (queue.length > 0) {
       const layer = queue.shift();
@@ -892,6 +889,11 @@ export enum Events {
   ScaleChanged = 'ScaleChanged',
 }
 
+export type EventTypes = {
+  [Events.PaintProfilerRequested]: Selection,
+  [Events.ScaleChanged]: number,
+};
+
 export const enum ChromeTexture {
   Left = 0,
   Middle = 1,
@@ -977,9 +979,7 @@ export class LayerTextureManager {
       this.setLayerTree(null);
     }
 
-    /** @type {!Map<!SDK.LayerTreeBase.Layer, !Array<!Tile>>} */
     this.tilesByLayer = new Map();
-    /** @type {!Array<!SDK.LayerTreeBase.Layer>} */
     this.queue = [];
   }
 
@@ -997,7 +997,7 @@ export class LayerTextureManager {
   resume(): void {
     this.active = true;
     if (this.queue.length) {
-      this.update();
+      void this.update();
     }
   }
 
@@ -1073,14 +1073,14 @@ export class LayerTextureManager {
       this.queue.push(layer);
     }
     if (this.active) {
-      this.throttler.schedule(this.update.bind(this));
+      void this.throttler.schedule(this.update.bind(this));
     }
   }
 
   forceUpdate(): void {
     this.queue.forEach(layer => this.updateLayer(layer));
     this.queue = [];
-    this.update();
+    void this.update();
   }
 
   private update(): Promise<void> {
@@ -1089,7 +1089,7 @@ export class LayerTextureManager {
       return Promise.resolve();
     }
     if (this.queue.length) {
-      this.throttler.schedule(this.update.bind(this));
+      void this.throttler.schedule(this.update.bind(this));
     }
     return this.updateLayer(layer);
   }
@@ -1113,7 +1113,7 @@ export class LayerTextureManager {
       for (const tile of tiles) {
         const promise = tile.updateScale(this.gl, this.scale);
         if (promise) {
-          promise.then(this.textureUpdatedCallback);
+          void promise.then(this.textureUpdatedCallback);
         }
       }
     }

@@ -5,10 +5,12 @@
 #ifndef COMPONENTS_REPORTING_CLIENT_MOCK_REPORT_QUEUE_H_
 #define COMPONENTS_REPORTING_CLIENT_MOCK_REPORT_QUEUE_H_
 
+#include <memory>
+
 #include "base/callback.h"
 #include "components/reporting/client/report_queue.h"
-#include "components/reporting/proto/record.pb.h"
-#include "components/reporting/proto/record_constants.pb.h"
+#include "components/reporting/proto/synced/record.pb.h"
+#include "components/reporting/proto/synced/record_constants.pb.h"
 #include "components/reporting/util/status.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "third_party/protobuf/src/google/protobuf/message_lite.h"

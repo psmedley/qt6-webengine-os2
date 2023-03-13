@@ -33,9 +33,10 @@
 
 #include <vector>
 
+#include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/web/web_node.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
 
 namespace gfx {
 class Rect;
@@ -123,6 +124,10 @@ class BLINK_EXPORT WebElement : public WebNode {
   // strings directly to WebElement and enable public component usage through
   // /public/web interfaces.
   WebString GetComputedValue(const WebString& property_name);
+
+  // TODO(crbug.com/1286950) Remove this once a decision is made on deprecation
+  // of the <param> URL functionality.
+  void UseCountParamUrlUsageIfNeeded(bool is_pdf) const;
 
 #if INSIDE_BLINK
   WebElement(Element*);

@@ -84,13 +84,13 @@ WGPUExtent3D AsDawnType(const V8GPUExtent3D* webgpu_extent) {
       switch (webgpu_extent_sequence.size()) {
         default:
           dawn_extent.depthOrArrayLayers = webgpu_extent_sequence[2];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 2:
           dawn_extent.height = webgpu_extent_sequence[1];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 1:
           dawn_extent.width = webgpu_extent_sequence[0];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 0:
           break;
       }
@@ -124,13 +124,13 @@ WGPUOrigin3D AsDawnType(const V8GPUOrigin3D* webgpu_origin) {
       switch (webgpu_origin_sequence.size()) {
         default:
           dawn_origin.z = webgpu_origin_sequence[2];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 2:
           dawn_origin.y = webgpu_origin_sequence[1];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 1:
           dawn_origin.x = webgpu_origin_sequence[0];
-          FALLTHROUGH;
+          [[fallthrough]];
         case 0:
           break;
       }
@@ -141,12 +141,11 @@ WGPUOrigin3D AsDawnType(const V8GPUOrigin3D* webgpu_origin) {
   return dawn_origin;
 }
 
-WGPUTextureCopyView AsDawnType(const GPUImageCopyTexture* webgpu_view,
-                               GPUDevice* device) {
+WGPUImageCopyTexture AsDawnType(const GPUImageCopyTexture* webgpu_view) {
   DCHECK(webgpu_view);
   DCHECK(webgpu_view->texture());
 
-  WGPUTextureCopyView dawn_view = {};
+  WGPUImageCopyTexture dawn_view = {};
   dawn_view.texture = webgpu_view->texture()->GetHandle();
   dawn_view.mipLevel = webgpu_view->mipLevel();
   dawn_view.origin = AsDawnType(webgpu_view->origin());

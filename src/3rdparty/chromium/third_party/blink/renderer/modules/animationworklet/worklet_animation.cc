@@ -9,7 +9,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_animationeffect_animationeffectsequence.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_documenttimeline_scrolltimeline.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_union_double_scrolltimelineautokeyword.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/element_animations.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
@@ -26,7 +25,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/modules/animationworklet/css_animation_worklet.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -106,12 +105,10 @@ bool ValidateTimeline(const V8UnionDocumentTimelineOrScrollTimeline* timeline,
   if (!timeline)
     return true;
   if (timeline->IsScrollTimeline()) {
-    V8UnionDoubleOrScrollTimelineAutoKeyword* time_range =
-        timeline->GetAsScrollTimeline()->timeRange();
-    if (time_range->IsScrollTimelineAutoKeyword()) {
-      error_string = "ScrollTimeline timeRange must have non-auto value";
-      return false;
-    }
+    // crbug.com/1238130 Add support for progress based timelines to worklet
+    // animations
+    error_string = "ScrollTimeline is not yet supported for worklet animations";
+    return false;
   }
   return true;
 }
@@ -130,12 +127,6 @@ AnimationTimeline* ConvertAnimationTimeline(
   }
   NOTREACHED();
   return nullptr;
-}
-
-bool CheckElementComposited(const Node& target) {
-  return target.GetLayoutObject() &&
-         target.GetLayoutObject()->GetCompositingState() ==
-             kPaintsIntoOwnBacking;
 }
 
 void StartEffectOnCompositor(CompositorAnimation* animation,
@@ -187,12 +178,12 @@ absl::optional<base::TimeDelta> CalculateStartTime(
   // SetPlaybackRateInternal has a DCHECK for that.
   DCHECK_NE(playback_rate, 0);
   if (current_time.is_max())
-    return base::TimeDelta::FromMilliseconds(0);
+    return base::Milliseconds(0);
   if (current_time.is_min())
     return base::TimeDelta::Max();
   absl::optional<double> timeline_current_time_ms =
       timeline.CurrentTimeMilliseconds();
-  return base::TimeDelta::FromMillisecondsD(timeline_current_time_ms.value()) -
+  return base::Milliseconds(timeline_current_time_ms.value()) -
          (current_time / playback_rate);
 }
 
@@ -315,7 +306,7 @@ WorkletAnimation::WorkletAnimation(
       timings, normalized_timings);
 
   if (timeline_->IsScrollTimeline())
-    To<ScrollTimeline>(*timeline_).WorkletAnimationAttached();
+    To<ScrollTimeline>(*timeline_).WorkletAnimationAttached(this);
 }
 
 String WorkletAnimation::playState() {
@@ -337,6 +328,8 @@ void WorkletAnimation::play(ExceptionState& exception_state) {
       InvalidateCompositingState();
       return;
     }
+  } else {
+    DCHECK(!IsCurrentTimeInitialized());
   }
 
   String failure_message;
@@ -350,7 +343,6 @@ void WorkletAnimation::play(ExceptionState& exception_state) {
   // While animation is pending, it hold time at Zero, see:
   // https://drafts.csswg.org/web-animations-1/#playing-an-animation-section
   SetPlayState(Animation::kPending);
-  DCHECK(!IsCurrentTimeInitialized());
   SetCurrentTime(InitialCurrentTime());
   has_started_ = true;
 
@@ -399,10 +391,10 @@ void WorkletAnimation::pause(ExceptionState& exception_state) {
 
   // If animation is playing then we should hold the current time
   // otherwise hold zero.
+  SetPlayState(Animation::kPaused);
   absl::optional<base::TimeDelta> new_current_time =
       IsCurrentTimeInitialized() ? CurrentTime() : InitialCurrentTime();
-
-  SetPlayState(Animation::kPaused);
+  DCHECK(new_current_time);
   SetCurrentTime(new_current_time);
 }
 
@@ -424,8 +416,8 @@ void WorkletAnimation::cancel() {
   // update the value in the next frame.
   if (IsActive(play_state_)) {
     for (auto& effect : effects_) {
-      effect->UpdateInheritedTime(absl::nullopt, absl::nullopt,
-                                  kTimingUpdateOnDemand);
+      effect->UpdateInheritedTime(absl::nullopt, absl::nullopt, false,
+                                  playback_rate_, kTimingUpdateOnDemand);
     }
   }
   SetPlayState(Animation::kIdle);
@@ -511,7 +503,7 @@ void WorkletAnimation::Update(TimingUpdateReason reason) {
         local_times_[i]
             ? absl::make_optional(AnimationTimeDelta(local_times_[i].value()))
             : absl::nullopt,
-        absl::nullopt, reason);
+        absl::nullopt, false, playback_rate_, reason);
   }
 }
 
@@ -531,6 +523,8 @@ bool WorkletAnimation::CheckCanStart(String* failure_message) {
 void WorkletAnimation::SetCurrentTime(
     absl::optional<base::TimeDelta> seek_time) {
   DCHECK(timeline_);
+  DCHECK(seek_time || play_state_ == Animation::kIdle ||
+         play_state_ == Animation::kUnset);
   // The procedure either:
   // 1) updates the hold time (for paused animations, non-existent or inactive
   //    timeline)
@@ -590,6 +584,7 @@ void WorkletAnimation::StartOnMain() {
   running_on_main_thread_ = true;
   absl::optional<base::TimeDelta> current_time =
       IsCurrentTimeInitialized() ? CurrentTime() : InitialCurrentTime();
+  DCHECK(current_time);
   SetPlayState(Animation::kRunning);
   SetCurrentTime(current_time);
 }
@@ -622,17 +617,17 @@ bool WorkletAnimation::CanStartOnCompositor() {
   if (failure_reasons != CompositorAnimations::kNoFailure)
     return false;
 
-  if (!CheckElementComposited(target))
-    return false;
-
   // If the scroll source is not composited, fall back to main thread.
   if (timeline_->IsScrollTimeline() &&
       !CompositorAnimations::CheckUsesCompositedScrolling(
-          To<ScrollTimeline>(*timeline_).ResolvedScrollSource())) {
+          To<ScrollTimeline>(*timeline_).ResolvedSource())) {
     return false;
   }
 
-  return true;
+  // TODO(crbug.com/1281413): This function has returned false since the launch
+  // of CompositeAfterPaint, but that may not be intended. Should this return
+  // true?
+  return false;
 }
 
 bool WorkletAnimation::StartOnCompositor() {
@@ -768,8 +763,7 @@ absl::optional<base::TimeDelta> WorkletAnimation::InitialCurrentTime() const {
     return absl::nullopt;
   }
 
-  return (base::TimeDelta::FromMillisecondsD(current_time.value()) -
-          starting_time.value()) *
+  return (base::Milliseconds(current_time.value()) - starting_time.value()) *
          playback_rate_;
 }
 
@@ -829,8 +823,7 @@ absl::optional<base::TimeDelta> WorkletAnimation::CurrentTimeInternal() const {
   if (!timeline_time_ms)
     return absl::nullopt;
 
-  base::TimeDelta timeline_time =
-      base::TimeDelta::FromMillisecondsD(timeline_time_ms.value());
+  base::TimeDelta timeline_time = base::Milliseconds(timeline_time_ms.value());
   DCHECK(start_time_);
   return (timeline_time - start_time_.value()) * playback_rate_;
 }
@@ -889,8 +882,6 @@ void WorkletAnimation::NotifyLocalTimeUpdated(
 
 void WorkletAnimation::Dispose() {
   DCHECK(IsMainThread());
-  if (timeline_->IsScrollTimeline())
-    To<ScrollTimeline>(*timeline_).WorkletAnimationDetached();
   DestroyCompositorAnimation();
 }
 

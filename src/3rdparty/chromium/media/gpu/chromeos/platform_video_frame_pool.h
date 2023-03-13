@@ -6,15 +6,16 @@
 #define MEDIA_GPU_CHROMEOS_PLATFORM_VIDEO_FRAME_POOL_H_
 
 #include <stddef.h>
+
+#include <map>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/containers/circular_deque.h"
 #include "base/files/scoped_file.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/thread_annotations.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_types.h"
@@ -22,10 +23,6 @@
 #include "media/gpu/media_gpu_export.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/gfx/gpu_memory_buffer.h"
-
-namespace gpu {
-class GpuMemoryBufferFactory;
-}  // namespace gpu
 
 namespace media {
 
@@ -42,21 +39,29 @@ class MEDIA_GPU_EXPORT PlatformVideoFramePool : public DmabufVideoFramePool {
  public:
   explicit PlatformVideoFramePool(
       gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory);
+
+  PlatformVideoFramePool(const PlatformVideoFramePool&) = delete;
+  PlatformVideoFramePool& operator=(const PlatformVideoFramePool&) = delete;
+
   ~PlatformVideoFramePool() override;
 
   // Returns the ID of the GpuMemoryBuffer wrapped by |frame|.
   static gfx::GpuMemoryBufferId GetGpuMemoryBufferId(const VideoFrame& frame);
 
   // DmabufVideoFramePool implementation.
-  absl::optional<GpuBufferLayout> Initialize(const Fourcc& fourcc,
-                                             const gfx::Size& coded_size,
-                                             const gfx::Rect& visible_rect,
-                                             const gfx::Size& natural_size,
-                                             size_t max_num_frames,
-                                             bool use_protected) override;
+  PlatformVideoFramePool* AsPlatformVideoFramePool() override;
+
+  CroStatus::Or<GpuBufferLayout> Initialize(const Fourcc& fourcc,
+                                            const gfx::Size& coded_size,
+                                            const gfx::Rect& visible_rect,
+                                            const gfx::Size& natural_size,
+                                            size_t max_num_frames,
+                                            bool use_protected,
+                                            bool use_linear_buffers) override;
   scoped_refptr<VideoFrame> GetFrame() override;
   bool IsExhausted() override;
   void NotifyWhenFrameAvailable(base::OnceClosure cb) override;
+  void ReleaseAllFrames() override;
 
   // Returns the original frame of a wrapped frame. We need this method to
   // determine whether the frame returned by GetFrame() is the same one after
@@ -65,6 +70,12 @@ class MEDIA_GPU_EXPORT PlatformVideoFramePool : public DmabufVideoFramePool {
 
   // Returns the number of frames in the pool for testing purposes.
   size_t GetPoolSizeForTesting();
+
+  // Allows the client to specify how to allocate buffers. |allocator| is only
+  // run during a call to Initialize() or GetFrame(), so it's guaranteed to be
+  // called in the same thread as those two methods. VaapiVideoDecoder uses this
+  // on linux to delegate dmabuf allocation to the libva driver.
+  void SetCustomFrameAllocator(DmabufVideoFramePool::CreateFrameCB allocator);
 
  private:
   friend class PlatformVideoFramePoolTest;
@@ -93,20 +104,12 @@ class MEDIA_GPU_EXPORT PlatformVideoFramePool : public DmabufVideoFramePool {
       EXCLUSIVE_LOCKS_REQUIRED(lock_);
   bool IsExhausted_Locked() EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
-  // The function used to allocate new frames.
-  using CreateFrameCB = base::RepeatingCallback<scoped_refptr<VideoFrame>(
-      gpu::GpuMemoryBufferFactory* gpu_memory_buffer_factory,
-      VideoPixelFormat format,
-      const gfx::Size& coded_size,
-      const gfx::Rect& visible_rect,
-      const gfx::Size& natural_size,
-      bool use_protected,
-      base::TimeDelta timestamp)>;
-  CreateFrameCB create_frame_cb_;
-
   // Lock to protect all data members.
   // Every public method and OnFrameReleased() acquire this lock.
   base::Lock lock_;
+
+  // The function used to allocate new frames.
+  CreateFrameCB create_frame_cb_ GUARDED_BY(lock_);
 
   // Used to allocate the video frame GpuMemoryBuffers, passed directly to
   // the callback that creates video frames. Indirectly owned by GpuChildThread;
@@ -134,6 +137,10 @@ class MEDIA_GPU_EXPORT PlatformVideoFramePool : public DmabufVideoFramePool {
   // If we are using HW protected buffers.
   bool use_protected_ GUARDED_BY(lock_) = false;
 
+  // True if we need to allocate GPU buffers in a way that is accessible from
+  // the CPU with a linear layout. Can only be set once per instance.
+  absl::optional<bool> use_linear_buffers_ GUARDED_BY(lock_);
+
   // Callback which is called when the pool is not exhausted.
   base::OnceClosure frame_available_cb_ GUARDED_BY(lock_);
 
@@ -141,8 +148,6 @@ class MEDIA_GPU_EXPORT PlatformVideoFramePool : public DmabufVideoFramePool {
   // Used at the VideoFrame destruction callback.
   base::WeakPtr<PlatformVideoFramePool> weak_this_;
   base::WeakPtrFactory<PlatformVideoFramePool> weak_this_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PlatformVideoFramePool);
 };
 
 }  // namespace media

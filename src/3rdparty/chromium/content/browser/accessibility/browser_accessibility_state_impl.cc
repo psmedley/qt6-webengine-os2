@@ -14,6 +14,7 @@
 #include "base/no_destructor.h"
 #include "base/task/thread_pool.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -68,8 +69,9 @@ BrowserAccessibilityState* BrowserAccessibilityState::GetInstance() {
   return BrowserAccessibilityStateImpl::GetInstance();
 }
 
-// On Android, Mac, and Windows there are platform-specific subclasses.
-#if (!defined(OS_ANDROID) && !defined(OS_WIN) && !defined(OS_MAC)) || defined(TOOLKIT_QT)
+// On Android, Mac, Lacros, and Windows there are platform-specific subclasses.
+#if (!BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_MAC) && \
+    !BUILDFLAG(IS_CHROMEOS_LACROS)) || defined(TOOLKIT_QT)
 // static
 BrowserAccessibilityStateImpl* BrowserAccessibilityStateImpl::GetInstance() {
   static base::NoDestructor<BrowserAccessibilityStateImpl> instance;
@@ -79,8 +81,7 @@ BrowserAccessibilityStateImpl* BrowserAccessibilityStateImpl::GetInstance() {
 
 BrowserAccessibilityStateImpl::BrowserAccessibilityStateImpl()
     : BrowserAccessibilityState(),
-      histogram_delay_(
-          base::TimeDelta::FromSeconds(ACCESSIBILITY_HISTOGRAM_DELAY_SECS)) {
+      histogram_delay_(base::Seconds(ACCESSIBILITY_HISTOGRAM_DELAY_SECS)) {
   force_renderer_accessibility_ =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kForceRendererAccessibility);
@@ -189,7 +190,7 @@ void BrowserAccessibilityStateImpl::UpdateHistogramsOnUIThread() {
 
   UMA_HISTOGRAM_BOOLEAN("Accessibility.ManuallyEnabled",
                         force_renderer_accessibility_);
-#if defined(OS_WIN) && !defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_WIN) && !defined(TOOLKIT_QT)
   UMA_HISTOGRAM_ENUMERATION(
       "Accessibility.WinHighContrastTheme",
       ui::NativeTheme::GetInstanceForNativeUi()
@@ -262,7 +263,7 @@ void BrowserAccessibilityStateImpl::OnUserInputEvent() {
     return;
 
   if (now - first_user_input_event_time_ >
-      base::TimeDelta::FromSeconds(kAutoDisableAccessibilityTimeSecs)) {
+      base::Seconds(kAutoDisableAccessibilityTimeSecs)) {
     if (!accessibility_active_start_time_.is_null()) {
       base::UmaHistogramLongTimes(
           "Accessibility.ActiveTime",
@@ -303,13 +304,13 @@ void BrowserAccessibilityStateImpl::OnAccessibilityApiUsage() {
         base::BindOnce(
             &BrowserAccessibilityStateImpl::UpdateAccessibilityActivityTask,
             base::Unretained(this)),
-        base::TimeDelta::FromSeconds(kOnAccessibilityUsageUpdateDelaySecs));
+        base::Seconds(kOnAccessibilityUsageUpdateDelaySecs));
   }
 }
 
 void BrowserAccessibilityStateImpl::UpdateUniqueUserHistograms() {}
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void BrowserAccessibilityStateImpl::SetImageLabelsModeForProfile(
     bool enabled,
     BrowserContext* profile) {}
@@ -403,7 +404,7 @@ void BrowserAccessibilityStateImpl::CallInitBackgroundTasksForTesting(
     base::RepeatingClosure done_callback) {
   // Set the delay to 1 second, that ensures that we actually test having
   // a nonzero delay but the test still runs quickly.
-  histogram_delay_ = base::TimeDelta::FromSeconds(1);
+  histogram_delay_ = base::Seconds(1);
   background_thread_done_callback_ = done_callback;
   InitBackgroundTasks();
 }

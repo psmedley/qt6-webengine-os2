@@ -28,7 +28,7 @@
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/platform/bindings/parkable_string.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -80,7 +80,7 @@ class SVGScriptElement final : public SVGElement,
   String ForAttributeValue() const override { return String(); }
   String IntegrityAttributeValue() const override { return String(); }
   String ReferrerPolicyAttributeValue() const override { return String(); }
-  String ImportanceAttributeValue() const override { return String(); }
+  String FetchPriorityAttributeValue() const override { return String(); }
   String LanguageAttributeValue() const override { return String(); }
   bool NomoduleAttributeValue() const override { return false; }
   String SourceAttributeValue() const override;
@@ -94,6 +94,7 @@ class SVGScriptElement final : public SVGElement,
   bool ElementHasDuplicateAttributes() const override {
     return HasDuplicateAttribute();
   }
+  bool IsRenderBlocking() const override { return false; }
   bool AllowInlineScriptForCSP(const AtomicString& nonce,
                                const WTF::OrdinalNumber&,
                                const String& script_content) override;

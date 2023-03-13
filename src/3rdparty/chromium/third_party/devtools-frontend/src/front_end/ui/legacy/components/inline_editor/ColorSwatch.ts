@@ -7,6 +7,8 @@ import * as i18n from '../../../../core/i18n/i18n.js';
 import * as ComponentHelpers from '../../../components/helpers/helpers.js';
 import * as LitHtml from '../../../lit-html/lit-html.js';
 
+import colorSwatchStyles from './colorSwatch.css.js';
+
 const UIStrings = {
   /**
   *@description Icon element title in Color Swatch of the inline editor in the Styles tab
@@ -16,11 +18,10 @@ const UIStrings = {
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/inline_editor/ColorSwatch.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
-const getStyleSheets = ComponentHelpers.GetStylesheet.getStyleSheets;
-
 export class FormatChangedEvent extends Event {
-  data: {format: string, text: string|null};
   static readonly eventName = 'formatchanged';
+
+  data: {format: string, text: string|null};
 
   constructor(format: string, text: string|null) {
     super(FormatChangedEvent.eventName, {});
@@ -47,7 +48,7 @@ export class ColorSwatch extends HTMLElement {
   constructor() {
     super();
     this.shadow.adoptedStyleSheets = [
-      ...getStyleSheets('ui/legacy/components/inline_editor/colorSwatch.css'),
+      colorSwatchStyles,
     ];
   }
 
@@ -117,7 +118,7 @@ export class ColorSwatch extends HTMLElement {
     // Note also that whitespace between nodes is removed on purpose to avoid pushing these elements apart. Do not
     // re-format the HTML code.
     LitHtml.render(
-      LitHtml.html`<span class="color-swatch" title="${this.tooltip}"><span class="color-swatch-inner"
+      LitHtml.html`<span class="color-swatch" title=${this.tooltip}><span class="color-swatch-inner"
         style="background-color: ${this.text};"
         @click=${this.onClick}
         @mousedown=${this.consume}
@@ -179,6 +180,7 @@ function nextColorFormat(color: Common.Color.Color, curFormat: string): string {
   // * original
   // * rgb(a)
   // * hsl(a)
+  // * hwb(a)
   // * nickname (if the color has a nickname)
   // * shorthex (if has short hex)
   // * hex
@@ -194,6 +196,10 @@ function nextColorFormat(color: Common.Color.Color, curFormat: string): string {
 
     case cf.HSL:
     case cf.HSLA:
+      return !color.hasAlpha() ? cf.HWB : cf.HWBA;
+
+    case cf.HWB:
+    case cf.HWBA:
       if (color.nickname()) {
         return cf.Nickname;
       }

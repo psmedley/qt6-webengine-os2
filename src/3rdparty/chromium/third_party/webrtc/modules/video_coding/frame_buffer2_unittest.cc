@@ -16,6 +16,8 @@
 #include <memory>
 #include <vector>
 
+#include "api/units/time_delta.h"
+#include "api/units/timestamp.h"
 #include "modules/video_coding/frame_object.h"
 #include "modules/video_coding/jitter_estimator.h"
 #include "modules/video_coding/timing.h"
@@ -26,68 +28,54 @@
 #include "test/field_trial.h"
 #include "test/gmock.h"
 #include "test/gtest.h"
+#include "test/scoped_key_value_config.h"
 #include "test/time_controller/simulated_time_controller.h"
 
 using ::testing::_;
+using ::testing::IsEmpty;
 using ::testing::Return;
+using ::testing::SizeIs;
 
 namespace webrtc {
 namespace video_coding {
 
 class VCMTimingFake : public VCMTiming {
  public:
-  explicit VCMTimingFake(Clock* clock) : VCMTiming(clock) {}
+  explicit VCMTimingFake(Clock* clock, const FieldTrialsView& field_trials)
+      : VCMTiming(clock, field_trials) {}
 
-  int64_t RenderTimeMs(uint32_t frame_timestamp,
-                       int64_t now_ms) const override {
-    if (last_ms_ == -1) {
-      last_ms_ = now_ms + kDelayMs;
+  Timestamp RenderTime(uint32_t frame_timestamp, Timestamp now) const override {
+    if (last_render_time_.IsMinusInfinity()) {
+      last_render_time_ = now + kDelay;
       last_timestamp_ = frame_timestamp;
     }
 
-    uint32_t diff = MinDiff(frame_timestamp, last_timestamp_);
+    auto diff = MinDiff(frame_timestamp, last_timestamp_);
+    auto timeDiff = TimeDelta::Millis(diff / 90);
     if (AheadOf(frame_timestamp, last_timestamp_))
-      last_ms_ += diff / 90;
+      last_render_time_ += timeDiff;
     else
-      last_ms_ -= diff / 90;
+      last_render_time_ -= timeDiff;
 
     last_timestamp_ = frame_timestamp;
-    return last_ms_;
+    return last_render_time_;
   }
 
-  int64_t MaxWaitingTime(int64_t render_time_ms,
-                         int64_t now_ms,
-                         bool too_many_frames_queued) const override {
-    return render_time_ms - now_ms - kDecodeTime;
+  TimeDelta MaxWaitingTime(Timestamp render_time,
+                           Timestamp now,
+                           bool too_many_frames_queued) const override {
+    return render_time - now - kDecodeTime;
   }
 
-  bool GetTimings(int* max_decode_ms,
-                  int* current_delay_ms,
-                  int* target_delay_ms,
-                  int* jitter_buffer_ms,
-                  int* min_playout_delay_ms,
-                  int* render_delay_ms) const override {
-    return true;
-  }
-
-  int GetCurrentJitter() {
-    int max_decode_ms;
-    int current_delay_ms;
-    int target_delay_ms;
-    int jitter_buffer_ms;
-    int min_playout_delay_ms;
-    int render_delay_ms;
-    VCMTiming::GetTimings(&max_decode_ms, &current_delay_ms, &target_delay_ms,
-                          &jitter_buffer_ms, &min_playout_delay_ms,
-                          &render_delay_ms);
-    return jitter_buffer_ms;
+  TimeDelta GetCurrentJitter() {
+    return VCMTiming::GetTimings().jitter_buffer_delay;
   }
 
  private:
-  static constexpr int kDelayMs = 50;
-  static constexpr int kDecodeTime = kDelayMs / 2;
+  static constexpr TimeDelta kDelay = TimeDelta::Millis(50);
+  const TimeDelta kDecodeTime = kDelay / 2;
   mutable uint32_t last_timestamp_ = 0;
-  mutable int64_t last_ms_ = -1;
+  mutable Timestamp last_render_time_ = Timestamp::MinusInfinity();
 };
 
 class FrameObjectFake : public EncodedFrame {
@@ -118,12 +106,12 @@ class VCMReceiveStatisticsCallbackMock : public VCMReceiveStatisticsCallback {
   MOCK_METHOD(void, OnDroppedFrames, (uint32_t frames_dropped), (override));
   MOCK_METHOD(void,
               OnFrameBufferTimingsUpdated,
-              (int max_decode_ms,
-               int current_delay_ms,
-               int target_delay_ms,
-               int jitter_buffer_ms,
-               int min_playout_delay_ms,
-               int render_delay_ms),
+              (int max_decode,
+               int current_delay,
+               int target_delay,
+               int jitter_buffer,
+               int min_playout_delay,
+               int render_delay),
               (override));
   MOCK_METHOD(void,
               OnTimingFrameInfoUpdated,
@@ -140,16 +128,16 @@ class TestFrameBuffer2 : public ::testing::Test {
   static constexpr size_t kFrameSize = 10;
 
   TestFrameBuffer2()
-      : trial_("WebRTC-AddRttToPlayoutDelay/Enabled/"),
-        time_controller_(Timestamp::Seconds(0)),
+      : time_controller_(Timestamp::Seconds(0)),
         time_task_queue_(
             time_controller_.GetTaskQueueFactory()->CreateTaskQueue(
                 "extract queue",
                 TaskQueueFactory::Priority::NORMAL)),
-        timing_(time_controller_.GetClock()),
+        timing_(time_controller_.GetClock(), field_trials_),
         buffer_(new FrameBuffer(time_controller_.GetClock(),
                                 &timing_,
-                                &stats_callback_)),
+                                &stats_callback_,
+                                field_trials_)),
         rand_(0x34678213) {}
 
   template <typename... T>
@@ -198,14 +186,10 @@ class TestFrameBuffer2 : public ::testing::Test {
 
   void ExtractFrame(int64_t max_wait_time = 0, bool keyframe_required = false) {
     time_task_queue_.PostTask([this, max_wait_time, keyframe_required]() {
-      buffer_->NextFrame(
-          max_wait_time, keyframe_required, &time_task_queue_,
-          [this](std::unique_ptr<EncodedFrame> frame,
-                 video_coding::FrameBuffer::ReturnReason reason) {
-            if (reason != FrameBuffer::ReturnReason::kStopped) {
-              frames_.emplace_back(std::move(frame));
-            }
-          });
+      buffer_->NextFrame(max_wait_time, keyframe_required, &time_task_queue_,
+                         [this](std::unique_ptr<EncodedFrame> frame) {
+                           frames_.emplace_back(std::move(frame));
+                         });
     });
     if (max_wait_time == 0) {
       time_controller_.AdvanceTime(TimeDelta::Millis(0));
@@ -232,8 +216,7 @@ class TestFrameBuffer2 : public ::testing::Test {
 
   uint32_t Rand() { return rand_.Rand<uint32_t>(); }
 
-  // The ProtectionMode tests depends on rtt-multiplier experiment.
-  test::ScopedFieldTrials trial_;
+  test::ScopedKeyValueConfig field_trials_;
   webrtc::GlobalSimulatedTimeController time_controller_;
   rtc::TaskQueue time_task_queue_;
   VCMTimingFake timing_;
@@ -262,6 +245,29 @@ TEST_F(TestFrameBuffer2, WaitForFrame) {
   CheckFrame(0, pid, 0);
 }
 
+TEST_F(TestFrameBuffer2, ClearWhileWaitingForFrame) {
+  const uint16_t pid = Rand();
+
+  // Insert a frame and wait for it for max 100ms.
+  InsertFrame(pid, 0, 25, true, kFrameSize);
+  ExtractFrame(100);
+  // After 10ms, clear the buffer.
+  time_controller_.AdvanceTime(TimeDelta::Millis(10));
+  buffer_->Clear();
+  // Confirm that the frame was not sent for rendering.
+  time_controller_.AdvanceTime(TimeDelta::Millis(15));
+  EXPECT_THAT(frames_, IsEmpty());
+
+  // We are still waiting for a frame, since 100ms has not passed. Insert a new
+  // frame. This new frame should be the one that is returned as the old frame
+  // was cleared.
+  const uint16_t new_pid = pid + 1;
+  InsertFrame(new_pid, 0, 50, true, kFrameSize);
+  time_controller_.AdvanceTime(TimeDelta::Millis(25));
+  ASSERT_THAT(frames_, SizeIs(1));
+  CheckFrame(0, new_pid, 0);
+}
+
 TEST_F(TestFrameBuffer2, OneSuperFrame) {
   uint16_t pid = Rand();
   uint32_t ts = Rand();
@@ -274,9 +280,10 @@ TEST_F(TestFrameBuffer2, OneSuperFrame) {
 }
 
 TEST_F(TestFrameBuffer2, ZeroPlayoutDelay) {
-  VCMTiming timing(time_controller_.GetClock());
-  buffer_.reset(
-      new FrameBuffer(time_controller_.GetClock(), &timing, &stats_callback_));
+  test::ScopedKeyValueConfig field_trials;
+  VCMTiming timing(time_controller_.GetClock(), field_trials);
+  buffer_.reset(new FrameBuffer(time_controller_.GetClock(), &timing,
+                                &stats_callback_, field_trials));
   const VideoPlayoutDelay kPlayoutDelayMs = {0, 0};
   std::unique_ptr<FrameObjectFake> test_frame(new FrameObjectFake());
   test_frame->SetId(0);
@@ -456,29 +463,7 @@ TEST_F(TestFrameBuffer2, ProtectionModeNackFEC) {
   ExtractFrame();
   ExtractFrame();
   ASSERT_EQ(4u, frames_.size());
-  EXPECT_LT(timing_.GetCurrentJitter(), kRttMs);
-}
-
-TEST_F(TestFrameBuffer2, ProtectionModeNack) {
-  uint16_t pid = Rand();
-  uint32_t ts = Rand();
-  constexpr int64_t kRttMs = 200;
-
-  buffer_->UpdateRtt(kRttMs);
-
-  // Jitter estimate includes RTT (after 3 retransmitted packets)
-  buffer_->SetProtectionMode(kProtectionNack);
-  InsertNackedFrame(pid, ts);
-  InsertNackedFrame(pid + 1, ts + 100);
-  InsertNackedFrame(pid + 2, ts + 200);
-  InsertFrame(pid + 3, 0, ts + 300, true, kFrameSize);
-  ExtractFrame();
-  ExtractFrame();
-  ExtractFrame();
-  ExtractFrame();
-  ASSERT_EQ(4u, frames_.size());
-
-  EXPECT_GT(timing_.GetCurrentJitter(), kRttMs);
+  EXPECT_LT(timing_.GetCurrentJitter().ms(), kRttMs);
 }
 
 TEST_F(TestFrameBuffer2, NoContinuousFrame) {
@@ -541,6 +526,8 @@ TEST_F(TestFrameBuffer2, StatsCallback) {
   EXPECT_CALL(stats_callback_,
               OnCompleteFrame(true, kFrameSize, VideoContentType::UNSPECIFIED));
   EXPECT_CALL(stats_callback_, OnFrameBufferTimingsUpdated(_, _, _, _, _, _));
+  // Stats callback requires a previously decoded frame.
+  timing_.StopDecodeTimer(TimeDelta::Millis(1), Timestamp::Zero());
 
   {
     std::unique_ptr<FrameObjectFake> frame(new FrameObjectFake());
@@ -686,6 +673,21 @@ TEST_F(TestFrameBuffer2, HigherSpatialLayerNonDecodable) {
   ExtractFrame();
   CheckFrame(1, pid + 3, 1);
   CheckFrame(2, pid + 4, 1);
+}
+
+TEST_F(TestFrameBuffer2, StopWhileWaitingForFrame) {
+  uint16_t pid = Rand();
+  uint32_t ts = Rand();
+
+  InsertFrame(pid, 0, ts, true, kFrameSize);
+  ExtractFrame(10);
+  buffer_->Stop();
+  time_controller_.AdvanceTime(TimeDelta::Millis(10));
+  EXPECT_THAT(frames_, IsEmpty());
+
+  // A new frame request should exit immediately and return no new frame.
+  ExtractFrame(0);
+  EXPECT_THAT(frames_, IsEmpty());
 }
 
 }  // namespace video_coding

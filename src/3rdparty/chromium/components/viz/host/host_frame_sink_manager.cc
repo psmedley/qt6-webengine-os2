@@ -10,8 +10,9 @@
 #include "base/callback_helpers.h"
 #include "base/containers/contains.h"
 #include "base/containers/cxx20_erase.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "components/viz/common/features.h"
 #include "components/viz/common/surfaces/surface_info.h"
@@ -165,12 +166,11 @@ void HostFrameSinkManager::CreateCompositorFrameSink(
 }
 
 void HostFrameSinkManager::CreateFrameSinkBundle(
-    const FrameSinkId& parent_frame_sink_id,
     const FrameSinkBundleId& bundle_id,
     mojo::PendingReceiver<mojom::FrameSinkBundle> receiver,
     mojo::PendingRemote<mojom::FrameSinkBundleClient> client) {
-  frame_sink_manager_->CreateFrameSinkBundle(
-      parent_frame_sink_id, bundle_id, std::move(receiver), std::move(client));
+  frame_sink_manager_->CreateFrameSinkBundle(bundle_id, std::move(receiver),
+                                             std::move(client));
 }
 
 void HostFrameSinkManager::CreateBundledCompositorFrameSink(
@@ -218,13 +218,6 @@ void HostFrameSinkManager::OnFrameTokenChanged(
   const FrameSinkData& data = iter->second;
   if (data.client)
     data.client->OnFrameTokenChanged(frame_token, activation_time);
-}
-
-void HostFrameSinkManager::SetHitTestAsyncQueriedDebugRegions(
-    const FrameSinkId& root_frame_sink_id,
-    const std::vector<FrameSinkId>& hit_test_async_queried_debug_queue) {
-  frame_sink_manager_->SetHitTestAsyncQueriedDebugRegions(
-      root_frame_sink_id, hit_test_async_queried_debug_queue);
 }
 
 bool HostFrameSinkManager::RegisterFrameSinkHierarchy(
@@ -413,6 +406,15 @@ void HostFrameSinkManager::EvictCachedBackBuffer(uint32_t cache_id) {
   // platform window is destroyed.
   mojo::SyncCallRestrictions::ScopedAllowSyncCall allow_sync_call;
   frame_sink_manager_remote_->EvictBackBuffer(cache_id);
+}
+
+void HostFrameSinkManager::CreateHitTestQueryForSynchronousCompositor(
+    const FrameSinkId& frame_sink_id) {
+  display_hit_test_query_[frame_sink_id] = std::make_unique<HitTestQuery>();
+}
+void HostFrameSinkManager::EraseHitTestQueryForSynchronousCompositor(
+    const FrameSinkId& frame_sink_id) {
+  display_hit_test_query_.erase(frame_sink_id);
 }
 
 void HostFrameSinkManager::UpdateDebugRendererSettings(

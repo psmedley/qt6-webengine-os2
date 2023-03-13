@@ -15,14 +15,17 @@ CSSAtRuleID CssAtRuleID(StringView name) {
     return kCSSAtRuleCharset;
   if (EqualIgnoringASCIICase(name, "font-face"))
     return kCSSAtRuleFontFace;
+  if (EqualIgnoringASCIICase(name, "font-palette-values")) {
+    if (RuntimeEnabledFeatures::FontPaletteEnabled())
+      return kCSSAtRuleFontPaletteValues;
+    return kCSSAtRuleInvalid;
+  }
   if (EqualIgnoringASCIICase(name, "import"))
     return kCSSAtRuleImport;
   if (EqualIgnoringASCIICase(name, "keyframes"))
     return kCSSAtRuleKeyframes;
   if (EqualIgnoringASCIICase(name, "layer")) {
-    if (RuntimeEnabledFeatures::CSSCascadeLayersEnabled())
-      return kCSSAtRuleLayer;
-    return kCSSAtRuleInvalid;
+    return kCSSAtRuleLayer;
   }
   if (EqualIgnoringASCIICase(name, "media"))
     return kCSSAtRuleMedia;
@@ -63,6 +66,9 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
     case kCSSAtRuleFontFace:
       feature = WebFeature::kCSSAtRuleFontFace;
       break;
+    case kCSSAtRuleFontPaletteValues:
+      feature = WebFeature::kCSSAtRuleFontPaletteValues;
+      break;
     case kCSSAtRuleImport:
       feature = WebFeature::kCSSAtRuleImport;
       break;
@@ -70,8 +76,8 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
       feature = WebFeature::kCSSAtRuleKeyframes;
       break;
     case kCSSAtRuleLayer:
-      // TODO(crbug.com/1095765): Add use-counter.
-      return;
+      feature = WebFeature::kCSSCascadeLayers;
+      break;
     case kCSSAtRuleMedia:
       feature = WebFeature::kCSSAtRuleMedia;
       break;
@@ -85,7 +91,7 @@ void CountAtRule(const CSSParserContext* context, CSSAtRuleID rule_id) {
       feature = WebFeature::kCSSAtRuleProperty;
       break;
     case kCSSAtRuleContainer:
-      // TODO(crbug.com/1145970): Add use-counter.
+      feature = WebFeature::kCSSAtRuleContainer;
       return;
     case kCSSAtRuleCounterStyle:
       feature = WebFeature::kCSSAtRuleCounterStyle;

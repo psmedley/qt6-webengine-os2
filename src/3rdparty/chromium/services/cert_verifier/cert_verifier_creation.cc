@@ -12,7 +12,7 @@
 #include "net/cert_net/cert_net_fetcher_url_request.h"
 #include "net/net_buildflags.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 #include "crypto/nss_util_internal.h"
 #include "net/cert/cert_verify_proc_builtin.h"
 #include "net/cert/internal/system_trust_store.h"
@@ -63,7 +63,7 @@ bool UsingChromeRootStore(
 
 #endif  // BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED)
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 scoped_refptr<net::CertVerifyProc> CreateCertVerifyProcForUser(
     scoped_refptr<net::CertNetFetcher> net_fetcher,
     crypto::ScopedPK11Slot user_public_slot) {
@@ -79,14 +79,14 @@ scoped_refptr<net::CertVerifyProc> CreateCertVerifyProcWithoutUserSlots(
       std::move(net_fetcher),
       net::CreateSslSystemTrustStoreNSSWithNoUserSlots());
 }
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 
 // Create the CertVerifyProc that is well-tested and stable for the platform in
 // question.
 scoped_refptr<net::CertVerifyProc> CreateOldDefaultWithoutCaching(
     scoped_refptr<net::CertNetFetcher> cert_net_fetcher) {
   scoped_refptr<net::CertVerifyProc> verify_proc;
-#if defined(OS_FUCHSIA) || defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   verify_proc =
       net::CertVerifyProc::CreateBuiltinVerifyProc(std::move(cert_net_fetcher));
 #else
@@ -103,7 +103,8 @@ scoped_refptr<net::CertVerifyProc> CreateOldDefaultWithoutCaching(
 scoped_refptr<net::CertVerifyProc> CreateNewDefaultWithoutCaching(
     scoped_refptr<net::CertNetFetcher> cert_net_fetcher) {
   scoped_refptr<net::CertVerifyProc> verify_proc;
-#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED) && defined(OS_LINUX)
+#if BUILDFLAG(CHROME_ROOT_STORE_SUPPORTED) && \
+    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN))
   verify_proc = net::CreateCertVerifyProcBuiltin(
       std::move(cert_net_fetcher), net::CreateSslSystemTrustStoreChromeRoot());
 #elif BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
@@ -118,9 +119,9 @@ scoped_refptr<net::CertVerifyProc> CreateNewDefaultWithoutCaching(
 }  // namespace
 
 bool IsUsingCertNetFetcher() {
-#if defined(OS_ANDROID) || defined(OS_FUCHSIA) || defined(OS_CHROMEOS) || \
-    defined(OS_LINUX) ||                                                  \
-    BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED) ||                \
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) ||      \
+    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) ||       \
+    BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED) || \
     BUILDFLAG(BUILTIN_CERT_VERIFIER_FEATURE_SUPPORTED)
   return true;
 #else
@@ -133,6 +134,27 @@ std::unique_ptr<net::CertVerifier> CreateCertVerifier(
     scoped_refptr<net::CertNetFetcher> cert_net_fetcher) {
   DCHECK(cert_net_fetcher || !IsUsingCertNetFetcher());
   std::unique_ptr<net::CertVerifier> cert_verifier;
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  if (!cert_verifier) {
+    scoped_refptr<net::CertVerifyProc> verify_proc;
+    if (!creation_params || !creation_params->nss_full_path.has_value()) {
+      verify_proc =
+          CreateCertVerifyProcWithoutUserSlots(std::move(cert_net_fetcher));
+    } else {
+      crypto::ScopedPK11Slot public_slot =
+          crypto::OpenSoftwareNSSDB(creation_params->nss_full_path.value(),
+                                    /*description=*/"cert_db");
+      // `public_slot` can contain important security related settings. Crash if
+      // failed to load it.
+      CHECK(public_slot);
+      verify_proc = CreateCertVerifyProcForUser(std::move(cert_net_fetcher),
+                                                std::move(public_slot));
+    }
+    cert_verifier = std::make_unique<net::MultiThreadedCertVerifier>(
+        std::move(verify_proc));
+  }
+#endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   // CHROMEOS_ASH does something special, so we do this first before we do
@@ -159,9 +181,9 @@ std::unique_ptr<net::CertVerifier> CreateCertVerifier(
 #endif
 
 #if BUILDFLAG(TRIAL_COMPARISON_CERT_VERIFIER_SUPPORTED)
-  // If we're doing trial verification, we always do it between the old default
-  // and the proposed new default, giving the user the value computed by the old
-  // default.
+  // If we're doing trial verification, we always do it between the old
+  // default and the proposed new default, giving the user the value computed
+  // by the old default.
   if (!cert_verifier && creation_params &&
       creation_params->trial_comparison_cert_verifier_params) {
     scoped_refptr<net::CertVerifyProc> primary =
@@ -197,9 +219,9 @@ std::unique_ptr<net::CertVerifier> CreateCertVerifier(
 
   if (!cert_verifier) {
     scoped_refptr<net::CertVerifyProc> verify_proc;
-    // If we're trying to use the new cert verifier for the platform (either the
-    // builtin_verifier, or the Chrome Root Store, or both at the same time),
-    // use the new default. Otherwise use the old default.
+    // If we're trying to use the new cert verifier for the platform (either
+    // the builtin_verifier, or the Chrome Root Store, or both at the same
+    // time), use the new default. Otherwise use the old default.
     if (use_new_default_for_platform) {
       verify_proc = CreateNewDefaultWithoutCaching(std::move(cert_net_fetcher));
     } else {

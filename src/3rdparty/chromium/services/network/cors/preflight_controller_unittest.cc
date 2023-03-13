@@ -12,7 +12,11 @@
 #include "base/test/task_environment.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "net/base/load_flags.h"
+#include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_source_type.h"
+#include "net/log/net_log_with_source.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
@@ -27,8 +31,10 @@
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/public/mojom/url_response_head.mojom.h"
+#include "services/network/test/client_security_state_builder.h"
 #include "services/network/test/fake_test_cert_verifier_params_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/origin.h"
 
@@ -38,9 +44,10 @@ namespace cors {
 
 namespace {
 
+using ::testing::Optional;
 using WithTrustedHeaderClient = PreflightController::WithTrustedHeaderClient;
-using WithNonWildcardRequestHeadersSupport =
-    PreflightController::WithNonWildcardRequestHeadersSupport;
+using EnforcePrivateNetworkAccessHeader =
+    PreflightController::EnforcePrivateNetworkAccessHeader;
 
 TEST(PreflightControllerCreatePreflightRequestTest, LexicographicalOrder) {
   ResourceRequest request;
@@ -218,24 +225,30 @@ TEST(PreflightControllerOptionsTest, CheckOptions) {
   base::test::TaskEnvironment task_environment_(
       base::test::TaskEnvironment::MainThreadType::IO);
   TestURLLoaderFactory url_loader_factory;
-  PreflightController preflight_controller(nullptr /* network_service */);
+  PreflightController preflight_controller(/*network_service=*/nullptr);
 
   network::ResourceRequest request;
   request.url = GURL("https://example.com/");
   request.request_initiator = url::Origin();
+  net::NetLogWithSource net_log = net::NetLogWithSource::Make(
+      net::NetLog::Get(), net::NetLogSourceType::URL_REQUEST);
   preflight_controller.PerformPreflightCheck(
       base::BindOnce([](int, absl::optional<CorsErrorStatus>, bool) {}),
       request, WithTrustedHeaderClient(false),
-      WithNonWildcardRequestHeadersSupport(false), false /* tainted */,
+      NonWildcardRequestHeadersSupport(false),
+      EnforcePrivateNetworkAccessHeader(false), /*tainted=*/false,
       TRAFFIC_ANNOTATION_FOR_TESTS, &url_loader_factory, net::IsolationInfo(),
-      /*devtools_observer=*/mojo::NullRemote());
+      /*client_security_state=*/nullptr,
+      /*devtools_observer=*/mojo::NullRemote(), net_log);
 
   preflight_controller.PerformPreflightCheck(
       base::BindOnce([](int, absl::optional<CorsErrorStatus>, bool) {}),
       request, WithTrustedHeaderClient(true),
-      WithNonWildcardRequestHeadersSupport(false), false /* tainted */,
+      NonWildcardRequestHeadersSupport(false),
+      EnforcePrivateNetworkAccessHeader(false), /*tainted=*/false,
       TRAFFIC_ANNOTATION_FOR_TESTS, &url_loader_factory, net::IsolationInfo(),
-      /*devtools_observer=*/mojo::NullRemote());
+      /*client_security_state=*/nullptr,
+      /*devtools_observer=*/mojo::NullRemote(), net_log);
 
   ASSERT_EQ(2, url_loader_factory.NumPending());
   EXPECT_EQ(mojom::kURLLoadOptionAsCorsPreflight,
@@ -275,7 +288,8 @@ class MockDevToolsObserver : public mojom::DevToolsObserver {
   const network::mojom::URLRequestDevToolsInfoPtr& preflight_request() const {
     return preflight_request_info_;
   }
-  const network::mojom::URLResponseHeadPtr& preflight_response() const {
+  const network::mojom::URLResponseHeadDevToolsInfoPtr& preflight_response()
+      const {
     return preflight_response_;
   }
   const absl::optional<network::URLLoaderCompletionStatus>& preflight_status()
@@ -292,6 +306,7 @@ class MockDevToolsObserver : public mojom::DevToolsObserver {
       const std::string& devtools_request_id,
       const net::CookieAccessResultList& cookies_with_access_result,
       std::vector<network::mojom::HttpRawHeaderPairPtr> headers,
+      const base::TimeTicks timestamp,
       network::mojom::ClientSecurityStatePtr client_security_state) override {
     on_raw_request_called_ = true;
   }
@@ -316,7 +331,7 @@ class MockDevToolsObserver : public mojom::DevToolsObserver {
   void OnCorsPreflightResponse(
       const base::UnguessableToken& devtool_request_id,
       const GURL& url,
-      network::mojom::URLResponseHeadPtr head) override {
+      network::mojom::URLResponseHeadDevToolsInfoPtr head) override {
     preflight_response_ = std::move(head);
   }
   void OnCorsPreflightRequestCompleted(
@@ -348,8 +363,11 @@ class MockDevToolsObserver : public mojom::DevToolsObserver {
 
   void OnCorsError(const absl::optional<std::string>& devtool_request_id,
                    const absl::optional<::url::Origin>& initiator_origin,
+                   mojom::ClientSecurityStatePtr client_security_state,
                    const GURL& url,
-                   const network::CorsErrorStatus& status) override {}
+                   const network::CorsErrorStatus& status,
+                   bool is_warning) override {}
+
   void Clone(mojo::PendingReceiver<DevToolsObserver> observer) override {
     receivers_.Add(this, std::move(observer));
   }
@@ -368,7 +386,7 @@ class MockDevToolsObserver : public mojom::DevToolsObserver {
   bool on_raw_request_called_ = false;
   bool on_raw_response_called_ = false;
   network::mojom::URLRequestDevToolsInfoPtr preflight_request_info_;
-  network::mojom::URLResponseHeadPtr preflight_response_;
+  network::mojom::URLResponseHeadDevToolsInfoPtr preflight_response_;
   absl::optional<network::URLLoaderCompletionStatus> preflight_status_;
   std::string initiator_devtools_request_id_;
 
@@ -431,25 +449,32 @@ class PreflightControllerTest : public testing::Test {
   void PerformPreflightCheck(
       const ResourceRequest& request,
       bool tainted = false,
-      net::IsolationInfo isolation_info = net::IsolationInfo()) {
+      net::IsolationInfo isolation_info = net::IsolationInfo(),
+      EnforcePrivateNetworkAccessHeader enforce_private_network_access_header =
+          EnforcePrivateNetworkAccessHeader(false),
+      mojom::ClientSecurityStatePtr client_security_state = nullptr) {
     DCHECK(preflight_controller_);
     run_loop_ = std::make_unique<base::RunLoop>();
     preflight_controller_->PerformPreflightCheck(
         base::BindOnce(&PreflightControllerTest::HandleRequestCompletion,
                        base::Unretained(this)),
         request, WithTrustedHeaderClient(false),
-        with_non_wildcard_request_headers_support_, tainted,
+        non_wildcard_request_headers_support_,
+        enforce_private_network_access_header, tainted,
         TRAFFIC_ANNOTATION_FOR_TESTS, url_loader_factory_remote_.get(),
-        isolation_info, devtools_observer_->Bind());
+        isolation_info, std::move(client_security_state),
+        devtools_observer_->Bind(),
+        net::NetLogWithSource::Make(net::NetLog::Get(),
+                                    net::NetLogSourceType::URL_REQUEST));
     run_loop_->Run();
   }
 
   void SetAccessControlAllowOrigin(const url::Origin origin) {
     access_control_allow_origin_ = origin;
   }
-  void SetWithNonWildcardRequestHeadersSupport(bool value) {
-    with_non_wildcard_request_headers_support_ =
-        WithNonWildcardRequestHeadersSupport(value);
+  void SetNonWildcardRequestHeadersSupport(bool value) {
+    non_wildcard_request_headers_support_ =
+        NonWildcardRequestHeadersSupport(value);
   }
 
   const url::Origin& test_initiator_origin() const {
@@ -528,8 +553,7 @@ class PreflightControllerTest : public testing::Test {
 
   net::test_server::EmbeddedTestServer test_server_;
   size_t access_count_ = 0;
-  WithNonWildcardRequestHeadersSupport
-      with_non_wildcard_request_headers_support_;
+  NonWildcardRequestHeadersSupport non_wildcard_request_headers_support_;
 
   std::unique_ptr<PreflightController> preflight_controller_;
   int net_error_ = net::OK;
@@ -658,7 +682,7 @@ TEST_F(PreflightControllerTest, CheckTaintedRequest) {
   request.url = GetURL("/tainted");
   request.request_initiator = test_initiator_origin();
 
-  PerformPreflightCheck(request, true /* tainted */);
+  PerformPreflightCheck(request, /*tainted=*/true);
   EXPECT_EQ(net::OK, net_error());
   ASSERT_FALSE(status());
   EXPECT_EQ(1u, access_count());
@@ -677,9 +701,104 @@ TEST_F(PreflightControllerTest, CheckResponseWithNullHeaders) {
 
   std::unique_ptr<PreflightResult> result =
       PreflightController::CreatePreflightResultForTesting(
-          url, response_head, request, tainted, &detected_error_status);
+          url, response_head, request, tainted,
+          PreflightController::EnforcePrivateNetworkAccessHeader(true),
+          &detected_error_status);
 
   EXPECT_FALSE(result);
+}
+
+TEST_F(PreflightControllerTest, CheckPrivateNetworkAccessRequest) {
+  GURL url = GetURL("/allow");
+  ResourceRequest request;
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.url = url;
+  request.request_initiator = test_initiator_origin();
+  request.target_ip_address_space = network::mojom::IPAddressSpace::kLocal;
+
+  mojom::ClientSecurityStatePtr client_security_state =
+      ClientSecurityStateBuilder()
+          .WithPrivateNetworkRequestPolicy(
+              mojom::PrivateNetworkRequestPolicy::kPreflightWarn)
+          .Build();
+
+  PerformPreflightCheck(request, /*tainted=*/false, net::IsolationInfo(),
+                        EnforcePrivateNetworkAccessHeader(true),
+                        std::move(client_security_state));
+  EXPECT_EQ(net::ERR_FAILED, net_error());
+
+  CorsErrorStatus expected_status(
+      mojom::CorsError::kPreflightMissingAllowPrivateNetwork, "");
+  expected_status.target_address_space = mojom::IPAddressSpace::kLocal;
+  EXPECT_THAT(status(), Optional(expected_status));
+  EXPECT_EQ(1u, access_count());
+}
+
+// Set custom DelayedHttpResponse for test server.
+std::unique_ptr<net::test_server::HttpResponse> AllowPrivateNetworkAccess(
+    const net::test_server::HttpRequest& request) {
+  // Warning preflights time out in 100ms. Delay the response by significantly
+  // longer than that in order to test whether the timeout triggers or not.
+  auto response = std::make_unique<net::test_server::DelayedHttpResponse>(
+      base::Milliseconds(500));
+  response->AddCustomHeader("Access-Control-Allow-Origin", "*");
+  response->AddCustomHeader("Access-Control-Allow-Private-Network", "true");
+  return std::move(response);
+}
+
+TEST_F(PreflightControllerTest,
+       CheckPrivateNetworkAccessRequestPreflightWarnTimeout) {
+  net::EmbeddedTestServer delayed_server;
+  delayed_server.RegisterRequestHandler(
+      base::BindRepeating(&AllowPrivateNetworkAccess));
+  ASSERT_TRUE(delayed_server.Start());
+  ResourceRequest request;
+  request.method = std::string("GET");
+  GURL url = delayed_server.GetURL("/");
+  request.url = url;
+  request.request_initiator = url::Origin::Create(url);
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.target_ip_address_space = network::mojom::IPAddressSpace::kLocal;
+
+  mojom::ClientSecurityStatePtr client_security_state =
+      ClientSecurityStateBuilder()
+          .WithPrivateNetworkRequestPolicy(
+              mojom::PrivateNetworkRequestPolicy::kPreflightWarn)
+          .Build();
+
+  PerformPreflightCheck(request, /*tainted=*/false, net::IsolationInfo(),
+                        EnforcePrivateNetworkAccessHeader(true),
+                        std::move(client_security_state));
+  EXPECT_EQ(net::ERR_TIMED_OUT, net_error());
+}
+
+TEST_F(PreflightControllerTest,
+       CheckPrivateNetworkAccessRequestPreflightBlockTimeout) {
+  net::EmbeddedTestServer delayed_server;
+  delayed_server.RegisterRequestHandler(
+      base::BindRepeating(&AllowPrivateNetworkAccess));
+  ASSERT_TRUE(delayed_server.Start());
+  ResourceRequest request;
+  request.method = std::string("GET");
+  GURL url = delayed_server.GetURL("/");
+  request.url = url;
+  request.request_initiator = url::Origin::Create(url);
+  request.mode = mojom::RequestMode::kCors;
+  request.credentials_mode = mojom::CredentialsMode::kOmit;
+  request.target_ip_address_space = network::mojom::IPAddressSpace::kLocal;
+
+  mojom::ClientSecurityStatePtr client_security_state =
+      ClientSecurityStateBuilder()
+          .WithPrivateNetworkRequestPolicy(
+              mojom::PrivateNetworkRequestPolicy::kPreflightBlock)
+          .Build();
+
+  PerformPreflightCheck(request, /*tainted=*/false, net::IsolationInfo(),
+                        EnforcePrivateNetworkAccessHeader(true),
+                        std::move(client_security_state));
+  EXPECT_EQ(net::OK, net_error());
 }
 
 TEST_F(PreflightControllerTest, DevToolsEvents) {
@@ -721,7 +840,7 @@ TEST_F(PreflightControllerTest, AuthorizationIsCoveredByWildcard) {
   request.request_initiator = test_initiator_origin();
   request.headers.SetHeader("authorization", "foobar");
 
-  SetWithNonWildcardRequestHeadersSupport(false);
+  SetNonWildcardRequestHeadersSupport(false);
 
   PerformPreflightCheck(request);
   EXPECT_EQ(net::OK, net_error());
@@ -738,7 +857,7 @@ TEST_F(PreflightControllerTest, AuthorizationIsNotCoveredByWildcard) {
   request.request_initiator = test_initiator_origin();
   request.headers.SetHeader("authorization", "foobar");
 
-  SetWithNonWildcardRequestHeadersSupport(true);
+  SetNonWildcardRequestHeadersSupport(true);
 
   PerformPreflightCheck(request);
   EXPECT_EQ(net::ERR_FAILED, net_error());
@@ -747,6 +866,41 @@ TEST_F(PreflightControllerTest, AuthorizationIsNotCoveredByWildcard) {
             status()->cors_error);
   EXPECT_EQ(1u, access_count());
   EXPECT_TRUE(has_authorization_covered_by_wildcard());
+}
+
+TEST_F(PreflightControllerTest, CheckPreflightAccessDetectsErrorStatus) {
+  const GURL response_url("http://example.com/data");
+  const url::Origin origin = url::Origin::Create(GURL("http://google.com"));
+  const std::string allow_all_header("*");
+
+  // Status 200-299 should pass.
+  EXPECT_FALSE(PreflightController::CheckPreflightAccessForTesting(
+      response_url, 200, allow_all_header,
+      /*allow_credentials_header=*/absl::nullopt,
+      network::mojom::CredentialsMode::kOmit, origin));
+  EXPECT_FALSE(PreflightController::CheckPreflightAccessForTesting(
+      response_url, 299, allow_all_header,
+      /*allow_credentials_header=*/absl::nullopt,
+      network::mojom::CredentialsMode::kOmit, origin));
+
+  // Status 300 should fail.
+  absl::optional<CorsErrorStatus> invalid_status_error =
+      PreflightController::CheckPreflightAccessForTesting(
+          response_url, 300, allow_all_header,
+          /*allow_credentials_header=*/absl::nullopt,
+          network::mojom::CredentialsMode::kOmit, origin);
+  ASSERT_TRUE(invalid_status_error);
+  EXPECT_EQ(mojom::CorsError::kPreflightInvalidStatus,
+            invalid_status_error->cors_error);
+
+  // Status 0 should fail too.
+  invalid_status_error = PreflightController::CheckPreflightAccessForTesting(
+      response_url, 0, allow_all_header,
+      /*allow_credentials_header=*/absl::nullopt,
+      network::mojom::CredentialsMode::kOmit, origin);
+  ASSERT_TRUE(invalid_status_error);
+  EXPECT_EQ(mojom::CorsError::kPreflightInvalidStatus,
+            invalid_status_error->cors_error);
 }
 
 }  // namespace

@@ -7,17 +7,18 @@
 #include <stdint.h>
 
 #include <cstring>
+#include <set>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/no_destructor.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
@@ -31,6 +32,7 @@
 #include "net/http/transport_security_state.h"
 #include "net/proxy_resolution/configured_proxy_resolution_service.h"
 #include "net/quic/quic_context.h"
+#include "net/socket/socket_test_util.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/test/test_with_task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,6 +52,9 @@ class CloseResultWaiter {
       : result_(false),
         have_result_(false),
         waiting_for_result_(false) {}
+
+  CloseResultWaiter(const CloseResultWaiter&) = delete;
+  CloseResultWaiter& operator=(const CloseResultWaiter&) = delete;
 
   int WaitForResult() {
     CHECK(!waiting_for_result_);
@@ -72,8 +77,6 @@ class CloseResultWaiter {
   int result_;
   bool have_result_;
   bool waiting_for_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(CloseResultWaiter);
 };
 
 class MockHttpStream : public HttpStream {
@@ -88,11 +91,15 @@ class MockHttpStream : public HttpStream {
         is_last_chunk_zero_size_(false),
         is_complete_(false),
         can_reuse_connection_(true) {}
+
+  MockHttpStream(const MockHttpStream&) = delete;
+  MockHttpStream& operator=(const MockHttpStream&) = delete;
+
   ~MockHttpStream() override = default;
 
   // HttpStream implementation.
-  int InitializeStream(const HttpRequestInfo* request_info,
-                       bool can_send_early,
+  void RegisterRequest(const HttpRequestInfo* request_info) override {}
+  int InitializeStream(bool can_send_early,
                        RequestPriority priority,
                        const NetLogWithSource& net_log,
                        CompletionOnceCallback callback) override {
@@ -144,9 +151,9 @@ class MockHttpStream : public HttpStream {
 
   void SetPriority(RequestPriority priority) override {}
 
-  const std::vector<std::string>& GetDnsAliases() const override {
-    static const base::NoDestructor<std::vector<std::string>> nullvector_result;
-    return *nullvector_result;
+  const std::set<std::string>& GetDnsAliases() const override {
+    static const base::NoDestructor<std::set<std::string>> nullset_result;
+    return *nullset_result;
   }
 
   base::StringPiece GetAcceptChViaAlps() const override { return {}; }
@@ -173,7 +180,7 @@ class MockHttpStream : public HttpStream {
 
   bool closed() const { return closed_; }
 
-  CloseResultWaiter* const result_waiter_;
+  const raw_ptr<CloseResultWaiter> result_waiter_;
   scoped_refptr<IOBuffer> user_buf_;
   CompletionOnceCallback callback_;
   int buf_len_;
@@ -186,8 +193,6 @@ class MockHttpStream : public HttpStream {
   bool can_reuse_connection_;
 
   base::WeakPtrFactory<MockHttpStream> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MockHttpStream);
 };
 
 int MockHttpStream::ReadResponseBody(IOBuffer* buf,
@@ -252,6 +257,7 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
 
   HttpNetworkSession* CreateNetworkSession() {
     HttpNetworkSessionContext context;
+    context.client_socket_factory = &socket_factory_;
     context.proxy_resolution_service = proxy_resolution_service_.get();
     context.ssl_config_service = ssl_config_service_.get();
     context.http_server_properties = http_server_properties_.get();
@@ -269,10 +275,11 @@ class HttpResponseBodyDrainerTest : public TestWithTaskEnvironment {
   TransportSecurityState transport_security_state_;
   DefaultCTPolicyEnforcer ct_policy_enforcer_;
   QuicContext quic_context_;
+  MockClientSocketFactory socket_factory_;
   const std::unique_ptr<HttpNetworkSession> session_;
   CloseResultWaiter result_waiter_;
-  MockHttpStream* const mock_stream_;  // Owned by |drainer_|.
-  HttpResponseBodyDrainer* const drainer_;  // Deletes itself.
+  const raw_ptr<MockHttpStream> mock_stream_;       // Owned by |drainer_|.
+  const raw_ptr<HttpResponseBodyDrainer> drainer_;  // Deletes itself.
 };
 
 TEST_F(HttpResponseBodyDrainerTest, DrainBodySyncSingleOK) {

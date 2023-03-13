@@ -15,8 +15,7 @@ const char kUpdateEngineServiceErrorFailed[] =
     "org.chromium.UpdateEngine.Error.Failed";
 
 // Methods.
-const char kAttemptUpdate[] = "AttemptUpdate";
-const char kAttemptUpdateWithFlags[] = "AttemptUpdateWithFlags";
+const char kUpdate[] = "Update";
 const char kGetLastAttemptError[] = "GetLastAttemptError";
 const char kGetStatusAdvanced[] = "GetStatusAdvanced";
 const char kRebootIfNeeded[] = "RebootIfNeeded";
@@ -30,17 +29,10 @@ const char kSetUpdateOverCellularPermission[] =
     "SetUpdateOverCellularPermission";
 const char kSetUpdateOverCellularTarget[] = "SetUpdateOverCellularTarget";
 const char kToggleFeature[] = "ToggleFeature";
+const char kIsFeatureEnabled[] = "IsFeatureEnabled";
 
 // Signals.
 const char kStatusUpdateAdvanced[] = "StatusUpdateAdvanced";
-
-// TODO(crbug.com/978672): Move to update_engine.proto and add other values from
-// update_status.h:UpdateAttemptFlags to this enum.
-//
-// Flags used in the |AttemptUpdateWithFlags()| D-Bus method.
-typedef enum {
-  kAttemptUpdateFlagNonInteractive = (1 << 0),
-} AttemptUpdateFlags;
 
 // Operations contained in |StatusUpdate| signals.
 const char kUpdateStatusIdle[] = "UPDATE_STATUS_IDLE";
@@ -64,6 +56,7 @@ const char kUpdateStatusCleanupPreviousUpdate[] =
 
 // Feature names.
 const char kFeatureRepeatedUpdates[] = "feature-repeated-updates";
+const char kFeatureConsumerAutoUpdate[] = "feature-consumer-auto-update";
 
 // Action exit codes.
 // Reference common/error_code.h in update_engine repo for direct mappings and

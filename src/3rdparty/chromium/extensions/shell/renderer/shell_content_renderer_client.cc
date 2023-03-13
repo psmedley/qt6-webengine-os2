@@ -15,7 +15,6 @@
 #include "extensions/common/extensions_client.h"
 #include "extensions/renderer/dispatcher.h"
 #include "extensions/renderer/extension_frame_helper.h"
-#include "extensions/renderer/guest_view/extensions_guest_view_container_dispatcher.h"
 #include "extensions/shell/common/shell_extensions_client.h"
 #include "extensions/shell/renderer/shell_extensions_renderer_client.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -31,11 +30,8 @@ using content::RenderThread;
 
 namespace extensions {
 
-ShellContentRendererClient::ShellContentRendererClient() {
-}
-
-ShellContentRendererClient::~ShellContentRendererClient() {
-}
+ShellContentRendererClient::ShellContentRendererClient() = default;
+ShellContentRendererClient::~ShellContentRendererClient() = default;
 
 void ShellContentRendererClient::RenderThreadStarted() {
   RenderThread* thread = RenderThread::Get();
@@ -48,10 +44,6 @@ void ShellContentRendererClient::RenderThreadStarted() {
   ExtensionsRendererClient::Set(extensions_renderer_client_.get());
 
   thread->AddObserver(extensions_renderer_client_->GetDispatcher());
-
-  guest_view_container_dispatcher_ =
-      std::make_unique<ExtensionsGuestViewContainerDispatcher>();
-  thread->AddObserver(guest_view_container_dispatcher_.get());
 }
 
 void ShellContentRendererClient::RenderFrameCreated(
@@ -117,6 +109,18 @@ void ShellContentRendererClient::RunScriptsAtDocumentEnd(
     content::RenderFrame* render_frame) {
   extensions_renderer_client_->GetDispatcher()->RunScriptsAtDocumentEnd(
       render_frame);
+}
+
+void ShellContentRendererClient::SetClientsForTesting(
+    std::unique_ptr<ExtensionsClient> extensions_client,
+    std::unique_ptr<ShellExtensionsRendererClient> extensions_renderer_client) {
+  DCHECK(!extensions_client_);
+  extensions_client_ = std::move(extensions_client);
+  ExtensionsClient::Set(extensions_client_.get());
+
+  DCHECK(!extensions_renderer_client_);
+  extensions_renderer_client_ = std::move(extensions_renderer_client);
+  ExtensionsRendererClient::Set(extensions_renderer_client_.get());
 }
 
 ExtensionsClient* ShellContentRendererClient::CreateExtensionsClient() {

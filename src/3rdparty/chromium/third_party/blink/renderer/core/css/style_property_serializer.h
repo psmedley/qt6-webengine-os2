@@ -34,7 +34,7 @@ class CSSPropertyName;
 class CSSPropertyValueSet;
 class StylePropertyShorthand;
 
-class StylePropertySerializer {
+class CORE_EXPORT StylePropertySerializer {
   STACK_ALLOCATED();
 
  public:
@@ -56,14 +56,18 @@ class StylePropertySerializer {
   String PageBreakPropertyValue(const StylePropertyShorthand&) const;
   String GetShorthandValue(const StylePropertyShorthand&,
                            String separator = " ") const;
+  String GetShorthandValueForGrid(const StylePropertyShorthand&) const;
+  String GetShorthandValueForGridTemplate(const StylePropertyShorthand&) const;
   String ContainerValue() const;
   String FontValue() const;
+  String FontSynthesisValue() const;
   String FontVariantValue() const;
   bool AppendFontLonghandValueIfNotNormal(const CSSProperty&,
                                           StringBuilder& result) const;
   String OffsetValue() const;
   String TextDecorationValue() const;
   String BackgroundRepeatPropertyValue() const;
+  String ContainIntrinsicSizeValue() const;
   String GetPropertyText(const CSSPropertyName&,
                          const String& value,
                          bool is_important,

@@ -6,9 +6,16 @@ import("../../../../../third_party/typescript/typescript.gni")
 
 ts_library("legacy") {
   testonly = true
-  sources = [ "SuggestBox_test.ts" ]
+  sources = [
+    "DockController_test.ts",
+    "SuggestBox_test.ts",
+    "UIUtils_test.ts",
+    "XLink_test.ts",
+  ]
 
   deps = [
+    "../../../../../front_end/core/common:bundle",
+    "../../../../../front_end/core/platform:bundle",
     "../../../../../front_end/ui/legacy:bundle",
     "../../helpers",
   ]

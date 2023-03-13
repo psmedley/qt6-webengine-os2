@@ -59,7 +59,8 @@ FaviconTabHelper::RegisterFaviconFetcherDelegate(
 }
 
 FaviconTabHelper::FaviconTabHelper(content::WebContents* contents)
-    : WebContentsObserver(contents) {}
+    : content::WebContentsUserData<FaviconTabHelper>(*contents),
+      WebContentsObserver(contents) {}
 
 void FaviconTabHelper::AddDelegate(FaviconFetcherDelegate* delegate) {
   delegates_.AddObserver(delegate);
@@ -121,6 +122,6 @@ void FaviconTabHelper::DidFinishNavigation(
     delegate.OnFaviconChanged(favicon_);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(FaviconTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(FaviconTabHelper);
 
 }  // namespace weblayer

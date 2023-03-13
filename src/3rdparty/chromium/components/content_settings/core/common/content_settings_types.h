@@ -71,14 +71,10 @@ enum class ContentSettingsType : int32_t {
   // sound. This will not block playback but instead the user will not hear it.
   SOUND,
 
-  // Website setting which stores the list of client hints (and the preference
-  // expiration time for each of the client hints) that the origin requested
-  // the browser to remember. Spec:
-  // http://httpwg.org/http-extensions/client-hints.html#accept-ch-lifetime.
-  // The setting is stored as a dictionary that includes the mapping from
-  // different client hints to their respective expiration times (seconds since
-  // epoch). The browser is expected to send all the unexpired client hints in
-  // the HTTP request headers for every resource requested from that origin.
+  // Website setting which stores the list of client hints that the origin
+  // requested the browser to remember. The browser is expected to send all
+  // client hints in the HTTP request headers for every resource requested
+  // from that origin.
   CLIENT_HINTS,
 
   // Generic Sensor API covering ambient-light-sensor, accelerometer, gyroscope
@@ -114,6 +110,9 @@ enum class ContentSettingsType : int32_t {
 
   // Used to store whether to allow a website to detect user active/idle state.
   IDLE_DETECTION,
+
+  // Setting for enabling auto-select of all screens for getDisplayMediaSet.
+  GET_DISPLAY_MEDIA_SET_SELECT_ALL_SCREENS,
 
   // Content settings for access to serial ports. The "guard" content setting
   // stores whether to allow sites to ask for permission to access a port. The
@@ -219,8 +218,8 @@ enum class ContentSettingsType : int32_t {
   INSECURE_PRIVATE_NETWORK,
 
   // Content setting which stores whether or not a site can access low-level
-  // locally installed font data using the Font Access API.
-  FONT_ACCESS,
+  // locally installed font data using the Local Fonts Access API.
+  LOCAL_FONTS,
 
   // Stores per-origin state for permission auto-revocation (for all permission
   // types).
@@ -237,13 +236,6 @@ enum class ContentSettingsType : int32_t {
   // No values are stored for this type, this is solely needed to be able to
   // register the PermissionContext.
   DISPLAY_CAPTURE,
-
-  // Register file-type associations with the operating system and obtain
-  // read-only access to files that the user chooses to open with this
-  // installed web application from the system file manager. This setting has
-  // no effect on the File System API, <input type="file">, or the ability to
-  // access files through drag & drop or clipboard paste operations.
-  FILE_HANDLING,
 
   // Website setting to store permissions metadata granted to paths on the local
   // file system via the File System Access API. |FILE_SYSTEM_WRITE_GUARD| is
@@ -272,6 +264,29 @@ enum class ContentSettingsType : int32_t {
   // are exact hostname matches -- subdomains of a host on the allowlist must be
   // separately allowlisted.
   HTTP_ALLOWED,
+
+  // Stores metadata related to form fill, such as e.g. whether user data was
+  // autofilled on a specific website.
+  FORMFILL_METADATA,
+
+  // Setting to indicate that there is an active federated sign-in session
+  // between a specified relying party and a specified identity provider for
+  // a specified account. When this is present it allows access to session
+  // management capabilities between the sites. This setting is associated
+  // with the relying party's origin.
+  FEDERATED_IDENTITY_ACTIVE_SESSION,
+
+  // Setting to indicate whether Chrome should automatically apply darkening to
+  // web content.
+  AUTO_DARK_WEB_CONTENT,
+
+  // Setting to indicate whether Chrome should request the desktop view of a
+  // site instead of the mobile one.
+  REQUEST_DESKTOP_SITE,
+
+  // Setting to indicate whether browser should allow signing into a website via
+  // the browser FedCM API.
+  FEDERATED_IDENTITY_API,
 
   NUM_TYPES,
 };

@@ -64,27 +64,29 @@ typedef enum VulkanObjectType {
     kVulkanObjectTypeCommandPool = 25,
     kVulkanObjectTypeSamplerYcbcrConversion = 26,
     kVulkanObjectTypeDescriptorUpdateTemplate = 27,
-    kVulkanObjectTypeSurfaceKHR = 28,
-    kVulkanObjectTypeSwapchainKHR = 29,
-    kVulkanObjectTypeDisplayKHR = 30,
-    kVulkanObjectTypeDisplayModeKHR = 31,
-    kVulkanObjectTypeVideoSessionKHR = 32,
-    kVulkanObjectTypeVideoSessionParametersKHR = 33,
-    kVulkanObjectTypeDeferredOperationKHR = 34,
-    kVulkanObjectTypeDebugReportCallbackEXT = 35,
-    kVulkanObjectTypeCuModuleNVX = 36,
-    kVulkanObjectTypeCuFunctionNVX = 37,
-    kVulkanObjectTypeDebugUtilsMessengerEXT = 38,
-    kVulkanObjectTypeValidationCacheEXT = 39,
-    kVulkanObjectTypeAccelerationStructureNV = 40,
-    kVulkanObjectTypePerformanceConfigurationINTEL = 41,
-    kVulkanObjectTypeIndirectCommandsLayoutNV = 42,
-    kVulkanObjectTypePrivateDataSlotEXT = 43,
-    kVulkanObjectTypeAccelerationStructureKHR = 44,
-    kVulkanObjectTypeMax = 45,
+    kVulkanObjectTypePrivateDataSlot = 28,
+    kVulkanObjectTypeSurfaceKHR = 29,
+    kVulkanObjectTypeSwapchainKHR = 30,
+    kVulkanObjectTypeDisplayKHR = 31,
+    kVulkanObjectTypeDisplayModeKHR = 32,
+    kVulkanObjectTypeVideoSessionKHR = 33,
+    kVulkanObjectTypeVideoSessionParametersKHR = 34,
+    kVulkanObjectTypeDeferredOperationKHR = 35,
+    kVulkanObjectTypeDebugReportCallbackEXT = 36,
+    kVulkanObjectTypeCuModuleNVX = 37,
+    kVulkanObjectTypeCuFunctionNVX = 38,
+    kVulkanObjectTypeDebugUtilsMessengerEXT = 39,
+    kVulkanObjectTypeValidationCacheEXT = 40,
+    kVulkanObjectTypeAccelerationStructureNV = 41,
+    kVulkanObjectTypePerformanceConfigurationINTEL = 42,
+    kVulkanObjectTypeIndirectCommandsLayoutNV = 43,
+    kVulkanObjectTypeBufferCollectionFUCHSIA = 44,
+    kVulkanObjectTypeAccelerationStructureKHR = 45,
+    kVulkanObjectTypeMax = 46,
     // Aliases for backwards compatibilty of "promoted" types
     kVulkanObjectTypeDescriptorUpdateTemplateKHR = kVulkanObjectTypeDescriptorUpdateTemplate,
     kVulkanObjectTypeSamplerYcbcrConversionKHR = kVulkanObjectTypeSamplerYcbcrConversion,
+    kVulkanObjectTypePrivateDataSlotEXT = kVulkanObjectTypePrivateDataSlot,
 } VulkanObjectType;
 
 // Array of object name strings for OBJECT_TYPE enum conversion
@@ -117,6 +119,7 @@ static const char * const object_string[kVulkanObjectTypeMax] = {
     "CommandPool",
     "SamplerYcbcrConversion",
     "DescriptorUpdateTemplate",
+    "PrivateDataSlot",
     "SurfaceKHR",
     "SwapchainKHR",
     "DisplayKHR",
@@ -132,7 +135,7 @@ static const char * const object_string[kVulkanObjectTypeMax] = {
     "AccelerationStructureNV",
     "PerformanceConfigurationINTEL",
     "IndirectCommandsLayoutNV",
-    "PrivateDataSlotEXT",
+    "BufferCollectionFUCHSIA",
     "AccelerationStructureKHR",
 };
 
@@ -166,6 +169,7 @@ const VkDebugReportObjectTypeEXT get_debug_report_enum[] = {
     VK_DEBUG_REPORT_OBJECT_TYPE_COMMAND_POOL_EXT,   // kVulkanObjectTypeCommandPool
     VK_DEBUG_REPORT_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION_EXT,   // kVulkanObjectTypeSamplerYcbcrConversion
     VK_DEBUG_REPORT_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE_EXT,   // kVulkanObjectTypeDescriptorUpdateTemplate
+    VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypePrivateDataSlot
     VK_DEBUG_REPORT_OBJECT_TYPE_SURFACE_KHR_EXT,   // kVulkanObjectTypeSurfaceKHR
     VK_DEBUG_REPORT_OBJECT_TYPE_SWAPCHAIN_KHR_EXT,   // kVulkanObjectTypeSwapchainKHR
     VK_DEBUG_REPORT_OBJECT_TYPE_DISPLAY_KHR_EXT,   // kVulkanObjectTypeDisplayKHR
@@ -181,7 +185,7 @@ const VkDebugReportObjectTypeEXT get_debug_report_enum[] = {
     VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT,   // kVulkanObjectTypeAccelerationStructureNV
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypePerformanceConfigurationINTEL
     VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypeIndirectCommandsLayoutNV
-    VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT,   // kVulkanObjectTypePrivateDataSlotEXT
+    VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT,   // kVulkanObjectTypeBufferCollectionFUCHSIA
     VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR_EXT,   // kVulkanObjectTypeAccelerationStructureKHR
 };
 
@@ -215,6 +219,7 @@ const VkObjectType get_object_type_enum[] = {
     VK_OBJECT_TYPE_COMMAND_POOL,   // kVulkanObjectTypeCommandPool
     VK_OBJECT_TYPE_SAMPLER_YCBCR_CONVERSION,   // kVulkanObjectTypeSamplerYcbcrConversion
     VK_OBJECT_TYPE_DESCRIPTOR_UPDATE_TEMPLATE,   // kVulkanObjectTypeDescriptorUpdateTemplate
+    VK_OBJECT_TYPE_PRIVATE_DATA_SLOT,   // kVulkanObjectTypePrivateDataSlot
     VK_OBJECT_TYPE_SURFACE_KHR,   // kVulkanObjectTypeSurfaceKHR
     VK_OBJECT_TYPE_SWAPCHAIN_KHR,   // kVulkanObjectTypeSwapchainKHR
     VK_OBJECT_TYPE_DISPLAY_KHR,   // kVulkanObjectTypeDisplayKHR
@@ -230,7 +235,7 @@ const VkObjectType get_object_type_enum[] = {
     VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV,   // kVulkanObjectTypeAccelerationStructureNV
     VK_OBJECT_TYPE_PERFORMANCE_CONFIGURATION_INTEL,   // kVulkanObjectTypePerformanceConfigurationINTEL
     VK_OBJECT_TYPE_INDIRECT_COMMANDS_LAYOUT_NV,   // kVulkanObjectTypeIndirectCommandsLayoutNV
-    VK_OBJECT_TYPE_PRIVATE_DATA_SLOT_EXT,   // kVulkanObjectTypePrivateDataSlotEXT
+    VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA,   // kVulkanObjectTypeBufferCollectionFUCHSIA
     VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_KHR,   // kVulkanObjectTypeAccelerationStructureKHR
 };
 
@@ -318,6 +323,8 @@ static inline VkObjectType convertDebugReportObjectToCoreObject(VkDebugReportObj
         return VK_OBJECT_TYPE_VALIDATION_CACHE_EXT;
     } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT) {
         return VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV;
+    } else if (debug_report_obj == VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT) {
+        return VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA;
     }
     return VK_OBJECT_TYPE_UNKNOWN;
 }
@@ -406,6 +413,8 @@ static inline VkDebugReportObjectTypeEXT convertCoreObjectToDebugReportObject(Vk
         return VK_DEBUG_REPORT_OBJECT_TYPE_VALIDATION_CACHE_EXT_EXT;
     } else if (core_report_obj == VK_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV) {
         return VK_DEBUG_REPORT_OBJECT_TYPE_ACCELERATION_STRUCTURE_NV_EXT;
+    } else if (core_report_obj == VK_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA) {
+        return VK_DEBUG_REPORT_OBJECT_TYPE_BUFFER_COLLECTION_FUCHSIA_EXT;
     }
     return VK_DEBUG_REPORT_OBJECT_TYPE_UNKNOWN_EXT;
 }

@@ -56,13 +56,13 @@ std::unique_ptr<PosixFileDescriptorInfo> CreateDefaultPosixFilesToMap(
   std::unique_ptr<PosixFileDescriptorInfo> files_to_register(
       PosixFileDescriptorInfoImpl::Create());
 
-#if !defined(OS_MAC)
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_OS2)
   // Mac and OS/2 shared memory doesn't use file descriptors.
   int fd = base::FieldTrialList::GetFieldTrialDescriptor();
   if (fd != -1)
     files_to_register->Share(kFieldTrialDescriptor, fd);
-#endif
+#endif // !BUILDFLAG(IS_OS2)
   DCHECK(mojo_channel_remote_endpoint.is_valid());
   files_to_register->Share(
       kMojoIPCChannel,
@@ -72,7 +72,7 @@ std::unique_ptr<PosixFileDescriptorInfo> CreateDefaultPosixFilesToMap(
   // GetAdditionalMappedFilesForChildProcess a no op on Mac.
   GetContentClient()->browser()->GetAdditionalMappedFilesForChildProcess(
       *command_line, child_process_id, files_to_register.get());
-#endif
+#endif // !BUILDFLAG(IS_MAC)
 
   // Also include the files specified explicitly by |files_to_preload|.
   base::GlobalDescriptors::Key key = kContentDynamicDescriptorStart;

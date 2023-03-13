@@ -117,7 +117,7 @@ specialize qw/vpx_tm_predictor_8x8 neon dspr2 msa sse2/;
 
 add_proto qw/void vpx_dc_predictor_8x8/, "uint8_t *dst, ptrdiff_t stride, const uint8_t *above, const uint8_t *left";
 # TODO(crbug.com/webm/1522): Re-enable vsx implementation.
-specialize qw/vpx_dc_predictor_8x8 dspr2 neon msa sse2/;
+specialize qw/vpx_dc_predictor_8x8 dspr2 neon msa sse2 lsx/;
 
 add_proto qw/void vpx_dc_top_predictor_8x8/, "uint8_t *dst, ptrdiff_t stride, const uint8_t *above, const uint8_t *left";
 specialize qw/vpx_dc_top_predictor_8x8 neon msa sse2/;
@@ -155,7 +155,7 @@ add_proto qw/void vpx_tm_predictor_16x16/, "uint8_t *dst, ptrdiff_t stride, cons
 specialize qw/vpx_tm_predictor_16x16 neon msa sse2 vsx/;
 
 add_proto qw/void vpx_dc_predictor_16x16/, "uint8_t *dst, ptrdiff_t stride, const uint8_t *above, const uint8_t *left";
-specialize qw/vpx_dc_predictor_16x16 dspr2 neon msa sse2 vsx/;
+specialize qw/vpx_dc_predictor_16x16 dspr2 neon msa sse2 vsx lsx/;
 
 add_proto qw/void vpx_dc_top_predictor_16x16/, "uint8_t *dst, ptrdiff_t stride, const uint8_t *above, const uint8_t *left";
 specialize qw/vpx_dc_top_predictor_16x16 neon msa sse2 vsx/;
@@ -371,19 +371,19 @@ add_proto qw/void vpx_convolve_copy/, "const uint8_t *src, ptrdiff_t src_stride,
 specialize qw/vpx_convolve_copy neon dspr2 msa sse2 vsx/;
 
 add_proto qw/void vpx_convolve_avg/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
-specialize qw/vpx_convolve_avg neon dspr2 msa sse2 vsx mmi/;
+specialize qw/vpx_convolve_avg neon dspr2 msa sse2 vsx mmi lsx/;
 
 add_proto qw/void vpx_convolve8/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
-specialize qw/vpx_convolve8 sse2 ssse3 avx2 neon dspr2 msa vsx mmi/;
+specialize qw/vpx_convolve8 sse2 ssse3 avx2 neon dspr2 msa vsx mmi lsx/;
 
 add_proto qw/void vpx_convolve8_horiz/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
-specialize qw/vpx_convolve8_horiz sse2 ssse3 avx2 neon dspr2 msa vsx mmi/;
+specialize qw/vpx_convolve8_horiz sse2 ssse3 avx2 neon dspr2 msa vsx mmi lsx/;
 
 add_proto qw/void vpx_convolve8_vert/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
-specialize qw/vpx_convolve8_vert sse2 ssse3 avx2 neon dspr2 msa vsx mmi/;
+specialize qw/vpx_convolve8_vert sse2 ssse3 avx2 neon dspr2 msa vsx mmi lsx/;
 
 add_proto qw/void vpx_convolve8_avg/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
-specialize qw/vpx_convolve8_avg sse2 ssse3 avx2 neon dspr2 msa vsx mmi/;
+specialize qw/vpx_convolve8_avg sse2 ssse3 avx2 neon dspr2 msa vsx mmi lsx/;
 
 add_proto qw/void vpx_convolve8_avg_horiz/, "const uint8_t *src, ptrdiff_t src_stride, uint8_t *dst, ptrdiff_t dst_stride, const InterpKernel *filter, int x0_q4, int x_step_q4, int y0_q4, int y_step_q4, int w, int h";
 specialize qw/vpx_convolve8_avg_horiz sse2 ssse3 avx2 neon dspr2 msa vsx mmi/;
@@ -442,10 +442,10 @@ add_proto qw/void vpx_lpf_vertical_16/, "uint8_t *s, int pitch, const uint8_t *b
 specialize qw/vpx_lpf_vertical_16 sse2 neon dspr2 msa/;
 
 add_proto qw/void vpx_lpf_vertical_16_dual/, "uint8_t *s, int pitch, const uint8_t *blimit, const uint8_t *limit, const uint8_t *thresh";
-specialize qw/vpx_lpf_vertical_16_dual sse2 neon dspr2 msa/;
+specialize qw/vpx_lpf_vertical_16_dual sse2 neon dspr2 msa lsx/;
 
 add_proto qw/void vpx_lpf_vertical_8/, "uint8_t *s, int pitch, const uint8_t *blimit, const uint8_t *limit, const uint8_t *thresh";
-specialize qw/vpx_lpf_vertical_8 sse2 neon dspr2 msa/;
+specialize qw/vpx_lpf_vertical_8 sse2 neon dspr2 msa lsx/;
 
 add_proto qw/void vpx_lpf_vertical_8_dual/, "uint8_t *s, int pitch, const uint8_t *blimit0, const uint8_t *limit0, const uint8_t *thresh0, const uint8_t *blimit1, const uint8_t *limit1, const uint8_t *thresh1";
 specialize qw/vpx_lpf_vertical_8_dual sse2 neon dspr2 msa/;
@@ -460,10 +460,10 @@ add_proto qw/void vpx_lpf_horizontal_16/, "uint8_t *s, int pitch, const uint8_t 
 specialize qw/vpx_lpf_horizontal_16 sse2 avx2 neon dspr2 msa/;
 
 add_proto qw/void vpx_lpf_horizontal_16_dual/, "uint8_t *s, int pitch, const uint8_t *blimit, const uint8_t *limit, const uint8_t *thresh";
-specialize qw/vpx_lpf_horizontal_16_dual sse2 avx2 neon dspr2 msa/;
+specialize qw/vpx_lpf_horizontal_16_dual sse2 avx2 neon dspr2 msa lsx/;
 
 add_proto qw/void vpx_lpf_horizontal_8/, "uint8_t *s, int pitch, const uint8_t *blimit, const uint8_t *limit, const uint8_t *thresh";
-specialize qw/vpx_lpf_horizontal_8 sse2 neon dspr2 msa/;
+specialize qw/vpx_lpf_horizontal_8 sse2 neon dspr2 msa lsx/;
 
 add_proto qw/void vpx_lpf_horizontal_8_dual/, "uint8_t *s, int pitch, const uint8_t *blimit0, const uint8_t *limit0, const uint8_t *thresh0, const uint8_t *blimit1, const uint8_t *limit1, const uint8_t *thresh1";
 specialize qw/vpx_lpf_horizontal_8_dual sse2 neon dspr2 msa/;
@@ -824,7 +824,7 @@ if (vpx_config("CONFIG_VP9_ENCODER") eq "yes") {
     specialize qw/vpx_satd avx2 sse2 neon msa/;
   }
 
-  add_proto qw/void vpx_int_pro_row/, "int16_t *hbuf, const uint8_t *ref, const int ref_stride, const int height";
+  add_proto qw/void vpx_int_pro_row/, "int16_t hbuf[16], const uint8_t *ref, const int ref_stride, const int height";
   specialize qw/vpx_int_pro_row sse2 neon msa/;
 
   add_proto qw/int16_t vpx_int_pro_col/, "const uint8_t *ref, const int width";

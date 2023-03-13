@@ -4,6 +4,11 @@
 
 #include "mojo/public/cpp/bindings/lib/interface_ptr_state.h"
 
+#include <stdint.h>
+
+#include <utility>
+
+#include "base/containers/span.h"
 #include "mojo/public/cpp/bindings/lib/task_runner_helper.h"
 
 namespace mojo {
@@ -67,6 +72,10 @@ void InterfacePtrStateBase::Bind(
       GetTaskRunnerToUseFromUserProvidedTaskRunner(std::move(task_runner));
 }
 
+PendingRemoteState InterfacePtrStateBase::Unbind() {
+  return PendingRemoteState(PassMessagePipe(), version());
+}
+
 void InterfacePtrStateBase::OnQueryVersion(
     base::OnceCallback<void(uint32_t)> callback,
     uint32_t version) {
@@ -79,7 +88,9 @@ bool InterfacePtrStateBase::InitializeEndpointClient(
     bool has_sync_methods,
     bool has_uninterruptable_methods,
     std::unique_ptr<MessageReceiver> payload_validator,
-    const char* interface_name) {
+    const char* interface_name,
+    MessageToStableIPCHashCallback ipc_hash_callback,
+    MessageToMethodNameCallback method_name_callback) {
   // The object hasn't been bound.
   if (!handle_.is_valid())
     return false;
@@ -94,10 +105,12 @@ bool InterfacePtrStateBase::InitializeEndpointClient(
                                     interface_name);
   endpoint_client_ = std::make_unique<InterfaceEndpointClient>(
       router_->CreateLocalEndpointHandle(kPrimaryInterfaceId), nullptr,
-      std::move(payload_validator), false, std::move(runner_),
+      std::move(payload_validator),
+      /* sync_method_ordinals= */ base::span<const uint32_t>(),
+      std::move(runner_),
       // The version is only queried from the client so the value passed here
       // will not be used.
-      0u, interface_name);
+      0u, interface_name, ipc_hash_callback, method_name_callback);
 
   // Note that we defer this until after attaching the endpoint. This is in case
   // `runner_` does not run tasks in the current sequence but MultiplexRouter is

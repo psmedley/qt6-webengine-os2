@@ -17,12 +17,13 @@
 #include <iterator>
 #include <utility>
 
+#include "core/fxcrt/fx_string_wrappers.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/string_data_template.h"
 #include "core/fxcrt/string_view_template.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
 #include "third_party/base/compiler_specific.h"
-#include "third_party/base/optional.h"
 #include "third_party/base/span.h"
 
 namespace fxcrt {
@@ -47,9 +48,10 @@ class ByteString {
   // Move-construct a ByteString. After construction, |other| is empty.
   ByteString(ByteString&& other) noexcept;
 
+  // Make a one-character string from a char.
+  explicit ByteString(char ch);
+
   // Deliberately implicit to avoid calling on every string literal.
-  // NOLINTNEXTLINE(runtime/explicit)
-  ByteString(char ch);
   // NOLINTNEXTLINE(runtime/explicit)
   ByteString(const char* ptr);
 
@@ -63,11 +65,13 @@ class ByteString {
   explicit ByteString(ByteStringView bstrc);
   ByteString(ByteStringView str1, ByteStringView str2);
   ByteString(const std::initializer_list<ByteStringView>& list);
-  explicit ByteString(const std::ostringstream& outStream);
+  explicit ByteString(const fxcrt::ostringstream& outStream);
 
   ~ByteString();
 
-  void clear() { m_pData.Reset(); }
+  // Holds on to buffer if possible for later re-use. Assign ByteString()
+  // to force immediate release if desired.
+  void clear();
 
   // Explicit conversion to C-style string.
   // Note: Any subsequent modification of |this| will invalidate the result.
@@ -167,13 +171,14 @@ class ByteString {
   pdfium::span<char> GetBuffer(size_t nMinBufLength);
   void ReleaseBuffer(size_t nNewLength);
 
+  ByteString Substr(size_t offset) const;
   ByteString Substr(size_t first, size_t count) const;
   ByteString First(size_t count) const;
   ByteString Last(size_t count) const;
 
-  Optional<size_t> Find(ByteStringView subStr, size_t start = 0) const;
-  Optional<size_t> Find(char ch, size_t start = 0) const;
-  Optional<size_t> ReverseFind(char ch) const;
+  absl::optional<size_t> Find(ByteStringView subStr, size_t start = 0) const;
+  absl::optional<size_t> Find(char ch, size_t start = 0) const;
+  absl::optional<size_t> ReverseFind(char ch) const;
 
   bool Contains(ByteStringView lpszSub, size_t start = 0) const {
     return Find(lpszSub, start).has_value();

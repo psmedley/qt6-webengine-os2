@@ -14,8 +14,6 @@
 
 # Proto for Nearby products
 
-load("//net/proto2/contrib/portable/cc:portable_proto_build_defs.bzl", "portable_proto_library")
-
 licenses(["notice"])
 
 package(default_visibility = ["//visibility:public"])
@@ -23,23 +21,10 @@ package(default_visibility = ["//visibility:public"])
 proto_library(
     name = "connections_enums_proto",
     srcs = ["connections_enums.proto"],
-    cc_api_version = 2,
-    compatible_with = [
-        "//buildenv/target:non_prod",
-        "//buildenv/target:appengine",
-    ],
-    deps = [
-        "//logs/proto/logs_annotations",
-    ],
 )
 
 java_lite_proto_library(
     name = "connections_enums_java_proto_lite",
-    deps = [":connections_enums_proto"],
-)
-
-go_proto_library(
-    name = "connections_enums_go_proto",
     deps = [":connections_enums_proto"],
 )
 
@@ -48,24 +33,10 @@ java_proto_library(
     deps = [":connections_enums_proto"],
 )
 
-portable_proto_library(
-    name = "connections_enums_portable_proto",
-    compatible_with = [
-        "//buildenv/target:non_prod",
-    ],
-    config = ":connections_enums_proto_config",
-    copts = [
-        "-DGOOGLE_PROTOBUF_NO_RTTI=1",
-    ],
-    header_outs = [
-        "connections_enums.pb.h",
-    ],
-    proto_deps = [
+cc_proto_library(
+    name = "connections_enums_cc_proto",
+    deps = [
         ":connections_enums_proto",
-    ],
-    visibility = [
-        "//location/nearby/connections:__subpackages__",
-        "//third_party/nearby_connections:__subpackages__",
     ],
 )
 
@@ -77,14 +48,6 @@ filegroup(
 proto_library(
     name = "sharing_enums_proto",
     srcs = ["sharing_enums.proto"],
-    cc_api_version = 2,
-    compatible_with = [
-        "//buildenv/target:non_prod",
-        "//buildenv/target:appengine",
-    ],
-    deps = [
-        "//logs/proto/logs_annotations",
-    ],
 )
 
 java_lite_proto_library(

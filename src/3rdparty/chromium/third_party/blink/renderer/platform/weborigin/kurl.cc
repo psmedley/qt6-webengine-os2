@@ -162,18 +162,18 @@ bool KURL::IsLocalFile() const {
   // and including feed would allow feeds to potentially let someone's blog
   // read the contents of the clipboard on a drag, even without a drop.
   // Likewise with using the FrameLoader::shouldTreatURLAsLocal() function.
-  return ProtocolIs("file");
+  return ProtocolIs(url::kFileScheme);
 }
 
 bool ProtocolIsJavaScript(const String& url) {
-  return ProtocolIs(url, "javascript");
+  return ProtocolIs(url, url::kJavaScriptScheme);
 }
 
 const KURL& BlankURL() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<KURL>, static_blank_url, ());
   KURL& blank_url = *static_blank_url;
   if (blank_url.IsNull())
-    blank_url = KURL(AtomicString("about:blank"));
+    blank_url = KURL(AtomicString(url::kAboutBlankURL));
   return blank_url;
 }
 
@@ -181,7 +181,7 @@ const KURL& SrcdocURL() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(ThreadSpecific<KURL>, static_srcdoc_url, ());
   KURL& srcdoc_url = *static_srcdoc_url;
   if (srcdoc_url.IsNull())
-    srcdoc_url = KURL(AtomicString("about:srcdoc"));
+    srcdoc_url = KURL(AtomicString(url::kAboutSrcdocURL));
   return srcdoc_url;
 }
 
@@ -332,7 +332,7 @@ bool KURL::HasPort() const {
 }
 
 bool KURL::ProtocolIsJavaScript() const {
-  return ComponentStringView(parsed_.scheme) == "javascript";
+  return ComponentStringView(parsed_.scheme) == url::kJavaScriptScheme;
 }
 
 bool KURL::ProtocolIsInHTTPFamily() const {
@@ -497,8 +497,8 @@ bool KURL::SetProtocol(const String& protocol) {
   if (SchemeRegistry::IsSpecialScheme(Protocol()) &&
       SchemeRegistry::IsSpecialScheme(new_protocol_canon)) {
     // The protocol is lower-cased during canonicalization.
-    const bool new_protocol_is_file = new_protocol_canon == "file";
-    const bool old_protocol_is_file = ProtocolIs("file");
+    const bool new_protocol_is_file = new_protocol_canon == url::kFileScheme;
+    const bool old_protocol_is_file = ProtocolIs(url::kFileScheme);
 
     // https://url.spec.whatwg.org/#scheme-state
     // 3. If url includes credentials or has a non-null port, and buffer is
@@ -887,12 +887,12 @@ void KURL::Init(const KURL& base,
     StringUTF8Adaptor relative_utf8(relative);
     is_valid_ = url::ResolveRelative(base_utf8.data(), base_utf8.size(),
                                      base.parsed_, relative_utf8.data(),
-                                     clampTo<int>(relative_utf8.size()),
+                                     ClampTo<int>(relative_utf8.size()),
                                      charset_converter, &output, &parsed_);
   } else {
     is_valid_ = url::ResolveRelative(base_utf8.data(), base_utf8.size(),
                                      base.parsed_, relative.Characters16(),
-                                     clampTo<int>(relative.length()),
+                                     ClampTo<int>(relative.length()),
                                      charset_converter, &output, &parsed_);
   }
 
@@ -1016,11 +1016,6 @@ void KURL::ReplaceComponents(const url::Replacements<CHAR>& replacements,
     string_ = AtomicString::FromUTF8(output.data(), output.length());
     InitProtocolMetadata();
   }
-}
-
-bool KURL::IsSafeToSendToAnotherThread() const {
-  return string_.IsSafeToSendToAnotherThread() &&
-         (!inner_url_ || inner_url_->IsSafeToSendToAnotherThread());
 }
 
 void KURL::WriteIntoTrace(perfetto::TracedValue context) const {

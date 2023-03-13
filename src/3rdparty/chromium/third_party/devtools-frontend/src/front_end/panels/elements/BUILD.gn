@@ -14,6 +14,17 @@ generate_css("css_files") {
     "computedStyleSidebarPane.css",
     "computedStyleWidgetTree.css",
     "domLinkifier.css",
+    "elementStatePaneWidget.css",
+    "elementsPanel.css",
+    "elementsTreeOutline.css",
+    "layersWidget.css",
+    "layoutPane.css",
+    "metricsSidebarPane.css",
+    "nodeStackTraceWidget.css",
+    "platformFontsWidget.css",
+    "propertiesWidget.css",
+    "stylesSectionTree.css",
+    "stylesSidebarPane.css",
   ]
 }
 
@@ -36,6 +47,7 @@ devtools_module("elements") {
     "EventListenersWidget.ts",
     "ImagePreviewPopover.ts",
     "InspectElementModeController.ts",
+    "LayersWidget.ts",
     "LayoutSidebarPane.ts",
     "MarkerDecorator.ts",
     "MetricsSidebarPane.ts",
@@ -44,8 +56,10 @@ devtools_module("elements") {
     "PropertiesWidget.ts",
     "PropertyNameCategories.ts",
     "StyleEditorWidget.ts",
+    "StylePropertiesSection.ts",
     "StylePropertyHighlighter.ts",
     "StylePropertyTreeElement.ts",
+    "StylePropertyUtils.ts",
     "StylesSidebarPane.ts",
   ]
 
@@ -60,16 +74,19 @@ devtools_module("elements") {
     "../../models/bindings:bundle",
     "../../models/extensions:bundle",
     "../../models/workspace:bundle",
+    "../../models/workspace_diff:bundle",
     "../../panels/emulation:bundle",
     "../../panels/event_listeners:bundle",
     "../../panels/mobile_throttling:bundle",
+    "../../panels/utils:bundle",
     "../../ui/components/adorners:bundle",
+    "../../ui/components/code_highlighter:bundle",
+    "../../ui/components/text_editor:bundle",
     "../../ui/components/tree_outline:bundle",
     "../../ui/legacy:bundle",
     "../../ui/legacy/components/color_picker:bundle",
     "../../ui/legacy/components/inline_editor:bundle",
     "../../ui/legacy/components/object_ui:bundle",
-    "../../ui/legacy/components/text_editor:bundle",
     "../../ui/legacy/components/utils:bundle",
     "../../ui/lit-html:bundle",
     "./components:bundle",
@@ -79,10 +96,6 @@ devtools_module("elements") {
     "../../../test/unittests/front_end/elements",
     "../../component_docs/*",
   ]
-}
-
-copy_to_gen("legacy_css") {
-  sources = [ "layoutPane.css" ]
 }
 
 devtools_entrypoint("bundle") {
@@ -132,5 +145,9 @@ devtools_entrypoint("meta") {
     "../../ui/legacy:bundle",
   ]
 
-  visibility = [ "../../entrypoints/*" ]
+  visibility = [
+    "../../../test/unittests/front_end/helpers/*",
+    "../../../test/unittests/front_end/panels/elements/*",
+    "../../entrypoints/*",
+  ]
 }

@@ -128,24 +128,21 @@ void SkPaint::setColor(SkColor color) {
 }
 
 void SkPaint::setColor(const SkColor4f& color, SkColorSpace* colorSpace) {
-    SkASSERT(fColor4f.fA >= 0 && fColor4f.fA <= 1.0f);
-
     SkColorSpaceXformSteps steps{colorSpace,          kUnpremul_SkAlphaType,
                                  sk_srgb_singleton(), kUnpremul_SkAlphaType};
-    fColor4f = color;
+    fColor4f = {color.fR, color.fG, color.fB, SkTPin(color.fA, 0.0f, 1.0f)};
     steps.apply(fColor4f.vec());
 }
 
 void SkPaint::setAlphaf(float a) {
-    SkASSERT(a >= 0 && a <= 1.0f);
-    fColor4f.fA = a;
+    fColor4f.fA = SkTPin(a, 0.0f, 1.0f);
 }
 
 void SkPaint::setARGB(U8CPU a, U8CPU r, U8CPU g, U8CPU b) {
     this->setColor(SkColorSetARGB(a, r, g, b));
 }
 
-skstd::optional<SkBlendMode> SkPaint::asBlendMode() const {
+std::optional<SkBlendMode> SkPaint::asBlendMode() const {
     return fBlender ? as_BB(fBlender)->asBlendMode()
                     : SkBlendMode::kSrcOver;
 }
@@ -426,6 +423,24 @@ bool SkPaint::canComputeFastBounds() const {
         return false;
     }
     return true;
+}
+
+const SkRect& SkPaint::computeFastBounds(const SkRect& orig, SkRect* storage) const {
+    // Things like stroking, etc... will do math on the bounds rect, assuming that it's sorted.
+    SkASSERT(orig.isSorted());
+    SkPaint::Style style = this->getStyle();
+    // ultra fast-case: filling with no effects that affect geometry
+    if (kFill_Style == style) {
+        uintptr_t effects = 0;
+        effects |= reinterpret_cast<uintptr_t>(this->getMaskFilter());
+        effects |= reinterpret_cast<uintptr_t>(this->getPathEffect());
+        effects |= reinterpret_cast<uintptr_t>(this->getImageFilter());
+        if (!effects) {
+            return orig;
+        }
+    }
+
+    return this->doComputeFastBounds(orig, storage, style);
 }
 
 const SkRect& SkPaint::doComputeFastBounds(const SkRect& origSrc,

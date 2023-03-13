@@ -24,7 +24,11 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         # Set up fresh git repository with one commit.
         self.untracking_checkout_path = self._mkdtemp(
             suffix='-git_unittest_untracking')
-        self._run(['git', 'init', self.untracking_checkout_path])
+        try:
+            self._run(['git', 'init', self.untracking_checkout_path])
+        except ScriptError:
+            # Skip the test if git is not installed on the system
+            raise self.skipTest("git init failed. Skipping the test")
 
         self._chdir(self.untracking_checkout_path)
         # Explicitly create the default branch instead of relying on
@@ -158,7 +162,7 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         self._run(['git', 'add', 'test_file_commit1'])
         git.commit_locally_with_message('message')
         patch = git.create_patch()
-        self.assertNotRegexpMatches(patch, r'Subversion Revision:')
+        self.assertNotRegexpMatches(patch, b'Subversion Revision:')
 
     def test_patches_have_filenames_with_prefixes(self):
         self._chdir(self.tracking_git_checkout_path)
@@ -171,7 +175,7 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         self._run(['git', 'config', 'diff.noprefix', 'true'])
         patch = git.create_patch()
         self.assertRegexpMatches(
-            patch, r'^diff --git a/test_file_commit1 b/test_file_commit1')
+            patch, b'^diff --git a/test_file_commit1 b/test_file_commit1')
 
     def test_rename_files(self):
         self._chdir(self.tracking_git_checkout_path)
@@ -180,7 +184,7 @@ class GitTestWithRealFilesystemAndExecutive(unittest.TestCase):
         git.commit_locally_with_message('message')
 
         patch = git.create_patch(changed_files=git.changed_files())
-        self.assertTrue('rename from' in patch)
+        self.assertTrue(b'rename from' in patch)
 
     def test_commit_position_from_git_log(self):
         # This tests a protected method. pylint: disable=protected-access

@@ -10,7 +10,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -53,7 +53,7 @@ class VectorIconGallery : public View, public TextfieldController {
     image_layout->set_main_axis_alignment(
         BoxLayout::MainAxisAlignment::kCenter);
     image_view_container->SetLayoutManager(std::move(image_layout));
-    image_view_->SetBorder(CreateSolidSidedBorder(1, 1, 1, 1, SK_ColorBLACK));
+    image_view_->SetBorder(CreateSolidBorder(1, SK_ColorBLACK));
     image_view_container_ = AddChildView(std::move(image_view_container));
 
     BoxLayout* box = SetLayoutManager(std::make_unique<BoxLayout>(
@@ -84,6 +84,9 @@ class VectorIconGallery : public View, public TextfieldController {
     color_input_->set_controller(this);
   }
 
+  VectorIconGallery(const VectorIconGallery&) = delete;
+  VectorIconGallery& operator=(const VectorIconGallery&) = delete;
+
   ~VectorIconGallery() override = default;
 
   // TextfieldController implementation.
@@ -112,7 +115,7 @@ class VectorIconGallery : public View, public TextfieldController {
  private:
   void FileGoButtonPressed() {
     base::ScopedAllowBlockingForTesting allow_blocking;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     base::FilePath path(base::UTF16ToWide(file_chooser_->GetText()));
 #else
     base::FilePath path(base::UTF16ToUTF8(file_chooser_->GetText()));
@@ -140,15 +143,13 @@ class VectorIconGallery : public View, public TextfieldController {
   int size_ = 36;
   SkColor color_ = SK_ColorRED;
 
-  ImageView* image_view_;
-  View* image_view_container_;
-  Textfield* size_input_;
-  Textfield* color_input_;
-  Textfield* file_chooser_;
-  Button* file_go_button_;
+  raw_ptr<ImageView> image_view_;
+  raw_ptr<View> image_view_container_;
+  raw_ptr<Textfield> size_input_;
+  raw_ptr<Textfield> color_input_;
+  raw_ptr<Textfield> file_chooser_;
+  raw_ptr<Button> file_go_button_;
   std::string contents_;
-
-  DISALLOW_COPY_AND_ASSIGN(VectorIconGallery);
 };
 
 }  // namespace

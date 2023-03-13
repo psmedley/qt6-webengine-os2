@@ -11,6 +11,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/unguessable_token.h"
+#include "build/build_config.h"
 #include "media/base/overlay_info.h"
 #include "media/base/supported_video_decoder_config.h"
 #include "media/media_buildflags.h"
@@ -31,6 +32,7 @@ class ColorSpace;
 namespace media {
 
 class AudioDecoder;
+class AudioEncoder;
 class CdmFactory;
 class MediaLog;
 class Renderer;
@@ -52,6 +54,9 @@ class MEDIA_MOJO_EXPORT MojoMediaClient {
 
   virtual std::unique_ptr<AudioDecoder> CreateAudioDecoder(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  virtual std::unique_ptr<AudioEncoder> CreateAudioEncoder(
+      scoped_refptr<base::SequencedTaskRunner> task_runner);
 
   virtual std::vector<SupportedVideoDecoderConfig>
   GetSupportedVideoDecoderConfigs();
@@ -87,13 +92,16 @@ class MEDIA_MOJO_EXPORT MojoMediaClient {
       const base::UnguessableToken& overlay_plane_id);
 #endif  // BUILDFLAG(ENABLE_CAST_RENDERER)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   virtual std::unique_ptr<Renderer> CreateMediaFoundationRenderer(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       mojom::FrameInterfaceFactory* frame_interfaces,
+      mojo::PendingRemote<mojom::MediaLog> media_log_remote,
       mojo::PendingReceiver<mojom::MediaFoundationRendererExtension>
-          renderer_extension_receiver);
-#endif  // defined(OS_WIN)
+          renderer_extension_receiver,
+      mojo::PendingRemote<media::mojom::MediaFoundationRendererClientExtension>
+          client_extension_remote);
+#endif  // BUILDFLAG(IS_WIN)
 
   // Returns the CdmFactory to be used by MojoCdmService. |frame_interfaces|
   // can be used to request interfaces provided remotely by the host. It may

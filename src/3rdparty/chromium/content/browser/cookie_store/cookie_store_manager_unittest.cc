@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/test/bind.h"
 #include "content/browser/cookie_store/cookie_store_manager.h"
@@ -17,8 +17,8 @@
 #include "content/browser/storage_partition_impl.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_browser_context.h"
-#include "content/test/fake_mojo_message_dispatch_context.h"
 #include "content/test/storage_partition_test_helpers.h"
+#include "mojo/public/cpp/test_support/fake_message_dispatch_context.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "net/cookies/cookie_access_result.h"
 #include "net/cookies/cookie_constants.h"
@@ -45,6 +45,10 @@ class CookieStoreSync {
   // The caller must ensure that the CookieStore service outlives this.
   explicit CookieStoreSync(blink::mojom::CookieStore* cookie_store_service)
       : cookie_store_service_(cookie_store_service) {}
+
+  CookieStoreSync(const CookieStoreSync&) = delete;
+  CookieStoreSync& operator=(const CookieStoreSync&) = delete;
+
   ~CookieStoreSync() = default;
 
   bool AddSubscriptions(int64_t service_worker_registration_id,
@@ -92,9 +96,7 @@ class CookieStoreSync {
   }
 
  private:
-  blink::mojom::CookieStore* cookie_store_service_;
-
-  DISALLOW_COPY_AND_ASSIGN(CookieStoreSync);
+  raw_ptr<blink::mojom::CookieStore> cookie_store_service_;
 };
 
 const char kExampleScope[] = "https://example.com/a/";
@@ -118,6 +120,10 @@ class CookieStoreWorkerTestHelper : public EmbeddedWorkerTestHelper {
    public:
     explicit ServiceWorker(CookieStoreWorkerTestHelper* worker_helper)
         : FakeServiceWorker(worker_helper), worker_helper_(worker_helper) {}
+
+    ServiceWorker(const ServiceWorker&) = delete;
+    ServiceWorker& operator=(const ServiceWorker&) = delete;
+
     ~ServiceWorker() override = default;
 
     // Used to implement WaitForActivateEvent().
@@ -140,9 +146,7 @@ class CookieStoreWorkerTestHelper : public EmbeddedWorkerTestHelper {
     }
 
    private:
-    CookieStoreWorkerTestHelper* const worker_helper_;
-
-    DISALLOW_COPY_AND_ASSIGN(ServiceWorker);
+    const raw_ptr<CookieStoreWorkerTestHelper> worker_helper_;
   };
 
   std::unique_ptr<FakeServiceWorker> CreateServiceWorker() override {
@@ -161,7 +165,7 @@ class CookieStoreWorkerTestHelper : public EmbeddedWorkerTestHelper {
 
  private:
   // Set by WaitForActivateEvent(), used in OnActivateEvent().
-  base::RunLoop* quit_on_activate_ = nullptr;
+  raw_ptr<base::RunLoop> quit_on_activate_ = nullptr;
 
   // Collects the changes reported to OnCookieChangeEvent().
   std::vector<net::CookieChangeInfo> changes_;
@@ -1756,7 +1760,7 @@ TEST_F(CookieStoreManagerTest, UnTrustworthyOrigin) {
   mojo::Remote<blink::mojom::CookieStore> untrustworthy_service_remote;
 
   // Create a fake dispatch context to trigger a bad message in.
-  FakeMojoMessageDispatchContext fake_dispatch_context;
+  mojo::FakeMessageDispatchContext fake_dispatch_context;
   mojo::test::BadMessageObserver bad_mesage_observer;
 
   cookie_store_manager_->BindReceiver(

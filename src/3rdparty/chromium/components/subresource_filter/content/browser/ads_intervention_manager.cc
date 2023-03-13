@@ -46,7 +46,7 @@ base::TimeDelta AdsInterventionManager::GetInterventionDuration(
     mojom::AdsViolation violation) {
   switch (violation) {
     case mojom::AdsViolation::kHeavyAdsInterventionAtHostLimit:
-      return base::TimeDelta::FromDays(1);
+      return base::Days(1);
     default:
       return kAdsInterventionDuration.Get();
   }
@@ -85,19 +85,23 @@ void AdsInterventionManager::TriggerAdsInterventionForUrlOnSubsequentLoads(
 
 absl::optional<AdsInterventionManager::LastAdsIntervention>
 AdsInterventionManager::GetLastAdsIntervention(const GURL& url) const {
-  int ads_violation;
-  double last_violation_time;
   // The last active ads intervention is stored in the site metadata.
   std::unique_ptr<base::DictionaryValue> dict =
       settings_manager_->GetSiteMetadata(url);
 
-  if (dict && dict->GetInteger(kLastAdsViolationKey, &ads_violation) &&
-      dict->GetDouble(kLastAdsViolationTimeKey, &last_violation_time)) {
+  if (!dict)
+    return absl::nullopt;
+
+  absl::optional<int> ads_violation = dict->FindIntKey(kLastAdsViolationKey);
+  absl::optional<double> last_violation_time =
+      dict->FindDoubleKey(kLastAdsViolationTimeKey);
+
+  if (ads_violation && last_violation_time) {
     base::TimeDelta diff =
-        clock_->Now() - base::Time::FromDoubleT(last_violation_time);
+        clock_->Now() - base::Time::FromDoubleT(*last_violation_time);
 
     return LastAdsIntervention(
-        {diff, static_cast<mojom::AdsViolation>(ads_violation)});
+        {diff, static_cast<mojom::AdsViolation>(*ads_violation)});
   }
 
   return absl::nullopt;

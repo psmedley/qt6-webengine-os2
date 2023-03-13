@@ -8,6 +8,7 @@
 #ifndef SkImage_Base_DEFINED
 #define SkImage_Base_DEFINED
 
+#include "include/core/SkData.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkSurface.h"
 #include "src/core/SkMipmap.h"
@@ -15,11 +16,15 @@
 
 #if SK_SUPPORT_GPU
 #include "include/private/SkTDArray.h"
-#include "src/gpu/GrSurfaceProxyView.h"
-#include "src/gpu/GrTextureProxy.h"
-#include "src/gpu/SkGr.h"
+#include "src/gpu/ganesh/GrSurfaceProxyView.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/SkGr.h"
 
 class GrTexture;
+#endif
+
+#ifdef SK_GRAPHITE_ENABLED
+#include "src/gpu/graphite/TextureProxyView.h"
 #endif
 
 #include <new>
@@ -65,7 +70,7 @@ public:
                                              RescaleGamma,
                                              RescaleMode,
                                              ReadPixelsCallback,
-                                             ReadPixelsContext);
+                                             ReadPixelsContext) const;
     /**
      * Default implementation does a rescale/read/yuv conversion and then calls the callback.
      */
@@ -76,7 +81,7 @@ public:
                                                    RescaleGamma,
                                                    RescaleMode,
                                                    ReadPixelsCallback,
-                                                   ReadPixelsContext);
+                                                   ReadPixelsContext) const;
 
     virtual GrImageContext* context() const { return nullptr; }
 
@@ -84,7 +89,7 @@ public:
     GrDirectContext* directContext() const;
 
 #if SK_SUPPORT_GPU
-    virtual GrSemaphoresSubmitted onFlush(GrDirectContext*, const GrFlushInfo&) {
+    virtual GrSemaphoresSubmitted onFlush(GrDirectContext*, const GrFlushInfo&) const {
         return GrSemaphoresSubmitted::kNo;
     }
 
@@ -117,14 +122,24 @@ public:
     // If this image is the current cached image snapshot of a surface then this is called when the
     // surface is destroyed to indicate no further writes may happen to surface backing store.
     virtual void generatingSurfaceIsDeleted() {}
+
+    virtual GrBackendTexture onGetBackendTexture(bool flushPendingGrContextIO,
+                                                 GrSurfaceOrigin* origin) const;
+#endif
+#ifdef SK_GRAPHITE_ENABLED
+    // Returns a TextureProxyView representation of the image, if possible. This also returns
+    // a color type. This may be different than the image's color type when the image is not
+    // texture-backed and the capabilities of the GPU require a data type conversion to put
+    // the data in a texture.
+    std::tuple<skgpu::graphite::TextureProxyView, SkColorType> asView(
+            skgpu::graphite::Recorder*,
+            skgpu::graphite::Mipmapped mipmapped,
+            SkBudgeted) const;
 #endif
 
     virtual bool onPinAsTexture(GrRecordingContext*) const { return false; }
     virtual void onUnpinAsTexture(GrRecordingContext*) const {}
     virtual bool isPinnedOnContext(GrRecordingContext*) const { return false; }
-
-    virtual GrBackendTexture onGetBackendTexture(bool flushPendingGrContextIO,
-                                                 GrSurfaceOrigin* origin) const;
 
     // return a read-only copy of the pixels. We promise to not modify them,
     // but only inspect them (or encode them).
@@ -140,8 +155,11 @@ public:
     // True for picture-backed and codec-backed
     virtual bool onIsLazyGenerated() const { return false; }
 
-    // True for images instantiated in GPU memory
-    virtual bool onIsTextureBacked() const { return false; }
+    // True for images instantiated by Ganesh in GPU memory
+    virtual bool isGaneshBacked() const { return false; }
+
+    // True for images instantiated by Graphite in GPU memory
+    virtual bool isGraphiteBacked() const { return false; }
 
     // Amount of texture memory used by texture-backed images.
     virtual size_t onTextureSize() const { return 0; }
@@ -209,6 +227,14 @@ private:
             const SkMatrix&,
             const SkRect* subset,
             const SkRect* domain) const = 0;
+#endif
+#ifdef SK_GRAPHITE_ENABLED
+    virtual std::tuple<skgpu::graphite::TextureProxyView, SkColorType> onAsView(
+            skgpu::graphite::Recorder*,
+            skgpu::graphite::Mipmapped mipmapped,
+            SkBudgeted) const {
+        return {}; // TODO: once incompatible derived classes are removed make this pure virtual
+    }
 #endif
     // Set true by caches when they cache content that's derived from the current pixels.
     mutable std::atomic<bool> fAddedToRasterCache;

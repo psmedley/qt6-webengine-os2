@@ -10,65 +10,25 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
+#include "components/safe_browsing/content/common/visual_utils.h"
 #include "components/safe_browsing/content/renderer/phishing_classifier/features.h"
 #include "components/safe_browsing/core/common/proto/client_model.pb.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
-#include "components/safe_browsing/core/common/visual_utils.h"
 #include "content/public/renderer/render_thread.h"
 #include "crypto/sha2.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "third_party/tflite-support/src/tensorflow_lite_support/cc/task/core/task_api_factory.h"
-#include "third_party/tflite-support/src/tensorflow_lite_support/cc/task/vision/image_classifier.h"
-#include "third_party/tflite/src/tensorflow/lite/kernels/builtin_op_kernels.h"
-#include "third_party/tflite/src/tensorflow/lite/op_resolver.h"
 
 namespace safe_browsing {
 
 namespace {
-std::unique_ptr<ClientPhishingRequest> GetMatchingVisualTargetsHelper(
-    const SkBitmap& bitmap,
-    const ClientSideModel& model,
-    std::unique_ptr<ClientPhishingRequest> request) {
-  DCHECK(!content::RenderThread::IsMainThread());
-
-  TRACE_EVENT0("safe_browsing", "GetMatchingVisualTargets");
-
-  VisualFeatures::BlurredImage blurred_image;
-  // Obtaining a blurred image is essential for both adding a vision match or
-  // populating telemetry.
-  if (!visual_utils::GetBlurredImage(bitmap, &blurred_image)) {
-    return request;
-  }
-  const std::string blurred_image_hash =
-      visual_utils::GetHashFromBlurredImage(blurred_image);
-
-  VisualFeatures::ColorHistogram histogram;
-  if (visual_utils::GetHistogramForImage(bitmap, &histogram)) {
-    for (const VisualTarget& target : model.vision_model().targets()) {
-      absl::optional<VisionMatchResult> result = visual_utils::IsVisualMatch(
-          bitmap, blurred_image_hash, histogram, target);
-      if (result.has_value()) {
-        *request->add_vision_match() = result.value();
-      }
-    }
-  }
-
-  // Populate these fields for telemetry purposes. They will be filtered in
-  // the browser process if they are not needed.
-  std::string raw_digest = crypto::SHA256HashString(blurred_image.data());
-  request->set_screenshot_digest(
-      base::HexEncode(raw_digest.data(), raw_digest.size()));
-  request->set_screenshot_phash(blurred_image_hash);
-  request->set_phash_dimension_size(48);
-
-  return request;
-}
 
 void RecordScorerCreationStatus(ScorerCreationStatus status) {
   UMA_HISTOGRAM_ENUMERATION("SBClientPhishing.ProtobufScorer.CreationStatus",
@@ -137,40 +97,31 @@ double ProtobufModelScorer::ComputeScore(const FeatureMap& features) const {
   return LogOdds2Prob(logodds);
 }
 
-void ProtobufModelScorer::GetMatchingVisualTargets(
-    const SkBitmap& bitmap,
-    std::unique_ptr<ClientPhishingRequest> request,
-    base::OnceCallback<void(std::unique_ptr<ClientPhishingRequest>)> callback)
-    const {
-  DCHECK(content::RenderThread::IsMainThread());
-
-  // Perform scoring off the main thread to avoid blocking.
-  base::ThreadPool::PostTaskAndReplyWithResult(
-      FROM_HERE, {base::WithBaseSyncPrimitives()},
-      base::BindOnce(&GetMatchingVisualTargetsHelper, bitmap, model_,
-                     std::move(request)),
-      std::move(callback));
-}
-
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
 void ProtobufModelScorer::ApplyVisualTfLiteModel(
     const SkBitmap& bitmap,
     base::OnceCallback<void(std::vector<double>)> callback) const {
   DCHECK(content::RenderThread::IsMainThread());
   if (visual_tflite_model_.IsValid()) {
-    base::ThreadPool::PostTaskAndReplyWithResult(
-        FROM_HERE,
-        {base::TaskPriority::BEST_EFFORT, base::WithBaseSyncPrimitives()},
-        base::BindOnce(&ApplyVisualTfLiteModelHelper, bitmap,
-                       model_.tflite_metadata().input_width(),
-                       model_.tflite_metadata().input_height(),
-                       std::string(reinterpret_cast<const char*>(
-                                       visual_tflite_model_.data()),
-                                   visual_tflite_model_.length())),
-        std::move(callback));
+    base::Time start_post_task_time = base::Time::Now();
+    base::ThreadPool::PostTask(
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT},
+        base::BindOnce(
+            &ApplyVisualTfLiteModelHelper, bitmap,
+            model_.tflite_metadata().input_width(),
+            model_.tflite_metadata().input_height(),
+            std::string(
+                reinterpret_cast<const char*>(visual_tflite_model_.data()),
+                visual_tflite_model_.length()),
+            base::SequencedTaskRunnerHandle::Get(), std::move(callback)));
+    base::UmaHistogramTimes(
+        "SBClientPhishing.TfLiteModelLoadTime.ProtobufScorer",
+        base::Time::Now() - start_post_task_time);
   } else {
     std::move(callback).Run(std::vector<double>());
   }
 }
+#endif
 
 int ProtobufModelScorer::model_version() const {
   return model_.version();

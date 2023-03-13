@@ -16,7 +16,7 @@
 const float CFGAS_Break::kConversionFactor = 20000.0f;
 const int CFGAS_Break::kMinimumTabWidth = 160000;
 
-CFGAS_Break::CFGAS_Break(uint32_t dwLayoutStyles)
+CFGAS_Break::CFGAS_Break(Mask<LayoutStyle> dwLayoutStyles)
     : m_dwLayoutStyles(dwLayoutStyles), m_pCurLine(&m_Lines[0]) {}
 
 CFGAS_Break::~CFGAS_Break() = default;
@@ -27,10 +27,10 @@ void CFGAS_Break::Reset() {
     line.Clear();
 }
 
-void CFGAS_Break::SetLayoutStyles(uint32_t dwLayoutStyles) {
+void CFGAS_Break::SetLayoutStyles(Mask<LayoutStyle> dwLayoutStyles) {
   m_dwLayoutStyles = dwLayoutStyles;
-  m_bSingleLine = (m_dwLayoutStyles & FX_LAYOUTSTYLE_SingleLine) != 0;
-  m_bCombText = (m_dwLayoutStyles & FX_LAYOUTSTYLE_CombText) != 0;
+  m_bSingleLine = !!(m_dwLayoutStyles & LayoutStyle::kSingleLine);
+  m_bCombText = !!(m_dwLayoutStyles & LayoutStyle::kCombText);
 }
 
 void CFGAS_Break::SetHorizontalScale(int32_t iScale) {
@@ -71,11 +71,9 @@ void CFGAS_Break::SetFontSize(float fFontSize) {
 
 void CFGAS_Break::SetBreakStatus() {
   ++m_dwIdentity;
-  if (m_pCurLine->m_LineChars.empty())
-    return;
 
-  CFGAS_Char* tc = m_pCurLine->GetChar(m_pCurLine->m_LineChars.size() - 1);
-  if (tc->m_dwStatus == CFGAS_Char::BreakType::kNone)
+  CFGAS_Char* tc = m_pCurLine->LastChar();
+  if (tc && tc->m_dwStatus == CFGAS_Char::BreakType::kNone)
     tc->m_dwStatus = CFGAS_Char::BreakType::kPiece;
 }
 

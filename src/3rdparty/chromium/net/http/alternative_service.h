@@ -14,11 +14,10 @@
 #include "base/time/time.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
-#include "net/base/port_util.h"
 #include "net/quic/quic_http_utils.h"
 #include "net/socket/next_proto.h"
-#include "net/third_party/quiche/src/quic/core/quic_versions.h"
-#include "net/third_party/quiche/src/spdy/core/spdy_protocol.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_versions.h"
+#include "net/third_party/quiche/src/quiche/spdy/core/spdy_protocol.h"
 
 namespace net {
 

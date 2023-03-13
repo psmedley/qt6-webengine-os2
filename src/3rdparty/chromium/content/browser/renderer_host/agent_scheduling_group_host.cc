@@ -10,6 +10,7 @@
 #include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "base/supports_user_data.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/renderer_host/agent_scheduling_group_host_factory.h"
 #include "content/browser/renderer_host/render_frame_host_impl.h"
@@ -19,6 +20,7 @@
 #include "content/common/state_transitions.h"
 #include "content/public/browser/browser_message_filter.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/services/shared_storage_worklet/public/mojom/shared_storage_worklet_service.mojom.h"
 #include "ipc/ipc_channel_mojo.h"
 #include "ipc/ipc_message.h"
 
@@ -29,14 +31,6 @@ namespace {
 using ::IPC::ChannelMojo;
 using ::IPC::ChannelProxy;
 using ::IPC::Listener;
-using ::mojo::AssociatedReceiver;
-using ::mojo::AssociatedRemote;
-using ::mojo::PendingAssociatedReceiver;
-using ::mojo::PendingAssociatedRemote;
-using ::mojo::PendingReceiver;
-using ::mojo::PendingRemote;
-using ::mojo::Receiver;
-using ::mojo::Remote;
 
 static constexpr char kAgentSchedulingGroupHostDataKey[] =
     "AgentSchedulingGroupHostUserDataKey";
@@ -54,10 +48,10 @@ struct AgentSchedulingGroupHostUserData : public base::SupportsUserData::Data {
 
   std::set<std::unique_ptr<AgentSchedulingGroupHost>, base::UniquePtrComparator>
       owned_host_set;
-  // This is used solely to DCHECK the invariant that a SiteInstance cannot
+  // This is used solely to DCHECK the invariant that a SiteInstanceGroup cannot
   // request an AgentSchedulingGroup twice from the same RenderProcessHost.
 #if DCHECK_IS_ON()
-  std::set<const SiteInstance*> site_instances;
+  std::set<const SiteInstanceGroup*> site_instance_groups;
 #endif
 };
 
@@ -71,7 +65,7 @@ static features::MBIMode GetMBIMode() {
 
 // static
 AgentSchedulingGroupHost* AgentSchedulingGroupHost::GetOrCreate(
-    const SiteInstance& instance,
+    const SiteInstanceGroup& site_instance_group,
     RenderProcessHost& process) {
   AgentSchedulingGroupHostUserData* data =
       static_cast<AgentSchedulingGroupHostUserData*>(
@@ -88,10 +82,10 @@ AgentSchedulingGroupHost* AgentSchedulingGroupHost::GetOrCreate(
 
   if (GetMBIMode() == features::MBIMode::kLegacy ||
       GetMBIMode() == features::MBIMode::kEnabledPerRenderProcessHost) {
-    // We don't use |data->site_instances| at all when AgentSchedulingGroupHost
-    // is 1:1 with RenderProcessHost.
+    // We don't use |data->site_instance_groups| at all when
+    // AgentSchedulingGroupHost is 1:1 with RenderProcessHost.
 #if DCHECK_IS_ON()
-    DCHECK(data->site_instances.empty());
+    DCHECK(data->site_instance_groups.empty());
 #endif
 
     if (data->owned_host_set.empty()) {
@@ -120,13 +114,13 @@ AgentSchedulingGroupHost* AgentSchedulingGroupHost::GetOrCreate(
       std::make_unique<AgentSchedulingGroupHost>(process);
   AgentSchedulingGroupHost* return_host = host.get();
 
-  // In the MBI mode where we AgentSchedulingGroupHosts are 1:1 with
-  // SiteInstances, a SiteInstance may see different RenderProcessHosts
-  // throughout its lifetime, but it should only ever see a single
-  // AgentSchedulingGroupHost for a given RenderProcessHost.
+  // In the MBI mode where AgentSchedulingGroupHosts are 1:1 with
+  // SiteInstanceGroups, a SiteInstanceGroup may see different
+  // RenderProcessHosts throughout its lifetime, but it should only ever see a
+  // single AgentSchedulingGroupHost for a given RenderProcessHost.
 #if DCHECK_IS_ON()
-  DCHECK(!base::Contains(data->site_instances, &instance));
-  data->site_instances.insert(&instance);
+  DCHECK(!base::Contains(data->site_instance_groups, &site_instance_group));
+  data->site_instance_groups.insert(&site_instance_group);
 #endif
 
   data->owned_host_set.insert(std::move(host));
@@ -349,6 +343,15 @@ void AgentSchedulingGroupHost::CreateFrameProxy(
       std::move(remote_main_frame_interfaces));
 }
 
+void AgentSchedulingGroupHost::CreateSharedStorageWorkletService(
+    mojo::PendingReceiver<
+        shared_storage_worklet::mojom::SharedStorageWorkletService> receiver) {
+  DCHECK_EQ(state_, LifecycleState::kBound);
+  DCHECK(process_.IsInitializedAndNotDead());
+  DCHECK(mojo_remote_.is_bound());
+  mojo_remote_.get()->CreateSharedStorageWorkletService(std::move(receiver));
+}
+
 void AgentSchedulingGroupHost::ReportNoBinderForInterface(
     const std::string& error) {
   broker_receiver_.ReportBadMessage(error +
@@ -456,7 +459,7 @@ void AgentSchedulingGroupHost::SetUpIPC() {
     auto io_task_runner = GetIOThreadTaskRunner({});
 
     // Empty interface endpoint to pass pipes more easily.
-    PendingRemote<IPC::mojom::ChannelBootstrap> bootstrap;
+    mojo::PendingRemote<IPC::mojom::ChannelBootstrap> bootstrap;
 
     process_.GetRendererInterface()->CreateAgentSchedulingGroup(
         bootstrap.InitWithNewPipeAndPassReceiver(),

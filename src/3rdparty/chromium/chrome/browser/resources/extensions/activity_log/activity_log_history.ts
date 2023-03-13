@@ -9,9 +9,10 @@ import 'chrome://resources/cr_elements/cr_search_field/cr_search_field.js';
 import '../shared_style.js';
 import './activity_log_history_item.js';
 
-import {assert} from 'chrome://resources/js/assert.m.js';
+import {assert} from 'chrome://resources/js/assert_ts.js';
 import {PromiseResolver} from 'chrome://resources/js/promise_resolver.m.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {getTemplate} from './activity_log_history.html.js';
 
 import {ActivityGroup} from './activity_log_history_item.js';
 
@@ -168,13 +169,13 @@ declare global {
   }
 }
 
-class ActivityLogHistoryElement extends PolymerElement {
+export class ActivityLogHistoryElement extends PolymerElement {
   static get is() {
     return 'activity-log-history';
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
@@ -230,9 +231,13 @@ class ActivityLogHistoryElement extends PolymerElement {
     this.rawActivities_ = '';
   }
 
-  ready() {
+  override ready() {
     super.ready();
     this.addEventListener('delete-activity-log-item', e => this.deleteItem_(e));
+  }
+
+  setPageStateForTest(state: ActivityLogPageState) {
+    this.pageState_ = state;
   }
 
   /**
@@ -242,7 +247,7 @@ class ActivityLogHistoryElement extends PolymerElement {
     return this.dataFetchedResolver_!.promise;
   }
 
-  connectedCallback() {
+  override connectedCallback() {
     super.connectedCallback();
     this.dataFetchedResolver_ = new PromiseResolver();
     this.refreshActivities_();
@@ -269,8 +274,9 @@ class ActivityLogHistoryElement extends PolymerElement {
   }
 
   private onMoreActionsClick_() {
-    this.shadowRoot!.querySelector('cr-action-menu')!.showAt(
-        assert(this.shadowRoot!.querySelector('cr-icon-button')!));
+    const moreButton = this.shadowRoot!.querySelector('cr-icon-button');
+    assert(moreButton);
+    this.shadowRoot!.querySelector('cr-action-menu')!.showAt(moreButton);
   }
 
   private expandItems_(expanded: boolean) {
@@ -360,6 +366,12 @@ class ActivityLogHistoryElement extends PolymerElement {
 
     this.lastSearch_ = searchTerm;
     this.refreshActivities_();
+  }
+}
+
+declare global {
+  interface HTMLElementTagNameMap {
+    'activity-log-history': ActivityLogHistoryElement;
   }
 }
 

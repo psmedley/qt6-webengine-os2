@@ -7,11 +7,21 @@
 
 #include "src/sksl/SkSLContext.h"
 
+#include "include/core/SkTypes.h"
+#ifdef SK_DEBUG
+#include "src/sksl/SkSLPool.h"
+#endif
+
 namespace SkSL {
 
-Context::Context(ErrorReporter& errors, const ShaderCapsClass& caps)
+Context::Context(ErrorReporter& errors, const ShaderCaps& caps, Mangler& mangler)
         : fCaps(caps)
-        , fErrors(errors) {
+        , fErrors(&errors)
+        , fMangler(&mangler) {
+    SkASSERT(!Pool::IsAttached());
+}
+
+Context::~Context() {
     SkASSERT(!Pool::IsAttached());
 }
 

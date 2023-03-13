@@ -5,7 +5,6 @@
 #ifndef COMPONENTS_PERMISSIONS_CONTEXTS_WEBXR_PERMISSION_CONTEXT_H_
 #define COMPONENTS_PERMISSIONS_CONTEXTS_WEBXR_PERMISSION_CONTEXT_H_
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -24,7 +23,7 @@ class WebXrPermissionContext : public PermissionContextBase {
   // PermissionContextBase:
   bool IsRestrictedToSecureOrigins() const override;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // On Android we need to do some additional checking for OS level permissions,
   // which do not need to happen on Desktop. Note that NotifyPermissionSet is
   // only called after a "RequestPermission" call (and not if we are just

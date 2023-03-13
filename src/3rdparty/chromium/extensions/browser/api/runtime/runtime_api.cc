@@ -14,8 +14,8 @@
 #include "base/metrics/histogram.h"
 #include "base/notreached.h"
 #include "base/one_shot_event.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "base/version.h"
@@ -182,8 +182,8 @@ void BrowserContextKeyedAPIFactory<RuntimeAPI>::DeclareFactoryDependencies() {
 
 RuntimeAPI::RuntimeAPI(content::BrowserContext* context)
     : browser_context_(context),
-      minimum_duration_between_restarts_(base::TimeDelta::FromHours(
-          kMinDurationBetweenSuccessiveRestartsHours)),
+      minimum_duration_between_restarts_(
+          base::Hours(kMinDurationBetweenSuccessiveRestartsHours)),
       dispatch_chrome_updated_event_(false),
       did_read_delayed_restart_preferences_(false),
       was_last_restart_due_to_delayed_restart_api_(false) {
@@ -361,8 +361,7 @@ void RuntimeAPI::OnExtensionsReady() {
 RuntimeAPI::RestartAfterDelayStatus RuntimeAPI::ScheduleDelayedRestart(
     const base::Time& now,
     int seconds_from_now) {
-  base::TimeDelta delay_till_restart =
-      base::TimeDelta::FromSeconds(seconds_from_now);
+  base::TimeDelta delay_till_restart = base::Seconds(seconds_from_now);
 
   // Throttle restart requests that are received too soon successively, only if
   // the previous restart was due to this API.
@@ -622,7 +621,7 @@ ExtensionFunction::ResponseAction RuntimeOpenOptionsPageFunction::Run() {
 
 ExtensionFunction::ResponseAction RuntimeSetUninstallURLFunction::Run() {
   std::unique_ptr<api::runtime::SetUninstallURL::Params> params(
-      api::runtime::SetUninstallURL::Params::Create(*args_));
+      api::runtime::SetUninstallURL::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
   if (!params->url.empty() && !GURL(params->url).SchemeIsHTTPOrHTTPS())
     return RespondNow(Error(kInvalidUrlError, params->url));
@@ -656,7 +655,7 @@ void RuntimeRequestUpdateCheckFunction::CheckComplete(
     const RuntimeAPIDelegate::UpdateCheckResult& result) {
   if (result.success) {
     std::unique_ptr<base::DictionaryValue> details(new base::DictionaryValue);
-    details->SetString("version", result.version);
+    details->SetStringKey("version", result.version);
     Respond(TwoArguments(base::Value(result.response),
                          base::Value::FromUniquePtrValue(std::move(details))));
   } else {
@@ -683,7 +682,7 @@ ExtensionFunction::ResponseAction RuntimeRestartAfterDelayFunction::Run() {
   }
 
   std::unique_ptr<api::runtime::RestartAfterDelay::Params> params(
-      api::runtime::RestartAfterDelay::Params::Create(*args_));
+      api::runtime::RestartAfterDelay::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
   int seconds = params->seconds;
 
@@ -739,8 +738,8 @@ RuntimeGetPackageDirectoryEntryFunction::Run() {
       content::ChildProcessSecurityPolicy::GetInstance();
   policy->GrantReadFileSystem(source_process_id(), filesystem.id());
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->SetString("fileSystemId", filesystem.id());
-  dict->SetString("baseName", relative_path);
+  dict->SetStringKey("fileSystemId", filesystem.id());
+  dict->SetStringKey("baseName", relative_path);
   return RespondNow(
       OneArgument(base::Value::FromUniquePtrValue(std::move(dict))));
 }

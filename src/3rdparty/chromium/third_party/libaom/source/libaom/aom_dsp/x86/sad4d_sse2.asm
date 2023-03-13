@@ -319,7 +319,7 @@ SECTION_TEXT
 ;   4: If 0, then normal sad, else skip rows
 %macro SADNXN4D 2-4 0,0
 %if %4 == 1  ; skip rows
-%if UNIX64
+%if ARCH_X86_64
 cglobal sad_skip_%1x%2x4d, 5, 8, 8, src, src_stride, ref1, ref_stride, \
                               res, ref2, ref3, ref4
 %else
@@ -327,7 +327,7 @@ cglobal sad_skip_%1x%2x4d, 4, 7, 8, src, src_stride, ref1, ref_stride, \
                               ref2, ref3, ref4
 %endif
 %elif %3 == 0  ; normal sad
-%if UNIX64
+%if ARCH_X86_64
 cglobal sad%1x%2x4d, 5, 8, 8, src, src_stride, ref1, ref_stride, \
                               res, ref2, ref3, ref4
 %else
@@ -335,7 +335,7 @@ cglobal sad%1x%2x4d, 4, 7, 8, src, src_stride, ref1, ref_stride, \
                               ref2, ref3, ref4
 %endif
 %else ; avg
-%if UNIX64
+%if ARCH_X86_64
 cglobal sad%1x%2x4d_avg, 6, 10, 8, src, src_stride, ref1, ref_stride, \
                                   second_pred, res, ref2, ref3, ref4
 %else
@@ -346,7 +346,7 @@ cglobal sad%1x%2x4d_avg, 5, 7, 8, src, ref4, ref1, ref_stride, \
 %endif
 %endif
 
-  %define mflag ((1 - UNIX64) & %3)
+  %define mflag ((1 - ARCH_X86_64) & %3)
 %if %4 == 1
   lea          src_strided, [2*src_strided]
   lea          ref_strided, [2*ref_strided]
@@ -434,6 +434,7 @@ SADNXN4D  32,   8
 SADNXN4D  16,  64
 SADNXN4D  64,  16
 %endif
+%if CONFIG_REALTIME_ONLY==0
 SADNXN4D 128, 128, 1
 SADNXN4D 128,  64, 1
 SADNXN4D  64, 128, 1
@@ -450,7 +451,6 @@ SADNXN4D   8,   8, 1
 SADNXN4D   8,   4, 1
 SADNXN4D   4,   8, 1
 SADNXN4D   4,   4, 1
-%if CONFIG_REALTIME_ONLY==0
 SADNXN4D   4,  16, 1
 SADNXN4D  16,   4, 1
 SADNXN4D   8,  32, 1

@@ -10,15 +10,14 @@
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/services/storage/public/mojom/cache_storage_control.mojom.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/code_cache/generated_code_cache.h"
 #include "content/browser/code_cache/generated_code_cache_context.h"
+#include "content/browser/process_lock.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
-#include "content/browser/storage_partition_impl.h"
 #include "content/public/browser/resource_context.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_features.h"
@@ -59,14 +58,18 @@ bool CheckSecurityForAccessingCodeCacheData(const GURL& resource_url,
       // malicious, but we don't trust it enough to store data.
       return false;
     }
-    if (!process_lock.matches_scheme(content::kChromeUIScheme) &&
-        !process_lock.matches_scheme(content::kChromeUIUntrustedScheme)) {
+    if (process_lock.matches_scheme(url::kHttpScheme) ||
+        process_lock.matches_scheme(url::kHttpsScheme)) {
       if (operation == Operation::kWrite) {
-        mojo::ReportBadMessage("Non-WebUI pages cannot cache WebUI code");
+        mojo::ReportBadMessage("HTTP(S) pages cannot cache WebUI code");
       }
       return false;
     }
-    return true;
+    // Other schemes which might successfully load chrome or chrome-untrusted
+    // scripts, such as the PDF viewer, are unsupported but not considered
+    // dangerous.
+    return process_lock.matches_scheme(content::kChromeUIScheme) ||
+           process_lock.matches_scheme(content::kChromeUIUntrustedScheme);
   }
   if (resource_url.SchemeIsHTTPOrHTTPS()) {
     if (process_lock.matches_scheme(content::kChromeUIScheme) ||
@@ -373,13 +376,22 @@ void CodeCacheHostImpl::DidGenerateCacheableMetadataInCacheStorage(
     const url::Origin& cache_storage_origin,
     const std::string& cache_storage_cache_name) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  RunOrPostTaskOnThread(
-      FROM_HERE, BrowserThread::UI,
-      base::BindOnce(&DidGenerateCacheableMetadataInCacheStorageOnUI, url,
-                     expected_response_time, std::move(data),
-                     cache_storage_origin, cache_storage_cache_name,
-                     render_process_id_, cache_storage_control_for_testing_,
-                     mojo::GetBadMessageCallback()));
+
+  auto task = base::BindOnce(
+      &DidGenerateCacheableMetadataInCacheStorageOnUI, url,
+      expected_response_time, std::move(data), cache_storage_origin,
+      cache_storage_cache_name, render_process_id_,
+      cache_storage_control_for_testing_, mojo::GetBadMessageCallback());
+
+  // This class may or may not be on the UI thread depending on
+  // whether NavigationThreadingOptimizations is enabled.
+  // TODO(crbug.com/1083097): Simplify this code when
+  // the NavigationThreadOptimizations is enabled by default
+  // and the feature is removed.
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI))
+    std::move(task).Run();
+  else
+    GetUIThreadTaskRunner({})->PostTask(FROM_HERE, std::move(task));
 }
 
 GeneratedCodeCache* CodeCacheHostImpl::GetCodeCache(

@@ -43,18 +43,23 @@
 #include "src/core/SkPictureData.h"
 #include "src/core/SkRecordDraw.h"
 #include "src/core/SkRecorder.h"
+#include "src/core/SkTLazy.h"
 #include "src/core/SkTaskGroup.h"
-#include "src/gpu/GrDirectContextPriv.h"
-#include "src/gpu/GrGpu.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrGpu.h"
+#include "src/utils/SkJSONWriter.h"
 #include "src/utils/SkMultiPictureDocumentPriv.h"
 #include "src/utils/SkOSPath.h"
+#include "src/utils/SkTestCanvas.h"
 #include "tools/DDLPromiseImageHelper.h"
 #include "tools/DDLTileHelper.h"
 #include "tools/Resources.h"
 #include "tools/RuntimeBlendUtils.h"
+#include "tools/UrlDataManager.h"
 #include "tools/debugger/DebugCanvas.h"
 #include "tools/gpu/BackendSurfaceFactory.h"
 #include "tools/gpu/MemoryCache.h"
+
 #if defined(SK_BUILD_FOR_WIN)
     #include "include/docs/SkXPSDocument.h"
     #include "src/utils/win/SkAutoCoInitialize.h"
@@ -68,14 +73,22 @@
     #include "modules/skresources/include/SkResources.h"
 #endif
 
-#if defined(SK_ENABLE_SKRIVE)
-    #include "experimental/skrive/include/SkRive.h"
-#endif
-
-#if defined(SK_XML)
+#if defined(SK_ENABLE_SVG)
     #include "include/svg/SkSVGCanvas.h"
     #include "modules/svg/include/SkSVGDOM.h"
+    #include "modules/svg/include/SkSVGNode.h"
     #include "src/xml/SkXMLWriter.h"
+#endif
+
+#ifdef SK_GRAPHITE_ENABLED
+#include "include/gpu/graphite/Context.h"
+#include "include/gpu/graphite/Recorder.h"
+#include "include/gpu/graphite/Recording.h"
+#include "include/gpu/graphite/SkStuff.h"
+// TODO: Remove this src include once we figure out public readPixels call for Graphite.
+#include "src/gpu/graphite/Surface_Graphite.h"
+#include "tools/graphite/ContextFactory.h"
+#include "tools/graphite/GraphiteTestContext.h"
 #endif
 
 #if defined(SK_ENABLE_ANDROID_UTILS)
@@ -986,7 +999,9 @@ Result ImageGenSrc::draw(GrDirectContext*, SkCanvas* canvas) const {
             status = Result::Status::Skip;
         }
 #endif
-        return Result(status, "Image generator could not getPixels() for %s\n", fPath.c_str());
+        return Result(
+                status,
+                SkStringPrintf("Image generator could not getPixels() for %s\n", fPath.c_str()));
     }
 
     set_bitmap_color_space(&decodeInfo);
@@ -1249,62 +1264,7 @@ bool SkottieSrc::veto(SinkFlags flags) const {
 #endif
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-#if defined(SK_ENABLE_SKRIVE)
-SkRiveSrc::SkRiveSrc(Path path) : fPath(std::move(path)) {}
-
-Result SkRiveSrc::draw(GrDirectContext*, SkCanvas* canvas) const {
-    auto fileStream = SkFILEStream::Make(fPath.c_str());
-    if (!fileStream) {
-        return Result::Fatal("Unable to open file: %s", fPath.c_str());
-    }
-
-    const auto skrive = skrive::SkRive::Builder().make(std::move(fileStream));
-    if (!skrive) {
-        return Result::Fatal("Unable to parse file: %s", fPath.c_str());
-    }
-
-    auto bounds = SkRect::MakeEmpty();
-
-    for (const auto& ab : skrive->artboards()) {
-        const auto& pos  = ab->getTranslation();
-        const auto& size = ab->getSize();
-
-        bounds.join(SkRect::MakeXYWH(pos.x, pos.y, size.x, size.y));
-    }
-
-    canvas->drawColor(SK_ColorWHITE);
-
-    if (!bounds.isEmpty()) {
-        // TODO: tiled frames when we add animation support
-        SkAutoCanvasRestore acr(canvas, true);
-        canvas->concat(SkMatrix::RectToRect(bounds, SkRect::MakeWH(kTargetSize, kTargetSize),
-                                            SkMatrix::kCenter_ScaleToFit));
-        for (const auto& ab : skrive->artboards()) {
-            ab->render(canvas);
-        }
-    }
-
-    return Result::Ok();
-}
-
-SkISize SkRiveSrc::size() const {
-    return SkISize::Make(kTargetSize, kTargetSize);
-}
-
-Name SkRiveSrc::name() const { return SkOSPath::Basename(fPath.c_str()); }
-
-bool SkRiveSrc::veto(SinkFlags flags) const {
-    // No need to test to non-(raster||gpu||vector) or indirect backends.
-    bool type_ok = flags.type == SinkFlags::kRaster
-                || flags.type == SinkFlags::kGPU
-                || flags.type == SinkFlags::kVector;
-
-    return !type_ok || flags.approach != SinkFlags::kDirect;
-}
-#endif
-
-/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
-#if defined(SK_XML)
+#if defined(SK_ENABLE_SVG)
 // Used when the image doesn't have an intrinsic size.
 static const SkSize kDefaultSVGSize = {1000, 1000};
 
@@ -1373,7 +1333,7 @@ bool SVGSrc::veto(SinkFlags flags) const {
     return !type_ok || flags.approach != SinkFlags::kDirect;
 }
 
-#endif // defined(SK_XML)
+#endif // defined(SK_ENABLE_SVG)
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
 MSKPSrc::MSKPSrc(Path path) : fPath(path) {
@@ -1452,7 +1412,7 @@ static Result compare_bitmaps(const SkBitmap& reference, const SkBitmap& bitmap)
             errString.append("\nActual image failed to encode: ");
             errString.append(encoded);
         }
-        return Result::Fatal(errString);
+        return Result(Result::Status::Fatal, errString);
     }
     return Result::Ok();
 }
@@ -1479,7 +1439,6 @@ GPUSink::GPUSink(const SkCommandLineConfigGpu* config,
         , fSurfaceFlags(config->getSurfaceFlags())
         , fColorType(config->getColorType())
         , fAlphaType(config->getAlphaType())
-        , fColorSpace(sk_ref_sp(config->getColorSpace()))
         , fBaseContextOptions(grCtxOptions) {
     if (FLAGS_programBinaryCache) {
         fBaseContextOptions.fPersistentCache = &fMemoryCache;
@@ -1534,7 +1493,8 @@ bool GPUSink::readBack(SkSurface* surface, SkBitmap* dst) const {
 
 Result GPUSink::onDraw(const Src& src, SkBitmap* dst, SkWStream*, SkString* log,
                        const GrContextOptions& baseOptions,
-                       std::function<void(GrDirectContext*)> initContext) const {
+                       std::function<void(GrDirectContext*)> initContext,
+                       std::function<SkCanvas*(SkCanvas*)> wrapCanvas) const {
     GrContextOptions grOptions = baseOptions;
 
     // We don't expect the src to mess with the persistent cache or the executor.
@@ -1563,7 +1523,12 @@ Result GPUSink::onDraw(const Src& src, SkBitmap* dst, SkWStream*, SkString* log,
         factory.abandonContexts();
     }
 
-    Result result = src.draw(direct, surface->getCanvas());
+    auto canvas = surface->getCanvas();
+    if (wrapCanvas != nullptr) {
+        canvas = wrapCanvas(canvas);
+    }
+
+    Result result = src.draw(direct, canvas);
     if (!result.isOk()) {
         return result;
     }
@@ -1589,7 +1554,24 @@ Result GPUSink::onDraw(const Src& src, SkBitmap* dst, SkWStream*, SkString* log,
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+GPUSlugSink::GPUSlugSink(const SkCommandLineConfigGpu* config, const GrContextOptions& options)
+        : GPUSink(config, options) {}
 
+Result GPUSlugSink::draw(const Src& src, SkBitmap* dst, SkWStream* write, SkString* log) const {
+    GrContextOptions grOptions = this->baseContextOptions();
+    // Force padded atlas entries for slug drawing.
+    grOptions.fSupportBilerpFromGlyphAtlas |= true;
+
+    SkTLazy<SkTestCanvas<SkSlugTestKey>> testCanvas;
+
+    return onDraw(src, dst, write, log, grOptions, nullptr,
+        [&](SkCanvas* canvas){
+            testCanvas.init(canvas);
+            return testCanvas.get();
+        });
+}
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 GPUThreadTestingSink::GPUThreadTestingSink(const SkCommandLineConfigGpu* config,
                                            const GrContextOptions& grCtxOptions)
         : INHERITED(config, grCtxOptions)
@@ -2071,7 +2053,7 @@ Result DebugSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) con
 SVGSink::SVGSink(int pageIndex) : fPageIndex(pageIndex) {}
 
 Result SVGSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const {
-#if defined(SK_XML)
+#if defined(SK_ENABLE_SVG)
     if (src.pageCount() > 1) {
         int pageCount = src.pageCount();
         if (fPageIndex > pageCount - 1) {
@@ -2087,14 +2069,13 @@ Result SVGSink::draw(const Src& src, SkBitmap*, SkWStream* dst, SkString*) const
 #else
     (void)fPageIndex;
     return Result::Fatal("SVG sink is disabled.");
-#endif // SK_XML
+#endif // SK_ENABLE_SVG
 }
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
-RasterSink::RasterSink(SkColorType colorType, sk_sp<SkColorSpace> colorSpace)
-    : fColorType(colorType)
-    , fColorSpace(std::move(colorSpace)) {}
+RasterSink::RasterSink(SkColorType colorType)
+    : fColorType(colorType) {}
 
 Result RasterSink::draw(const Src& src, SkBitmap* dst, SkWStream*, SkString*) const {
     const SkISize size = src.size();
@@ -2108,6 +2089,99 @@ Result RasterSink::draw(const Src& src, SkBitmap* dst, SkWStream*, SkString*) co
     SkCanvas canvas(*dst, SkSurfaceProps(0, kRGB_H_SkPixelGeometry));
     return src.draw(nullptr, &canvas);
 }
+
+/*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
+
+#ifdef SK_GRAPHITE_ENABLED
+
+namespace {
+
+// For the sprint Graphite only handles:
+//    solid colors with src or srcOver
+//    repeated or clamped linear gradients with src or srcOver
+void precompile(skgpu::graphite::Context* context) {
+    using ShaderType = skgpu::graphite::ShaderCombo::ShaderType;
+
+    skgpu::graphite::PaintCombo c1 { { skgpu::graphite::ShaderCombo({ ShaderType::kSolidColor },
+                                                                    { SkTileMode::kRepeat }) },
+                                     { SkBlendMode::kSrcOver, SkBlendMode::kSrc } };
+    context->preCompile(c1);
+
+    skgpu::graphite::PaintCombo c2 { { skgpu::graphite::ShaderCombo({ ShaderType::kLinearGradient },
+                                                     { SkTileMode::kRepeat, SkTileMode::kClamp }) },
+                                     { SkBlendMode::kSrcOver, SkBlendMode::kSrc } };
+    context->preCompile(c2);
+}
+
+} // anonymous namespace
+
+GraphiteSink::GraphiteSink(const SkCommandLineConfigGraphite* config)
+        : fContextType(config->getContextType())
+        , fColorType(config->getColorType())
+        , fAlphaType(config->getAlphaType())
+        , fTestPrecompile(config->getTestPrecompile()) {
+}
+
+Result GraphiteSink::draw(const Src& src,
+                          SkBitmap* dst,
+                          SkWStream* dstStream,
+                          SkString* log) const {
+    SkImageInfo ii = SkImageInfo::Make(src.size(), fColorType, fAlphaType);
+
+    skiatest::graphite::ContextFactory factory;
+    auto [_, context] = factory.getContextInfo(fContextType);
+    if (!context) {
+        return Result::Fatal("Could not create a context.");
+    }
+
+    if (fTestPrecompile) {
+        precompile(context);
+    }
+
+    std::unique_ptr<skgpu::graphite::Recorder> recorder = context->makeRecorder();
+    if (!recorder) {
+        return Result::Fatal("Could not create a recorder.");
+    }
+
+    dst->allocPixels(ii);
+
+    {
+        sk_sp<SkSurface> surface = MakeGraphite(recorder.get(), ii);
+        if (!surface) {
+            return Result::Fatal("Could not create a surface.");
+        }
+        Result result = src.draw(/* dContext */ nullptr, surface->getCanvas());
+        if (!result.isOk()) {
+            return result;
+        }
+
+        // For now we cast and call directly into Surface. Once we have a been idea of
+        // what the public API for synchronous graphite readPixels we can update this call to use
+        // that instead.
+        SkPixmap pm;
+        if (!dst->peekPixels(&pm) ||
+            !static_cast<skgpu::graphite::Surface*>(surface.get())->onReadPixels(context,
+                                                                                 recorder.get(),
+                                                                                 pm,
+                                                                                 0,
+                                                                                 0)) {
+            return Result::Fatal("Could not readback from surface.");
+        }
+    }
+
+    std::unique_ptr<skgpu::graphite::Recording> recording = recorder->snap();
+    if (!recording) {
+        return Result::Fatal("Could not create a recording.");
+    }
+
+    skgpu::graphite::InsertRecordingInfo info;
+    info.fRecording = recording.get();
+    context->insertRecording(info);
+    context->submit(skgpu::graphite::SyncToCpu::kYes);
+
+    return Result::Ok();
+}
+#endif
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
@@ -2277,7 +2351,7 @@ Result ViaRuntimeBlend::draw(const Src& src,
 
     protected:
         bool onFilter(SkPaint& paint) const override {
-            if (skstd::optional<SkBlendMode> mode = paint.asBlendMode()) {
+            if (std::optional<SkBlendMode> mode = paint.asBlendMode()) {
                 paint.setBlender(GetRuntimeBlendForBlendMode(*mode));
             }
             return true;

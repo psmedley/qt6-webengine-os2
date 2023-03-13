@@ -28,13 +28,16 @@
 #include "third_party/blink/renderer/modules/payments/payment_manager.h"
 #include "third_party/blink/renderer/modules/permissions/permission_utils.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 namespace {
+
+// Maximum size of a PaymentInstrument icon's type when passed over mojo.
+const size_t kMaxTypeLength = 4096;
 
 static const char kPaymentManagerUnavailable[] = "Payment manager unavailable";
 
@@ -76,7 +79,7 @@ bool rejectError(ScriptPromiseResolver* resolver,
   return false;
 }
 
-bool AllowedToUsePaymentFeatures(ScriptState* script_state) {
+bool AllowedToUsePaymentFeatures2(ScriptState* script_state) {
   if (!script_state->ContextIsValid())
     return false;
   return ExecutionContext::From(script_state)
@@ -105,7 +108,7 @@ ScriptPromise PaymentInstruments::deleteInstrument(
     ScriptState* script_state,
     const String& instrument_key,
     ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -127,7 +130,7 @@ ScriptPromise PaymentInstruments::deleteInstrument(
 ScriptPromise PaymentInstruments::get(ScriptState* script_state,
                                       const String& instrument_key,
                                       ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -148,7 +151,7 @@ ScriptPromise PaymentInstruments::get(ScriptState* script_state,
 
 ScriptPromise PaymentInstruments::keys(ScriptState* script_state,
                                        ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -169,7 +172,7 @@ ScriptPromise PaymentInstruments::keys(ScriptState* script_state,
 ScriptPromise PaymentInstruments::has(ScriptState* script_state,
                                       const String& instrument_key,
                                       ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -192,7 +195,7 @@ ScriptPromise PaymentInstruments::set(ScriptState* script_state,
                                       const String& instrument_key,
                                       const PaymentInstrument* details,
                                       ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -203,14 +206,21 @@ ScriptPromise PaymentInstruments::set(ScriptState* script_state,
 
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
 
+  // TODO(crbug.com/1311953): A service worker can get here without a frame to
+  // check for a user gesture. We should consider either removing the user
+  // gesture requirement or not exposing PaymentInstruments to service workers.
+  LocalDOMWindow* window = LocalDOMWindow::From(script_state);
+  bool user_gesture =
+      window ? LocalFrame::HasTransientUserActivation(window->GetFrame())
+             : false;
+
   // Should move this permission check to browser process.
   // Please see http://crbug.com/795929
   GetPermissionService(script_state)
       ->RequestPermission(
           CreatePermissionDescriptor(
               mojom::blink::PermissionName::PAYMENT_HANDLER),
-          LocalFrame::HasTransientUserActivation(
-              LocalDOMWindow::From(script_state)->GetFrame()),
+          user_gesture,
           WTF::Bind(&PaymentInstruments::OnRequestPermission,
                     WrapPersistent(this), WrapPersistent(resolver),
                     instrument_key, WrapPersistent(details)));
@@ -219,7 +229,7 @@ ScriptPromise PaymentInstruments::set(ScriptState* script_state,
 
 ScriptPromise PaymentInstruments::clear(ScriptState* script_state,
                                         ExceptionState& exception_state) {
-  if (!AllowedToUsePaymentFeatures(script_state))
+  if (!AllowedToUsePaymentFeatures2(script_state))
     return RejectNotAllowedToUsePaymentFeatures(script_state, exception_state);
 
   if (!manager_.is_bound()) {
@@ -291,10 +301,13 @@ void PaymentInstruments::OnRequestPermission(
       mojom::blink::ManifestImageResourcePtr icon =
           mojom::blink::ManifestImageResource::New();
       icon->src = parsed_url;
-      icon->type = image_object->type();
+      // Truncate the type to avoid passing too-large strings to Mojo (see
+      // https://crbug.com/810792). We could additionally verify that the type
+      // is a MIME type, but the browser side will do that anyway.
+      icon->type = image_object->getTypeOr("").Left(kMaxTypeLength);
       icon->purpose.push_back(blink::mojom::ManifestImageResource_Purpose::ANY);
       WebVector<gfx::Size> web_sizes =
-          WebIconSizesParser::ParseIconSizes(image_object->sizes());
+          WebIconSizesParser::ParseIconSizes(image_object->getSizesOr(""));
       for (const auto& web_size : web_sizes) {
         icon->sizes.push_back(web_size);
       }
@@ -305,7 +318,9 @@ void PaymentInstruments::OnRequestPermission(
   instrument->method =
       details->hasMethod() ? details->method() : WTF::g_empty_string;
 
-  if (details->hasCapabilities()) {
+  if (RuntimeEnabledFeatures::PaymentRequestBasicCardEnabled(
+          resolver->GetExecutionContext()) &&
+      details->hasCapabilities()) {
     v8::Local<v8::String> value;
     if (!v8::JSON::Stringify(resolver->GetScriptState()->GetContext(),
                              details->capabilities().V8Value().As<v8::Object>())
@@ -379,7 +394,9 @@ void PaymentInstruments::onGetPaymentInstrument(
   }
   instrument->setIcons(icons);
   instrument->setMethod(stored_instrument->method);
-  if (!stored_instrument->stringified_capabilities.IsEmpty()) {
+  if (RuntimeEnabledFeatures::PaymentRequestBasicCardEnabled(
+          resolver->GetExecutionContext()) &&
+      !stored_instrument->stringified_capabilities.IsEmpty()) {
     ExceptionState exception_state(resolver->GetScriptState()->GetIsolate(),
                                    ExceptionState::kGetterContext,
                                    "PaymentInstruments", "get");

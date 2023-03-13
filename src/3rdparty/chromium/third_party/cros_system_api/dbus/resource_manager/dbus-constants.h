@@ -47,6 +47,9 @@ const char kGetForegroundAvailableMemoryKBMethod[] =
 const char kGetMemoryMarginsKBMethod[] = "GetMemoryMarginsKB";
 const char kGetGameModeMethod[] = "GetGameMode";
 const char kSetGameModeMethod[] = "SetGameMode";
+const char kSetGameModeWithTimeoutMethod[] = "SetGameModeWithTimeout";
+const char kSetMemoryMarginsBps[] = "SetMemoryMarginsBps";
+const char kSetFullscreenVideoWithTimeout[] = "SetFullscreenVideoWithTimeout";
 
 // Signals.
 

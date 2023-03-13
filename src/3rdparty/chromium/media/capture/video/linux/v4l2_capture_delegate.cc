@@ -219,7 +219,7 @@ VideoPixelFormat V4L2CaptureDelegate::V4l2FourCcToChromiumPixelFormat(
 std::vector<uint32_t> V4L2CaptureDelegate::GetListOfUsableFourCcs(
     bool prefer_mjpeg) {
   std::vector<uint32_t> supported_formats;
-  supported_formats.reserve(base::size(kSupportedFormatsAndPlanarity));
+  supported_formats.reserve(std::size(kSupportedFormatsAndPlanarity));
 
   // Duplicate MJPEG on top of the list depending on |prefer_mjpeg|.
   if (prefer_mjpeg)
@@ -974,7 +974,9 @@ void V4L2CaptureDelegate::DoCapture() {
 
 bool V4L2CaptureDelegate::StopStream() {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
-  DCHECK(is_capturing_);
+  if (!is_capturing_)
+    return false;
+
   is_capturing_ = false;
 
   // The order is important: stop streaming, clear |buffer_pool_|,
@@ -1003,7 +1005,6 @@ void V4L2CaptureDelegate::SetErrorState(VideoCaptureError error,
                                         const base::Location& from_here,
                                         const std::string& reason) {
   DCHECK(v4l2_task_runner_->BelongsToCurrentThread());
-  is_capturing_ = false;
   client_->OnError(error, from_here, reason);
 }
 

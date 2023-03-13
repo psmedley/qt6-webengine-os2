@@ -10,16 +10,17 @@
 #include "base/strings/string_piece.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
-#include "base/threading/platform_thread.h"
-#include "base/time/time.h"
 #include "chrome/browser/dom_distiller/tab_utils.h"
 #include "chrome/browser/dom_distiller/test_distillation_observers.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/install_verifier.h"
 #include "chrome/browser/extensions/test_extension_system.h"
+#include "chrome/browser/net/profile_network_context_service.h"
+#include "chrome/browser/net/profile_network_context_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "chrome/test/base/web_feature_histogram_tester.h"
 #include "components/dom_distiller/content/browser/distiller_javascript_utils.h"
 #include "components/dom_distiller/content/browser/test_distillability_observer.h"
 #include "components/dom_distiller/core/dom_distiller_features.h"
@@ -28,6 +29,8 @@
 #include "components/embedder_support/switches.h"
 #include "components/error_page/content/browser/net_error_auto_reloader.h"
 #include "components/metrics/content/subprocess_metrics_provider.h"
+#include "components/proxy_config/proxy_config_dictionary.h"
+#include "components/proxy_config/proxy_config_pref_names.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
@@ -41,16 +44,16 @@
 #include "extensions/common/extension_builder.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/network/public/cpp/private_network_access_check_result.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
 #include "testing/gmock/include/gmock/gmock.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom.h"
 
 namespace {
 
 using blink::mojom::WebFeature;
-using testing::ElementsAre;
 using testing::IsEmpty;
-using testing::Pair;
 
 // We use a custom page that explicitly disables its own favicon (by providing
 // an invalid data: URL for it) so as to prevent the browser from making an
@@ -98,6 +101,13 @@ GURL LocalNonSecureWithCrossOriginCors(const net::EmbeddedTestServer& server) {
   return SecureURL(server, "/cors-ok.txt");
 }
 
+// Path to a worker script that posts a message to its creator once loaded.
+constexpr char kWorkerScriptPath[] = "/workers/post_ready.js";
+
+// Same as above, but with PNA headers set correctly for preflight requests.
+constexpr char kWorkerScriptWithPnaHeadersPath[] =
+    "/workers/post_ready_with_pna_headers.js";
+
 // The returned script evaluates to a boolean indicating whether the fetch
 // succeeded or not.
 std::string FetchScript(const GURL& url) {
@@ -105,97 +115,66 @@ std::string FetchScript(const GURL& url) {
       "fetch($1).then(response => true).catch(error => false)", url);
 }
 
-constexpr char kFeatureHistogramName[] = "Blink.UseCounter.Features";
-
-constexpr WebFeature kAllAddressSpaceFeatures[] = {
-    WebFeature::kAddressSpacePrivateSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpacePrivateNonSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpacePublicNonSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpaceUnknownSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpaceUnknownNonSecureContextEmbeddedLocal,
-    WebFeature::kAddressSpacePublicSecureContextEmbeddedPrivate,
-    WebFeature::kAddressSpacePublicNonSecureContextEmbeddedPrivate,
-    WebFeature::kAddressSpaceUnknownSecureContextEmbeddedPrivate,
-    WebFeature::kAddressSpaceUnknownNonSecureContextEmbeddedPrivate,
-    WebFeature::kAddressSpacePrivateSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpacePrivateNonSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpacePublicSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpaceUnknownSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpaceUnknownNonSecureContextNavigatedToLocal,
-    WebFeature::kAddressSpacePublicSecureContextNavigatedToPrivate,
-    WebFeature::kAddressSpacePublicNonSecureContextNavigatedToPrivate,
-    WebFeature::kAddressSpaceUnknownSecureContextNavigatedToPrivate,
-    WebFeature::kAddressSpaceUnknownNonSecureContextNavigatedToPrivate,
-};
-
-// Returns a map of WebFeature to bucket count. Skips buckets with zero counts.
-std::map<WebFeature, int> GetAddressSpaceFeatureBucketCounts(
-    const base::HistogramTester& tester) {
-  content::FetchHistogramsFromChildProcesses();
-  metrics::SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
-
-  std::map<WebFeature, int> counts;
-  for (WebFeature feature : kAllAddressSpaceFeatures) {
-    int count = tester.GetBucketCount(kFeatureHistogramName, feature);
-    if (count == 0) {
-      continue;
-    }
-
-    counts.emplace(feature, count);
-  }
-  return counts;
+std::string FetchWorkerScript(base::StringPiece relative_url) {
+  constexpr char kTemplate[] = R"(
+    new Promise((resolve) => {
+      const worker = new Worker($1);
+      worker.addEventListener("message", () => { resolve(true); });
+      worker.addEventListener("error", () => { resolve(false); });
+    });
+  )";
+  return content::JsReplace(kTemplate, relative_url);
 }
 
-// Helper for `IsLessBucketCounts()`.
-// `ASSERT_*` macros can only be used in functions that return `void`.
-void AssertLe(size_t lhs, size_t rhs) {
-  ASSERT_LE(lhs, rhs);
+// Path to a worker script that posts a message to each client that connects.
+constexpr char kSharedWorkerScriptPath[] = "/workers/shared_post_ready.js";
+
+// Same as above, but with PNA headers set correctly for preflight requests.
+constexpr char kSharedWorkerScriptWithPnaHeadersPath[] =
+    "/workers/shared_post_ready_with_pna_headers.js";
+
+// Instantiates a shared worker script from `path`.
+// If it loads successfully, the worker should post a message to each client
+// that connects to it to signal success.
+std::string FetchSharedWorkerScript(base::StringPiece path) {
+  constexpr char kTemplate[] = R"(
+    new Promise((resolve) => {
+      const worker = new SharedWorker($1);
+      worker.port.addEventListener("message", () => resolve(true));
+      worker.addEventListener("error", () => resolve(false));
+      worker.port.start();
+    })
+  )";
+
+  return content::JsReplace(kTemplate, path);
 }
 
-// Returns true if all the keys in `lhs` have lesser-than-or-equal values than
-// the corresponding keys in `rhs` and `lhs != rhs`.
-bool IsLessBucketCounts(const std::map<WebFeature, int>& lhs,
-                        const std::map<WebFeature, int>& rhs) {
-  bool lhs_has_lesser_entry = false;
-
-  for (const auto& entry : lhs) {
-    WebFeature feature = entry.first;
-    int count = entry.second;
-
-    const auto it = rhs.find(feature);
-    if (it == rhs.end() || count > it->second) {
-      return false;
-    }
-
-    if (count < it->second) {
-      lhs_has_lesser_entry = true;
-    }
-  }
-
-  // All entries in `lhs` have a corresponding entry in `rhs`.
-  AssertLe(lhs.size(), rhs.size());
-
-  // `lhs` is less if one of its entries is strictly less than the corresponding
-  // `rhs` entry, or if `rhs` has some keys which `lhs` does not have.
-  return lhs_has_lesser_entry || lhs.size() < rhs.size();
-}
-
-void WaitForBucketCounts(const base::HistogramTester& histogram_tester,
-                         const std::map<WebFeature, int>& expected) {
-  std::map<WebFeature, int> counts;
-
-  while (true) {
-    counts = GetAddressSpaceFeatureBucketCounts(histogram_tester);
-    if (!IsLessBucketCounts(counts, expected)) {
-      break;
-    }
-
-    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(5));
-  }
-
-  EXPECT_EQ(counts, expected);
+std::vector<WebFeature> AllAddressSpaceFeatures() {
+  return {
+      WebFeature::kAddressSpacePrivateSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpacePrivateNonSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpacePublicNonSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpaceUnknownSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpaceUnknownNonSecureContextEmbeddedLocal,
+      WebFeature::kAddressSpacePublicSecureContextEmbeddedPrivate,
+      WebFeature::kAddressSpacePublicNonSecureContextEmbeddedPrivate,
+      WebFeature::kAddressSpaceUnknownSecureContextEmbeddedPrivate,
+      WebFeature::kAddressSpaceUnknownNonSecureContextEmbeddedPrivate,
+      WebFeature::kAddressSpacePrivateSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpacePrivateNonSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpacePublicSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpaceUnknownSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpaceUnknownNonSecureContextNavigatedToLocal,
+      WebFeature::kAddressSpacePublicSecureContextNavigatedToPrivate,
+      WebFeature::kAddressSpacePublicNonSecureContextNavigatedToPrivate,
+      WebFeature::kAddressSpaceUnknownSecureContextNavigatedToPrivate,
+      WebFeature::kAddressSpaceUnknownNonSecureContextNavigatedToPrivate,
+      WebFeature::kPrivateNetworkAccessIgnoredPreflightError,
+      WebFeature::kPrivateNetworkAccessFetchedWorkerScript,
+      WebFeature::kPrivateNetworkAccessWithinWorker,
+  };
 }
 
 // Private Network Access is a web platform specification aimed at securing
@@ -276,9 +255,12 @@ class PrivateNetworkAccessWithFeatureEnabledBrowserTest
   PrivateNetworkAccessWithFeatureEnabledBrowserTest()
       : PrivateNetworkAccessBrowserTestBase(
             {
+                blink::features::kPlzDedicatedWorker,
                 features::kBlockInsecurePrivateNetworkRequests,
                 features::kBlockInsecurePrivateNetworkRequestsFromPrivate,
                 features::kBlockInsecurePrivateNetworkRequestsDeprecationTrial,
+                features::kPrivateNetworkAccessSendPreflights,
+                features::kPrivateNetworkAccessForWorkers,
                 dom_distiller::kReaderMode,
             },
             {}) {}
@@ -300,6 +282,21 @@ class PrivateNetworkAccessWithFeatureEnabledBrowserTest
   }
 };
 
+class PrivateNetworkAccessRespectPreflightResultsBrowserTest
+    : public PrivateNetworkAccessBrowserTestBase {
+ public:
+  PrivateNetworkAccessRespectPreflightResultsBrowserTest()
+      : PrivateNetworkAccessBrowserTestBase(
+            {
+                blink::features::kPlzDedicatedWorker,
+                features::kBlockInsecurePrivateNetworkRequests,
+                features::kPrivateNetworkAccessSendPreflights,
+                features::kPrivateNetworkAccessRespectPreflightResults,
+                features::kPrivateNetworkAccessForWorkers,
+            },
+            {}) {}
+};
+
 // ================
 // USECOUNTER TESTS
 // ================
@@ -314,12 +311,14 @@ class PrivateNetworkAccessWithFeatureEnabledBrowserTest
 // Regression test for https://crbug.com/1134601.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
                        DoesNotRecordAddressSpaceFeatureForInitialNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 // This test verifies that no feature is counted for top-level navigations from
@@ -330,13 +329,15 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
 // decide what to do.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
                        DoesNotRecordAddressSpaceFeatureForRegularNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
   EXPECT_TRUE(content::NavigateToURL(web_contents(), LocalSecureURL(*server)));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 // This test verifies that when a secure context served from the public address
@@ -344,21 +345,49 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
 // use-counted.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
                        RecordsAddressSpaceFeatureForFetch) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
     fetch("/defaultresponse").then(response => response.ok)
   )"));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal, 1},
-      });
+      }));
+}
+
+// This test verifies that when a preflight request is sent ahead of a private
+// network request, fails, and enforcement is not enabled, the correct
+// WebFeature is use-counted to reflect the suppressed error.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsAddressSpaceFeatureForFetchWithPreflight) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  // The server does not reply with valid CORS headers, so the preflight fails.
+  // The enforcement feature is not enabled however, so the error is suppressed.
+  // Instead, a warning is shown in DevTools and a WebFeature use-counted.
+  EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
+    fetch("/defaultresponse").then(response => response.ok)
+  )"));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal, 1},
+          {WebFeature::kPrivateNetworkAccessIgnoredPreflightError, 1},
+      }));
 }
 
 // This test verifies that when a non-secure context served from the public
@@ -366,22 +395,24 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
 // is use-counted.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
                        RecordsAddressSpaceFeatureForFetchInNonSecureContext) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
     fetch("/defaultresponse").then(response => response.ok)
   )"));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextEmbeddedLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that when the user navigates a `public` document to a
@@ -389,7 +420,7 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
 IN_PROC_BROWSER_TEST_F(
     PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     DoesNotRecordAddressSpaceFeatureForBrowserInitiatedNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
@@ -398,7 +429,9 @@ IN_PROC_BROWSER_TEST_F(
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), LocalNonSecureURL(*server)));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 // This test verifies that when a `public` document navigates itself to a
@@ -406,21 +439,23 @@ IN_PROC_BROWSER_TEST_F(
 // recorded.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                        RecordsAddressSpaceFeatureForNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   EXPECT_TRUE(content::NavigateToURLFromRenderer(web_contents(),
                                                  LocalNonSecureURL(*server)));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that when a `public` document navigates itself to a
@@ -430,12 +465,14 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
 IN_PROC_BROWSER_TEST_F(
     PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     RecordsAddressSpaceFeatureForNavigationToTreatAsPublicAddress) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   // Navigate to a different URL with the same CSP directive. If we just tried
   // to navigate to `PublicNonSecureURL(*server)`, nothing would happen.
@@ -445,11 +482,11 @@ IN_PROC_BROWSER_TEST_F(
           *server,
           "/set-header?Content-Security-Policy: treat-as-public-address")));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that when a page embeds an empty iframe pointing to
@@ -458,7 +495,7 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     DoesNotRecordAddressSpaceFeatureForChildAboutBlankNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
@@ -472,7 +509,9 @@ IN_PROC_BROWSER_TEST_F(
     })
   )"));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 // This test verifies that when a non-secure context served from the public
@@ -480,12 +519,14 @@ IN_PROC_BROWSER_TEST_F(
 // WebFeature is use-counted.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                        RecordsAddressSpaceFeatureForChildNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   base::StringPiece script_template = R"(
     new Promise(resolve => {
@@ -500,11 +541,11 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                             content::JsReplace(script_template,
                                                LocalNonSecureURL(*server))));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that when a non-secure context served from the public
@@ -513,12 +554,14 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
 // intermediate about:blank frame might confuse the address space logic.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                        RecordsAddressSpaceFeatureForGrandchildNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   base::StringPiece script_template = R"(
     function addChildFrame(doc, src) {
@@ -539,11 +582,11 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                             content::JsReplace(script_template,
                                                LocalNonSecureURL(*server))));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that the right address space feature is recorded when a
@@ -552,7 +595,7 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
 // latter being the "remote initiator" referenced by the test name).
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                        RecordsAddressSpaceFeatureForRemoteInitiatorNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(
@@ -560,7 +603,9 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
       NonSecureURL(
           *server,
           "/private_network_access/remote-initiator-navigation.html")));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 
   EXPECT_EQ(true, content::EvalJs(web_contents(), content::JsReplace(R"(
     runTest({
@@ -568,11 +613,11 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     });
   )")));
 
-  WaitForBucketCounts(
-      histogram_tester,
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
       {
           {WebFeature::kAddressSpacePublicNonSecureContextNavigatedToLocal, 1},
-      });
+      }));
 }
 
 // This test verifies that when the initiator of a navigation is no longer
@@ -581,7 +626,7 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
 IN_PROC_BROWSER_TEST_F(
     PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     DoesNotRecordAddressSpaceFeatureForClosedInitiatorNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(
@@ -597,7 +642,9 @@ IN_PROC_BROWSER_TEST_F(
     });
   )"));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 // This test verifies that when the initiator of a navigation has already
@@ -606,7 +653,7 @@ IN_PROC_BROWSER_TEST_F(
 IN_PROC_BROWSER_TEST_F(
     PrivateNetworkAccessWithFeatureEnabledBrowserTest,
     DoesNotRecordAddressSpaceFeatureForMissingInitiatorNavigation) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(content::NavigateToURL(
@@ -622,44 +669,583 @@ IN_PROC_BROWSER_TEST_F(
     });
   )"));
 
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
-// This test verifies that private network requests that are blocked result in
-// a WebFeature being use-counted.
+// This test verifies that private network requests that are blocked are not
+// use-counted.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
-                       RecordsAddressSpaceFeatureForBlockedRequests) {
-  base::HistogramTester histogram_tester;
+                       DoesNotRecordAddressSpaceFeatureForBlockedRequests) {
+  WebFeatureHistogramTester feature_histogram_tester;
   std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
 
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
-  EXPECT_THAT(GetAddressSpaceFeatureBucketCounts(histogram_tester), IsEmpty());
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
+
+  base::HistogramTester base_histogram_tester;
 
   EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
     fetch("/defaultresponse").catch(() => true)
   )"));
 
-  WaitForBucketCounts(
-      histogram_tester,
-      {
-          {WebFeature::kAddressSpacePublicNonSecureContextEmbeddedLocal, 1},
-      });
+  metrics::SubprocessMetricsProvider::MergeHistogramDeltasForTesting();
+  base_histogram_tester.ExpectBucketCount(
+      "Security.PrivateNetworkAccess.CheckResult",
+      network::PrivateNetworkAccessCheckResult::kBlockedByPolicyBlock, 1);
+
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
 }
 
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
                        RecordsAddressSpaceFeatureForDeprecationTrial) {
-  base::HistogramTester histogram_tester;
+  WebFeatureHistogramTester feature_histogram_tester;
   content::DeprecationTrialURLLoaderInterceptor interceptor;
 
   EXPECT_TRUE(content::NavigateToURL(web_contents(), interceptor.EnabledUrl()));
 
   EXPECT_EQ(
-      histogram_tester.GetBucketCount(
-          kFeatureHistogramName,
+      feature_histogram_tester.GetCount(
           WebFeature::
               kPrivateNetworkAccessNonSecureContextsAllowedDeprecationTrial),
       1);
+}
+
+// This test verifies that resources proxied through a proxy on localhost can
+// be fetched from documents in the public IP address space.
+// Regression test for https://crbug.com/1253239.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       ProxiedResourcesAllowed) {
+  auto server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  browser()->profile()->GetPrefs()->Set(
+      proxy_config::prefs::kProxy,
+      ProxyConfigDictionary::CreateFixedServers(
+          server->host_port_pair().ToString(), ""));
+  ProfileNetworkContextServiceFactory::GetForContext(browser()->profile())
+      ->FlushProxyConfigMonitorForTesting();
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
+    fetch("/defaultresponse").then(response => response.ok)
+  )"));
+
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
+}
+
+// This test verifies that resources fetched from cache are subject to Private
+// Network Access checks. When the fetch is blocked, it is not use-counted.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       DoesNotRecordAddressSpaceFeatureForCachedBlocked) {
+  auto server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), LocalNonSecureURL(*server)));
+
+  // Load the resource a first time, to prime the HTTP cache.
+  //
+  // This caching hinges on the fact that `PublicNonSecureURL(*server)` is
+  // same-origin with `LocalNonSecureURL(*server)` (the public one just uses
+  // the `Content-Security-Policy: treat-as-public-address` header). Therefore
+  // both documents share the same cache key.
+  EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
+    fetch("/cachetime").then(response => response.ok)
+  )"));
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(false, content::EvalJs(web_contents(), R"(
+    fetch("/cachetime").then(response => true).catch(error => false)
+  )"));
+
+  EXPECT_THAT(
+      feature_histogram_tester.GetNonZeroCounts(AllAddressSpaceFeatures()),
+      IsEmpty());
+}
+
+// This test verifies that resources fetched from cache are subject to Private
+// Network Access checks. When the fetch is allowed, it is use-counted.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsAddressSpaceFeatureForCachedResource) {
+  auto server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), LocalSecureURL(*server)));
+
+  // Load the resource a first time, to prime the HTTP cache.
+  //
+  // This caching hinges on the fact that `PublicNonSecureURL(*server)` is
+  // same-origin with `LocalNonSecureURL(*server)` (the public one just uses
+  // the `Content-Security-Policy: treat-as-public-address` header). Therefore
+  // both documents share the same cache key.
+  EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
+    fetch("/cachetime").then(response => response.ok)
+  )"));
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(), R"(
+    fetch("/cachetime").then(response => response.ok)
+  )"));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kAddressSpacePublicSecureContextEmbeddedLocal, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a non-secure context,
+// even when the PNA for workers feature is disabled.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchFromNonSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(),
+                                  FetchWorkerScript(kWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a non-secure context,
+// and the request fails due to PNA.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchFromNonSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(false, content::EvalJs(web_contents(),
+                                   FetchWorkerScript(kWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a secure context, even
+// when the PNA for workers feature is disabled.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(),
+                                  FetchWorkerScript(kWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a secure context,
+// sends a preflight request, ignores its failure, and loads the script anyway.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(),
+                                  FetchWorkerScript(kWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a secure context,
+// sends a preflight request, and fails the request due to a preflight error.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessRespectPreflightResultsBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchErrorFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(false, content::EvalJs(web_contents(),
+                                   FetchWorkerScript(kWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a worker script from a secure context,
+// sends a preflight request, and succeeds in loading the script.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessRespectPreflightResultsBrowserTest,
+                       RecordsFeatureForWorkerScriptFetchSuccessFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(
+                      web_contents(),
+                      FetchWorkerScript(kWorkerScriptWithPnaHeadersPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a non-secure
+// context, even when the PNA for workers feature is disabled.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
+                       RecordsFeatureForSharedWorkerScriptFetchFromNonSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true,
+            content::EvalJs(web_contents(),
+                            FetchSharedWorkerScript(kSharedWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a non-secure
+// context, and the request fails due to PNA.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForSharedWorkerScriptFetchFromNonSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), PublicNonSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(false,
+            content::EvalJs(web_contents(),
+                            FetchSharedWorkerScript(kSharedWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a secure context,
+// even when the PNA for workers feature is disabled.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureDisabledBrowserTest,
+                       RecordsFeatureForSharedWorkerScriptFetchFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true,
+            content::EvalJs(web_contents(),
+                            FetchSharedWorkerScript(kSharedWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a secure context,
+// sends a preflight request, ignores its failure, and loads the script anyway.
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForSharedWorkerScriptFetchFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true,
+            content::EvalJs(web_contents(),
+                            FetchSharedWorkerScript(kSharedWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a secure context,
+// sends a preflight request, and fails the request due to a preflight error.
+IN_PROC_BROWSER_TEST_F(
+    PrivateNetworkAccessRespectPreflightResultsBrowserTest,
+    RecordsFeatureForSharedWorkerScriptFetchErrorFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(false,
+            content::EvalJs(web_contents(),
+                            FetchSharedWorkerScript(kSharedWorkerScriptPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+// This test verifies that a UseCounter is recorded when a document makes a
+// private network request to load a shared worker script from a secure context,
+// sends a preflight request, and succeeds in loading the script.
+IN_PROC_BROWSER_TEST_F(
+    PrivateNetworkAccessRespectPreflightResultsBrowserTest,
+    RecordsFeatureForSharedWorkerScriptFetchSuccessFromSecure) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), PublicSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  EXPECT_EQ(true, content::EvalJs(web_contents(),
+                                  FetchSharedWorkerScript(
+                                      kSharedWorkerScriptWithPnaHeadersPath)));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessFetchedWorkerScript, 1},
+      }));
+}
+
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForFetchInWorker) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), LocalSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  ASSERT_EQ(true, content::EvalJs(web_contents(), R"(
+    (async () => {
+      const worker = new Worker("/workers/fetcher_treat_as_public.js");
+
+      const messagePromise = new Promise((resolve) => {
+        const listener = (event) => resolve(event.data);
+        worker.addEventListener("message", listener, { once: true });
+      });
+
+      worker.postMessage("/defaultresponse");
+
+      console.log("Waiting for response.");
+      const { error, ok } = await messagePromise;
+      if (error !== undefined) {
+        throw(error);
+      }
+
+      return ok;
+    })()
+  )"));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessWithinWorker, 1},
+      }));
+}
+
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       RecordsFeatureForFetchInSharedWorker) {
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(web_contents(), LocalSecureURL(*server)));
+
+  WebFeatureHistogramTester feature_histogram_tester;
+
+  ASSERT_EQ(true, content::EvalJs(web_contents(), R"(
+    (async () => {
+      const worker = await new Promise((resolve, reject) => {
+        const worker =
+            new SharedWorker("/workers/shared_fetcher_treat_as_public.js");
+        worker.port.addEventListener("message", () => resolve(worker));
+        worker.addEventListener("error", reject);
+        worker.port.start();
+      });
+
+      const messagePromise = new Promise((resolve) => {
+        const listener = (event) => resolve(event.data);
+        worker.port.addEventListener("message", listener, { once: true });
+      });
+
+      worker.port.postMessage("/defaultresponse");
+
+      const { error, ok } = await messagePromise;
+      if (error !== undefined) {
+        throw(error);
+      }
+
+      return ok;
+    })()
+  )"));
+
+  feature_histogram_tester.ExpectCounts(AddFeatureCounts(
+      AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+      {
+          {WebFeature::kPrivateNetworkAccessWithinWorker, 1},
+      }));
+}
+
+// Test the experimental use counter for accesses to the 0.0.0.0 IP address
+// (and the corresponding `[::]` IPv6 address).
+//
+// In the Internet Protocol Version 4, the address 0.0.0.0 is a non-routable
+// meta-address used to designate an invalid, unknown or non-applicable target.
+// The real life behavior for 0.0.0.0 is different between operating systems.
+// On Windows, it is unreachable, while on MacOS and Linux, 0.0.0.0 means
+// all IP addresses on the local machine.
+//
+// In this case, 0.0.0.0 can be used to access localhost on MacOS and Linux
+// and bypass Private Network Access checks, so that we would like to forbid
+// fetches to 0.0.0.0. See more: https://crbug.com/1300021
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_FetchNullIpAddressForNavigation \
+  DISABLED_FetchNullIpAddressForNavigation
+#else
+#define MAYBE_FetchNullIpAddressForNavigation FetchNullIpAddressForNavigation
+#endif
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       MAYBE_FetchNullIpAddressForNavigation) {
+  WebFeatureHistogramTester feature_histogram_tester;
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(
+      web_contents(), server->GetURL("0.0.0.0", kNoFaviconPath)));
+
+  feature_histogram_tester.ExpectCounts(
+      AddFeatureCounts(AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+                       {
+                           {WebFeature::kPrivateNetworkAccessNullIpAddress, 1},
+                       }));
+}
+
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_FetchNullIpAddressFromDocument \
+  DISABLED_FetchNullIpAddressFromDocument
+#else
+#define MAYBE_FetchNullIpAddressFromDocument FetchNullIpAddressFromDocument
+#endif
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       MAYBE_FetchNullIpAddressFromDocument) {
+  WebFeatureHistogramTester feature_histogram_tester;
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(
+      content::NavigateToURL(web_contents(), server->GetURL(kNoFaviconPath)));
+
+  auto subresource_url =
+      server->GetURL("0.0.0.0", "/set-header?Access-Control-Allow-Origin: *");
+  constexpr char kSubresourceScript[] = R"(
+    new Promise(resolve => {
+      fetch($1).then(e => resolve(true));
+    }))";
+  EXPECT_EQ(true, content::EvalJs(
+                      web_contents(),
+                      content::JsReplace(kSubresourceScript, subresource_url)));
+
+  feature_histogram_tester.ExpectCounts(
+      AddFeatureCounts(AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+                       {
+                           {WebFeature::kPrivateNetworkAccessNullIpAddress, 1},
+                       }));
+}
+
+#if BUILDFLAG(IS_WIN)
+#define MAYBE_FetchNullIpAddressFromWorker DISABLED_FetchNullIpAddressFromWorker
+#else
+#define MAYBE_FetchNullIpAddressFromWorker FetchNullIpAddressFromWorker
+#endif
+IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
+                       MAYBE_FetchNullIpAddressFromWorker) {
+  WebFeatureHistogramTester feature_histogram_tester;
+  std::unique_ptr<net::EmbeddedTestServer> server = NewServer();
+
+  EXPECT_TRUE(content::NavigateToURL(
+      web_contents(), server->GetURL("/workers/fetch_from_worker.html")));
+
+  constexpr char kWorkerScript[] = R"(
+    new Promise(resolve => {
+      fetch_from_worker($1);
+      resolve(true);
+    }))";
+  auto worker_url =
+      server->GetURL("0.0.0.0", "/set-header?Access-Control-Allow-Origin: *");
+  EXPECT_EQ(true,
+            content::EvalJs(web_contents(),
+                            content::JsReplace(kWorkerScript, worker_url)));
+
+  feature_histogram_tester.ExpectCounts(
+      AddFeatureCounts(AllZeroFeatureCounts(AllAddressSpaceFeatures()),
+                       {
+                           {WebFeature::kPrivateNetworkAccessNullIpAddress, 1},
+                       }));
 }
 
 // ====================
@@ -672,8 +1258,10 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
 
 // This test verifies that the chrome-untrusted:// scheme is considered local
 // for the purpose of Private Network Access computations.
+// TODO(crbug.com/1244544): The NTP no longer loads a chrome-untrusted://
+// iframe in all cases. Find another way to test the chrome-untrusted:// scheme.
 IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
-                       SpecialSchemeChromeUntrusted) {
+                       DISABLED_SpecialSchemeChromeUntrusted) {
   // The only way to have a page with a loaded chrome-untrusted:// url without
   // relying on platform specific or components features, is to use the
   // new-tab-page host. chrome-untrusted://new-tab-page is restricted to iframes
@@ -681,10 +1269,8 @@ IN_PROC_BROWSER_TEST_F(PrivateNetworkAccessWithFeatureEnabledBrowserTest,
   // frame(s) by default.
   EXPECT_TRUE(
       content::NavigateToURL(web_contents(), GURL("chrome://new-tab-page")));
-  std::vector<content::RenderFrameHost*> frames =
-      web_contents()->GetAllFrames();
-  ASSERT_GE(frames.size(), 2u);
-  content::RenderFrameHost* iframe = frames[1];
+  content::RenderFrameHost* iframe = ChildFrameAt(web_contents(), 0);
+  ASSERT_TRUE(iframe);
   EXPECT_TRUE(iframe->GetLastCommittedURL().SchemeIs(
       content::kChromeUIUntrustedScheme));
 

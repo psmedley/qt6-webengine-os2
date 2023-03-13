@@ -66,7 +66,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DiscoveryListChanges) {
 
   int invocations = called;
   base::ListValue list;
-  list.AppendString("somehost:2000");
+  list.Append("somehost:2000");
 
   service->Set(prefs::kDevToolsTCPDiscoveryConfig, list);
 
@@ -82,11 +82,11 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DiscoveryListChanges) {
   EXPECT_EQ(nullptr, provider);
   invocations = called;
 
-  list.AppendString("b:1");
-  list.AppendString("c:2");
-  list.AppendString("<not really a good address.");
-  list.AppendString("d:3");
-  list.AppendString("c:2");
+  list.Append("b:1");
+  list.Append("c:2");
+  list.Append("<not really a good address.");
+  list.Append("d:3");
+  list.Append("c:2");
   service->Set(prefs::kDevToolsTCPDiscoveryConfig, list);
 
   EXPECT_LT(invocations, called);
@@ -102,15 +102,16 @@ IN_PROC_BROWSER_TEST_F(DevToolsAndroidBridgeTest, DefaultValues) {
   service->ClearPref(prefs::kDevToolsDiscoverTCPTargetsEnabled);
   service->ClearPref(prefs::kDevToolsTCPDiscoveryConfig);
 
-  const base::ListValue* targets =
-    service->GetList(prefs::kDevToolsTCPDiscoveryConfig);
+  const base::Value* targets =
+      service->GetList(prefs::kDevToolsTCPDiscoveryConfig);
   EXPECT_NE(nullptr, targets);
-  EXPECT_EQ(2ul, targets->GetSize());
+  EXPECT_EQ(2ul, targets->GetListDeprecated().size());
 
   std::set<std::string> actual;
-  for (size_t i = 0; i < targets->GetSize(); i++) {
+  for (const base::Value& item : targets->GetListDeprecated()) {
     std::string value;
-    targets->GetString(i, &value);
+    if (item.is_string())
+      value = item.GetString();
     actual.insert(value);
   }
   EXPECT_STREQ("localhost:9222, localhost:9229", SetToString(actual).c_str());

@@ -23,7 +23,7 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "content/browser/child_process_task_port_provider_mac.h"
 #endif
 
@@ -32,12 +32,11 @@ namespace content {
 using internal::ChildProcessLauncherHelper;
 
 void ChildProcessLauncherPriority::WriteIntoTrace(
-    perfetto::TracedProto<
-        perfetto::protos::pbzero::ChildProcessLauncherPriority> proto) {
+    perfetto::TracedProto<TraceProto> proto) const {
   proto->set_is_backgrounded(is_background());
   proto->set_has_pending_views(boost_for_pending_views);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   using PriorityProto = perfetto::protos::pbzero::ChildProcessLauncherPriority;
   switch (importance) {
     case ChildProcessImportance::IMPORTANT:
@@ -53,7 +52,7 @@ void ChildProcessLauncherPriority::WriteIntoTrace(
 #endif
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 bool ChildProcessLauncher::Client::CanUseWarmUpConnection() {
   return true;
 }
@@ -83,7 +82,7 @@ ChildProcessLauncher::ChildProcessLauncher(
   helper_ = base::MakeRefCounted<ChildProcessLauncherHelper>(
       child_process_id, std::move(command_line), std::move(delegate),
       weak_factory_.GetWeakPtr(), terminate_on_shutdown,
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
       client_->CanUseWarmUpConnection(),
 #endif
       std::move(mojo_invitation), process_error_callback,
@@ -111,9 +110,11 @@ void ChildProcessLauncher::SetProcessPriority(
           helper_, std::move(to_pass), priority));
 }
 
-void ChildProcessLauncher::Notify(
-    ChildProcessLauncherHelper::Process process,
-    int error_code) {
+void ChildProcessLauncher::Notify(ChildProcessLauncherHelper::Process process,
+#if BUILDFLAG(IS_WIN)
+                                  DWORD last_error,
+#endif
+                                  int error_code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   starting_ = false;
   process_ = std::move(process);
@@ -123,6 +124,10 @@ void ChildProcessLauncher::Notify(
     client_->OnProcessLaunched();
   } else {
     termination_info_.status = base::TERMINATION_STATUS_LAUNCH_FAILED;
+    termination_info_.exit_code = error_code;
+#if BUILDFLAG(IS_WIN)
+    termination_info_.last_error = last_error;
+#endif
 
     // NOTE: May delete |this|.
     client_->OnProcessLaunchFailed(error_code);
@@ -130,14 +135,13 @@ void ChildProcessLauncher::Notify(
 }
 
 bool ChildProcessLauncher::IsStarting() {
-  // TODO(crbug.com/469248): This fails in some tests.
-  // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return starting_;
 }
 
 const base::Process& ChildProcessLauncher::GetProcess() const {
-  // TODO(crbug.com/469248): This fails in some tests.
-  // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!starting_);
   return process_.process;
 }
 
@@ -155,7 +159,7 @@ ChildProcessTerminationInfo ChildProcessLauncher::GetChildTerminationInfo(
     return termination_info_;
   }
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // GetTerminationInfo() invokes base::GetTerminationStatus() which reaps the
   // zombie process info, after which it's not longer readable. This is why
   // RecordProcessLifetimeMetrics() needs to called before that happens.
@@ -193,7 +197,7 @@ void ChildProcessLauncher::RecordProcessLifetimeMetrics() {
   // processes.
   if (helper_->GetProcessType() != switches::kRendererProcess)
     return;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   std::unique_ptr<base::ProcessMetrics> process_metrics =
       base::ProcessMetrics::CreateProcessMetrics(
           process_.process.Handle(),
@@ -208,28 +212,25 @@ void ChildProcessLauncher::RecordProcessLifetimeMetrics() {
   const base::TimeDelta process_total_cpu_use =
       process_metrics->GetCumulativeCPUUsage();
 
-  constexpr base::TimeDelta kShortLifetime = base::TimeDelta::FromMinutes(1);
+  constexpr base::TimeDelta kShortLifetime = base::Minutes(1);
   if (process_lifetime <= kShortLifetime) {
     // Bucketing chosen by looking at AverageCPU2.RendererProcess in UMA. Only
     // a renderer at the 99.9th percentile of this metric would overflow.
     UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2.ShortLived",
-                               process_total_cpu_use,
-                               base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromSeconds(30), 100);
+                               process_total_cpu_use, base::Milliseconds(1),
+                               base::Seconds(30), 100);
   } else {
     // Bucketing chosen by looking at AverageCPU2.RendererProcess and
     // Renderer.ProcessLifetime values in UMA. Only a renderer at the 99th
     // percentile of both of those values combined will overflow.
     UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2.LongLived",
-                               process_total_cpu_use,
-                               base::TimeDelta::FromMilliseconds(1),
-                               base::TimeDelta::FromHours(3), 100);
+                               process_total_cpu_use, base::Milliseconds(1),
+                               base::Hours(3), 100);
   }
 
   // Global measurement. Bucketing identical to LongLivedRenders.
   UMA_HISTOGRAM_CUSTOM_TIMES("Renderer.TotalCPUUse2", process_total_cpu_use,
-                             base::TimeDelta::FromMilliseconds(1),
-                             base::TimeDelta::FromHours(3), 100);
+                             base::Milliseconds(1), base::Hours(3), 100);
 }
 
 // static
@@ -238,7 +239,7 @@ bool ChildProcessLauncher::TerminateProcess(const base::Process& process,
   return ChildProcessLauncherHelper::TerminateProcess(process, exit_code);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 void ChildProcessLauncher::DumpProcessStack() {
   base::Process to_pass = process_.process.Duplicate();
   GetProcessLauncherTaskRunner()->PostTask(
@@ -267,7 +268,7 @@ bool ChildProcessLauncherPriority::operator==(
          frame_depth == other.frame_depth &&
          intersects_viewport == other.intersects_viewport &&
          boost_for_pending_views == other.boost_for_pending_views
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
          && importance == other.importance
 #endif
       ;

@@ -6,7 +6,6 @@ import logging
 import multiprocessing
 import os
 import platform
-import signal
 import subprocess
 import sys
 import threading
@@ -53,7 +52,7 @@ def domains_are_distinct(a, b):
     return a_parts[slice_index:] != b_parts[slice_index:]
 
 
-class WrapperHandler(object):
+class WrapperHandler:
 
     __meta__ = abc.ABCMeta
 
@@ -121,9 +120,8 @@ class WrapperHandler(object):
         path = self._get_filesystem_path(request)
         try:
             with open(path, "rb") as f:
-                for key, value in read_script_metadata(f, js_meta_re):
-                    yield key, value
-        except IOError:
+                yield from read_script_metadata(f, js_meta_re)
+        except OSError:
             raise HTTPException(404)
 
     def _get_meta(self, request):
@@ -180,7 +178,7 @@ class HtmlWrapperHandler(WrapperHandler):
 
     def check_exposure(self, request):
         if self.global_type:
-            globals = u""
+            globals = ""
             for (key, value) in self._get_metadata(request):
                 if key == "global":
                     globals = value
@@ -346,6 +344,44 @@ class ServiceWorkerModulesHandler(HtmlWrapperHandler):
 </script>
 """
 
+class ShadowRealmHandler(HtmlWrapperHandler):
+    global_type = "shadowrealm"
+    path_replace = [(".any.shadowrealm.html", ".any.js")]
+
+    wrapper = """<!doctype html>
+<meta charset=utf-8>
+%(meta)s
+<script src="/resources/testharness.js"></script>
+<script src="/resources/testharnessreport.js"></script>
+<script>
+(async function() {
+  const r = new ShadowRealm();
+
+  await new Promise(r.evaluate(`
+    (resolve, reject) => {
+      (async () => {
+        await import("/resources/testharness.js");
+        %(script)s
+        globalThis.self.GLOBAL = {
+          isWindow: function() { return false; },
+          isWorker: function() { return false; },
+        };
+        await import("%(path)s");
+      })().then(resolve, (e) => reject(e.toString()));
+    }
+  `));
+
+  await fetch_tests_from_shadow_realm(r);
+  done();
+})();
+</script>
+"""
+
+    def _script_replacement(self, key, value):
+        if key == "script":
+            return 'await import("%s");' % value
+        return None
+
 
 class BaseWorkerHandler(WrapperHandler):
     headers = [('Content-Type', 'text/javascript')]
@@ -406,7 +442,7 @@ done();
 rewrites = [("GET", "/resources/WebIDLParser.js", "/resources/webidl2/lib/webidl2.js")]
 
 
-class RoutesBuilder(object):
+class RoutesBuilder:
     def __init__(self):
         self.forbidden_override = [("GET", "/tools/runner/*", handlers.file_handler),
                                    ("POST", "/tools/runner/update_manifest.py",
@@ -455,6 +491,7 @@ class RoutesBuilder(object):
             ("GET", "*.any.sharedworker-module.html", SharedWorkerModulesHandler),
             ("GET", "*.any.serviceworker.html", ServiceWorkersHandler),
             ("GET", "*.any.serviceworker-module.html", ServiceWorkerModulesHandler),
+            ("GET", "*.any.shadowrealm.html", ShadowRealmHandler),
             ("GET", "*.any.worker.js", ClassicWorkerHandler),
             ("GET", "*.any.worker-module.js", ModuleWorkerHandler),
             ("GET", "*.asis", handlers.AsIsHandler),
@@ -490,7 +527,7 @@ def get_route_builder(logger, aliases, config):
     return builder
 
 
-class ServerProc(object):
+class ServerProc:
     def __init__(self, mp_context, scheme=None):
         self.proc = None
         self.daemon = None
@@ -570,7 +607,7 @@ def check_subdomains(logger, config, routes, mp_context, log_handlers):
     wrapper.start(start_http_server, host, port, paths, routes,
                   bind_address, config, log_handlers)
 
-    url = "http://{}:{}/".format(host, port)
+    url = f"http://{host}:{port}/"
     connected = False
     for i in range(10):
         try:
@@ -592,7 +629,7 @@ def check_subdomains(logger, config, routes, mp_context, log_handlers):
         try:
             urllib.request.urlopen("http://%s:%d/" % (domain, port))
         except Exception:
-            logger.critical("Failed probing domain {}. {}".format(domain, EDIT_HOSTS_HELP))
+            logger.critical(f"Failed probing domain {domain}. {EDIT_HOSTS_HELP}")
             sys.exit(1)
 
     wrapper.stop()
@@ -630,6 +667,10 @@ def start_servers(logger, host, ports, paths, routes, bind_address, config,
                          'Requires OpenSSL 1.0.2+')
             continue
 
+        # Skip WebTransport over HTTP/3 server unless if is enabled explicitly.
+        if scheme == 'webtransport-h3' and not kwargs.get("webtransport_h3"):
+            continue
+
         for port in ports:
             if port is None:
                 continue
@@ -644,7 +685,7 @@ def start_servers(logger, host, ports, paths, routes, bind_address, config,
                 "h2": start_http2_server,
                 "ws": start_ws_server,
                 "wss": start_wss_server,
-                "quic-transport": start_quic_transport_server,
+                "webtransport-h3": start_webtransport_h3_server,
             }[scheme]
 
             server_proc = ServerProc(mp_context, scheme=scheme)
@@ -716,7 +757,7 @@ def start_http2_server(logger, host, port, paths, routes, bind_address, config, 
         startup_failed(logger)
 
 
-class WebSocketDaemon(object):
+class WebSocketDaemon:
     def __init__(self, host, port, doc_root, handlers_root, bind_address, ssl_config):
         logger = logging.getLogger()
         self.host = host
@@ -795,54 +836,21 @@ def start_wss_server(logger, host, port, paths, routes, bind_address, config, **
         startup_failed(logger)
 
 
-class QuicTransportDaemon(object):
-    def __init__(self, host, port, handlers_path=None, private_key=None, certificate=None, log_level=None):
-        args = ["python3", "wpt", "serve-quic-transport"]
-        if host:
-            args += ["--host", host]
-        if port:
-            args += ["--port", str(port)]
-        if private_key:
-            args += ["--private-key", private_key]
-        if certificate:
-            args += ["--certificate", certificate]
-        if handlers_path:
-            args += ["--handlers-path", handlers_path]
-        if log_level == "debug":
-            args += ["--verbose"]
-        self.command = args
-        self.proc = None
-
-    def start(self):
-        def handle_signal(*_):
-            if self.proc:
-                try:
-                    self.proc.terminate()
-                except OSError:
-                    # It's fine if the child already exits.
-                    pass
-                self.proc.wait()
-            sys.exit(0)
-
-        signal.signal(signal.SIGTERM, handle_signal)
-        signal.signal(signal.SIGINT, handle_signal)
-
-        self.proc = subprocess.Popen(self.command)
-        # Give the server a second to start and then check.
-        time.sleep(1)
-        if self.proc.poll():
-            sys.exit(1)
-
-
-def start_quic_transport_server(logger, host, port, paths, routes, bind_address, config, **kwargs):
+def start_webtransport_h3_server(logger, host, port, paths, routes, bind_address, config, **kwargs):
     try:
-        return QuicTransportDaemon(host,
-                                   port,
-                                   private_key=config.ssl_config["key_path"],
-                                   certificate=config.ssl_config["cert_path"],
-                                   log_level=config.log_level)
-    except Exception:
-        startup_failed(logger)
+        # TODO(bashi): Move the following import to the beginning of this file
+        # once WebTransportH3Server is enabled by default.
+        from webtransport.h3.webtransport_h3_server import WebTransportH3Server  # type: ignore
+        return WebTransportH3Server(host=host,
+                                    port=port,
+                                    doc_root=paths["doc_root"],
+                                    cert_path=config.ssl_config["cert_path"],
+                                    key_path=config.ssl_config["key_path"],
+                                    logger=logger)
+    except Exception as error:
+        logger.critical(
+            f"Failed to start WebTransport over HTTP/3 server: {error}")
+        sys.exit(0)
 
 
 def start(logger, config, routes, mp_context, log_handlers, **kwargs):
@@ -866,20 +874,20 @@ def iter_servers(servers):
 
 
 def _make_subdomains_product(s: Set[str], depth: int = 2) -> Set[str]:
-    return {u".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1)))}
+    return {".".join(x) for x in chain(*(product(s, repeat=i) for i in range(1, depth+1)))}
 
 
 def _make_origin_policy_subdomains(limit: int) -> Set[str]:
-    return {u"op%d" % x for x in range(1,limit+1)}
+    return {"op%d" % x for x in range(1,limit+1)}
 
 
-_subdomains = {u"www",
-               u"www1",
-               u"www2",
-               u"天気の良い日",
-               u"élève"}
+_subdomains = {"www",
+               "www1",
+               "www2",
+               "天気の良い日",
+               "élève"}
 
-_not_subdomains = {u"nonexistent"}
+_not_subdomains = {"nonexistent"}
 
 _subdomains = _make_subdomains_product(_subdomains)
 
@@ -915,6 +923,7 @@ class ConfigBuilder(config.ConfigBuilder):
             "https-public": ["auto"],
             "ws": ["auto"],
             "wss": ["auto"],
+            "webtransport-h3": ["auto"],
         },
         "check_subdomains": True,
         "log_level": "info",
@@ -946,7 +955,7 @@ class ConfigBuilder(config.ConfigBuilder):
             kwargs["subdomains"] = _subdomains
         if "not_subdomains" not in kwargs:
             kwargs["not_subdomains"] = _not_subdomains
-        super(ConfigBuilder, self).__init__(
+        super().__init__(
             logger,
             *args,
             **kwargs
@@ -967,7 +976,7 @@ class ConfigBuilder(config.ConfigBuilder):
             return os.path.join(data["doc_root"], "websockets", "handlers")
 
     def _get_paths(self, data):
-        rv = super(ConfigBuilder, self)._get_paths(data)
+        rv = super()._get_paths(data)
         rv["ws_doc_root"] = data["ws_doc_root"]
         return rv
 
@@ -980,9 +989,6 @@ def build_config(logger, override_path=None, config_cls=ConfigBuilder, **kwargs)
         enable_http2 = True
     if enable_http2:
         rv._default["ports"]["h2"] = [9000]
-
-    if kwargs.get("quic_transport"):
-        rv._default["ports"]["quic-transport"] = [10000]
 
     if override_path and os.path.exists(override_path):
         with open(override_path) as f:
@@ -1031,7 +1037,8 @@ def get_parser():
                         help=argparse.SUPPRESS)
     parser.add_argument("--no-h2", action="store_false", dest="h2", default=None,
                         help="Disable the HTTP/2.0 server")
-    parser.add_argument("--quic-transport", action="store_true", help="Enable QUIC server for WebTransport")
+    parser.add_argument("--webtransport-h3", action="store_true",
+                        help="Enable WebTransport over HTTP/3 server")
     parser.add_argument("--exit-after-start", action="store_true", help="Exit after starting servers")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
     parser.set_defaults(report=False)
@@ -1039,7 +1046,7 @@ def get_parser():
     return parser
 
 
-class MpContext(object):
+class MpContext:
     def __getattr__(self, name):
         return getattr(multiprocessing, name)
 
@@ -1091,9 +1098,9 @@ def run(config_cls=ConfigBuilder, route_builder=None, mp_context=None, log_handl
         bind_address = config["bind_address"]
 
         if kwargs.get("alias_file"):
-            with open(kwargs["alias_file"], 'r') as alias_file:
+            with open(kwargs["alias_file"]) as alias_file:
                 for line in alias_file:
-                    alias, doc_root = [x.strip() for x in line.split(',')]
+                    alias, doc_root = (x.strip() for x in line.split(','))
                     config["aliases"].append({
                         'url-path': alias,
                         'local-dir': doc_root,
@@ -1114,7 +1121,7 @@ def run(config_cls=ConfigBuilder, route_builder=None, mp_context=None, log_handl
         with stash.StashServer(stash_address, authkey=str(uuid.uuid4())):
             servers = start(logger, config, routes, mp_context, log_handlers, **kwargs)
 
-            if not kwargs["exit_after_start"]:
+            if not kwargs.get("exit_after_start"):
                 try:
                     # Periodically check if all the servers are alive
                     server_process_exited = False

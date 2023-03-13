@@ -13,8 +13,10 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
@@ -29,8 +31,8 @@ namespace device {
 BluetoothAdapter::ServiceOptions::ServiceOptions() = default;
 BluetoothAdapter::ServiceOptions::~ServiceOptions() = default;
 
-#if !defined(OS_ANDROID) && !defined(OS_CHROMEOS) && !defined(OS_MAC) && \
-    !defined(OS_WIN) && !defined(OS_LINUX)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_MAC) && \
+    !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_LINUX)
 // static
 scoped_refptr<BluetoothAdapter> BluetoothAdapter::CreateAdapter() {
   return nullptr;
@@ -41,7 +43,7 @@ base::WeakPtr<BluetoothAdapter> BluetoothAdapter::GetWeakPtrForTesting() {
   return GetWeakPtr();
 }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 void BluetoothAdapter::Shutdown() {
   NOTIMPLEMENTED();
 }
@@ -116,16 +118,26 @@ BluetoothAdapter::RetrieveGattConnectedDevicesWithDiscoveryFilter(
   return std::unordered_map<BluetoothDevice*, BluetoothDevice::UUIDSet>();
 }
 
-void BluetoothAdapter::StartDiscoverySession(DiscoverySessionCallback callback,
+void BluetoothAdapter::StartDiscoverySession(const std::string& client_name,
+                                             DiscoverySessionCallback callback,
                                              ErrorCallback error_callback) {
-  StartDiscoverySessionWithFilter(nullptr, std::move(callback),
+  StartDiscoverySessionWithFilter(nullptr, client_name, std::move(callback),
                                   std::move(error_callback));
 }
 
 void BluetoothAdapter::StartDiscoverySessionWithFilter(
     std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
+    const std::string& client_name,
     DiscoverySessionCallback callback,
     ErrorCallback error_callback) {
+  if (!client_name.empty()) {
+    BLUETOOTH_LOG(EVENT) << client_name
+                         << " initiating Bluetooth discovery session";
+  } else {
+    BLUETOOTH_LOG(EVENT)
+        << "Unknown client initiating Bluetooth discovery session";
+  }
+
   std::unique_ptr<BluetoothDiscoverySession> new_session(
       new BluetoothDiscoverySession(this, std::move(discovery_filter)));
   discovery_sessions_.insert(new_session.get());
@@ -306,24 +318,35 @@ void BluetoothAdapter::NotifyAdapterDiscoveryChangeCompletedForTesting() {
     observer.DiscoveryChangeCompletedForTesting();
 }
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 void BluetoothAdapter::NotifyDevicePairedChanged(BluetoothDevice* device,
                                                  bool new_paired_status) {
   for (auto& observer : observers_)
     observer.DevicePairedChanged(this, device, new_paired_status);
 }
-#endif
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
-void BluetoothAdapter::NotifyDeviceBatteryChanged(BluetoothDevice* device) {
-  DCHECK_EQ(device->GetAdapter(), this);
+void BluetoothAdapter::NotifyDeviceConnectedStateChanged(
+    BluetoothDevice* device,
+    bool is_connected) {
   for (auto& observer : observers_) {
-    observer.DeviceBatteryChanged(this, device, device->battery_percentage());
+    observer.DeviceConnectedStateChanged(this, device, is_connected);
   }
 }
 #endif
 
-#if defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
+void BluetoothAdapter::NotifyDeviceBatteryChanged(
+    BluetoothDevice* device,
+    BluetoothDevice::BatteryType type) {
+  DCHECK_EQ(device->GetAdapter(), this);
+
+  for (auto& observer : observers_) {
+    observer.DeviceBatteryChanged(this, device, type);
+  }
+}
+#endif
+
+#if BUILDFLAG(IS_CHROMEOS)
 void BluetoothAdapter::NotifyDeviceIsBlockedByPolicyChanged(
     BluetoothDevice* device,
     bool new_blocked_status) {
@@ -449,6 +472,15 @@ void BluetoothAdapter::NotifyGattDescriptorValueChanged(
   for (auto& observer : observers_)
     observer.GattDescriptorValueChanged(this, descriptor, value);
 }
+
+#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+void BluetoothAdapter::
+    NotifyLowEnergyScanSessionHardwareOffloadingStatusChanged(
+        LowEnergyScanSessionHardwareOffloadingStatus status) {
+  for (auto& observer : observers_)
+    observer.LowEnergyScanSessionHardwareOffloadingStatusChanged(status);
+}
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
 BluetoothAdapter::SetPoweredCallbacks::SetPoweredCallbacks() = default;
 BluetoothAdapter::SetPoweredCallbacks::~SetPoweredCallbacks() = default;
@@ -660,7 +692,6 @@ void BluetoothAdapter::RemoveTimedOutDevices() {
 }
 
 // static
-constexpr base::TimeDelta BluetoothAdapter::timeoutSec =
-    base::TimeDelta::FromSeconds(180);
+const base::TimeDelta BluetoothAdapter::timeoutSec = base::Seconds(180);
 
 }  // namespace device

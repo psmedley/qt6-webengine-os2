@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/sequence_checker.h"
 #include "base/system/system_monitor.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "device/udev_linux/udev.h"
 #include "device/udev_linux/udev_watcher.h"
@@ -45,6 +44,10 @@ class DeviceMonitorLinux::BlockingTaskRunnerHelper
     : public device::UdevWatcher::Observer {
  public:
   BlockingTaskRunnerHelper();
+
+  BlockingTaskRunnerHelper(const BlockingTaskRunnerHelper&) = delete;
+  BlockingTaskRunnerHelper& operator=(const BlockingTaskRunnerHelper&) = delete;
+
   ~BlockingTaskRunnerHelper() override = default;
 
   void Initialize();
@@ -60,8 +63,6 @@ class DeviceMonitorLinux::BlockingTaskRunnerHelper
   std::unique_ptr<device::UdevWatcher> udev_watcher_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(BlockingTaskRunnerHelper);
 };
 
 DeviceMonitorLinux::BlockingTaskRunnerHelper::BlockingTaskRunnerHelper() {

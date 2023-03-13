@@ -9,10 +9,10 @@
 
 #include "base/check_op.h"
 #include "base/containers/contains.h"
-#include "base/containers/flat_set.h"
+#include "base/containers/fixed_flat_set.h"
 #include "base/feature_list.h"
-#include "base/no_destructor.h"
 #include "base/strings/string_piece.h"
+#include "build/build_config.h"
 #include "content/common/url_schemes.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/url_constants.h"
@@ -24,8 +24,13 @@
 namespace content {
 
 bool HasWebUIScheme(const GURL& url) {
-  return url.SchemeIs(kChromeDevToolsScheme) || url.SchemeIs(kChromeUIScheme) ||
-         url.SchemeIs(kChromeUIUntrustedScheme);
+  return HasWebUIOrigin(url::Origin::Create(url));
+}
+
+bool HasWebUIOrigin(const url::Origin& origin) {
+  return origin.scheme() == content::kChromeUIScheme ||
+         origin.scheme() == content::kChromeUIUntrustedScheme ||
+         origin.scheme() == content::kChromeDevToolsScheme;
 }
 
 bool IsSavableURL(const GURL& url) {
@@ -54,7 +59,7 @@ bool IsURLHandledByNetworkStack(const GURL& url) {
   if (blink::IsRendererDebugURL(url))
     return false;
 
-  // For you information, even though a "data:" url doesn't generate actual
+  // For your information, even though a "data:" url doesn't generate actual
   // network requests, it is handled by the network stack and so must return
   // true. The reason is that a few "data:" urls can't be handled locally. For
   // instance:
@@ -67,18 +72,17 @@ bool IsURLHandledByNetworkStack(const GURL& url) {
 }
 
 bool IsSafeRedirectTarget(const GURL& from_url, const GURL& to_url) {
-  static const base::NoDestructor<base::flat_set<base::StringPiece>>
-      kUnsafeSchemes(base::flat_set<base::StringPiece>({
+  static const auto kUnsafeSchemes =
+      base::MakeFixedFlatSet<base::StringPiece>({
         url::kAboutScheme,
-            url::kBlobScheme,
-            url::kJavaScriptScheme,
+            url::kJavaScriptScheme, url::kBlobScheme,
 #if !defined(CHROMECAST_BUILD)
-            url::kDataScheme,
+        url::kDataScheme,
 #endif
-#if defined(OS_ANDROID)
-            url::kContentScheme,
+#if BUILDFLAG(IS_ANDROID)
+        url::kContentScheme,
 #endif
-      }));
+      });
   if (from_url.is_empty())
     return false;
   if (base::Contains(url::GetLocalSchemes(), to_url.scheme_piece())) {
@@ -96,7 +100,7 @@ bool IsSafeRedirectTarget(const GURL& from_url, const GURL& to_url) {
 #endif
   if (HasWebUIScheme(to_url))
     return false;
-  if (kUnsafeSchemes->contains(to_url.scheme_piece()))
+  if (kUnsafeSchemes.contains(to_url.scheme_piece()))
     return false;
   if (to_url.SchemeIsFileSystem())
     return from_url.SchemeIsFileSystem();

@@ -18,6 +18,8 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
+#include "base/ranges/ranges.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -26,12 +28,13 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
-#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/data_model/autofill_profile.h"
 #include "components/autofill/core/browser/data_model/autofill_structured_address_utils.h"
 #include "components/autofill/core/browser/data_model/credit_card.h"
+#include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/form_structure.h"
+#include "components/autofill/core/browser/metrics/autofill_metrics.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/personal_data_manager_observer.h"
 #include "components/autofill/core/browser/test_autofill_client.h"
@@ -52,18 +55,262 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::ASCIIToUTF16;
 using base::UTF8ToUTF16;
-using testing::_;
-using testing::AtLeast;
-using testing::Invoke;
-using testing::Return;
-using testing::SaveArg;
-using testing::UnorderedElementsAre;
-using testing::WithoutArgs;
 
 namespace autofill {
 namespace {
+
+// Define values for the default address profile.
+constexpr char kDefaultFullName[] = "Thomas Neo Anderson";
+constexpr char kDefaultFirstName[] = "Thomas";
+constexpr char kDefaultLastName[] = "Anderson";
+constexpr char kDefaultMail[] = "theone@thematrix.org";
+constexpr char kDefaultAddressLine1[] = "21 Laussat St";
+constexpr char kDefaultStreetAddress[] = "21 Laussat St\\nApt 123";
+constexpr char kDefaultZip[] = "94102";
+constexpr char kDefaultCity[] = "Los Angeles";
+constexpr char kDefaultDependentLocality[] = "Nob Hill";
+constexpr char kDefaultState[] = "California";
+constexpr char kDefaultPhone[] = "+1 650-555-0000";
+constexpr char kDefaultPhoneAlternativeFormatting[] = "650-555-0000";
+constexpr char kDefaultPhoneDomesticFormatting[] = "(650) 555-0000";
+constexpr char kDefaultPhoneAreaCode[] = "650";
+constexpr char kDefaultPhonePrefix[] = "555";
+constexpr char kDefaultPhoneSuffix[] = "0000";
+
+// Define values for a second address profile.
+constexpr char kSecondFirstName[] = "Bruce";
+constexpr char kSecondLastName[] = "Wayne";
+constexpr char kSecondMail[] = "wayne@bruce.org";
+constexpr char kSecondAddressLine1[] = "23 Main St";
+constexpr char kSecondZip[] = "94106";
+constexpr char kSecondCity[] = "Los Angeles";
+constexpr char kSecondDependentLocality[] = "Down Town";
+constexpr char kSecondState[] = "California";
+constexpr char kSecondPhone[] = "+1 651-666-1111";
+constexpr char kSecondPhoneAreaCode[] = "651";
+constexpr char kSecondPhonePrefix[] = "666";
+constexpr char kSecondPhoneSuffix[] = "1111";
+
+// Define values for a third address profile.
+constexpr char kThirdFirstName[] = "Homer";
+constexpr char kThirdLastName[] = "Simpson";
+constexpr char kThirdMail[] = "donut@whatever.net";
+constexpr char kThirdAddressLine1[] = "742 Evergreen Terrace";
+constexpr char kThirdZip[] = "65619";
+constexpr char kThirdCity[] = "Springfield";
+constexpr char kThirdDependentLocality[] = "Down Town";
+constexpr char kThirdState[] = "Oregon";
+constexpr char kThirdPhone[] = "+1 851-777-2222";
+
+constexpr char kDefaultCreditCardNumber[] = "4111 1111 1111 1111";
+
+// For a given ServerFieldType |type| returns a pair of field name and label
+// that should be parsed into this type by our field type parsers.
+std::pair<std::string, std::string> GetLabelAndNameForType(
+    ServerFieldType type) {
+  static const std::map<ServerFieldType, std::pair<std::string, std::string>>
+      name_type_map = {
+          {NAME_FULL, {"Full Name:", "full_name"}},
+          {NAME_FIRST, {"First Name:", "first_name"}},
+          {NAME_MIDDLE, {"Middle Name", "middle_name"}},
+          {NAME_LAST, {"Last Name:", "last_name"}},
+          {EMAIL_ADDRESS, {"Email:", "email"}},
+          {ADDRESS_HOME_LINE1, {"Address:", "address1"}},
+          {ADDRESS_HOME_STREET_ADDRESS, {"Address:", "address"}},
+          {ADDRESS_HOME_CITY, {"City:", "city"}},
+          {ADDRESS_HOME_ZIP, {"Zip:", "zip"}},
+          {ADDRESS_HOME_STATE, {"State:", "state"}},
+          {ADDRESS_HOME_DEPENDENT_LOCALITY, {"Neighborhood:", "neighborhood"}},
+          {ADDRESS_HOME_COUNTRY, {"Country:", "country"}},
+          {PHONE_HOME_WHOLE_NUMBER, {"Phone:", "phone"}},
+          {CREDIT_CARD_NUMBER, {"Credit Card Number:", "card_number"}},
+      };
+  auto it = name_type_map.find(type);
+  if (it == name_type_map.end()) {
+    NOTIMPLEMENTED() << " field name and label is missing for "
+                     << AutofillType(type).ToString();
+    return {std::string(), std::string()};
+  }
+  return it->second;
+}
+
+// Constructs a FormData instance for |url| from a vector of type value pairs
+// that defines a sequence of fields and the filled values.
+// The field names and labels for the different types are relieved from
+// |GetLabelAndNameForType(type)|
+FormData ConstructFormDateFromTypeValuePairs(
+    std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs,
+    std::string url = "https://www.foo.com") {
+  FormData form;
+  form.url = GURL(url);
+
+  FormFieldData field;
+  for (const auto& [type, value] : type_value_pairs) {
+    const auto& [name, label] = GetLabelAndNameForType(type);
+    test::CreateTestFormField(
+        name.c_str(), label.c_str(), value.c_str(),
+        type == ADDRESS_HOME_STREET_ADDRESS ? "textarea" : "text", &field);
+    form.fields.push_back(field);
+  }
+
+  return form;
+}
+
+// Constructs a FormStructure instance from a FormData instance and determines
+// the heuristic types.
+std::unique_ptr<FormStructure> ConstructFormStructureFromFormData(
+    const FormData& form) {
+  auto form_structure = std::make_unique<FormStructure>(form);
+  form_structure->DetermineHeuristicTypes(nullptr, nullptr);
+  return form_structure;
+}
+
+// Constructs a FormStructure instance with fields and inserted values given by
+// a vector of type and value pairs.
+std::unique_ptr<FormStructure> ConstructFormStructureFromTypeValuePairs(
+    std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs,
+    std::string url = "https://www.foo.com") {
+  FormData form = ConstructFormDateFromTypeValuePairs(type_value_pairs, url);
+  return ConstructFormStructureFromFormData(form);
+}
+
+// Construct and finalizes an AutofillProfile based on a vector of type and
+// value pairs. The values are set as |VerificationStatus::kObserved| and the
+// profile is finalizes in the end.
+AutofillProfile ConstructProfileFromTypeValuePairs(
+    std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs) {
+  AutofillProfile profile;
+  for (const auto& [type, value] : type_value_pairs) {
+    if (type == ADDRESS_HOME_DEPENDENT_LOCALITY &&
+        !base::FeatureList::IsEnabled(
+            features::kAutofillEnableDependentLocalityParsing)) {
+      continue;
+    }
+
+    profile.SetRawInfoWithVerificationStatus(
+        type, base::UTF8ToUTF16(value),
+        structured_address::VerificationStatus::kObserved);
+  }
+  if (!profile.FinalizeAfterImport())
+    NOTREACHED();
+  return profile;
+}
+
+// Returns a vector of ServerFieldType and value pairs used to construct the
+// default AutofillProfile, or a FormStructure or FormData instance that carries
+// that corresponding information.
+std::vector<std::pair<ServerFieldType, std::string>>
+GetDefaultProfileTypeValuePairs() {
+  return {
+      {NAME_FIRST, kDefaultFirstName},
+      {NAME_LAST, kDefaultLastName},
+      {EMAIL_ADDRESS, kDefaultMail},
+      {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+  };
+}
+
+// Same as |GetDefaultProfileTypeValuePairs()| but with ADDRESS_HOME_COUNTRY
+// set to |country|.
+std::vector<std::pair<ServerFieldType, std::string>>
+GetDefaultProfileTypeValuePairsWithCountry(const std::string& country) {
+  auto profile_typed_value_pairs = GetDefaultProfileTypeValuePairs();
+  profile_typed_value_pairs.emplace_back(ADDRESS_HOME_COUNTRY, country);
+  return profile_typed_value_pairs;
+}
+
+// Same as |GetDefaultProfileTypeValuePairs()| but with the second profile
+// information.
+std::vector<std::pair<ServerFieldType, std::string>>
+GetSecondProfileTypeValuePairs() {
+  return {
+      {NAME_FIRST, kSecondFirstName},
+      {NAME_LAST, kSecondLastName},
+      {EMAIL_ADDRESS, kSecondMail},
+      {PHONE_HOME_WHOLE_NUMBER, kSecondPhone},
+      {ADDRESS_HOME_LINE1, kSecondAddressLine1},
+      {ADDRESS_HOME_DEPENDENT_LOCALITY, kSecondDependentLocality},
+      {ADDRESS_HOME_CITY, kSecondCity},
+      {ADDRESS_HOME_STATE, kSecondState},
+      {ADDRESS_HOME_ZIP, kSecondZip},
+  };
+}
+
+// Same as |GetDefaultProfileTypeValuePairs()| but with the third profile
+// information.
+std::vector<std::pair<ServerFieldType, std::string>>
+GetThirdProfileTypeValuePairs() {
+  return {
+      {NAME_FIRST, kThirdFirstName},
+      {NAME_LAST, kThirdLastName},
+      {EMAIL_ADDRESS, kThirdMail},
+      {PHONE_HOME_WHOLE_NUMBER, kThirdPhone},
+      {ADDRESS_HOME_LINE1, kThirdAddressLine1},
+      {ADDRESS_HOME_DEPENDENT_LOCALITY, kThirdDependentLocality},
+      {ADDRESS_HOME_CITY, kThirdCity},
+      {ADDRESS_HOME_STATE, kThirdState},
+      {ADDRESS_HOME_ZIP, kThirdZip},
+  };
+}
+
+// Returns the default AutofillProfile used in this test file.
+AutofillProfile ConstructDefaultProfile() {
+  return ConstructProfileFromTypeValuePairs(GetDefaultProfileTypeValuePairs());
+}
+
+// Same as |ConstructDefaultProfile()| but with |country|.
+AutofillProfile ConstructDefaultProfileWithCountry(const std::string& country) {
+  return ConstructProfileFromTypeValuePairs(
+      GetDefaultProfileTypeValuePairsWithCountry(country));
+}
+
+// Returns the second AutofillProfile used in this test file.
+AutofillProfile ConstructSecondProfile() {
+  return ConstructProfileFromTypeValuePairs(GetSecondProfileTypeValuePairs());
+}
+
+// Returns the third AutofillProfile used in this test file.
+AutofillProfile ConstructThirdProfile() {
+  return ConstructProfileFromTypeValuePairs(GetThirdProfileTypeValuePairs());
+}
+
+// Returns a form with the default profile. The AutofillProfile that is imported
+// from this form should be similar to the profile create by calling
+// |ConstructDefaultProfile()|
+std::unique_ptr<FormStructure> ConstructDefaultProfileFormStructure() {
+  return ConstructFormStructureFromTypeValuePairs(
+      GetDefaultProfileTypeValuePairs());
+}
+
+// Same as |ConstructDefaultFormStructure()| but with |country|.
+std::unique_ptr<FormStructure> ConstructDefaultProfileFormStructureWithCountry(
+    const std::string& country) {
+  return ConstructFormStructureFromTypeValuePairs(
+      GetDefaultProfileTypeValuePairsWithCountry(country));
+}
+
+// Same as |ConstructDefaultFormStructure()| but for the second profile.
+std::unique_ptr<FormStructure> ConstructSecondProfileFormStructure() {
+  return ConstructFormStructureFromTypeValuePairs(
+      GetSecondProfileTypeValuePairs());
+}
+
+// Same as |ConstructDefaultFormStructure()| but for the third profile.
+std::unique_ptr<FormStructure> ConstructThirdProfileFormStructure() {
+  return ConstructFormStructureFromTypeValuePairs(
+      GetThirdProfileTypeValuePairs());
+}
+
+// Constructs a |FormData| instance that carries the information of the default
+// profile.
+FormData ConstructDefaultFormData() {
+  return ConstructFormDateFromTypeValuePairs(GetDefaultProfileTypeValuePairs());
+}
 
 ACTION_P(QuitMessageLoop, loop) {
   loop->Quit();
@@ -73,42 +320,38 @@ enum UserMode { USER_MODE_NORMAL, USER_MODE_INCOGNITO };
 
 class PersonalDataLoadedObserverMock : public PersonalDataManagerObserver {
  public:
-  PersonalDataLoadedObserverMock() {}
-  ~PersonalDataLoadedObserverMock() override {}
+  PersonalDataLoadedObserverMock() = default;
+  ~PersonalDataLoadedObserverMock() override = default;
 
   MOCK_METHOD(void, OnPersonalDataChanged, (), (override));
   MOCK_METHOD(void, OnPersonalDataFinishedProfileTasks, (), (override));
 };
 
+// Matches an AddressProfile or CreditCard pointer according to Compare().
+// Takes `expected` by value to avoid a dangling reference.
 template <typename T>
-bool CompareElements(T* a, T* b) {
-  return a->Compare(*b) < 0;
+auto ComparesEqual(T expected) {
+  return ::testing::Truly([expected = std::move(expected)](const T& actual) {
+    return actual.Compare(expected) == 0;
+  });
 }
 
+// The below matchers follow ::testing::UnorderedElementsAre[Array] except that
+// they accept AutofillProfile or CreditCard *pointers* and compare their
+// pointees using ComparesEqual().
+
 template <typename T>
-bool ElementsEqual(T* a, T* b) {
-  return a->Compare(*b) == 0;
+auto UnorderedElementsCompareEqualArray(const std::vector<T>& expected_values) {
+  std::vector<::testing::Matcher<T*>> matchers;
+  for (const T& expected : expected_values)
+    matchers.push_back(::testing::Pointee(ComparesEqual(expected)));
+  return ::testing::UnorderedElementsAreArray(matchers);
 }
 
-// Verifies that two vectors have the same elements (according to T::Compare)
-// while ignoring order. This is useful because multiple profiles or credit
-// cards that are added to the SQLite DB within the same second will be returned
-// in GUID (aka random) order.
-template <typename T>
-void ExpectSameElements(const std::vector<T*>& expectations,
-                        const std::vector<T*>& results) {
-  ASSERT_EQ(expectations.size(), results.size());
-
-  std::vector<T*> expectations_copy = expectations;
-  std::sort(expectations_copy.begin(), expectations_copy.end(),
-            CompareElements<T>);
-  std::vector<T*> results_copy = results;
-  std::sort(results_copy.begin(), results_copy.end(), CompareElements<T>);
-
-  EXPECT_EQ(std::mismatch(results_copy.begin(), results_copy.end(),
-                          expectations_copy.begin(), ElementsEqual<T>)
-                .first,
-            results_copy.end());
+template <typename... Matchers>
+auto UnorderedElementsCompareEqual(Matchers... matchers) {
+  return ::testing::UnorderedElementsAre(
+      ::testing::Pointee(ComparesEqual(std::move(matchers)))...);
 }
 
 }  // anonymous namespace
@@ -119,13 +362,13 @@ class FormDataImporterTestBase {
 
   void ResetPersonalDataManager(UserMode user_mode) {
     personal_data_manager_ = std::make_unique<PersonalDataManager>("en", "US");
+    personal_data_manager_->set_auto_accept_address_imports_for_testing(true);
     personal_data_manager_->Init(
         scoped_refptr<AutofillWebDataService>(autofill_database_service_),
         /*account_database=*/nullptr,
         /*pref_service=*/prefs_.get(),
         /*local_state=*/prefs_.get(),
         /*identity_manager=*/nullptr,
-        /*client_profile_validator=*/nullptr,
         /*history_service=*/nullptr,
         /*strike_database=*/nullptr,
         /*image_fetcher=*/nullptr,
@@ -173,15 +416,29 @@ class FormDataImporterTestBase {
                              const FormStructure& form,
                              bool skip_waiting_on_pdm = false,
                              bool allow_save_prompts = true) {
+    // This parameter has no effect unless save prompts for addresses are
+    // enabled.
+    allow_save_prompts =
+        allow_save_prompts || !base::FeatureList::IsEnabled(
+                                  features::kAutofillAddressProfileSavePrompt);
+
+    std::vector<FormDataImporter::AddressProfileImportCandidate>
+        address_profile_import_candidates;
+
+    EXPECT_EQ(extraction_successful,
+              form_data_importer_->ImportAddressProfiles(
+                  form, address_profile_import_candidates));
+
     if (!extraction_successful) {
-      EXPECT_FALSE(
-          form_data_importer_->ImportAddressProfiles(form, allow_save_prompts));
+      EXPECT_FALSE(form_data_importer_->ProcessAddressProfileImportCandidates(
+          address_profile_import_candidates, allow_save_prompts));
       return;
     }
 
     if (skip_waiting_on_pdm) {
-      EXPECT_TRUE(
-          form_data_importer_->ImportAddressProfiles(form, allow_save_prompts));
+      EXPECT_EQ(form_data_importer_->ProcessAddressProfileImportCandidates(
+                    address_profile_import_candidates, allow_save_prompts),
+                allow_save_prompts);
       return;
     }
 
@@ -189,9 +446,62 @@ class FormDataImporterTestBase {
     EXPECT_CALL(personal_data_observer_, OnPersonalDataFinishedProfileTasks())
         .WillOnce(QuitMessageLoop(&run_loop));
     EXPECT_CALL(personal_data_observer_, OnPersonalDataChanged()).Times(1);
-    EXPECT_TRUE(
-        form_data_importer_->ImportAddressProfiles(form, allow_save_prompts));
+    EXPECT_EQ(form_data_importer_->ProcessAddressProfileImportCandidates(
+                  address_profile_import_candidates, allow_save_prompts),
+              allow_save_prompts);
     run_loop.Run();
+  }
+
+  // Verifies that the stored profiles in the PersonalDataManager equal
+  // |expected_profiles| with respect to |AutofillProfile::Compare|.
+  // Note, that order is taken into account.
+  void VerifyExpectationForImportedAddressProfiles(
+      const std::vector<AutofillProfile>& expected_profiles) {
+    EXPECT_THAT(personal_data_manager_->GetProfiles(),
+                UnorderedElementsCompareEqualArray(expected_profiles));
+  }
+
+  // Convenience wrapper that calls |FormDataImporter::ImportFormData()| and
+  // subsequetly processes the candidates for address profile import.
+  // Returns the result of |FormDataImporter::ImportFormData()|.
+  bool ImportFormDataAndProcessAddressCandidates(
+      const FormStructure& form,
+      bool profile_autofill_enabled,
+      bool credit_card_autofill_enabled,
+      bool should_return_local_card,
+      std::unique_ptr<CreditCard>* imported_credit_card,
+      absl::optional<std::string>* imported_upi_id) {
+    std::vector<FormDataImporter::AddressProfileImportCandidate>
+        address_profile_import_candidates;
+
+    bool result = form_data_importer_->ImportFormData(
+        form, profile_autofill_enabled, credit_card_autofill_enabled,
+        should_return_local_card, imported_credit_card,
+        address_profile_import_candidates, imported_upi_id);
+
+    form_data_importer_->ProcessAddressProfileImportCandidates(
+        address_profile_import_candidates);
+
+    return result;
+  }
+
+  void ImportAddressProfilesAndVerifyExpectation(
+      const FormStructure& form,
+      const std::vector<AutofillProfile>& expected_profiles) {
+    ImportAddressProfiles(/*extraction_successful=*/!expected_profiles.empty(),
+                          form);
+    VerifyExpectationForImportedAddressProfiles(expected_profiles);
+  }
+
+  void ImportAddressProfileAndVerifyImportOfDefaultProfile(
+      const FormStructure& form) {
+    ImportAddressProfilesAndVerifyExpectation(form,
+                                              {ConstructDefaultProfile()});
+  }
+
+  void ImportAddressProfileAndVerifyImportOfNoProfile(
+      const FormStructure& form) {
+    ImportAddressProfilesAndVerifyExpectation(form, {});
   }
 
   bool ImportCreditCard(const FormStructure& form,
@@ -218,10 +528,8 @@ class FormDataImporterTestBase {
     CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
     test::SetCreditCardInfo(&expected, exp_name, exp_cc_num, exp_cc_month,
                             exp_cc_year, "");
-    const std::vector<CreditCard*>& results =
-        personal_data_manager_->GetCreditCards();
-    ASSERT_EQ(1U, results.size());
-    EXPECT_EQ(0, expected.Compare(*results[0]));
+    EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+                UnorderedElementsCompareEqual(expected));
   }
 
   void WaitForOnPersonalDataChanged() {
@@ -238,7 +546,7 @@ class FormDataImporterTestBase {
   std::unique_ptr<PrefService> prefs_;
   scoped_refptr<AutofillWebDataService> autofill_database_service_;
   scoped_refptr<WebDatabaseService> web_database_;
-  AutofillTable* autofill_table_;  // weak ref
+  raw_ptr<AutofillTable> autofill_table_;  // weak ref
   PersonalDataLoadedObserverMock personal_data_observer_;
   std::unique_ptr<TestAutofillClient> autofill_client_;
   std::unique_ptr<PersonalDataManager> personal_data_manager_;
@@ -254,8 +562,13 @@ class FormDataImporterTest
       public testing::Test,
       public testing::WithParamInterface<std::tuple<bool, bool, bool>> {
  protected:
-  bool StructuredNames() const { return structured_names_enabled_; }
-  bool StructuredAddresses() const { return structured_addresses_enabled_; }
+  bool DependentLocalityParsingEnabled() {
+    return support_for_depending_locality_;
+  }
+
+  bool ConsiderVariationCountryCodeForPhoneNumbers() {
+    return consider_variation_country_code_for_phone_numbers_;
+  }
 
  private:
   void SetUp() override {
@@ -299,43 +612,124 @@ class FormDataImporterTest
   }
 
   void InitializeFeatures() {
-    structured_names_enabled_ = std::get<0>(GetParam());
-    structured_addresses_enabled_ = std::get<1>(GetParam());
-    support_for_apartment_numbers_ = std::get<2>(GetParam());
+    support_for_apartment_numbers_ = std::get<0>(GetParam());
+    support_for_depending_locality_ = std::get<1>(GetParam());
+    consider_variation_country_code_for_phone_numbers_ =
+        std::get<2>(GetParam());
 
-    std::vector<base::Feature> enabled_features;
+    // Enable all those features by default.
+    std::vector<base::Feature> enabled_features{
+        features::kAutofillEnableSupportForMoreStructureInAddresses,
+        features::kAutofillEnableSupportForMoreStructureInNames};
+
     std::vector<base::Feature> disabled_features;
 
-    if (structured_names_enabled_) {
-      enabled_features.push_back(
-          features::kAutofillEnableSupportForMoreStructureInNames);
-    } else {
-      disabled_features.push_back(
-          features::kAutofillEnableSupportForMoreStructureInNames);
-    }
+    (support_for_depending_locality_ ? enabled_features : disabled_features)
+        .push_back(features::kAutofillEnableDependentLocalityParsing);
 
-    if (structured_addresses_enabled_) {
-      enabled_features.push_back(
-          features::kAutofillEnableSupportForMoreStructureInAddresses);
-    } else {
-      disabled_features.push_back(
-          features::kAutofillEnableSupportForMoreStructureInAddresses);
-    }
+    (support_for_apartment_numbers_ ? enabled_features : disabled_features)
+        .push_back(features::kAutofillEnableSupportForApartmentNumbers);
 
-    if (support_for_apartment_numbers_) {
-      enabled_features.push_back(
-          features::kAutofillEnableSupportForApartmentNumbers);
-    } else {
-      disabled_features.push_back(
-          features::kAutofillEnableSupportForApartmentNumbers);
-    }
+    (consider_variation_country_code_for_phone_numbers_ ? enabled_features
+                                                        : disabled_features)
+        .push_back(
+            features::kAutofillConsiderVariationCountryCodeForPhoneNumbers);
+
     scoped_feature_list_.InitWithFeatures(enabled_features, disabled_features);
   }
 
-  bool structured_names_enabled_;
-  bool structured_addresses_enabled_;
   bool support_for_apartment_numbers_;
+  bool support_for_depending_locality_;
+  bool consider_variation_country_code_for_phone_numbers_;
 };
+
+TEST_P(FormDataImporterTest, GetPredictedCountryCode) {
+  const AutofillProfile us_profile =
+      ConstructProfileFromTypeValuePairs({{ADDRESS_HOME_COUNTRY, "US"}});
+  const AutofillProfile empty_profile;
+  // Test prioritization: profile > variation service state > app locale
+  EXPECT_EQ(FormDataImporter::GetPredictedCountryCode(us_profile, "DE", "de-AT",
+                                                      nullptr),
+            "US");
+  EXPECT_EQ(FormDataImporter::GetPredictedCountryCode(us_profile, "", "de-AT",
+                                                      nullptr),
+            "US");
+  EXPECT_EQ(FormDataImporter::GetPredictedCountryCode(empty_profile, "DE",
+                                                      "de-AT", nullptr),
+            "DE");
+  EXPECT_EQ(FormDataImporter::GetPredictedCountryCode(empty_profile, "",
+                                                      "de-AT", nullptr),
+            "AT");
+}
+
+TEST_P(FormDataImporterTest, ComplementCountry) {
+  base::test::ScopedFeatureList complement_country_feature;
+  complement_country_feature.InitAndEnableFeature(
+      features::kAutofillComplementCountryCodeOnImport);
+
+  auto import_with_country =
+      [this](const std::string& form_country,
+             const std::vector<AutofillProfile>& expected_profiles) {
+        // Remove existing profiles, to prevent an update instead of an import.
+        personal_data_manager_->ClearAllLocalData();
+
+        std::unique_ptr<FormStructure> form_structure =
+            form_country.empty()
+                ? ConstructDefaultProfileFormStructure()
+                : ConstructDefaultProfileFormStructureWithCountry(form_country);
+        ImportAddressProfilesAndVerifyExpectation(*form_structure,
+                                                  expected_profiles);
+      };
+
+  // Country part of the form:
+  // If a valid country was entered, use that.
+  import_with_country("Germany", {ConstructDefaultProfileWithCountry("DE")});
+  // Reject the profile if an invalid country was entered.
+  import_with_country("Somewhere", {});
+  // Country not part of the form: Complement using
+  // FormDataImporter::GetPredictedCountryCode
+  // If no variation config country code is available, default to locale (US)
+  import_with_country("", {ConstructDefaultProfileWithCountry("US")});
+  // Prefer variation config country code over locale
+  autofill_client_->SetVariationConfigCountryCode("DE");
+  import_with_country("", {ConstructDefaultProfileWithCountry("DE")});
+}
+
+TEST_P(FormDataImporterTest, InvalidPhoneNumber) {
+  std::vector<std::pair<ServerFieldType, std::string>>
+      profile_with_invalid_phone_number = GetDefaultProfileTypeValuePairs();
+  auto phone_number_it =
+      base::ranges::find(profile_with_invalid_phone_number,
+                         std::pair<ServerFieldType, std::string>(
+                             PHONE_HOME_WHOLE_NUMBER, kDefaultPhone));
+  phone_number_it->second = "invalid";
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(
+          profile_with_invalid_phone_number);
+
+  // With |kAutofillRemoveInvalidPhoneNumberOnImport| disabled, profiles with
+  // invalid phone numbers are rejected.
+  {
+    base::test::ScopedFeatureList remove_invalid_phone_number_feature;
+    remove_invalid_phone_number_feature.InitAndDisableFeature(
+        features::kAutofillRemoveInvalidPhoneNumberOnImport);
+
+    ImportAddressProfilesAndVerifyExpectation(*form_structure, {});
+  }
+
+  // With the feature enabled, the phone number is removed and the profile
+  // imported.
+  {
+    base::test::ScopedFeatureList remove_invalid_phone_number_feature;
+    remove_invalid_phone_number_feature.InitAndEnableFeature(
+        features::kAutofillRemoveInvalidPhoneNumberOnImport);
+
+    profile_with_invalid_phone_number.erase(phone_number_it);
+    ImportAddressProfilesAndVerifyExpectation(
+        *form_structure, {ConstructProfileFromTypeValuePairs(
+                             profile_with_invalid_phone_number)});
+  }
+}
 
 // ImportAddressProfiles tests.
 TEST_P(FormDataImporterTest, ImportStructuredNameProfile) {
@@ -489,12 +883,9 @@ TEST_P(
   EXPECT_EQ(results[0]->GetVerificationStatus(ADDRESS_HOME_STREET_ADDRESS),
             structured_address::VerificationStatus::kFormatted);
 }
+
 TEST_P(FormDataImporterTest,
        ImportStructuredAddressProfile_GermanStreetNameAndHouseNumber) {
-  // This test is only applicable if structured addresses are enabled.
-  if (!StructuredAddresses())
-    return;
-
   FormData form;
   form.url = GURL("https://wwww.foo.com");
 
@@ -587,44 +978,31 @@ TEST_P(FormDataImporterTest, ImportAddressProfiles) {
   dependent_locality_feature.InitAndEnableFeature(
       features::kAutofillEnableDependentLocalityParsing);
 
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultProfileFormStructure();
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
+}
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Neighborhood:", "neighborhood", "Nob Hill", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+TEST_P(FormDataImporterTest, ImportSecondAddressProfiles) {
+  base::test::ScopedFeatureList dependent_locality_feature;
+  dependent_locality_feature.InitAndEnableFeature(
+      features::kAutofillEnableDependentLocalityParsing);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "Nob Hill", "San Francisco", "California", "94102",
-                       nullptr, nullptr);
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructSecondProfileFormStructure();
+  ImportAddressProfilesAndVerifyExpectation(*form_structure,
+                                            {ConstructSecondProfile()});
+}
+
+TEST_P(FormDataImporterTest, ImportThirdAddressProfiles) {
+  base::test::ScopedFeatureList dependent_locality_feature;
+  dependent_locality_feature.InitAndEnableFeature(
+      features::kAutofillEnableDependentLocalityParsing);
+
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructThirdProfileFormStructure();
+  ImportAddressProfilesAndVerifyExpectation(*form_structure,
+                                            {ConstructThirdProfile()});
 }
 
 // Test that the storage is prevented if the structured address prompt feature
@@ -634,232 +1012,82 @@ TEST_P(FormDataImporterTest, ImportAddressProfiles_DontAllowPrompt) {
   save_prompt_feature.InitAndEnableFeature(
       features::kAutofillAddressProfileSavePrompt);
 
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
-
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure,
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultProfileFormStructure();
+  ImportAddressProfiles(/*extraction_successful=*/true, *form_structure,
                         /*skip_waiting_on_pdm=*/true,
                         /*allow_save_prompts=*/false);
-
-  EXPECT_EQ(personal_data_manager_->GetProfiles().size(), 0U);
+  VerifyExpectationForImportedAddressProfiles({});
 
   save_prompt_feature.Reset();
   save_prompt_feature.InitAndDisableFeature(
       features::kAutofillAddressProfileSavePrompt);
 
   // Verify that the behavior changes when prompts are disabled.
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure,
+  ImportAddressProfiles(/*extraction_successful=*/true, *form_structure,
                         /*skip_waiting_on_pdm=*/false,
                         /*allow_save_prompts=*/false);
-  EXPECT_EQ(personal_data_manager_->GetProfiles().size(), 1U);
-}
-
-// Tests that even if the the autocomplete prevents filling, it does not prevent
-// import. For now, this is limited to the field with the signature 2281611779.
-TEST_P(FormDataImporterTest, ImportAddressProfilesDespiteAutocomplete) {
-  base::test::ScopedFeatureList feature_list;
-  feature_list.InitAndEnableFeature(
-      features::kAutofillIgnoreAutocompleteForImport);
-
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
-
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "checkout[shipping_address][address1]",
-                            "21 Laussat St", "text", &field);
-  field.autocomplete_attribute = "none";
-  form.fields.push_back(field);
-  field.autocomplete_attribute = "";
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  ASSERT_EQ(form_structure.field(3)->GetFieldSignature(),
-            FieldSignature(2281611779));
-  ASSERT_EQ(form_structure.field(3)->Type().GetStorableType(), UNKNOWN_TYPE);
-
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       nullptr, "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
-
-  ASSERT_EQ(form_structure.field(3)->GetFieldSignature(),
-            FieldSignature(2281611779));
-  ASSERT_EQ(form_structure.field(3)->Type().GetStorableType(), UNKNOWN_TYPE);
+  VerifyExpectationForImportedAddressProfiles({ConstructDefaultProfile()});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfileFromUnifiedSection) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
-
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultProfileFormStructure();
 
   // Assign the address field another section than the other fields.
-  form_structure.field(3)->section = "another_section";
+  form_structure->field(4)->section = "another_section";
 
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-  const std::vector<AutofillProfile*>& results2 =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.Compare(*results2[0]));
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_BadEmail) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultProfileFormStructure();
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "bogus", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure);
+  // Change the value of the email field.
+  ASSERT_EQ(form_structure->field(2)->Type().GetStorableType(), EMAIL_ADDRESS);
+  form_structure->field(2)->value = u"bogus";
 
-  ASSERT_EQ(0U, personal_data_manager_->GetProfiles().size());
+  // Verify that there was no import.
+  ImportAddressProfileAndVerifyImportOfNoProfile(*form_structure);
 }
 
 // Tests that a 'confirm email' field does not block profile import.
 TEST_P(FormDataImporterTest, ImportAddressProfiles_TwoEmails) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {EMAIL_ADDRESS, kDefaultMail},
+           // Add two email fields with the same value.
+           {EMAIL_ADDRESS, kDefaultMail},
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip}});
 
-  FormFieldData field;
-  test::CreateTestFormField("Name:", "name", "George Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "example@example.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Confirm email:", "confirm_email",
-                            "example@example.com", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  ASSERT_EQ(1U, personal_data_manager_->GetProfiles().size());
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
 }
 
 // Tests two email fields containing different values blocks profile import.
 TEST_P(FormDataImporterTest, ImportAddressProfiles_TwoDifferentEmails) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {EMAIL_ADDRESS, kDefaultMail},
+           // Add two email fields with different values.
+           {EMAIL_ADDRESS, "another@mail.com"},
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip}});
 
-  FormFieldData field;
-  test::CreateTestFormField("Name:", "name", "George Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "example@example.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email2", "example2@example.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure);
-
-  ASSERT_EQ(0U, personal_data_manager_->GetProfiles().size());
+  ImportAddressProfileAndVerifyImportOfNoProfile(*form_structure);
 }
 
 // Tests that multiple phone numbers do not block profile import and the first
@@ -869,45 +1097,21 @@ TEST_P(FormDataImporterTest, ImportAddressProfiles_MultiplePhoneNumbers) {
   enable_import_when_multiple_phones_feature.InitAndEnableFeature(
       features::kAutofillEnableImportWhenMultiplePhoneNumbers);
 
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {EMAIL_ADDRESS, kDefaultMail},
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+           // Add a second phone field with a different number.
+           {PHONE_HOME_WHOLE_NUMBER, kSecondPhone},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip}});
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 1:", "phone1", "+16505550000", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 2:", "phone2", "+14155551234", "text",
-                            &field);
-  form.fields.push_back(field);
-
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington", nullptr,
-                       nullptr, "21 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, "1 650-555-0000");
-
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
 }
 
 // Tests that multiple phone numbers do not block profile import and the first
@@ -918,898 +1122,428 @@ TEST_P(FormDataImporterTest,
   enable_import_when_multiple_phones_feature.InitAndEnableFeature(
       features::kAutofillEnableImportWhenMultiplePhoneNumbers);
 
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  FormData form_data = ConstructFormDateFromTypeValuePairs(
+      {{NAME_FIRST, kDefaultFirstName},
+       {NAME_LAST, kDefaultLastName},
+       {EMAIL_ADDRESS, kDefaultMail},
+       // Add six phone number fields.
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneAreaCode},
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhonePrefix},
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneSuffix},
+       {PHONE_HOME_WHOLE_NUMBER, kSecondPhoneAreaCode},
+       {PHONE_HOME_WHOLE_NUMBER, kSecondPhonePrefix},
+       {PHONE_HOME_WHOLE_NUMBER, kSecondPhoneSuffix},
+       {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+       {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+       {ADDRESS_HOME_CITY, kDefaultCity},
+       {ADDRESS_HOME_STATE, kDefaultState},
+       {ADDRESS_HOME_ZIP, kDefaultZip}});
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 1:", "home_phone_area_code1", "650", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 1:", "home_phone_prefix1", "555", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 1:", "home_phone_suffix1", "0000", "text",
-                            &field);
-  field.max_length = 4;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 2:", "home_phone_area_code2", "202", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 2:", "home_phone_prefix2", "555", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone 2:", "home_phone_suffix2", "1234", "text",
-                            &field);
-  field.max_length = 4;
-  form.fields.push_back(field);
+  form_data.fields[3].max_length = 3;
+  form_data.fields[4].max_length = 3;
+  form_data.fields[5].max_length = 4;
+  form_data.fields[6].max_length = 3;
+  form_data.fields[7].max_length = 3;
+  form_data.fields[8].max_length = 4;
 
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromFormData(form_data);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington", nullptr,
-                       nullptr, "21 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, "(650) 555-0000");
-
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  ImportAddressProfilesAndVerifyExpectation(
+      *form_structure,
+      {ConstructProfileFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {EMAIL_ADDRESS, kDefaultMail},
+           // Note that this formatting is without a country code.
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneDomesticFormatting},
+           {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip}})});
 }
 
 // Tests that not enough filled fields will result in not importing an address.
 TEST_P(FormDataImporterTest, ImportAddressProfiles_NotEnoughFilledFields) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {CREDIT_CARD_NUMBER, kDefaultCreditCardNumber}});
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Card number:", "card_number",
-                            "4111 1111 1111 1111", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure);
-
-  ASSERT_EQ(0U, personal_data_manager_->GetProfiles().size());
+  ImportAddressProfileAndVerifyImportOfNoProfile(*form_structure);
+  // Also verify that there was no import of a credit card.
   ASSERT_EQ(0U, personal_data_manager_->GetCreditCards().size());
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MinimumAddressUSA) {
-  // United States addresses must specify one address line, a city, state and
-  // zip code.
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {ADDRESS_HOME_COUNTRY, "US"},
+  });
 
-  FormFieldData field;
-  test::CreateTestFormField("Name:", "name", "Barack Obama", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "1600 Pennsylvania Avenue",
-                            "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Washington", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "DC", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "20500", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Country:", "country", "USA", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  AutofillProfile profile =
+      ConstructProfileFromTypeValuePairs(type_value_pairs);
 
-  ASSERT_EQ(1U, personal_data_manager_->GetProfiles().size());
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*form_structure, {profile});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MinimumAddressGB) {
-  // British addresses do not require a state/province as the county is usually
-  // not requested on forms.
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {ADDRESS_HOME_COUNTRY, "GB"},
+  });
 
-  FormFieldData field;
-  test::CreateTestFormField("Name:", "name", "David Cameron", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "10 Downing Street", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "London", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Postcode:", "postcode", "SW1A 2AA", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Country:", "country", "United Kingdom", "text",
-                            &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  AutofillProfile profile =
+      ConstructProfileFromTypeValuePairs(type_value_pairs);
 
-  ASSERT_EQ(1U, personal_data_manager_->GetProfiles().size());
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*form_structure, {profile});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MinimumAddressGI) {
-  // Gibraltar has the most minimal set of requirements for a valid address.
-  // There are no cities or provinces and no postal/zip code system.
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_COUNTRY, "GI"},
+  });
 
-  FormFieldData field;
-  test::CreateTestFormField("Name:", "name", "Sir Adrian Johns", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "The Convent, Main Street",
-                            "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Country:", "country", "Gibraltar", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  AutofillProfile profile =
+      ConstructProfileFromTypeValuePairs(type_value_pairs);
 
-  ASSERT_EQ(1U, personal_data_manager_->GetProfiles().size());
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*form_structure, {profile});
 }
 
 TEST_P(FormDataImporterTest,
        ImportAddressProfiles_PhoneNumberSplitAcrossMultipleFields) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  FormData form_data = ConstructFormDateFromTypeValuePairs(
+      {{NAME_FIRST, kDefaultFirstName},
+       {NAME_LAST, kDefaultLastName},
+       {EMAIL_ADDRESS, kDefaultMail},
+       // Add three phone number fields.
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneAreaCode},
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhonePrefix},
+       {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneSuffix},
+       {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+       {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+       {ADDRESS_HOME_CITY, kDefaultCity},
+       {ADDRESS_HOME_STATE, kDefaultState},
+       {ADDRESS_HOME_ZIP, kDefaultZip}});
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone #:", "home_phone_area_code", "650", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone #:", "home_phone_prefix", "555", "text",
-                            &field);
-  field.max_length = 3;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Phone #:", "home_phone_suffix", "0000", "text",
-                            &field);
-  field.max_length = 4;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  // Define the length of the phone number fields to allow the parser to
+  // identify them as area code, prefix and suffix.
+  form_data.fields[3].max_length = 3;
+  form_data.fields[4].max_length = 3;
+  form_data.fields[5].max_length = 4;
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington", nullptr,
-                       nullptr, "21 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, "(650) 555-0000");
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromFormData(form_data);
+  ImportAddressProfilesAndVerifyExpectation(
+      *form_structure,
+      {ConstructProfileFromTypeValuePairs(
+          {{NAME_FIRST, kDefaultFirstName},
+           {NAME_LAST, kDefaultLastName},
+           {EMAIL_ADDRESS, kDefaultMail},
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneDomesticFormatting},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_DEPENDENT_LOCALITY, kDefaultDependentLocality},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip}})});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_UnFocussableFields) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructDefaultProfileFormStructure();
+  // Set the Address line field as unfocusable.
+  form_structure->field(4)->is_focusable = false;
 
-  FormFieldData field;
+  base::test::ScopedFeatureList unfocusable_feature;
 
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("Phone:", "phone", "1234554321", "text", &field);
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  // Set this field to be unfocusable.
-  field.is_focusable = false;
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-
-  // Verify the status quo that the form is not imported with the unfocusable
-  // fields.
-  // TODO(crbug.com/1101280): Remove once feature is launched.
-  scoped_feature_list_.Reset();
-  scoped_feature_list_.InitAndDisableFeature(
+  // With the feature disabled, there should be no import.
+  unfocusable_feature.InitAndDisableFeature(
       features::kAutofillProfileImportFromUnfocusableFields);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure);
+  ImportAddressProfileAndVerifyImportOfNoProfile(*form_structure);
 
-  // Activate the feature and test again.
-  scoped_feature_list_.Reset();
-  scoped_feature_list_.InitAndEnableFeature(
+  unfocusable_feature.Reset();
+  // In contrast, with the feature enabled, there should be import.
+  unfocusable_feature.InitAndEnableFeature(
       features::kAutofillProfileImportFromUnfocusableFields);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington", nullptr,
-                       nullptr, "21 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, "1234554321");
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MultilineAddress) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      // This is a multi-line field.
+      {ADDRESS_HOME_STREET_ADDRESS, kDefaultStreetAddress},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {ADDRESS_HOME_COUNTRY, "US"},
+  });
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "street_address",
-                            "21 Laussat St\n"
-                            "Apt. #42",
-                            "textarea", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  AutofillProfile profile =
+      ConstructProfileFromTypeValuePairs(type_value_pairs);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St",
-                       "Apt. #42", "San Francisco", "California", "94102",
-                       nullptr, nullptr);
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*form_structure, {profile});
 }
 
 TEST_P(FormDataImporterTest,
        ImportAddressProfiles_TwoValidProfilesDifferentForms) {
-  FormData form1;
-  form1.url = GURL("https://wwww.foo.com");
+  std::unique_ptr<FormStructure> default_form_structure =
+      ConstructDefaultProfileFormStructure();
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form1.fields.push_back(field);
+  AutofillProfile default_profile = ConstructDefaultProfile();
+  ImportAddressProfilesAndVerifyExpectation(*default_form_structure,
+                                            {default_profile});
 
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure1);
+  // Now import a second profile from a different form submission.
+  std::unique_ptr<FormStructure> alternative_form_structure =
+      ConstructSecondProfileFormStructure();
+  AutofillProfile alternative_profile = ConstructSecondProfile();
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-  const std::vector<AutofillProfile*>& results1 =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
-
-  // Now create a completely different profile.
-  FormData form2;
-  form2.url = GURL("https://wwww.foo.com");
-
-  test::CreateTestFormField("First name:", "first_name", "John", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Adams", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "second@gmail.com", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "22 Laussat St", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure2);
-
-  AutofillProfile expected2(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected2, "John", nullptr, "Adams", "second@gmail.com",
-                       nullptr, "22 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, nullptr);
-  std::vector<AutofillProfile*> profiles;
-  profiles.push_back(&expected);
-  profiles.push_back(&expected2);
-  ExpectSameElements(profiles, personal_data_manager_->GetProfiles());
+  // Verify that both profiles have been imported.
+  ImportAddressProfilesAndVerifyExpectation(
+      *alternative_form_structure, {alternative_profile, default_profile});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_TwoValidProfilesSameForm) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  AutofillProfile default_profile = ConstructDefaultProfile();
+  AutofillProfile alternative_profile = ConstructSecondProfile();
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
+  // Get the type value pairs that correspond to the first profile.
+  std::vector<std::pair<ServerFieldType, std::string>>
+      profile_type_value_pairs = GetDefaultProfileTypeValuePairs();
+  std::vector<std::pair<ServerFieldType, std::string>>
+      second_profile_type_value_pairs = GetSecondProfileTypeValuePairs();
 
-  // Different address.
-  test::CreateTestFormField("First name:", "first_name", "John", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Adams", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "second@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "22 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
+  // Now combine the two vectors and construct the single FormStructure that
+  // holds both profiles.
+  profile_type_value_pairs.insert(profile_type_value_pairs.end(),
+                                  second_profile_type_value_pairs.begin(),
+                                  second_profile_type_value_pairs.end());
 
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(profile_type_value_pairs);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-  AutofillProfile expected2(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected2, "John", nullptr, "Adams", "second@gmail.com",
-                       nullptr, "22 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, nullptr);
-
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(2U, results.size());
-
-  std::vector<AutofillProfile*> profiles;
-  profiles.push_back(&expected);
-  profiles.push_back(&expected2);
-  ExpectSameElements(profiles, personal_data_manager_->GetProfiles());
+  ImportAddressProfilesAndVerifyExpectation(
+      *form_structure, {default_profile, alternative_profile});
 }
 
 TEST_P(FormDataImporterTest,
        ImportAddressProfiles_OneValidProfileSameForm_PartsHidden) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+  FormData form_data = ConstructDefaultFormData();
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
+  FormData hidden_second_form = form_data;
+  for (FormFieldData& field : hidden_second_form.fields) {
+    // Reset the values and make the field non focusable.
+    field.value = u"";
+    field.is_focusable = false;
+  }
 
-  // There is an empty but hidden form section (this has been observed on sites
-  // where users can choose which form section they choose by unhiding it).
-  test::CreateTestFormField("First name:", "first_name", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "", "text", &field);
-  field.is_focusable = false;
-  form.fields.push_back(field);
+  // Append the fields of the second form to the first form.
+  form_data.fields.insert(form_data.fields.end(),
+                          hidden_second_form.fields.begin(),
+                          hidden_second_form.fields.end());
 
-  // Still able to do the import.
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
-
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-
-  std::vector<AutofillProfile*> profiles;
-  profiles.push_back(&expected);
-  ExpectSameElements(profiles, personal_data_manager_->GetProfiles());
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromFormData(form_data);
+  ImportAddressProfileAndVerifyImportOfDefaultProfile(*form_structure);
 }
 
 // A maximum of two address profiles are imported per form.
-TEST_P(FormDataImporterTest, ImportAddressProfiles_ThreeValidProfilesSameForm) {
-  FormData form;
-  form.url = GURL("https://wwww.foo.com");
+// This test is flaky for an unknown reason.
+// TODO(crbug.com/1297212): Understand flakiness.
+TEST_P(FormDataImporterTest,
+       DISABLED_ImportAddressProfiles_ThreeValidProfilesSameForm) {
+  std::vector<std::pair<ServerFieldType, std::string>>
+      profile_type_value_pairs = GetDefaultProfileTypeValuePairs();
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "21 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
+  std::vector<std::pair<ServerFieldType, std::string>>
+      second_profile_type_value_pairs = GetSecondProfileTypeValuePairs();
 
-  // Different address within the same form.
-  test::CreateTestFormField("First name:", "first_name", "John", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Adams", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "second@gmail.com", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address1", "22 Laussat St", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form.fields.push_back(field);
+  std::vector<std::pair<ServerFieldType, std::string>>
+      third_profile_type_value_pairs = GetThirdProfileTypeValuePairs();
 
-  // Yet another different address.
-  test::CreateTestFormField("First name:", "first_name", "David", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Cameron", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "10 Downing Street", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "London", "text", &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Postcode:", "postcode", "SW1A 2AA", "text",
-                            &field);
-  form.fields.push_back(field);
-  test::CreateTestFormField("Country:", "country", "United Kingdom", "text",
-                            &field);
-  form.fields.push_back(field);
+  // Merge the type value pairs into one and construct the corresponding form
+  // structure.
+  profile_type_value_pairs.insert(profile_type_value_pairs.end(),
+                                  second_profile_type_value_pairs.begin(),
+                                  second_profile_type_value_pairs.end());
+  profile_type_value_pairs.insert(profile_type_value_pairs.end(),
+                                  third_profile_type_value_pairs.begin(),
+                                  third_profile_type_value_pairs.end());
 
-  FormStructure form_structure(form);
-  form_structure.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure);
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(profile_type_value_pairs);
 
-  // Only two are saved.
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
-  AutofillProfile expected2(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected2, "John", nullptr, "Adams", "second@gmail.com",
-                       nullptr, "22 Laussat St", nullptr, "San Francisco",
-                       "California", "94102", nullptr, nullptr);
-
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(2U, results.size());
-
-  std::vector<AutofillProfile*> profiles;
-  profiles.push_back(&expected);
-  profiles.push_back(&expected2);
-  ExpectSameElements(profiles, personal_data_manager_->GetProfiles());
+  // Import from the form structure and verify that only the first two profiles
+  // are imported.
+  ImportAddressProfilesAndVerifyExpectation(
+      *form_structure, {ConstructDefaultProfile(), ConstructSecondProfile()});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_SameProfileWithConflict) {
-  FormData form1;
-  form1.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> initial_type_value_pairs{
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneDomesticFormatting},
+  };
+  AutofillProfile initial_profile =
+      ConstructProfileFromTypeValuePairs(initial_type_value_pairs);
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "1600 Pennsylvania Avenue",
-                            "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address Line 2:", "address2", "Suite A", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Phone:", "phone", "6505556666", "text", &field);
-  form1.fields.push_back(field);
+  std::unique_ptr<FormStructure> initial_form_structure =
+      ConstructFormStructureFromTypeValuePairs(initial_type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*initial_form_structure,
+                                            {initial_profile});
 
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure1);
+  // Create a second form structure with an additional country and a differently
+  // formatted phone number
+  std::vector<std::pair<ServerFieldType, std::string>>
+      conflicting_type_value_pairs(
+          {{NAME_FULL, kDefaultFullName},
+           {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+           {ADDRESS_HOME_CITY, kDefaultCity},
+           {ADDRESS_HOME_STATE, kDefaultState},
+           {ADDRESS_HOME_ZIP, kDefaultZip},
+           // The phone number is spelled differently.
+           {PHONE_HOME_WHOLE_NUMBER, kDefaultPhoneAlternativeFormatting},
+           // Country information is added.
+           {ADDRESS_HOME_COUNTRY, "US"}});
+  AutofillProfile conflicting_profile =
+      ConstructProfileFromTypeValuePairs(conflicting_type_value_pairs);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "1600 Pennsylvania Avenue",
-                       "Suite A", "San Francisco", "California", "94102",
-                       nullptr, "(650) 555-6666");
-  expected.FinalizeAfterImport();
-  const std::vector<AutofillProfile*>& results1 =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
+  // Verify that the initial profile and the conflicting profile are not the
+  // same.
+  ASSERT_FALSE(initial_profile.Compare(conflicting_profile) == 0);
+  std::unique_ptr<FormStructure> conflicting_form_structure =
+      ConstructFormStructureFromTypeValuePairs(conflicting_type_value_pairs);
 
-  // Now create an updated profile.
-  FormData form2;
-  form2.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>>
+      resulting_type_value_pairs{{NAME_FULL, kDefaultFullName},
+                                 {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+                                 {ADDRESS_HOME_CITY, kDefaultCity},
+                                 {ADDRESS_HOME_STATE, kDefaultState},
+                                 {ADDRESS_HOME_ZIP, kDefaultZip},
+                                 // The phone number is spelled differently.
+                                 {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+                                 // Country information is added.
+                                 {ADDRESS_HOME_COUNTRY, "US"}};
 
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Address:", "address", "1600 Pennsylvania Avenue",
-                            "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Address Line 2:", "address2", "Suite A", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "San Francisco", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "California", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zip", "94102", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form2.fields.push_back(field);
-  // Country gets added.
-  test::CreateTestFormField("Country:", "country", "USA", "text", &field);
-  form2.fields.push_back(field);
-  // Same phone number with different formatting doesn't create a new profile.
-  test::CreateTestFormField("Phone:", "phone", "650-555-6666", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure2);
-
-  const std::vector<AutofillProfile*>& results2 =
-      personal_data_manager_->GetProfiles();
-
-  // Full name, phone formatting and country are updated.
-  if (!StructuredNames())
-    expected.SetRawInfo(NAME_FULL, u"George Washington");
-  expected.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"+1 650-555-6666");
-  expected.SetRawInfoWithVerificationStatus(
-      ADDRESS_HOME_COUNTRY, u"US",
-      structured_address::VerificationStatus::kObserved);
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.Compare(*results2[0]));
+  // Verify that importing the conflicting profile will result in an update of
+  // the existing profile rather than creating a new one.
+  ImportAddressProfilesAndVerifyExpectation(
+      *conflicting_form_structure,
+      {ConstructProfileFromTypeValuePairs(resulting_type_value_pairs)});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MissingInfoInOld) {
-  FormData form1;
-  form1.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> initial_type_value_pairs{
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+  };
+  AutofillProfile initial_profile =
+      ConstructProfileFromTypeValuePairs(initial_type_value_pairs);
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address Line 1:", "address", "190 High Street",
-                            "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Philadelphia", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "Pennsylvania", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zipcode", "19106", "text", &field);
-  form1.fields.push_back(field);
+  std::unique_ptr<FormStructure> initial_form_structure =
+      ConstructFormStructureFromTypeValuePairs(initial_type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*initial_form_structure,
+                                            {initial_profile});
 
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure1);
+  // Create a superset that includes a new email address.
+  std::vector<std::pair<ServerFieldType, std::string>>
+      superset_type_value_pairs = initial_type_value_pairs;
+  superset_type_value_pairs.emplace_back(EMAIL_ADDRESS, kDefaultMail);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington", nullptr,
-                       nullptr, "190 High Street", nullptr, "Philadelphia",
-                       "Pennsylvania", "19106", nullptr, nullptr);
-  if (StructuredNames())
-    expected.FinalizeAfterImport();
-  const std::vector<AutofillProfile*>& results1 =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
+  AutofillProfile superset_profile =
+      ConstructProfileFromTypeValuePairs(superset_type_value_pairs);
 
-  // Submit a form with new data for the first profile.
-  FormData form2;
-  form2.url = GURL("https://wwww.foo.com");
+  // Verify that the initial profile and the superset profile are not the
+  // same.
+  ASSERT_FALSE(initial_profile.Compare(superset_profile) == 0);
 
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Address Line 1:", "address", "190 High Street",
-                            "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Philadelphia", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "Pennsylvania", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zipcode", "19106", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure2);
-
-  const std::vector<AutofillProfile*>& results2 =
-      personal_data_manager_->GetProfiles();
-
-  AutofillProfile expected2(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected2, "George", nullptr, "Washington",
-                       "theprez@gmail.com", nullptr, "190 High Street", nullptr,
-                       "Philadelphia", "Pennsylvania", "19106", nullptr,
-                       nullptr);
-  if (StructuredNames())
-    expected2.FinalizeAfterImport();
-  else
-    expected2.SetRawInfo(NAME_FULL, u"George Washington");
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  std::unique_ptr<FormStructure> superset_form_structure =
+      ConstructFormStructureFromTypeValuePairs(superset_type_value_pairs);
+  // Verify that importing the superset profile will result in an update of
+  // the existing profile rather than creating a new one.
+  ImportAddressProfilesAndVerifyExpectation(*superset_form_structure,
+                                            {superset_profile});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_MissingInfoInNew) {
-  FormData form1;
-  form1.url = GURL("https://wwww.foo.com");
+  std::vector<std::pair<ServerFieldType, std::string>> subset_type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_STATE, kDefaultState},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {PHONE_HOME_WHOLE_NUMBER, kDefaultPhone},
+  });
+  // Create a superset that includes a new email address.
+  std::vector<std::pair<ServerFieldType, std::string>>
+      superset_type_value_pairs = subset_type_value_pairs;
+  superset_type_value_pairs.emplace_back(EMAIL_ADDRESS, kDefaultMail);
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Company:", "company", "Government", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address Line 1:", "address", "190 High Street",
-                            "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Philadelphia", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "Pennsylvania", "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zipcode", "19106", "text", &field);
-  form1.fields.push_back(field);
+  AutofillProfile subset_profile =
+      ConstructProfileFromTypeValuePairs(subset_type_value_pairs);
+  AutofillProfile superset_profile =
+      ConstructProfileFromTypeValuePairs(superset_type_value_pairs);
 
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure1);
+  // Verify that the subset profile and the superset profile are not the
+  // same.
+  ASSERT_FALSE(subset_profile.Compare(superset_profile) == 0);
 
-  AutofillProfile expected(base::GenerateGUID(), test::kEmptyOrigin);
-  test::SetProfileInfo(&expected, "George", nullptr, "Washington",
-                       "theprez@gmail.com", "Government", "190 High Street",
-                       nullptr, "Philadelphia", "Pennsylvania", "19106",
-                       nullptr, nullptr);
-  expected.FinalizeAfterImport();
-  const std::vector<AutofillProfile*>& results1 =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, expected.Compare(*results1[0]));
+  // First import the superset profile.
+  std::unique_ptr<FormStructure> superset_form_structure =
+      ConstructFormStructureFromTypeValuePairs(superset_type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*superset_form_structure,
+                                            {superset_profile});
 
-  // Submit a form with new data for the first profile.
-  FormData form2;
-  form2.url = GURL("https://wwww.foo.com");
-
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form2.fields.push_back(field);
-  // Note missing Company field.
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Address Line 1:", "address", "190 High Street",
-                            "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Philadelphia", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("State:", "state", "Pennsylvania", "text", &field);
-  form2.fields.push_back(field);
-  test::CreateTestFormField("Zip:", "zipcode", "19106", "text", &field);
-  form2.fields.push_back(field);
-
-  FormStructure form_structure2(form2);
-  form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/true, form_structure2);
-
-  const std::vector<AutofillProfile*>& results2 =
-      personal_data_manager_->GetProfiles();
-
-  // The merge operation will populate the full name if it's empty.
-  // For structured names, this happens automatically on finalization.
-  if (StructuredNames())
-    expected.FinalizeAfterImport();
-  else
-    expected.SetRawInfo(NAME_FULL, u"George Washington");
-  ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected.Compare(*results2[0]));
+  // Than import the subset profile and verify that the stored profile is still
+  // the superset.
+  std::unique_ptr<FormStructure> subset_form_structure =
+      ConstructFormStructureFromTypeValuePairs(subset_type_value_pairs);
+  ImportAddressProfilesAndVerifyExpectation(*superset_form_structure,
+                                            {superset_profile});
 }
 
 TEST_P(FormDataImporterTest, ImportAddressProfiles_InsufficientAddress) {
-  FormData form1;
-  form1.url = GURL("https://wwww.foo.com");
+  // This address is missing a state which is required in the US.
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs({
+      {NAME_FULL, kDefaultFullName},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {ADDRESS_HOME_COUNTRY, "US"},
+  });
 
-  FormFieldData field;
-  test::CreateTestFormField("First name:", "first_name", "George", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Last name:", "last_name", "Washington", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Company:", "company", "Government", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Email:", "email", "theprez@gmail.com", "text",
-                            &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("Address Line 1:", "address", "190 High Street",
-                            "text", &field);
-  form1.fields.push_back(field);
-  test::CreateTestFormField("City:", "city", "Philadelphia", "text", &field);
-  form1.fields.push_back(field);
-
-  FormStructure form_structure1(form1);
-  form_structure1.DetermineHeuristicTypes(nullptr, nullptr);
-  ImportAddressProfiles(/*extraction_successful=*/false, form_structure1);
-
-  // Since no refresh is expected, reload the data from the database to make
-  // sure no changes were written out.
-  ResetPersonalDataManager(USER_MODE_NORMAL);
-
-  ASSERT_EQ(0U, personal_data_manager_->GetProfiles().size());
-  ASSERT_EQ(0U, personal_data_manager_->GetCreditCards().size());
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  // Verify that no profile is imported.
+  ImportAddressProfileAndVerifyImportOfNoProfile(*form_structure);
 }
 
 // Ensure that if a verified profile already exists, aggregated profiles cannot
@@ -1864,7 +1598,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<AutofillProfile*>& results =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, profile.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(profile));
 
   // Try the same thing, but without "Mitchell". The profiles should still match
   // because the non empty name pieces (first and last) match that stored in the
@@ -1882,7 +1616,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<AutofillProfile*>& results2 =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, profile.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(profile));
 }
 
 TEST_P(FormDataImporterTest,
@@ -1955,7 +1689,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<AutofillProfile*>& results =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, profile.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(profile));
 
   // Try the same thing, but without "Mitchell". The profiles should still match
   // because "Marion Morrison" is a variant of the known full name.
@@ -1972,7 +1706,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<AutofillProfile*>& results2 =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, profile.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(profile));
 }
 
 TEST_P(FormDataImporterTest,
@@ -2054,7 +1788,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<AutofillProfile*>& results =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, profile.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(profile));
 }
 
 // Tests that no profile is inferred if the country is not recognized.
@@ -2155,7 +1889,7 @@ TEST_P(FormDataImporterTest, ImportAddressProfiles_LocalizedCountryName) {
                        "San Francisco", "California", "94102", "AM", nullptr);
   const std::vector<AutofillProfile*>& results =
       personal_data_manager_->GetProfiles();
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(expected));
 }
 
 // Tests that a profile is created for countries with composed names.
@@ -2195,10 +1929,8 @@ TEST_P(FormDataImporterTest,
   test::SetProfileInfo(&expected, "George", nullptr, "Washington",
                        "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
                        "San Francisco", "California", "94102", "MM", nullptr);
-  const std::vector<AutofillProfile*>& results =
-      personal_data_manager_->GetProfiles();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetProfiles(),
+              UnorderedElementsCompareEqual(expected));
 }
 
 // TODO(crbug.com/634131): Create profiles if part of a standalone part of a
@@ -2273,10 +2005,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_Valid) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2999", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 }
 
 // Tests that an invalid credit card number is not extracted.
@@ -2377,10 +2107,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MonthSelectInvalidText) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "02",
                           "2999", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_TwoValidCards) {
@@ -2403,10 +2131,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_TwoValidCards) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2999", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 
   // Add a second different valid credit card.
   FormData form2;
@@ -2427,10 +2153,11 @@ TEST_P(FormDataImporterTest, ImportCreditCard_TwoValidCards) {
   CreditCard expected2(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected2, "", "5500000000000004", "02", "2999",
                           "");  // Imported cards have no billing info.
-  std::vector<CreditCard*> cards;
-  cards.push_back(&expected);
-  cards.push_back(&expected2);
-  ExpectSameElements(cards, personal_data_manager_->GetCreditCards());
+  // We ignore the order because multiple profiles or credit cards that
+  // are added to the SQLite DB within the same second will be returned in GUID
+  // (i.e., random) order.
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected, expected2));
 }
 
 // This form has the expiration year as one field with MM/YY.
@@ -2517,10 +2244,10 @@ TEST_P(FormDataImporterTest, ImportCreditCard_2DigitYear) {
                                           "4111111111111111", "05", "2045");
 }
 
-// Tests that a credit card is not extracted because the
-// card matches a masked server card.
+// Tests that a credit card is extracted when the card matches a masked server
+// card.
 TEST_P(FormDataImporterTest,
-       ImportCreditCard_DuplicateServerCards_MaskedCard_DontExtract) {
+       ImportCreditCard_DuplicateServerCards_ExtractMaskedCard) {
   // Add a masked server card.
   std::vector<CreditCard> server_cards;
   server_cards.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "a123"));
@@ -2547,12 +2274,15 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   EXPECT_FALSE(ImportCreditCard(form_structure, false, &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card->record_type() ==
+              CreditCard::MASKED_SERVER_CARD);
 }
 
-// Tests that a credit card is not extracted because it matches a full server
+// Tests that a credit card is extracted when it matches a full server
 // card.
-TEST_P(FormDataImporterTest, ImportCreditCard_DuplicateServerCards_FullCard) {
+TEST_P(FormDataImporterTest,
+       ImportCreditCard_DuplicateServerCards_ExtractFullCard) {
   // Add a full server card.
   std::vector<CreditCard> server_cards;
   server_cards.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "c789"));
@@ -2578,7 +2308,9 @@ TEST_P(FormDataImporterTest, ImportCreditCard_DuplicateServerCards_FullCard) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   EXPECT_FALSE(ImportCreditCard(form_structure, false, &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card->record_type() ==
+              CreditCard::RecordType::FULL_SERVER_CARD);
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_SameCreditCardWithConflict) {
@@ -2601,10 +2333,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCreditCardWithConflict) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2998", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 
   // Add a second different valid credit card where the year is different but
   // the credit card number matches.
@@ -2618,7 +2348,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCreditCardWithConflict) {
   form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card2;
   EXPECT_TRUE(ImportCreditCard(form_structure2, false, &imported_credit_card2));
-  EXPECT_FALSE(imported_credit_card2);
+  EXPECT_TRUE(imported_credit_card2);
 
   WaitForOnPersonalDataChanged();
 
@@ -2630,7 +2360,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCreditCardWithConflict) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(expected2));
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_ShouldReturnLocalCard) {
@@ -2653,10 +2383,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_ShouldReturnLocalCard) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2998", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 
   // Add a second different valid credit card where the year is different but
   // the credit card number matches.
@@ -2685,7 +2413,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_ShouldReturnLocalCard) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(expected2));
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_EmptyCardWithConflict) {
@@ -2709,10 +2437,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_EmptyCardWithConflict) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2998", "");  // Imported cards have no billing info.
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 
   // Add a second credit card with no number.
   FormData form2;
@@ -2739,7 +2465,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_EmptyCardWithConflict) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(expected2));
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInNew) {
@@ -2762,10 +2488,8 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInNew) {
   CreditCard expected(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetCreditCardInfo(&expected, "Biggie Smalls", "4111111111111111", "01",
                           "2999", "");
-  const std::vector<CreditCard*>& results =
-      personal_data_manager_->GetCreditCards();
-  ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected.Compare(*results[0]));
+  EXPECT_THAT(personal_data_manager_->GetCreditCards(),
+              UnorderedElementsCompareEqual(expected));
 
   // Add a second different valid credit card where the name is missing but
   // the credit card number matches.
@@ -2779,7 +2503,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInNew) {
   form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card2;
   EXPECT_TRUE(ImportCreditCard(form_structure2, false, &imported_credit_card2));
-  EXPECT_FALSE(imported_credit_card2);
+  EXPECT_TRUE(imported_credit_card2);
 
   // Since no refresh is expected, reload the data from the database to make
   // sure no changes were written out.
@@ -2792,7 +2516,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInNew) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(expected2));
 
   // Add a third credit card where the expiration date is missing.
   FormData form3;
@@ -2820,7 +2544,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInNew) {
   const std::vector<CreditCard*>& results3 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results3.size());
-  EXPECT_EQ(0, expected3.Compare(*results3[0]));
+  EXPECT_THAT(*results3[0], ComparesEqual(expected3));
 }
 
 TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInOld) {
@@ -2850,7 +2574,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInOld) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   EXPECT_TRUE(ImportCreditCard(form_structure, false, &imported_credit_card));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
 
   WaitForOnPersonalDataChanged();
 
@@ -2862,7 +2586,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_MissingInfoInOld) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, expected2.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(expected2));
 }
 
 // We allow the user to store a credit card number with separators via the UI.
@@ -2880,7 +2604,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCardWithSeparators) {
   const std::vector<CreditCard*>& results1 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results1.size());
-  EXPECT_EQ(0, saved_credit_card.Compare(*results1[0]));
+  EXPECT_THAT(*results1[0], ComparesEqual(saved_credit_card));
 
   // Import the same card info, but with different separators in the number.
   FormData form;
@@ -2893,7 +2617,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCardWithSeparators) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   EXPECT_TRUE(ImportCreditCard(form_structure, false, &imported_credit_card));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
 
   // Since no refresh is expected, reload the data from the database to make
   // sure no changes were written out.
@@ -2903,7 +2627,7 @@ TEST_P(FormDataImporterTest, ImportCreditCard_SameCardWithSeparators) {
   const std::vector<CreditCard*>& results2 =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results2.size());
-  EXPECT_EQ(0, saved_credit_card.Compare(*results2[0]));
+  EXPECT_THAT(*results2[0], ComparesEqual(saved_credit_card));
 }
 
 // Ensure that if a verified credit card already exists, aggregated credit cards
@@ -2935,7 +2659,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   EXPECT_TRUE(ImportCreditCard(form_structure, false, &imported_credit_card));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
 
   // Since no refresh is expected, reload the data from the database to make
   // sure no changes were written out.
@@ -2945,7 +2669,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, credit_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(credit_card));
 }
 
 // Ensures that |imported_credit_card_record_type_| is set and reset correctly.
@@ -2962,7 +2686,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, saved_credit_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(saved_credit_card));
 
   // Simulate a form submission with the same card.
   FormData form;
@@ -2975,7 +2699,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -2998,7 +2722,7 @@ TEST_P(FormDataImporterTest,
   FormStructure form_structure2(form2);
   form_structure2.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card2;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure2, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card2,
@@ -3038,7 +2762,7 @@ TEST_P(FormDataImporterTest,
   FormStructure form_structure3(form3);
   form_structure3.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card3;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure3, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/false,
       /*should_return_local_card=*/true, &imported_credit_card3,
@@ -3063,7 +2787,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3089,7 +2813,7 @@ TEST_P(FormDataImporterTest,
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, saved_credit_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(saved_credit_card));
 
   // Simulate a form submission with the same card.
   FormData form;
@@ -3102,7 +2826,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3141,12 +2865,12 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
       &imported_upi_id));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
   // |imported_credit_card_record_type_| should be SERVER_CARD.
   ASSERT_TRUE(form_data_importer_->imported_credit_card_record_type_ ==
               FormDataImporter::ImportedCreditCardRecordType::SERVER_CARD);
@@ -3179,12 +2903,12 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
       &imported_upi_id));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
   // |imported_credit_card_record_type_| should be SERVER_CARD.
   ASSERT_TRUE(form_data_importer_->imported_credit_card_record_type_ ==
               FormDataImporter::ImportedCreditCardRecordType::SERVER_CARD);
@@ -3204,7 +2928,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3231,7 +2955,7 @@ TEST_P(FormDataImporterTest,
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
 
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3258,7 +2982,7 @@ TEST_P(
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3301,7 +3025,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3350,7 +3074,7 @@ TEST_P(FormDataImporterTest, ImportFormData_OneAddressOneCreditCard) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
@@ -3365,12 +3089,11 @@ TEST_P(FormDataImporterTest, ImportFormData_OneAddressOneCreditCard) {
   AutofillProfile expected_address(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetProfileInfo(&expected_address, "George", nullptr, "Washington",
                        "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
+                       "San Francisco", "California", "94102", "", nullptr);
   const std::vector<AutofillProfile*>& results_addr =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results_addr.size());
-  EXPECT_EQ(0, expected_address.Compare(*results_addr[0]));
+  EXPECT_THAT(*results_addr[0], ComparesEqual(expected_address));
 
   // Test that the credit card has also been saved.
   CreditCard expected_card(base::GenerateGUID(), test::kEmptyOrigin);
@@ -3379,7 +3102,7 @@ TEST_P(FormDataImporterTest, ImportFormData_OneAddressOneCreditCard) {
   const std::vector<CreditCard*>& results_cards =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results_cards.size());
-  EXPECT_EQ(0, expected_card.Compare(*results_cards[0]));
+  EXPECT_THAT(*results_cards[0], ComparesEqual(expected_card));
 }
 
 // Test that a form with two address sections and a credit card section does not
@@ -3439,7 +3162,7 @@ TEST_P(FormDataImporterTest, ImportFormData_TwoAddressesOneCreditCard) {
       .Times(testing::AnyNumber());
   absl::optional<std::string> imported_upi_id;
   // Still returns true because the credit card import was successful.
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -3461,7 +3184,7 @@ TEST_P(FormDataImporterTest, ImportFormData_TwoAddressesOneCreditCard) {
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(expected_card));
 }
 
 // Test that a form is split into two sections correctly when the name has
@@ -3555,7 +3278,7 @@ TEST_P(FormDataImporterTest, ImportFormData_AddressesDisabledOneCreditCard) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/false,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -3575,7 +3298,7 @@ TEST_P(FormDataImporterTest, ImportFormData_AddressesDisabledOneCreditCard) {
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(expected_card));
 }
 
 // Test that a form with both address and credit card sections imports only the
@@ -3613,7 +3336,7 @@ TEST_P(FormDataImporterTest, ImportFormData_OneAddressCreditCardDisabled) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/false,
@@ -3627,12 +3350,11 @@ TEST_P(FormDataImporterTest, ImportFormData_OneAddressCreditCardDisabled) {
   AutofillProfile expected_address(base::GenerateGUID(), test::kEmptyOrigin);
   test::SetProfileInfo(&expected_address, "George", nullptr, "Washington",
                        "theprez@gmail.com", nullptr, "21 Laussat St", nullptr,
-                       "San Francisco", "California", "94102", nullptr,
-                       nullptr);
+                       "San Francisco", "California", "94102", "", nullptr);
   const std::vector<AutofillProfile*>& results_addr =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results_addr.size());
-  EXPECT_EQ(0, expected_address.Compare(*results_addr[0]));
+  EXPECT_THAT(*results_addr[0], ComparesEqual(expected_address));
 
   // Test that the credit card was not saved.
   const std::vector<CreditCard*>& results_cards =
@@ -3675,7 +3397,7 @@ TEST_P(FormDataImporterTest, ImportFormData_AddressCreditCardDisabled) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/false,
       /*credit_card_autofill_enabled=*/false,
@@ -3692,7 +3414,7 @@ TEST_P(FormDataImporterTest, ImportFormData_AddressCreditCardDisabled) {
   ASSERT_EQ(0U, results_cards.size());
 }
 
-TEST_P(FormDataImporterTest, DontDuplicateMaskedServerCard) {
+TEST_P(FormDataImporterTest, DuplicateMaskedServerCard) {
   std::vector<CreditCard> server_cards;
   server_cards.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "a123"));
   test::SetCreditCardInfo(&server_cards.back(), "John Dillinger",
@@ -3732,12 +3454,12 @@ TEST_P(FormDataImporterTest, DontDuplicateMaskedServerCard) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  ASSERT_FALSE(imported_credit_card);
+  ASSERT_TRUE(imported_credit_card);
 }
 
 // Tests that a credit card form that is hidden after receiving input still
@@ -3772,7 +3494,7 @@ TEST_P(FormDataImporterTest, ImportFormData_HiddenCreditCardFormAfterEntered) {
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
   // Still returns true because the credit card import was successful.
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -3789,7 +3511,7 @@ TEST_P(FormDataImporterTest, ImportFormData_HiddenCreditCardFormAfterEntered) {
   const std::vector<CreditCard*>& results =
       personal_data_manager_->GetCreditCards();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, expected_card.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(expected_card));
 }
 
 // Ensures that no UPI ID value is returned when there's a credit card and no
@@ -3807,7 +3529,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/true, &imported_credit_card,
@@ -3815,7 +3537,8 @@ TEST_P(FormDataImporterTest,
   ASSERT_FALSE(imported_upi_id.has_value());
 }
 
-TEST_P(FormDataImporterTest, DontDuplicateFullServerCard) {
+TEST_P(FormDataImporterTest,
+       DuplicateFullServerCardWhileContainingLocalCardCopies) {
   std::vector<CreditCard> server_cards;
   server_cards.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "a123"));
   test::SetCreditCardInfo(&server_cards.back(), "John Dillinger",
@@ -3829,10 +3552,24 @@ TEST_P(FormDataImporterTest, DontDuplicateFullServerCard) {
 
   test::SetServerCreditCards(autofill_table_, server_cards);
 
+  // Add two local cards to the credit cards to ensure that in the case where we
+  // have separate copies of a server card and a local card, we still only set
+  // |imported_credit_card| to the server card details as we want the server
+  // to be the source of truth. Adding two cards also helps us ensure that we
+  // will update both.
+  for (int i = 0; i < 2; i++) {
+    CreditCard local_card = test::GetCreditCard();
+    test::SetCreditCardInfo(&local_card, "Clyde Barrow",
+                            "378282246310005" /* American Express */, "05",
+                            "2999", "1");
+    local_card.set_record_type(CreditCard::RecordType::LOCAL_CARD);
+    personal_data_manager_->AddCreditCard(local_card);
+  }
+
   // Make sure everything is set up correctly.
   personal_data_manager_->Refresh();
   WaitForOnPersonalDataChanged();
-  EXPECT_EQ(2U, personal_data_manager_->GetCreditCards().size());
+  EXPECT_EQ(4U, personal_data_manager_->GetCreditCards().size());
 
   // A user re-types (or fills with) an unmasked card. Don't offer to save
   // here, either. Since it's unmasked, we know for certain that it's the same
@@ -3856,13 +3593,27 @@ TEST_P(FormDataImporterTest, DontDuplicateFullServerCard) {
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
+  // Ensure that we imported the server version of the card, not the local
+  // version.
+  EXPECT_TRUE(imported_credit_card->record_type() ==
+              CreditCard::FULL_SERVER_CARD);
+
+  // Check that both of the local cards we have added were updated.
+  int matched_local_cards = 0;
+  for (const CreditCard* card : personal_data_manager_->GetCreditCards()) {
+    if (card->record_type() == CreditCard::RecordType::LOCAL_CARD) {
+      matched_local_cards++;
+      EXPECT_EQ(card->expiration_month(), 4);
+    }
+  }
+  EXPECT_EQ(matched_local_cards, 2);
 }
 
 TEST_P(FormDataImporterTest,
@@ -3901,13 +3652,13 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
   histogram_tester.ExpectUniqueSample(
       "Autofill.SubmittedServerCardExpirationStatus",
       AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_MATCHED, 1);
@@ -3950,7 +3701,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
@@ -3996,7 +3747,7 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
@@ -4043,7 +3794,7 @@ TEST_P(
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
@@ -4089,13 +3840,13 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
   histogram_tester.ExpectUniqueSample(
       "Autofill.SubmittedServerCardExpirationStatus",
       AutofillMetrics::FULL_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH, 1);
@@ -4138,13 +3889,13 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure,
       /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
   histogram_tester.ExpectUniqueSample(
       "Autofill.SubmittedServerCardExpirationStatus",
       AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_MATCHED, 1);
@@ -4188,12 +3939,12 @@ TEST_P(FormDataImporterTest,
   form_structure.DetermineHeuristicTypes(nullptr, nullptr);
   std::unique_ptr<CreditCard> imported_credit_card;
   absl::optional<std::string> imported_upi_id;
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/true,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
       &imported_upi_id));
-  EXPECT_FALSE(imported_credit_card);
+  EXPECT_TRUE(imported_credit_card);
   histogram_tester.ExpectUniqueSample(
       "Autofill.SubmittedServerCardExpirationStatus",
       AutofillMetrics::MASKED_SERVER_CARD_EXPIRATION_DATE_DID_NOT_MATCH, 1);
@@ -4214,7 +3965,7 @@ TEST_P(FormDataImporterTest, ImportUpiId) {
   std::unique_ptr<CreditCard> imported_credit_card;  // Discarded.
   absl::optional<std::string> imported_upi_id;
 
-  EXPECT_TRUE(form_data_importer_->ImportFormData(
+  EXPECT_TRUE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/false,
       /*credit_card_autofill_enabled=*/true,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -4239,7 +3990,7 @@ TEST_P(FormDataImporterTest, ImportUpiIdDisabled) {
   std::unique_ptr<CreditCard> imported_credit_card;  // Discarded.
   absl::optional<std::string> imported_upi_id;
 
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/false,
       /*credit_card_autofill_enabled=*/false,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -4263,7 +4014,7 @@ TEST_P(FormDataImporterTest, ImportUpiIdIgnoreNonUpiId) {
   std::unique_ptr<CreditCard> imported_credit_card;  // Discarded.
   absl::optional<std::string> imported_upi_id;
 
-  EXPECT_FALSE(form_data_importer_->ImportFormData(
+  EXPECT_FALSE(ImportFormDataAndProcessAddressCandidates(
       form_structure, /*profile_autofill_enabled=*/false,
       /*credit_card_autofill_enabled=*/false,
       /*should_return_local_card=*/false, &imported_credit_card,
@@ -4273,10 +4024,6 @@ TEST_P(FormDataImporterTest, ImportUpiIdIgnoreNonUpiId) {
 }
 
 TEST_P(FormDataImporterTest, SilentlyUpdateExistingProfileByIncompleteProfile) {
-  // This test is only applicable when structured names are enabled.
-  if (!StructuredNames())
-    return;
-
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(
       features::kAutofillSilentProfileUpdateForInsufficientImport);
@@ -4334,10 +4081,6 @@ TEST_P(FormDataImporterTest, SilentlyUpdateExistingProfileByIncompleteProfile) {
 TEST_P(
     FormDataImporterTest,
     SilentlyUpdateExistingProfileByIncompleteProfile_DespiteDisallowedPrompts) {
-  // This test is only applicable when structured names are enabled.
-  if (!StructuredNames())
-    return;
-
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitWithFeatures(
       {features::kAutofillSilentProfileUpdateForInsufficientImport,
@@ -4397,10 +4140,6 @@ TEST_P(
 }
 
 TEST_P(FormDataImporterTest, UnusableIncompleteProfile) {
-  // This test is only applicable when structured names are enabled.
-  if (!StructuredNames())
-    return;
-
   base::test::ScopedFeatureList scoped_feature_list;
   scoped_feature_list.InitAndEnableFeature(
       features::kAutofillSilentProfileUpdateForInsufficientImport);
@@ -4449,16 +4188,52 @@ TEST_P(FormDataImporterTest, UnusableIncompleteProfile) {
   const std::vector<AutofillProfile*>& results =
       personal_data_manager_->GetProfiles();
   ASSERT_EQ(1U, results.size());
-  EXPECT_EQ(0, profile.Compare(*results[0]));
+  EXPECT_THAT(*results[0], ComparesEqual(profile));
   EXPECT_EQ(results[0]->GetRawInfo(NAME_FULL), u"Marion Mitchell Morrison");
   EXPECT_EQ(results[0]->GetRawInfo(NAME_FIRST), u"Marion");
   EXPECT_EQ(results[0]->GetRawInfo(NAME_MIDDLE), u"Mitchell");
   EXPECT_EQ(results[0]->GetRawInfo(NAME_LAST), u"Morrison");
 }
 
-// Runs the suite with the feature |kAutofillSupportForMoreStructuredNames|,
-// |kAutofillSupportForMoreStructuredAddresses| and
-// |kAutofillEnableSupportForApartmentNumbers| enabled and disabled.
+// Tests that metrics are correctly recorded when removing setting-inaccessible
+// fields.
+// Note that this function doesn't test the removal functionality itself. This
+// is done in the AutofillProfile unit tests.
+TEST_P(FormDataImporterTest, RemoveInaccessibleProfileValuesMetrics) {
+  base::test::ScopedFeatureList remove_inaccessible_values_feature;
+  remove_inaccessible_values_feature.InitAndEnableFeature(
+      features::kAutofillRemoveInaccessibleProfileValues);
+
+  // Minimal importable profile, but with a state, which is setting-inaccessible
+  // for Germany.
+  std::vector<std::pair<ServerFieldType, std::string>> type_value_pairs{
+      {ADDRESS_HOME_COUNTRY, "DE"},
+      {ADDRESS_HOME_LINE1, kDefaultAddressLine1},
+      {ADDRESS_HOME_CITY, kDefaultCity},
+      {ADDRESS_HOME_ZIP, kDefaultZip},
+      {ADDRESS_HOME_STATE, kDefaultState}};
+
+  std::unique_ptr<FormStructure> form_structure =
+      ConstructFormStructureFromTypeValuePairs(type_value_pairs);
+  type_value_pairs.pop_back();  // Remove state manually for verification.
+  base::HistogramTester histogram_tester;
+  ImportAddressProfilesAndVerifyExpectation(
+      *form_structure, {ConstructProfileFromTypeValuePairs(type_value_pairs)});
+
+  // State was removed. Expect the metrics to behave accordingly.
+  const std::string metric =
+      "Autofill.ProfileImport.InaccessibleFieldsRemoved.";
+  histogram_tester.ExpectUniqueSample(metric + "Total", true, 1);
+  histogram_tester.ExpectUniqueSample(
+      metric + "DE",
+      AutofillMetrics::SettingsVisibleFieldTypeForMetrics::kState, 1);
+}
+
+// Runs the suite with the feature |kAutofillEnableSupportForApartmentNumbers|,
+// |kAutofillEnableDependentLocalityParsing| and
+// |kAutofillConsiderVariationCountryCodeForPhoneNumbers| enabled and disabled.
+// TODO(crbug.com/1295721): Remove
+// |kAutofillConsiderVariationCountryCodeForPhoneNumbers| when launched.
 INSTANTIATE_TEST_SUITE_P(,
                          FormDataImporterTest,
                          testing::Combine(testing::Bool(),

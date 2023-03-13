@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/weak_ptr.h"
-#include "content/public/browser/document_service_base.h"
+#include "content/public/browser/document_service.h"
 #include "content/public/browser/hid_delegate.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -26,10 +26,9 @@ class RenderFrameHost;
 
 // HidService provides an implementation of the HidService mojom interface. This
 // interface is used by Blink to implement the WebHID API.
-class HidService
-    : public content::DocumentServiceBase<blink::mojom::HidService>,
-      public device::mojom::HidConnectionWatcher,
-      public HidDelegate::Observer {
+class HidService : public content::DocumentService<blink::mojom::HidService>,
+                   public device::mojom::HidConnectionWatcher,
+                   public HidDelegate::Observer {
  public:
   HidService(HidService&) = delete;
   HidService& operator=(HidService&) = delete;
@@ -42,11 +41,15 @@ class HidService
       mojo::PendingAssociatedRemote<device::mojom::HidManagerClient> client)
       override;
   void GetDevices(GetDevicesCallback callback) override;
-  void RequestDevice(std::vector<blink::mojom::HidDeviceFilterPtr> filters,
-                     RequestDeviceCallback callback) override;
+  void RequestDevice(
+      std::vector<blink::mojom::HidDeviceFilterPtr> filters,
+      std::vector<blink::mojom::HidDeviceFilterPtr> exclusion_filters,
+      RequestDeviceCallback callback) override;
   void Connect(const std::string& device_guid,
                mojo::PendingRemote<device::mojom::HidConnectionClient> client,
                ConnectCallback callback) override;
+  void Forget(device::mojom::HidDeviceInfoPtr device_info,
+              ForgetCallback callback) override;
 
   // HidDelegate::Observer:
   void OnDeviceAdded(const device::mojom::HidDeviceInfo& device_info) override;

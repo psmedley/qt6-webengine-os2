@@ -155,6 +155,10 @@ class EntrySet {
   }
 
   const std::vector<Entry>& entries() const { return entries_; }
+  void DumpStateForDebugging(std::ostream& os) {
+    os << entries_.size() << " entries " << good_matcher_count_
+       << " good matchers " << bad_matcher_count_ << " bad matchers";
+  }
 
  private:
   friend class EntrySetBuilder;
@@ -178,6 +182,11 @@ class EntrySet {
   url_matcher::RegexSetMatcher page_path_matcher_;
   HostSuffixMatcher host_suffix_matcher_{{}};
   url_matcher::URLMatcher rss_url_matcher_;
+
+  // Counts of how many matchers were successfully parsed when building this
+  // `EntrySet`.
+  int good_matcher_count_ = 0;
+  int bad_matcher_count_ = 0;
 };
 
 class EntrySetBuilder {
@@ -215,7 +224,18 @@ class EntrySetBuilder {
   }
 
  private:
-  bool CreateMatcherConditions(
+  void CreateMatcherConditions(
+      const feedwire::webfeed::WebFeedMatcher& web_feed_matcher,
+      int web_feed_entry_index) {
+    if (!CreateMatcherConditionsWithStatus(web_feed_matcher,
+                                           web_feed_entry_index)) {
+      ++entry_set_->bad_matcher_count_;
+    } else {
+      ++entry_set_->good_matcher_count_;
+    }
+  }
+
+  bool CreateMatcherConditionsWithStatus(
       const feedwire::webfeed::WebFeedMatcher& web_feed_matcher,
       int web_feed_entry_index) {
     // Interpret all of the criteria first. If there are any errors, or unknown
@@ -421,7 +441,8 @@ void WebFeedIndex::Clear() {
   subscribed_feeds_update_time_ = base::Time();
 }
 
-WebFeedIndex::Entry WebFeedIndex::FindWebFeed(const std::string& web_feed_id) {
+WebFeedIndex::Entry WebFeedIndex::FindWebFeed(
+    const std::string& web_feed_id) const {
   for (const Entry& e : subscribed_->entries()) {
     if (e.web_feed_id == web_feed_id)
       return e;
@@ -459,9 +480,31 @@ int WebFeedIndex::SubscriptionCount() const {
   return subscribed_->entries().size();
 }
 
+int WebFeedIndex::RecommendedWebFeedCount() const {
+  return recommended_->entries().size();
+}
+
+const std::vector<Entry>& WebFeedIndex::GetSubscribedEntries() const {
+  return subscribed_->entries();
+}
+
 std::vector<WebFeedIndex::Entry> WebFeedIndex::GetRecommendedEntriesForTesting()
     const {
   return recommended_->entries();
+}
+
+std::vector<WebFeedIndex::Entry> WebFeedIndex::GetSubscribedEntriesForTesting()
+    const {
+  return subscribed_->entries();
+}
+
+void WebFeedIndex::DumpStateForDebugging(std::ostream& os) {
+  os << "recommended: ";
+  recommended_->DumpStateForDebugging(os);
+  os << " updated " << recommended_feeds_update_time_;
+  os << "\nsubscribed: ";
+  subscribed_->DumpStateForDebugging(os);
+  os << " updated " << subscribed_feeds_update_time_;
 }
 
 std::ostream& operator<<(std::ostream& os, const WebFeedIndex::Entry& entry) {

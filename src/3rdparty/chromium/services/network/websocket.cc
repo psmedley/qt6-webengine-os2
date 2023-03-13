@@ -8,19 +8,22 @@
 #include <string.h>
 
 #include <memory>
+#include <tuple>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/check.h"
+#include "base/check_op.h"
 #include "base/feature_list.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/strcat.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/auth.h"
@@ -40,7 +43,10 @@
 #include "net/websockets/websocket_handshake_request_info.h"
 #include "net/websockets/websocket_handshake_response_info.h"
 #include "services/network/public/cpp/features.h"
+#include "services/network/throttling/throttling_controller.h"
+#include "services/network/throttling/throttling_network_interceptor.h"
 #include "services/network/websocket_factory.h"
+#include "services/network/websocket_interceptor.h"
 
 namespace network {
 namespace {
@@ -51,7 +57,7 @@ constexpr uint64_t kSmallMessageThreshhold = 1 << 16;
 
 // The capacity of the data pipe to use for received messages, in bytes. Optimal
 // value depends on the platform.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 constexpr uint32_t kReceiveDataPipeCapacity = 1 << 16;
 #else
 // |2^n - delta| is better than 2^n on Linux. See crrev.com/c/1792208.
@@ -127,6 +133,10 @@ class WebSocket::WebSocketEventHandler final
     : public net::WebSocketEventInterface {
  public:
   explicit WebSocketEventHandler(WebSocket* impl);
+
+  WebSocketEventHandler(const WebSocketEventHandler&) = delete;
+  WebSocketEventHandler& operator=(const WebSocketEventHandler&) = delete;
+
   ~WebSocketEventHandler() override;
 
   // net::WebSocketEventInterface implementation
@@ -165,9 +175,7 @@ class WebSocket::WebSocketEventHandler final
       absl::optional<net::AuthCredentials>* credentials) override;
 
  private:
-  WebSocket* const impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebSocketEventHandler);
+  const raw_ptr<WebSocket> impl_;
 };
 
 WebSocket::WebSocketEventHandler::WebSocketEventHandler(WebSocket* impl)
@@ -185,9 +193,10 @@ void WebSocket::WebSocketEventHandler::OnCreateURLRequest(
     net::URLRequest* url_request) {
   url_request->SetUserData(WebSocket::kUserDataKey,
                            std::make_unique<UnownedPointer>(impl_));
-  impl_->net_log_source_id_ = url_request->net_log().source().id;
-  impl_->throttling_token_ = network::ScopedThrottlingToken::MaybeCreate(
-      impl_->net_log_source_id_, impl_->throttling_profile_id_);
+  if (impl_->throttling_profile_id_) {
+    impl_->frame_interceptor_ = std::make_unique<WebSocketInterceptor>(
+        url_request->net_log().source().id, impl_->throttling_profile_id_);
+  }
 }
 
 void WebSocket::WebSocketEventHandler::OnAddChannelResponse(
@@ -263,7 +272,7 @@ void WebSocket::WebSocketEventHandler::OnDataFrame(
   if (payload.size() > 0) {
     impl_->pending_data_frames_.push(payload);
   }
-  impl_->SendPendingDataFrames();
+  impl_->SendPendingDataFrames(InterruptionReason::kNone);
 }
 
 void WebSocket::WebSocketEventHandler::OnSendDataFrameDone() {
@@ -440,7 +449,7 @@ WebSocket::WebSocket(
       throttling_profile_id_(throttling_profile_id) {
   DCHECK(handshake_client_);
   // |delay| should be zero if this connection is not throttled.
-  DCHECK(pending_connection_tracker.has_value() || delay.is_zero());
+  DCHECK(pending_connection_tracker_.has_value() || delay.is_zero());
   if (auth_handler_) {
     // Make sure the request dies if |auth_handler_| has an error, otherwise
     // requests can hang.
@@ -455,7 +464,7 @@ WebSocket::WebSocket(
   }
   handshake_client_.set_disconnect_handler(base::BindOnce(
       &WebSocket::OnConnectionError, base::Unretained(this), FROM_HERE));
-  if (delay_ > base::TimeDelta()) {
+  if (delay_.is_positive()) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&WebSocket::AddChannel, weak_ptr_factory_.GetWeakPtr(),
@@ -501,13 +510,14 @@ void WebSocket::SendMessage(mojom::WebSocketMessageType type,
 
   // Safe if ReadAndSendFromDataPipe() deletes |this| because this method is
   // only called from mojo.
-  if (!blocked_on_websocket_channel_)
-    ReadAndSendFromDataPipe();
+  if (!blocked_on_websocket_channel_) {
+    ReadAndSendFromDataPipe(InterruptionReason::kNone);
+  }
 }
 
 void WebSocket::StartReceiving() {
   DCHECK(pending_data_frames_.empty());
-  ignore_result(channel_->ReadFrames());
+  std::ignore = channel_->ReadFrames();
 }
 
 void WebSocket::StartClosingHandshake(uint16_t code,
@@ -525,7 +535,7 @@ void WebSocket::StartClosingHandshake(uint16_t code,
         std::make_unique<CloseInfo>(code, reason);
     return;
   }
-  ignore_result(channel_->StartClosingHandshake(code, reason));
+  std::ignore = channel_->StartClosingHandshake(code, reason);
 }
 
 bool WebSocket::AllowCookies(const GURL& url) const {
@@ -635,32 +645,51 @@ void WebSocket::OnWritable(MojoResult result,
     OnConnectionError(FROM_HERE);
     return;
   }
-  wait_for_writable_ = false;
-  SendPendingDataFrames();
-  if (pending_data_frames_.empty()) {
-    ignore_result(channel_->ReadFrames());
-  }
+  SendPendingDataFrames(InterruptionReason::kMojoPipe);
 }
 
-void WebSocket::SendPendingDataFrames() {
+void WebSocket::SendPendingDataFrames(InterruptionReason resume_reason) {
   DVLOG(3) << "WebSocket::SendPendingDataFrames @"
            << reinterpret_cast<void*>(this)
            << ", pending_data_frames_.size=" << pending_data_frames_.size()
-           << ", wait_for_writable_?" << wait_for_writable_;
+           << ", incoming_frames_interrupted_="
+           << static_cast<int>(incoming_frames_interrupted_);
 
-  if (wait_for_writable_) {
+  if (incoming_frames_interrupted_ != resume_reason)
     return;
+
+  bool resuming_after_interruption = false;
+  if (incoming_frames_interrupted_ != InterruptionReason::kNone) {
+    incoming_frames_interrupted_ = InterruptionReason::kNone;
+    resuming_after_interruption = true;
   }
   while (!pending_data_frames_.empty()) {
     base::span<const char>& data_frame = pending_data_frames_.front();
+    if (frame_interceptor_ && resume_reason == InterruptionReason::kNone) {
+      // `Intercept` always intercepts sending data per frame.
+      auto intercept_result = frame_interceptor_->Intercept(
+          WebSocketInterceptor::kIncoming, data_frame.size(),
+          base::BindOnce(&WebSocket::SendPendingDataFrames,
+                         base::Unretained(this),
+                         InterruptionReason::kInterceptor));
+      if (intercept_result == WebSocketInterceptor::kShouldWait) {
+        DCHECK_EQ(incoming_frames_interrupted_, InterruptionReason::kNone);
+        incoming_frames_interrupted_ = InterruptionReason::kInterceptor;
+        return;
+      }
+    }
     SendDataFrame(&data_frame);
     if (data_frame.size() > 0) {
       // Mojo doesn't have any write buffer so far.
       writable_watcher_.ArmOrNotify();
-      wait_for_writable_ = true;
+      DCHECK_EQ(incoming_frames_interrupted_, InterruptionReason::kNone);
+      incoming_frames_interrupted_ = InterruptionReason::kMojoPipe;
       return;
     }
     pending_data_frames_.pop();
+  }
+  if (resuming_after_interruption) {
+    std::ignore = channel_->ReadFrames();
   }
 }
 
@@ -704,31 +733,60 @@ void WebSocket::OnReadable(MojoResult result,
     OnConnectionError(FROM_HERE);
     return;
   }
-  wait_for_readable_ = false;
-
   // Safe if ReadAndSendFromDataPipe() deletes |this| because this method is
   // only called from mojo.
-  ReadAndSendFromDataPipe();
+  ReadAndSendFromDataPipe(InterruptionReason::kMojoPipe);
 }
 
-void WebSocket::ReadAndSendFromDataPipe() {
-  if (wait_for_readable_) {
+void WebSocket::ReadAndSendFromDataPipe(InterruptionReason resume_reason) {
+  if (outgoing_frames_interrupted_ != resume_reason &&
+      outgoing_frames_interrupted_ != InterruptionReason::kNone)
     return;
-  }
+
+  if (outgoing_frames_interrupted_ != InterruptionReason::kNone)
+    outgoing_frames_interrupted_ = InterruptionReason::kNone;
+
   while (!pending_send_data_frames_.empty()) {
     DataFrame& data_frame = pending_send_data_frames_.front();
     DVLOG(2) << " ConsumePendingDataFrame frame=(" << data_frame.type
              << ", (data_length = " << data_frame.data_length << "))";
-    if (data_frame.data_length == 0) {
+    if (frame_interceptor_ && resume_reason == InterruptionReason::kNone) {
+      // `Intercept` always intercepts reading data per frame.
+      auto intercept_result = frame_interceptor_->Intercept(
+          WebSocketInterceptor::kOutgoing, data_frame.data_length,
+          base::BindOnce(&WebSocket::ReadAndSendFromDataPipe,
+                         base::Unretained(this),
+                         InterruptionReason::kInterceptor));
+      if (intercept_result == WebSocketInterceptor::kShouldWait) {
+        DCHECK_EQ(outgoing_frames_interrupted_, InterruptionReason::kNone);
+        outgoing_frames_interrupted_ = InterruptionReason::kInterceptor;
+        return;
+      }
+    }
+    if (!ReadAndSendFrameFromDataPipe(&data_frame)) {
+      return;
+    }
+    pending_send_data_frames_.pop();
+  }
+  if (pending_start_closing_handshake_) {
+    std::unique_ptr<CloseInfo> close_info =
+        std::move(pending_start_closing_handshake_);
+    std::ignore =
+        channel_->StartClosingHandshake(close_info->code, close_info->reason);
+  }
+}
+
+bool WebSocket::ReadAndSendFrameFromDataPipe(DataFrame* data_frame) {
+  while (true) {
+    if (data_frame->data_length == 0) {
       auto data_to_pass = base::MakeRefCounted<net::IOBuffer>(0);
-      if (channel_->SendFrame(true, MessageTypeToOpCode(data_frame.type),
+      if (channel_->SendFrame(true, MessageTypeToOpCode(data_frame->type),
                               std::move(data_to_pass),
                               0) == net::WebSocketChannel::CHANNEL_DELETED) {
         // |this| has been deleted.
-        return;
+        return false;
       }
-      pending_send_data_frames_.pop();
-      continue;
+      return true;
     }
 
     const void* buffer;
@@ -736,30 +794,31 @@ void WebSocket::ReadAndSendFromDataPipe() {
     const MojoResult begin_result = readable_->BeginReadData(
         &buffer, &readable_size, MOJO_READ_DATA_FLAG_NONE);
     if (begin_result == MOJO_RESULT_SHOULD_WAIT) {
-      wait_for_readable_ = true;
+      DCHECK_EQ(outgoing_frames_interrupted_, InterruptionReason::kNone);
+      outgoing_frames_interrupted_ = InterruptionReason::kMojoPipe;
       if (!blocked_on_websocket_channel_) {
         readable_watcher_.ArmOrNotify();
       }
-      return;
+      return false;
     }
     if (begin_result == MOJO_RESULT_FAILED_PRECONDITION) {
-      return;
+      return false;
     }
     DCHECK_EQ(begin_result, MOJO_RESULT_OK);
 
-    if (readable_size < data_frame.data_length && data_frame.do_not_fragment &&
-        !message_under_reassembly_) {
+    if (readable_size < data_frame->data_length &&
+        data_frame->do_not_fragment && !message_under_reassembly_) {
       // The cast is needed to unambiguously select a constructor on 32-bit
       // platforms.
       message_under_reassembly_ = base::MakeRefCounted<net::IOBuffer>(
-          base::checked_cast<size_t>(data_frame.data_length));
+          base::checked_cast<size_t>(data_frame->data_length));
       DCHECK_EQ(bytes_reassembled_, 0u);
     }
 
     if (message_under_reassembly_) {
       const size_t bytes_to_copy =
           std::min(static_cast<uint64_t>(readable_size),
-                   data_frame.data_length - bytes_reassembled_);
+                   data_frame->data_length - bytes_reassembled_);
       memcpy(message_under_reassembly_->data() + bytes_reassembled_, buffer,
              bytes_to_copy);
       bytes_reassembled_ += bytes_to_copy;
@@ -767,52 +826,46 @@ void WebSocket::ReadAndSendFromDataPipe() {
       const MojoResult end_result = readable_->EndReadData(bytes_to_copy);
       DCHECK_EQ(end_result, MOJO_RESULT_OK);
 
-      DCHECK_LE(bytes_reassembled_, data_frame.data_length);
-      if (bytes_reassembled_ == data_frame.data_length) {
+      DCHECK_LE(bytes_reassembled_, data_frame->data_length);
+      if (bytes_reassembled_ == data_frame->data_length) {
         bytes_reassembled_ = 0;
         blocked_on_websocket_channel_ = true;
         if (channel_->SendFrame(
-                /*fin=*/true, MessageTypeToOpCode(data_frame.type),
-                std::move(message_under_reassembly_), data_frame.data_length) ==
+                /*fin=*/true, MessageTypeToOpCode(data_frame->type),
+                std::move(message_under_reassembly_),
+                data_frame->data_length) ==
             net::WebSocketChannel::CHANNEL_DELETED) {
           // |this| has been deleted.
-          return;
+          return false;
         }
-        pending_send_data_frames_.pop();
+        return true;
       }
 
       continue;
     }
 
     const size_t size_to_send =
-        std::min(static_cast<uint64_t>(readable_size), data_frame.data_length);
+        std::min(static_cast<uint64_t>(readable_size), data_frame->data_length);
     auto data_to_pass = base::MakeRefCounted<net::IOBuffer>(size_to_send);
-    const bool is_final = (size_to_send == data_frame.data_length);
+    const bool is_final = (size_to_send == data_frame->data_length);
     memcpy(data_to_pass->data(), buffer, size_to_send);
     blocked_on_websocket_channel_ = true;
-    if (channel_->SendFrame(is_final, MessageTypeToOpCode(data_frame.type),
+    if (channel_->SendFrame(is_final, MessageTypeToOpCode(data_frame->type),
                             std::move(data_to_pass), size_to_send) ==
         net::WebSocketChannel::CHANNEL_DELETED) {
       // |this| has been deleted.
-      return;
+      return false;
     }
     const MojoResult end_result = readable_->EndReadData(size_to_send);
     DCHECK_EQ(end_result, MOJO_RESULT_OK);
 
-    if (size_to_send == data_frame.data_length) {
-      pending_send_data_frames_.pop();
-      continue;
+    if (size_to_send == data_frame->data_length) {
+      return true;
     }
 
-    DCHECK_GT(data_frame.data_length, size_to_send);
-    data_frame.type = mojom::WebSocketMessageType::CONTINUATION;
-    data_frame.data_length -= size_to_send;
-  }
-  if (pending_start_closing_handshake_) {
-    std::unique_ptr<CloseInfo> close_info =
-        std::move(pending_start_closing_handshake_);
-    ignore_result(
-        channel_->StartClosingHandshake(close_info->code, close_info->reason));
+    DCHECK_GT(data_frame->data_length, size_to_send);
+    data_frame->type = mojom::WebSocketMessageType::CONTINUATION;
+    data_frame->data_length -= size_to_send;
   }
 }
 

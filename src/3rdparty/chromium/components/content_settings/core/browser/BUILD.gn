@@ -10,8 +10,6 @@ jumbo_static_library("browser") {
   sources = [
     "content_settings_default_provider.cc",
     "content_settings_default_provider.h",
-    "content_settings_details.cc",
-    "content_settings_details.h",
     "content_settings_global_value_map.cc",
     "content_settings_global_value_map.h",
     "content_settings_info.cc",
@@ -32,6 +30,7 @@ jumbo_static_library("browser") {
     "content_settings_registry.h",
     "content_settings_rule.cc",
     "content_settings_rule.h",
+    "content_settings_type_set.h",
     "content_settings_utils.cc",
     "content_settings_utils.h",
     "cookie_settings.cc",
@@ -40,8 +39,6 @@ jumbo_static_library("browser") {
     "host_content_settings_map.h",
     "private_network_settings.cc",
     "private_network_settings.h",
-    "uma_util.cc",
-    "uma_util.h",
     "user_modifiable_provider.h",
     "website_settings_info.cc",
     "website_settings_info.h",
@@ -84,9 +81,7 @@ jumbo_static_library("browser") {
     ]
   }
 
-  configs += [
-    "//build/config/compiler:wexit_time_destructors",
-  ]
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 jumbo_source_set("unit_tests") {
@@ -114,7 +109,6 @@ jumbo_source_set("unit_tests") {
     "//components/pref_registry:pref_registry",
     "//components/prefs",
     "//components/prefs:test_support",
-    "//components/privacy_sandbox:privacy_sandbox_prefs",
     "//components/sync_preferences:test_support",
     "//extensions/buildflags",
     "//net",
@@ -130,6 +124,7 @@ jumbo_source_set("unit_tests") {
     deps += [
       "//components/policy:generated",
       "//components/policy/core/browser:test_support",
+      "//components/privacy_sandbox:privacy_sandbox_prefs",
       "//third_party/blink/public/common:headers",
     ]
   }

@@ -9,6 +9,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/core/html/html_br_element.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_fragment_item.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_cursor.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
@@ -18,11 +19,8 @@ namespace blink {
 
 using ::testing::ElementsAre;
 
-class LayoutNGTextCombineTest : public NGLayoutTest,
-                                private ScopedLayoutNGTextCombineForTest {
+class LayoutNGTextCombineTest : public NGLayoutTest {
  protected:
-  LayoutNGTextCombineTest() : ScopedLayoutNGTextCombineForTest(true) {}
-
   std::string AsInkOverflowString(const LayoutBlockFlow& root) {
     std::ostringstream ostream;
     ostream << std::endl;
@@ -164,6 +162,32 @@ LayoutNGBlockFlow DIV id="root"
   |  +--LayoutBR BR id="target" style="color: red;"
 )DUMP",
             ToSimpleLayoutTree(root_layout_object));
+}
+
+// http://crbug.com/1241194
+TEST_F(LayoutNGTextCombineTest, HtmlElement) {
+  InsertStyleElement(
+      "html {"
+      "text-combine-upright: all;"
+      "writing-mode: vertical-lr;"
+      "}");
+
+  // Make |Text| node child in <html> element to call
+  // |HTMLHtmlElement::PropagateWritingModeAndDirectionFromBody()|
+  GetDocument().documentElement()->appendChild(
+      Text::Create(GetDocument(), "X"));
+
+  RunDocumentLifecycle();
+
+  EXPECT_EQ(
+      R"DUMP(
+LayoutNGBlockFlow HTML
+  +--LayoutNGBlockFlow BODY
+  +--LayoutNGBlockFlow (anonymous)
+  |  +--LayoutNGTextCombine (anonymous)
+  |  |  +--LayoutText #text "X"
+)DUMP",
+      ToSimpleLayoutTree(*GetDocument().documentElement()->GetLayoutObject()));
 }
 
 TEST_F(LayoutNGTextCombineTest, InkOverflow) {
@@ -497,6 +521,25 @@ LayoutNGBlockFlow DIV id="root"
             ToSimpleLayoutTree(root_layout_object));
 }
 
+// http://crbug.com/1258331
+// See also VerticalWritingModeByWBR
+TEST_F(LayoutNGTextCombineTest, InsertBR) {
+  InsertStyleElement(
+      "br { text-combine-upright: all; writing-mode: vertical-rl; }");
+  SetBodyInnerHTML("<div id=root>x</div>");
+  auto& root = *GetElementById("root");
+  root.insertBefore(MakeGarbageCollected<HTMLBRElement>(GetDocument()),
+                    root.lastChild());
+  RunDocumentLifecycle();
+
+  EXPECT_EQ(R"DUMP(
+LayoutNGBlockFlow DIV id="root"
+  +--LayoutBR BR
+  +--LayoutText #text "x"
+)DUMP",
+            ToSimpleLayoutTree(*root.GetLayoutObject()));
+}
+
 // http://crbug.com/1215026
 TEST_F(LayoutNGTextCombineTest, LegacyQuote) {
   InsertStyleElement(
@@ -566,14 +609,16 @@ TEST_F(LayoutNGTextCombineTest, LayoutOverflow) {
   //       text run at (0,0) width 200: "aX"
 
   const auto& sample1 = *To<LayoutBlockFlow>(GetLayoutObjectByElementId("t1"));
-  const auto& sample_fragment1 = *sample1.CurrentFragment();
+  ASSERT_EQ(sample1.PhysicalFragmentCount(), 1u);
+  const auto& sample_fragment1 = *sample1.GetPhysicalFragment(0);
   EXPECT_FALSE(sample_fragment1.HasLayoutOverflow());
   EXPECT_EQ(PhysicalSize(150, 200), sample_fragment1.Size());
   EXPECT_EQ(PhysicalRect(PhysicalOffset(), PhysicalSize(150, 200)),
             sample_fragment1.LayoutOverflow());
 
   const auto& sample2 = *To<LayoutBlockFlow>(GetLayoutObjectByElementId("t2"));
-  const auto& sample_fragment2 = *sample2.CurrentFragment();
+  ASSERT_EQ(sample2.PhysicalFragmentCount(), 1u);
+  const auto& sample_fragment2 = *sample2.GetPhysicalFragment(0);
   EXPECT_FALSE(sample_fragment2.HasLayoutOverflow());
   EXPECT_EQ(PhysicalSize(150, 200), sample_fragment2.Size());
   EXPECT_EQ(PhysicalRect(PhysicalOffset(), PhysicalSize(150, 200)),
@@ -690,14 +735,14 @@ TEST_F(LayoutNGTextCombineTest, Outline) {
   // Sample 1 with text-combine-upright:all
   const auto& sample1 = *GetLayoutObjectByElementId("t1");
   Vector<PhysicalRect> standard_outlines1;
-  sample1.AddOutlineRects(standard_outlines1, PhysicalOffset(),
+  sample1.AddOutlineRects(standard_outlines1, nullptr, PhysicalOffset(),
                           NGOutlineType::kDontIncludeBlockVisualOverflow);
   EXPECT_THAT(
       standard_outlines1,
       ElementsAre(PhysicalRect(PhysicalOffset(0, 0), PhysicalSize(150, 200))));
 
   Vector<PhysicalRect> focus_outlines1;
-  sample1.AddOutlineRects(focus_outlines1, PhysicalOffset(),
+  sample1.AddOutlineRects(focus_outlines1, nullptr, PhysicalOffset(),
                           NGOutlineType::kIncludeBlockVisualOverflow);
   EXPECT_THAT(
       focus_outlines1,
@@ -715,14 +760,14 @@ TEST_F(LayoutNGTextCombineTest, Outline) {
   // Sample 1 without text-combine-upright:all
   const auto& sample2 = *GetLayoutObjectByElementId("t2");
   Vector<PhysicalRect> standard_outlines2;
-  sample2.AddOutlineRects(standard_outlines2, PhysicalOffset(),
+  sample2.AddOutlineRects(standard_outlines2, nullptr, PhysicalOffset(),
                           NGOutlineType::kDontIncludeBlockVisualOverflow);
   EXPECT_THAT(
       standard_outlines2,
       ElementsAre(PhysicalRect(PhysicalOffset(0, 0), PhysicalSize(150, 100))));
 
   Vector<PhysicalRect> focus_outlines2;
-  sample1.AddOutlineRects(focus_outlines2, PhysicalOffset(),
+  sample1.AddOutlineRects(focus_outlines2, nullptr, PhysicalOffset(),
                           NGOutlineType::kIncludeBlockVisualOverflow);
   EXPECT_THAT(
       focus_outlines2,
@@ -736,6 +781,58 @@ TEST_F(LayoutNGTextCombineTest, Outline) {
           // "X"
           PhysicalRect(PhysicalOffset(25, 100), PhysicalSize(100, 100)),
           PhysicalRect(PhysicalOffset(25, 100), PhysicalSize(100, 100))));
+}
+
+// http://crbug.com/1256783
+TEST_F(LayoutNGTextCombineTest, PropageWritingModeFromBodyToHorizontal) {
+  InsertStyleElement(
+      "body { writing-mode: horizontal-tb; }"
+      "html {"
+      "text-combine-upright: all;"
+      "writing-mode: vertical-lr;"
+      "}");
+
+  // Make |Text| node child in <html> element to call
+  // |HTMLHtmlElement::PropagateWritingModeAndDirectionFromBody()|
+  GetDocument().documentElement()->insertBefore(
+      Text::Create(GetDocument(), "X"), GetDocument().body());
+
+  RunDocumentLifecycle();
+
+  EXPECT_EQ(
+      R"DUMP(
+LayoutNGBlockFlow HTML
+  +--LayoutNGBlockFlow (anonymous)
+  |  +--LayoutText #text "X"
+  +--LayoutNGBlockFlow BODY
+)DUMP",
+      ToSimpleLayoutTree(*GetDocument().documentElement()->GetLayoutObject()));
+}
+
+TEST_F(LayoutNGTextCombineTest, PropageWritingModeFromBodyToVertical) {
+  InsertStyleElement(
+      "body { writing-mode: vertical-rl; }"
+      "html {"
+      "text-combine-upright: all;"
+      "writing-mode: horizontal-tb;"
+      "}");
+
+  // Make |Text| node child in <html> element to call
+  // |HTMLHtmlElement::PropagateWritingModeAndDirectionFromBody()|
+  GetDocument().documentElement()->insertBefore(
+      Text::Create(GetDocument(), "X"), GetDocument().body());
+
+  RunDocumentLifecycle();
+
+  EXPECT_EQ(
+      R"DUMP(
+LayoutNGBlockFlow HTML
+  +--LayoutNGBlockFlow (anonymous)
+  |  +--LayoutNGTextCombine (anonymous)
+  |  |  +--LayoutText #text "X"
+  +--LayoutNGBlockFlow BODY
+)DUMP",
+      ToSimpleLayoutTree(*GetDocument().documentElement()->GetLayoutObject()));
 }
 
 // http://crbug.com/1222160
@@ -1197,6 +1294,29 @@ LayoutNGBlockFlow DIV id="root" style="writing-mode: horizontal-tb"
       << "There are no wrapper.";
 }
 
+TEST_F(LayoutNGTextCombineTest, StyleToHorizontalWritingModeWithWordBreak) {
+  InsertStyleElement(
+      "wbr { text-combine-upright: all; }"
+      "div { writing-mode: vertical-rl; }");
+  SetBodyInnerHTML("<div id=root><wbr></div>");
+  auto& root = *GetElementById("root");
+
+  EXPECT_EQ(R"DUMP(
+LayoutNGBlockFlow DIV id="root"
+  +--LayoutNGTextCombine (anonymous)
+  |  +--LayoutWordBreak WBR
+)DUMP",
+            ToSimpleLayoutTree(*root.GetLayoutObject()));
+
+  root.setAttribute("style", "writing-mode: horizontal-tb");
+  RunDocumentLifecycle();
+  EXPECT_EQ(R"DUMP(
+LayoutNGBlockFlow DIV id="root" style="writing-mode: horizontal-tb"
+  +--LayoutWordBreak WBR
+)DUMP",
+            ToSimpleLayoutTree(*root.GetLayoutObject()));
+}
+
 TEST_F(LayoutNGTextCombineTest, StyleToVerticalWritingMode) {
   InsertStyleElement("c { text-combine-upright: all; }");
   SetBodyInnerHTML("<div id=root>ab<c id=combine><b>XY</b></c>de</div>");
@@ -1388,6 +1508,24 @@ LayoutNGBlockFlow DIV id="root"
   +--LayoutText #text "de"
 )DUMP",
             ToSimpleLayoutTree(root_layout_object));
+}
+
+// http://crbug.com/1242755
+TEST_F(LayoutNGTextCombineTest, WithTextIndent) {
+  LoadAhem();
+  InsertStyleElement(
+      "body { font: 20px/30px Ahem; }"
+      "c { text-combine-upright: all; }"
+      "div { writing-mode: vertical-rl; }"
+      "#root { text-indent: 100px; }");
+  SetBodyInnerHTML("<div id=root>ab<c id=combine>XYZ</c>de</div>");
+  const auto& text_xyz = *To<Text>(GetElementById("combine")->firstChild());
+
+  NGInlineCursor cursor;
+  cursor.MoveTo(*text_xyz.GetLayoutObject());
+
+  EXPECT_EQ(PhysicalRect(0, 0, 60, 20),
+            cursor.Current().RectInContainerFragment());
 }
 
 TEST_F(LayoutNGTextCombineTest, WithWordBreak) {

@@ -53,9 +53,8 @@ export class PersistenceUtils {
       }
       const icon = UI.Icon.Icon.create('mediumicon-file-sync');
       UI.Tooltip.Tooltip.install(icon, PersistenceUtils.tooltipForUISourceCode(binding.network));
-      // TODO(allada) This will not work properly with dark theme.
       if (NetworkPersistenceManager.instance().project() === binding.fileSystem.project()) {
-        icon.style.filter = 'hue-rotate(160deg)';
+        icon.classList.add('purple-dot');
       }
       return icon;
     }
@@ -70,15 +69,16 @@ export class PersistenceUtils {
   }
 }
 
-export class LinkDecorator extends Common.ObjectWrapper.ObjectWrapper implements Components.Linkifier.LinkDecorator {
+export class LinkDecorator extends Common.ObjectWrapper.ObjectWrapper<Components.Linkifier.LinkDecorator.EventTypes>
+    implements Components.Linkifier.LinkDecorator {
   constructor(persistence: PersistenceImpl) {
     super();
     persistence.addEventListener(Events.BindingCreated, this.bindingChanged, this);
     persistence.addEventListener(Events.BindingRemoved, this.bindingChanged, this);
   }
 
-  private bindingChanged(event: Common.EventTarget.EventTargetEvent): void {
-    const binding = event.data as PersistenceBinding;
+  private bindingChanged(event: Common.EventTarget.EventTargetEvent<PersistenceBinding>): void {
+    const binding = event.data;
     this.dispatchEventToListeners(Components.Linkifier.LinkDecorator.Events.LinkIconChanged, binding.network);
   }
 

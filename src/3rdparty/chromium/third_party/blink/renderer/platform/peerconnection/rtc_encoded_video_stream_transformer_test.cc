@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/memory/scoped_refptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -18,6 +18,7 @@
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_scoped_refptr_cross_thread_copier.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/webrtc/api/array_view.h"
@@ -55,8 +56,9 @@ class MockTransformableVideoFrame
  public:
   MOCK_METHOD(rtc::ArrayView<const uint8_t>, GetData, (), (const override));
   MOCK_METHOD(void, SetData, (rtc::ArrayView<const uint8_t> data), (override));
-  MOCK_METHOD(uint32_t, GetTimestamp, (), (const override));
+  MOCK_METHOD(uint8_t, GetPayloadType, (), (const, override));
   MOCK_METHOD(uint32_t, GetSsrc, (), (const, override));
+  MOCK_METHOD(uint32_t, GetTimestamp, (), (const override));
   MOCK_METHOD(bool, IsKeyFrame, (), (const, override));
   MOCK_METHOD(std::vector<uint8_t>, GetAdditionalData, (), (const, override));
   MOCK_METHOD(const webrtc::VideoFrameMetadata&,

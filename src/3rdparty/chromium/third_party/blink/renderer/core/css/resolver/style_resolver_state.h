@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/css/resolver/element_resolve_context.h"
 #include "third_party/blink/renderer/core/css/resolver/element_style_resources.h"
 #include "third_party/blink/renderer/core/css/resolver/font_builder.h"
+#include "third_party/blink/renderer/core/css/style_recalc_context.h"
 #include "third_party/blink/renderer/core/css/style_request.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -42,7 +43,6 @@ namespace blink {
 class ComputedStyle;
 class FontDescription;
 class PseudoElement;
-class StyleRecalcContext;
 
 // A per-element object which wraps an ElementResolveContext. It collects state
 // throughout the process of computing the style. It also gives convenient
@@ -64,6 +64,7 @@ class CORE_EXPORT StyleResolverState {
   bool IsForPseudoElement() const {
     return element_type_ == ElementType::kPseudoElement;
   }
+  bool IsInheritedForUnset(const CSSProperty& property) const;
 
   // In FontFaceSet and CanvasRenderingContext2D, we don't have an element to
   // grab the document from.  This is why we have to store the document
@@ -156,17 +157,35 @@ class CORE_EXPORT StyleResolverState {
 
   // If the input CSSValue is a CSSLightDarkValuePair, return the light or dark
   // CSSValue based on the UsedColorScheme. For all other values, just return a
-  // reference to the passed value. If the property is a non-inherited one, mark
-  // the ComputedStyle as having such a pair since that will make sure its not
-  // stored in the MatchedPropertiesCache.
-  const CSSValue& ResolveLightDarkPair(const CSSProperty&, const CSSValue&);
+  // reference to the passed value.
+  const CSSValue& ResolveLightDarkPair(const CSSValue&);
+
+  const ComputedStyle* OriginatingElementStyle() const {
+    return originating_element_style_.get();
+  }
+  bool IsForHighlight() const { return is_for_highlight_; }
 
   bool CanCacheBaseStyle() const { return can_cache_base_style_; }
 
   bool HadNoMatchedProperties() const { return had_no_matched_properties_; }
   void SetHadNoMatchedProperties() { had_no_matched_properties_ = true; }
 
+  // True if the cascade observed any  "animation" or "transition" properties,
+  // or when such properties were found within non-matching container queries.
+  //
+  // The flag is supposed to represent whether or not animations can be
+  // affected by at least one of the style variations produced by evaluating
+  // @container rules differently.
+  bool CanAffectAnimations() const { return can_affect_animations_; }
+  void SetCanAffectAnimations() { can_affect_animations_ = true; }
+
+  bool AffectsCompositorSnapshots() const {
+    return affects_compositor_snapshots_;
+  }
+  void SetAffectsCompositorSnapshots() { affects_compositor_snapshots_ = true; }
+
  private:
+  void UpdateLengthConversionData();
   CSSToLengthConversionData UnzoomedLengthConversionData(
       const ComputedStyle* font_style) const;
 
@@ -196,6 +215,12 @@ class CORE_EXPORT StyleResolverState {
   ElementType element_type_;
   Element* nearest_container_;
 
+  scoped_refptr<const ComputedStyle> originating_element_style_;
+  // True if we are resolving styles for a highlight pseudo-element.
+  const bool is_for_highlight_;
+  // True if we are resolving styles for a custom highlight pseudo-element.
+  const bool is_for_custom_highlight_;
+
   // True if the base style can be cached to optimize style recalculations for
   // animation updates or transition retargeting.
   bool can_cache_base_style_ = false;
@@ -203,6 +228,13 @@ class CORE_EXPORT StyleResolverState {
   // Set to true if a given style resolve produced an empty MatchResult.
   // This is used to return a nullptr style for pseudo-element style resolves.
   bool had_no_matched_properties_ = false;
+
+  // True whenever a matching rule in a non-matching container query contains
+  // any properties that can affect animations or transitions.
+  bool can_affect_animations_ = false;
+
+  // True if snapshots of composited keyframes require re-validation.
+  bool affects_compositor_snapshots_ = false;
 };
 
 }  // namespace blink

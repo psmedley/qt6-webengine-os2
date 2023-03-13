@@ -14,9 +14,13 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/pickle.h"
 #include "base/strings/string_util.h"
+#include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
+#include "net/disk_cache/simple/simple_backend_impl.h"
 #include "net/disk_cache/simple/simple_entry_format.h"
+#include "net/disk_cache/simple/simple_file_enumerator.h"
 #include "net/disk_cache/simple/simple_histogram_macros.h"
 #include "net/disk_cache/simple/simple_index.h"
 #include "net/disk_cache/simple/simple_synchronous_entry.h"
@@ -105,7 +109,7 @@ class SimpleIndexPickle : public base::Pickle {
 bool WritePickleFile(base::Pickle* pickle, const base::FilePath& file_name) {
   base::File file(file_name, base::File::FLAG_CREATE_ALWAYS |
                                  base::File::FLAG_WRITE |
-                                 base::File::FLAG_SHARE_DELETE);
+                                 base::File::FLAG_WIN_SHARE_DELETE);
   if (!file.IsValid())
     return false;
 
@@ -150,7 +154,7 @@ void ProcessEntryFile(net::CacheType cache_type,
   }
 
   base::Time last_used_time;
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   // For POSIX systems, a last access time is available. However, it's not
   // guaranteed to be more accurate than mtime. It is no worse though.
   last_used_time = last_accessed;
@@ -331,12 +335,10 @@ bool SimpleIndexFile::IndexMetadata::CheckIndexMetadata() {
 }
 
 SimpleIndexFile::SimpleIndexFile(
-    const scoped_refptr<base::SequencedTaskRunner>& cache_runner,
-    const scoped_refptr<base::TaskRunner>& worker_pool,
+    scoped_refptr<base::SequencedTaskRunner> cache_runner,
     net::CacheType cache_type,
     const base::FilePath& cache_directory)
-    : cache_runner_(cache_runner),
-      worker_pool_(worker_pool),
+    : cache_runner_(std::move(cache_runner)),
       cache_type_(cache_type),
       cache_directory_(cache_directory),
       index_file_(cache_directory_.AppendASCII(kIndexDirectory)
@@ -352,8 +354,10 @@ void SimpleIndexFile::LoadIndexEntries(base::Time cache_last_modified,
   base::OnceClosure task = base::BindOnce(
       &SimpleIndexFile::SyncLoadIndexEntries, cache_type_, cache_last_modified,
       cache_directory_, index_file_, out_result);
-  worker_pool_->PostTaskAndReply(FROM_HERE, std::move(task),
-                                 std::move(callback));
+  auto task_runner = base::ThreadPool::CreateSequencedTaskRunner(
+      SimpleBackendImpl::kWorkerPoolTaskTraits);
+  task_runner->PostTaskAndReply(FROM_HERE, std::move(task),
+                                std::move(callback));
 }
 
 void SimpleIndexFile::WriteToDisk(net::CacheType cache_type,
@@ -448,8 +452,8 @@ void SimpleIndexFile::SyncLoadFromDisk(net::CacheType cache_type,
 
   base::File file(index_filename, base::File::FLAG_OPEN |
                                       base::File::FLAG_READ |
-                                      base::File::FLAG_SHARE_DELETE |
-                                      base::File::FLAG_SEQUENTIAL_SCAN);
+                                      base::File::FLAG_WIN_SHARE_DELETE |
+                                      base::File::FLAG_WIN_SEQUENTIAL_SCAN);
   if (!file.IsValid())
     return;
 
@@ -568,10 +572,13 @@ void SimpleIndexFile::SyncRestoreFromDisk(net::CacheType cache_type,
   out_result->Reset();
   SimpleIndex::EntrySet* entries = &out_result->entries;
 
-  const bool did_succeed = TraverseCacheDirectory(
-      cache_directory,
-      base::BindRepeating(&ProcessEntryFile, cache_type, entries));
-  if (!did_succeed) {
+  SimpleFileEnumerator enumerator(cache_directory);
+  while (absl::optional<SimpleFileEnumerator::Entry> entry =
+             enumerator.Next()) {
+    ProcessEntryFile(cache_type, entries, entry->path, entry->last_accessed,
+                     entry->last_modified, entry->size);
+  }
+  if (enumerator.HasError()) {
     LOG(ERROR) << "Could not reconstruct index from disk";
     return;
   }

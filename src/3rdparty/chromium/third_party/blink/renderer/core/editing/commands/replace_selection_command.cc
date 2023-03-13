@@ -65,7 +65,7 @@
 #include "third_party/blink/renderer/core/layout/layout_text.h"
 #include "third_party/blink/renderer/core/svg/svg_style_element.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
@@ -1055,17 +1055,20 @@ ElementToSplitToAvoidPastingIntoInlineElementsWithStyle(
 
 void ReplaceSelectionCommand::SetUpStyle(const VisibleSelection& selection) {
   // We can skip matching the style if the selection is plain text.
-  // TODO(editing-dev): Use IsEditablePosition instead of using UserModify
+  // TODO(editing-dev): Use IsEditablePosition instead of using UsedUserModify
   // directly.
   if ((selection.Start().AnchorNode()->GetLayoutObject() &&
        selection.Start()
                .AnchorNode()
                ->GetLayoutObject()
                ->Style()
-               ->UserModify() == EUserModify::kReadWritePlaintextOnly) &&
+               ->UsedUserModify() == EUserModify::kReadWritePlaintextOnly) &&
       (selection.End().AnchorNode()->GetLayoutObject() &&
-       selection.End().AnchorNode()->GetLayoutObject()->Style()->UserModify() ==
-           EUserModify::kReadWritePlaintextOnly))
+       selection.End()
+               .AnchorNode()
+               ->GetLayoutObject()
+               ->Style()
+               ->UsedUserModify() == EUserModify::kReadWritePlaintextOnly))
     match_style_ = false;
 
   if (match_style_) {

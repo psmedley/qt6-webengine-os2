@@ -28,18 +28,19 @@
 #include "components/webrtc/media_stream_devices_controller.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include <vector>
 
-#include "chrome/browser/media/webrtc/screen_capture_infobar_delegate_android.h"
+#include "chrome/browser/media/webrtc/screen_capture_permission_handler_android.h"
 #include "components/permissions/permission_uma_util.h"
 #include "components/permissions/permission_util.h"
 #include "content/public/common/content_features.h"
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/content_settings/chrome_content_settings_utils.h"
 #include "chrome/browser/media/webrtc/system_media_capture_permissions_mac.h"
@@ -53,7 +54,7 @@ using MediaResponseCallback =
                             blink::mojom::MediaStreamRequestResult result,
                             std::unique_ptr<content::MediaStreamUI> ui)>;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 using system_media_permissions::SystemPermission;
 #endif
 
@@ -67,10 +68,12 @@ void UpdatePageSpecificContentSettings(
   if (!web_contents)
     return;
 
-  // TODO(https://crbug.com/1103176): We should extract the frame from |request|
+  content::RenderFrameHost* const render_frame_host =
+      content::RenderFrameHost::FromID(request.render_process_id,
+                                       request.render_frame_id);
   auto* content_settings =
       content_settings::PageSpecificContentSettings::GetForFrame(
-          web_contents->GetMainFrame());
+          render_frame_host);
   if (!content_settings)
     return;
 
@@ -116,11 +119,12 @@ void UpdatePageSpecificContentSettings(
   GURL embedding_origin;
   if (permissions::PermissionsClient::Get()->DoOriginsMatchNewTabPage(
           request.security_origin,
-          web_contents->GetLastCommittedURL().GetOrigin())) {
-    embedding_origin = web_contents->GetLastCommittedURL().GetOrigin();
-  } else {
+          web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL())) {
     embedding_origin =
-        permissions::PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+        web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
+  } else {
+    embedding_origin = permissions::PermissionUtil::GetLastCommittedOriginAsURL(
+        render_frame_host->GetMainFrame());
   }
 
   content_settings->OnMediaStreamPermissionSet(
@@ -154,7 +158,7 @@ bool PermissionBubbleMediaAccessHandler::SupportsStreamType(
     content::WebContents* web_contents,
     const blink::mojom::MediaStreamType type,
     const extensions::Extension* extension) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return type == blink::mojom::MediaStreamType::DEVICE_VIDEO_CAPTURE ||
          type == blink::mojom::MediaStreamType::DEVICE_AUDIO_CAPTURE ||
          type == blink::mojom::MediaStreamType::GUM_DESKTOP_VIDEO_CAPTURE ||
@@ -194,7 +198,7 @@ void PermissionBubbleMediaAccessHandler::HandleRequest(
     const extensions::Extension* extension) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (blink::IsScreenCaptureMediaType(request.video_type) &&
       !base::FeatureList::IsEnabled(features::kUserMediaScreenCapturing)) {
     // If screen capturing isn't enabled on Android, we'll use "invalid state"
@@ -204,7 +208,7 @@ void PermissionBubbleMediaAccessHandler::HandleRequest(
         blink::mojom::MediaStreamRequestResult::INVALID_STATE, nullptr);
     return;
   }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // Ensure we are observing the deletion of |web_contents|.
   web_contents_collection_.StartObserving(web_contents);
@@ -234,9 +238,11 @@ void PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest(
   const int64_t request_id = it->second.begin()->first;
   const content::MediaStreamRequest& request =
       it->second.begin()->second.request;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
+  // TODO(https://crbug.com/1157166): This should be split into
+  // DisplayMediaAccessHandler and DesktopCaptureAccessHandler.
   if (blink::IsScreenCaptureMediaType(request.video_type)) {
-    ScreenCaptureInfoBarDelegateAndroid::Create(
+    screen_capture::GetScreenCapturePermissionAndroid(
         web_contents, request,
         base::BindOnce(
             &PermissionBubbleMediaAccessHandler::OnAccessRequestResponse,
@@ -347,7 +353,7 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
 
   blink::mojom::MediaStreamRequestResult final_result = result;
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // If the request was approved, ask for system permissions if needed, and run
   // this function again when done.
   if (result == blink::mojom::MediaStreamRequestResult::OK) {
@@ -409,7 +415,7 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
       }
     }
   }
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
   MediaResponseCallback callback = std::move(request_it->second.callback);
   requests_map.erase(request_it);

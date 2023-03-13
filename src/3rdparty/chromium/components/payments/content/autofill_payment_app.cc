@@ -105,12 +105,6 @@ std::u16string AutofillPaymentApp::GetMissingInfoLabel() const {
 bool AutofillPaymentApp::HasEnrolledInstrument() const {
   CreditCardCompletionStatus status =
       GetCompletionStatusForCard(credit_card_, app_locale_, billing_profiles_);
-  if (PaymentsExperimentalFeatures::IsEnabled(
-          features::kStrictHasEnrolledAutofillInstrument)) {
-    return status == CREDIT_CARD_COMPLETE &&
-           is_requested_autofill_data_available_;
-  }
-
   // Card has to have a cardholder name and number for the purposes of
   // CanMakePayment. An expired card is still valid at this stage.
   return !(status & CREDIT_CARD_NO_CARDHOLDER ||
@@ -219,12 +213,12 @@ void AutofillPaymentApp::GenerateBasicCardResponse() {
   DCHECK(!is_waiting_for_card_unmask_);
 
   if (delegate_) {
-    std::unique_ptr<base::DictionaryValue> response_value =
+    base::Value response_value =
         payments::data_util::GetBasicCardResponseFromAutofillCreditCard(
             credit_card_, cvc_, billing_address_, app_locale_)
-            ->ToDictionaryValue();
+            ->ToValue();
     std::string stringified_details;
-    base::JSONWriter::Write(*response_value, &stringified_details);
+    base::JSONWriter::Write(response_value, &stringified_details);
     delegate_->OnInstrumentDetailsReady(method_name_, stringified_details,
                                         PayerData());
     delegate_ = nullptr;

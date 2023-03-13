@@ -6,9 +6,9 @@
 #define CORE_FXCRT_UNOWNED_PTR_H_
 
 #include <functional>
-#include <memory>
 #include <type_traits>
 #include <utility>
+#include <stdint.h>
 
 // UnownedPtr is a smart pointer class that behaves very much like a
 // standard C-style pointer. The advantages of using it over raw
@@ -60,7 +60,10 @@ class UnownedPtr {
   // NOLINTNEXTLINE(runtime/explicit)
   constexpr UnownedPtr(std::nullptr_t ptr) noexcept {}
 
-  ~UnownedPtr() { ProbeForLowSeverityLifetimeIssue(); }
+  ~UnownedPtr() {
+    ProbeForLowSeverityLifetimeIssue();
+    m_pObj = nullptr;
+  }
 
   void Reset(T* obj = nullptr) {
     ProbeForLowSeverityLifetimeIssue();

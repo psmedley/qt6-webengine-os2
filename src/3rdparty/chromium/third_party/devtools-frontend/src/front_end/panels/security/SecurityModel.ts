@@ -41,7 +41,7 @@ const str_ = i18n.i18n.registerUIStrings('panels/security/SecurityModel.ts', UIS
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 const i18nLazyString = i18n.i18n.getLazilyComputedLocalizedString.bind(undefined, str_);
 
-export class SecurityModel extends SDK.SDKModel.SDKModel {
+export class SecurityModel extends SDK.SDKModel.SDKModel<EventTypes> {
   private readonly dispatcher: SecurityDispatcher;
   private readonly securityAgent: ProtocolProxyApi.SecurityApi;
   constructor(target: SDK.Target.Target) {
@@ -49,17 +49,15 @@ export class SecurityModel extends SDK.SDKModel.SDKModel {
     this.dispatcher = new SecurityDispatcher(this);
     this.securityAgent = target.securityAgent();
     target.registerSecurityDispatcher(this.dispatcher);
-    this.securityAgent.invoke_enable();
+    void this.securityAgent.invoke_enable();
   }
 
   resourceTreeModel(): SDK.ResourceTreeModel.ResourceTreeModel {
-    return /** @type {!SDK.ResourceTreeModel.ResourceTreeModel} */ this.target().model(
-               SDK.ResourceTreeModel.ResourceTreeModel) as SDK.ResourceTreeModel.ResourceTreeModel;
+    return this.target().model(SDK.ResourceTreeModel.ResourceTreeModel) as SDK.ResourceTreeModel.ResourceTreeModel;
   }
 
   networkManager(): SDK.NetworkManager.NetworkManager {
-    return /** @type {!SDK.NetworkManager.NetworkManager} */ this.target().model(SDK.NetworkManager.NetworkManager) as
-        SDK.NetworkManager.NetworkManager;
+    return this.target().model(SDK.NetworkManager.NetworkManager) as SDK.NetworkManager.NetworkManager;
   }
 
   // eslint-disable-next-line @typescript-eslint/naming-convention
@@ -99,9 +97,12 @@ SDK.SDKModel.SDKModel.register(SecurityModel, {capabilities: SDK.Target.Capabili
 // TODO(crbug.com/1167717): Make this a const enum again
 // eslint-disable-next-line rulesdir/const_enum
 export enum Events {
-  SecurityStateChanged = 'SecurityStateChanged',
   VisibleSecurityStateChanged = 'VisibleSecurityStateChanged',
 }
+
+export type EventTypes = {
+  [Events.VisibleSecurityStateChanged]: PageVisibleSecurityState,
+};
 
 export const SummaryMessages: {[x: string]: () => string} = {
   [Protocol.Security.SecurityState.Unknown]: i18nLazyString(UIStrings.theSecurityOfThisPageIsUnknown),
@@ -110,19 +111,6 @@ export const SummaryMessages: {[x: string]: () => string} = {
   [Protocol.Security.SecurityState.Secure]: i18nLazyString(UIStrings.thisPageIsSecureValidHttps),
   [Protocol.Security.SecurityState.InsecureBroken]: i18nLazyString(UIStrings.thisPageIsNotSecureBrokenHttps),
 };
-
-export class PageSecurityState {
-  securityState: Protocol.Security.SecurityState;
-  explanations: Protocol.Security.SecurityStateExplanation[];
-  summary: string|null;
-  constructor(
-      securityState: Protocol.Security.SecurityState, explanations: Protocol.Security.SecurityStateExplanation[],
-      summary: string|null) {
-    this.securityState = securityState;
-    this.explanations = explanations;
-    this.summary = summary;
-  }
-}
 
 export class PageVisibleSecurityState {
   securityState: Protocol.Security.SecurityState;
@@ -238,9 +226,7 @@ class SecurityDispatcher implements ProtocolProxyApi.SecurityDispatcher {
     this.model = model;
   }
 
-  securityStateChanged({securityState, explanations, summary}: Protocol.Security.SecurityStateChangedEvent): void {
-    const pageSecurityState = new PageSecurityState(securityState, explanations, summary || null);
-    this.model.dispatchEventToListeners(Events.SecurityStateChanged, pageSecurityState);
+  securityStateChanged(_event: Protocol.Security.SecurityStateChangedEvent): void {
   }
 
   visibleSecurityStateChanged({visibleSecurityState}: Protocol.Security.VisibleSecurityStateChangedEvent): void {

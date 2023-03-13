@@ -17,6 +17,7 @@
 
 #include "absl/types/optional.h"
 #include "api/units/data_rate.h"
+#include "api/video/render_resolution.h"
 #include "api/video_codecs/sdp_video_format.h"
 
 namespace webrtc {
@@ -27,16 +28,6 @@ class VideoEncoder;
 // NOTE: This class is still under development and may change without notice.
 class VideoEncoderFactory {
  public:
-  // TODO(magjed): Try to get rid of this struct.
-  struct CodecInfo {
-    // `has_internal_source` is true if encoders created by this factory of the
-    // given codec will use internal camera sources, meaning that they don't
-    // require/expect frames to be delivered via webrtc::VideoEncoder::Encode.
-    // This flag is used as the internal_source parameter to
-    // webrtc::ViEExternalCodec::RegisterExternalSendCodec.
-    bool has_internal_source = false;
-  };
-
   struct CodecSupport {
     bool is_supported = false;
     bool is_power_efficient = false;
@@ -57,6 +48,13 @@ class VideoEncoderFactory {
     virtual absl::optional<SdpVideoFormat> OnAvailableBitrate(
         const DataRate& rate) = 0;
 
+    // Called every time the encoder input resolution change. Should return a
+    // non-empty if an encoder switch should be performed.
+    virtual absl::optional<SdpVideoFormat> OnResolutionChange(
+        const RenderResolution& resolution) {
+      return absl::nullopt;
+    }
+
     // Called if the currently used encoder reports itself as broken. Should
     // return a non-empty if an encoder switch should be performed.
     virtual absl::optional<SdpVideoFormat> OnEncoderBroken() = 0;
@@ -72,16 +70,6 @@ class VideoEncoderFactory {
   // called.
   virtual std::vector<SdpVideoFormat> GetImplementations() const {
     return GetSupportedFormats();
-  }
-
-  // Returns information about how this format will be encoded. The specified
-  // format must be one of the supported formats by this factory.
-
-  // TODO(magjed): Try to get rid of this method. Since is_hardware_accelerated
-  // is unused, only factories producing internal source encoders (in itself a
-  // deprecated feature) needs to override this method.
-  virtual CodecInfo QueryVideoEncoder(const SdpVideoFormat& format) const {
-    return CodecInfo();
   }
 
   // Query whether the specifed format is supported or not and if it will be

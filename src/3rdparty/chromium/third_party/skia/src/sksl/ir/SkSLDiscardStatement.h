@@ -18,21 +18,21 @@ namespace SkSL {
  */
 class DiscardStatement final : public Statement {
 public:
-    static constexpr Kind kStatementKind = Kind::kDiscard;
+    inline static constexpr Kind kStatementKind = Kind::kDiscard;
 
-    DiscardStatement(int offset)
-    : INHERITED(offset, kStatementKind) {}
+    DiscardStatement(Position pos)
+    : INHERITED(pos, kStatementKind) {}
 
-    static std::unique_ptr<Statement> Make(int offset) {
-        return std::make_unique<DiscardStatement>(offset);
+    static std::unique_ptr<Statement> Make(Position pos) {
+        return std::make_unique<DiscardStatement>(pos);
     }
 
     std::unique_ptr<Statement> clone() const override {
-        return std::make_unique<DiscardStatement>(fOffset);
+        return std::make_unique<DiscardStatement>(fPosition);
     }
 
-    String description() const override {
-        return String("discard;");
+    std::string description() const override {
+        return "discard;";
     }
 
 private:

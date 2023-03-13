@@ -4,7 +4,7 @@
  *
  *   TrueType and OpenType colored glyph layer support (body).
  *
- * Copyright (C) 2018-2021 by
+ * Copyright (C) 2018-2022 by
  * David Turner, Robert Wilhelm, Dominik Röttsches, and Werner Lemberg.
  *
  * Originally written by Shao Yu Zhang <shaozhang@fb.com>.
@@ -27,6 +27,7 @@
    */
 
 
+#include <freetype/internal/ftcalc.h>
 #include <freetype/internal/ftdebug.h>
 #include <freetype/internal/ftstream.h>
 #include <freetype/tttags.h>
@@ -46,8 +47,16 @@
 #define LAYER_V1_LIST_NUM_LAYERS_SIZE     4U
 #define COLOR_STOP_SIZE                   6U
 #define LAYER_SIZE                        4U
-#define COLR_HEADER_SIZE                 14U
+/* https://docs.microsoft.com/en-us/typography/opentype/spec/colr#colr-header */
+/* 3 * uint16 + 2 * Offset32 */
+#define COLRV0_HEADER_SIZE               14U
+/* COLRV0_HEADER_SIZE + 5 * Offset32 */
+#define COLRV1_HEADER_SIZE               34U
 
+#define ENSURE_READ_BYTES( byte_size )                            \
+  if ( p < colr->paints_start_v1 ||                               \
+       p > (FT_Byte*)colr->table + colr->table_size - byte_size ) \
+    return 0;
 
   typedef enum  FT_PaintFormat_Internal_
   {
@@ -148,7 +157,7 @@
     if ( error )
       goto NoColr;
 
-    if ( table_size < COLR_HEADER_SIZE )
+    if ( table_size < COLRV0_HEADER_SIZE )
       goto InvalidTable;
 
     if ( FT_FRAME_EXTRACT( table_size, table ) )
@@ -182,9 +191,12 @@
 
     if ( colr->version == 1 )
     {
+      if ( table_size < COLRV1_HEADER_SIZE )
+        goto InvalidTable;
+
       base_glyphs_offset_v1 = FT_NEXT_ULONG( p );
 
-      if ( base_glyphs_offset_v1 >= table_size )
+      if ( base_glyphs_offset_v1 + 4 >= table_size )
         goto InvalidTable;
 
       p1                 = (FT_Byte*)( table + base_glyphs_offset_v1 );
@@ -204,6 +216,9 @@
 
       if ( layer_offset_v1 )
       {
+        if ( layer_offset_v1 + 4 >= table_size )
+          goto InvalidTable;
+
         p1            = (FT_Byte*)( table + layer_offset_v1 );
         num_layers_v1 = FT_PEEK_ULONG( p1 );
 
@@ -371,12 +386,14 @@
 
 
   static FT_Bool
-  read_color_line( FT_Byte*      color_line_p,
+  read_color_line( Colr*          colr,
+                   FT_Byte*       color_line_p,
                    FT_ColorLine  *colorline )
   {
     FT_Byte*        p = color_line_p;
     FT_PaintExtend  paint_extend;
 
+    ENSURE_READ_BYTES( 3 );
 
     paint_extend = (FT_PaintExtend)FT_NEXT_BYTE( p );
     if ( paint_extend > FT_COLR_PAINT_EXTEND_REFLECT )
@@ -412,6 +429,10 @@
     if ( !child_table_pointer )
       return 0;
 
+    if ( *p < colr->paints_start_v1                            ||
+         *p > (FT_Byte*)colr->table + colr->table_size - 1 - 3 )
+      return 0;
+
     paint_offset = FT_NEXT_UOFF3( *p );
     if ( !paint_offset )
       return 0;
@@ -439,8 +460,10 @@
     if ( !p || !colr || !colr->table )
       return 0;
 
-    if ( p < colr->paints_start_v1                         ||
-         p >= ( (FT_Byte*)colr->table + colr->table_size ) )
+    /* The last byte of the 'COLR' table is at 'size-1'; subtract 1 of    */
+    /* that to account for the expected format byte we are going to read. */
+    if ( p < colr->paints_start_v1                        ||
+         p > (FT_Byte*)colr->table + colr->table_size - 2 )
       return 0;
 
     apaint->format = (FT_PaintFormat)FT_NEXT_BYTE( p );
@@ -476,6 +499,8 @@
 
     else if ( apaint->format == FT_COLR_PAINTFORMAT_SOLID )
     {
+      ENSURE_READ_BYTES( 4 );
+
       apaint->u.solid.color.palette_index = FT_NEXT_USHORT( p );
       apaint->u.solid.color.alpha         = FT_NEXT_SHORT( p );
 
@@ -484,6 +509,8 @@
 
     else if ( apaint->format == FT_COLR_PAINTFORMAT_COLR_GLYPH )
     {
+      ENSURE_READ_BYTES( 2 );
+
       apaint->u.colr_glyph.glyphID = FT_NEXT_USHORT( p );
 
       return 1;
@@ -501,56 +528,85 @@
 
     if ( apaint->format == FT_COLR_PAINTFORMAT_LINEAR_GRADIENT )
     {
-      if ( !read_color_line( child_table_p,
+      if ( !read_color_line( colr,
+                             child_table_p,
                              &apaint->u.linear_gradient.colorline ) )
         return 0;
 
-      apaint->u.linear_gradient.p0.x = FT_NEXT_SHORT( p );
-      apaint->u.linear_gradient.p0.y = FT_NEXT_SHORT( p );
-      apaint->u.linear_gradient.p1.x = FT_NEXT_SHORT( p );
-      apaint->u.linear_gradient.p1.y = FT_NEXT_SHORT( p );
-      apaint->u.linear_gradient.p2.x = FT_NEXT_SHORT( p );
-      apaint->u.linear_gradient.p2.y = FT_NEXT_SHORT( p );
+      ENSURE_READ_BYTES( 12 );
+
+      /*
+       * In order to support variations expose these as FT_Fixed 16.16 values so
+       * that we can support fractional values after interpolation.
+       */
+      apaint->u.linear_gradient.p0.x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.linear_gradient.p0.y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.linear_gradient.p1.x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.linear_gradient.p1.y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.linear_gradient.p2.x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.linear_gradient.p2.y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       return 1;
     }
 
     else if ( apaint->format == FT_COLR_PAINTFORMAT_RADIAL_GRADIENT )
     {
-      if ( !read_color_line( child_table_p,
+      FT_Pos  tmp;
+
+
+      if ( !read_color_line( colr,
+                             child_table_p,
                              &apaint->u.radial_gradient.colorline ) )
         return 0;
 
-      apaint->u.radial_gradient.c0.x = FT_NEXT_SHORT( p );
-      apaint->u.radial_gradient.c0.y = FT_NEXT_SHORT( p );
+      ENSURE_READ_BYTES( 12 );
 
-      apaint->u.radial_gradient.r0 = FT_NEXT_USHORT( p );
+      /* In the OpenType specification, `r0` and `r1` are defined as   */
+      /* `UFWORD`.  Since FreeType doesn't have a corresponding 16.16  */
+      /* format we convert to `FWORD` and replace negative values with */
+      /* (32bit) `FT_INT_MAX`.                                         */
 
-      apaint->u.radial_gradient.c1.x = FT_NEXT_SHORT( p );
-      apaint->u.radial_gradient.c1.y = FT_NEXT_SHORT( p );
+      apaint->u.radial_gradient.c0.x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.radial_gradient.c0.y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
 
-      apaint->u.radial_gradient.r1 = FT_NEXT_USHORT( p );
+      tmp                          = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.radial_gradient.r0 = tmp < 0 ? FT_INT_MAX : tmp;
+
+      apaint->u.radial_gradient.c1.x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.radial_gradient.c1.y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+
+      tmp                          = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.radial_gradient.r1 = tmp < 0 ? FT_INT_MAX : tmp;
 
       return 1;
     }
 
     else if ( apaint->format == FT_COLR_PAINTFORMAT_SWEEP_GRADIENT )
     {
-      if ( !read_color_line( child_table_p,
+      if ( !read_color_line( colr,
+                             child_table_p,
                              &apaint->u.sweep_gradient.colorline ) )
         return 0;
 
-      apaint->u.sweep_gradient.center.x = FT_NEXT_SHORT( p );
-      apaint->u.sweep_gradient.center.y = FT_NEXT_SHORT( p );
+      ENSURE_READ_BYTES( 8 );
 
-      apaint->u.sweep_gradient.start_angle = FT_NEXT_SHORT( p ) << 2;
-      apaint->u.sweep_gradient.end_angle   = FT_NEXT_SHORT( p ) << 2;
+      apaint->u.sweep_gradient.center.x =
+          INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.sweep_gradient.center.y =
+          INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+
+      apaint->u.sweep_gradient.start_angle =
+          F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.sweep_gradient.end_angle =
+          F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       return 1;
     }
 
     if ( apaint->format == FT_COLR_PAINTFORMAT_GLYPH )
     {
+      ENSURE_READ_BYTES( 2 );
+
       apaint->u.glyph.paint.p                     = child_table_p;
       apaint->u.glyph.paint.insert_root_transform = 0;
       apaint->u.glyph.glyphID                     = FT_NEXT_USHORT( p );
@@ -568,6 +624,12 @@
 
       p = child_table_p;
 
+      ENSURE_READ_BYTES( 24 );
+
+      /*
+       * The following matrix coefficients are encoded as
+       * OpenType 16.16 fixed-point values.
+       */
       apaint->u.transform.affine.xx = FT_NEXT_LONG( p );
       apaint->u.transform.affine.yx = FT_NEXT_LONG( p );
       apaint->u.transform.affine.xy = FT_NEXT_LONG( p );
@@ -583,8 +645,10 @@
       apaint->u.translate.paint.p                     = child_table_p;
       apaint->u.translate.paint.insert_root_transform = 0;
 
-      apaint->u.translate.dx = FT_NEXT_SHORT( p ) << 16;
-      apaint->u.translate.dy = FT_NEXT_SHORT( p ) << 16;
+      ENSURE_READ_BYTES( 4 );
+
+      apaint->u.translate.dx = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.translate.dy = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       return 1;
     }
@@ -601,17 +665,23 @@
       apaint->u.scale.paint.p                     = child_table_p;
       apaint->u.scale.paint.insert_root_transform = 0;
 
+      ENSURE_READ_BYTES( 2 );
+
       /* All scale paints get at least one scale value. */
-      apaint->u.scale.scale_x = FT_NEXT_SHORT( p ) << 2;
+      apaint->u.scale.scale_x = F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       /* Non-uniform ones read an extra y value. */
       if ( apaint->format ==
              FT_COLR_PAINTFORMAT_SCALE                 ||
            (FT_PaintFormat_Internal)apaint->format ==
-             FT_COLR_PAINTFORMAT_INTERNAL_SCALE_CENTER )
-        apaint->u.scale.scale_y = FT_NEXT_SHORT( p ) << 2;
+             FT_COLR_PAINTFORMAT_INTERNAL_SCALE_CENTER ) {
+        ENSURE_READ_BYTES( 2 );
+        apaint->u.scale.scale_y = F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
+      }
       else
+      {
         apaint->u.scale.scale_y = apaint->u.scale.scale_x;
+      }
 
       /* Scale paints that have a center read center coordinates, */
       /* otherwise the center is (0,0).                           */
@@ -620,8 +690,9 @@
            (FT_PaintFormat_Internal)apaint->format ==
              FT_COLR_PAINTFORMAT_INTERNAL_SCALE_UNIFORM_CENTER )
       {
-        apaint->u.scale.center_x = FT_NEXT_SHORT ( p ) << 16;
-        apaint->u.scale.center_y = FT_NEXT_SHORT ( p ) << 16;
+        ENSURE_READ_BYTES( 4 );
+        apaint->u.scale.center_x = INT_TO_FIXED( FT_NEXT_SHORT ( p ) );
+        apaint->u.scale.center_y = INT_TO_FIXED( FT_NEXT_SHORT ( p ) );
       }
       else
       {
@@ -643,17 +714,15 @@
       apaint->u.rotate.paint.p                     = child_table_p;
       apaint->u.rotate.paint.insert_root_transform = 0;
 
-      /* The angle is specified as F2DOT14 and our output type is an FT_Fixed,
-       * shift by 2 positions. */
-      apaint->u.rotate.angle = FT_NEXT_SHORT( p ) << 2;
+      ENSURE_READ_BYTES( 2 );
+      apaint->u.rotate.angle = F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       if ( (FT_PaintFormat_Internal)apaint->format ==
            FT_COLR_PAINTFORMAT_INTERNAL_ROTATE_CENTER )
       {
-        /* The center is specified as Int16 in font units, shift by 16 bits to
-         * convert to our FT_Fixed output type. */
-        apaint->u.rotate.center_x = FT_NEXT_SHORT( p ) << 16;
-        apaint->u.rotate.center_y = FT_NEXT_SHORT( p ) << 16;
+        ENSURE_READ_BYTES( 4 );
+        apaint->u.rotate.center_x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+        apaint->u.rotate.center_y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
       }
       else
       {
@@ -673,14 +742,16 @@
       apaint->u.skew.paint.p                     = child_table_p;
       apaint->u.skew.paint.insert_root_transform = 0;
 
-      apaint->u.skew.x_skew_angle = FT_NEXT_SHORT( p ) << 2;
-      apaint->u.skew.y_skew_angle = FT_NEXT_SHORT( p ) << 2;
+      ENSURE_READ_BYTES( 4 );
+      apaint->u.skew.x_skew_angle = F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
+      apaint->u.skew.y_skew_angle = F2DOT14_TO_FIXED( FT_NEXT_SHORT( p ) );
 
       if ( (FT_PaintFormat_Internal)apaint->format ==
            FT_COLR_PAINTFORMAT_INTERNAL_SKEW_CENTER )
       {
-        apaint->u.skew.center_x = FT_NEXT_SHORT( p ) << 16;
-        apaint->u.skew.center_y = FT_NEXT_SHORT( p ) << 16;
+        ENSURE_READ_BYTES( 4 );
+        apaint->u.skew.center_x = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
+        apaint->u.skew.center_y = INT_TO_FIXED( FT_NEXT_SHORT( p ) );
       }
       else
       {
@@ -701,6 +772,8 @@
       apaint->u.composite.source_paint.p                     = child_table_p;
       apaint->u.composite.source_paint.insert_root_transform = 0;
 
+
+      ENSURE_READ_BYTES( 1 );
       composite_mode = FT_NEXT_BYTE( p );
       if ( composite_mode >= FT_COLR_COMPOSITE_MAX )
         return 0;
@@ -815,7 +888,7 @@
   {
     Colr*  colr;
 
-    FT_Byte  *p, *p1, *clip_base;
+    FT_Byte  *p, *p1, *clip_base, *limit;
 
     FT_Byte    clip_list_format;
     FT_ULong   num_clip_boxes, i;
@@ -838,15 +911,31 @@
 
     p = colr->clip_list;
 
+    /* Limit points to the first byte after the end of the color table.    */
+    /* Thus, in subsequent limit checks below we need to check whether the */
+    /* read pointer is strictly greater than a position offset by certain  */
+    /* field sizes to the left of that position.                           */
+    limit = (FT_Byte*)colr->table + colr->table_size;
+
+    /* Check whether we can extract one `uint8` and one `uint32`. */
+    if ( p > limit - ( 1 + 4 ) )
+      return 0;
+
     clip_base        = p;
     clip_list_format = FT_NEXT_BYTE ( p );
 
     /* Format byte used here to be able to upgrade ClipList for >16bit */
-    /* glyph ids; for now we can expect it to be 0. */
-    if ( !( clip_list_format == 0 ) )
+    /* glyph ids; for now we can expect it to be 0.                    */
+    if ( !( clip_list_format == 1 ) )
       return 0;
 
     num_clip_boxes = FT_NEXT_ULONG( p );
+
+    /* Check whether we can extract two `uint16` and one `Offset24`, */
+    /* `num_clip_boxes` times.                                       */
+    if ( colr->table_size / ( 2 + 2 + 3 ) < num_clip_boxes ||
+         p > limit - ( 2 + 2 + 3 ) * num_clip_boxes        )
+      return 0;
 
     for ( i = 0; i < num_clip_boxes; ++i )
     {
@@ -858,12 +947,17 @@
       {
         p1 = (FT_Byte*)( clip_base + clip_box_offset );
 
-        if ( p1 >= ( (FT_Byte*)colr->table + colr->table_size ) )
+        /* Check whether we can extract one `uint8`. */
+        if ( p1 > limit - 1 )
           return 0;
 
         format = FT_NEXT_BYTE( p1 );
 
         if ( format > 1 )
+          return 0;
+
+        /* Check whether we can extract four `FWORD`. */
+        if ( p1 > limit - ( 2 + 2 + 2 + 2 ) )
           return 0;
 
         /* `face->root.size->metrics.x_scale` and `y_scale` are factors   */
@@ -946,13 +1040,6 @@
     p = iterator->p;
 
     /*
-     * First ensure that p is within COLRv1.
-     */
-    if ( p < colr->layers_v1                               ||
-         p >= ( (FT_Byte*)colr->table + colr->table_size ) )
-      return 0;
-
-    /*
      * Do a cursor sanity check of the iterator.  Counting backwards from
      * where it stands, we need to end up at a position after the beginning
      * of the `LayerV1List` table and not after the end of the
@@ -966,6 +1053,14 @@
     if ( p_first_layer >= (FT_Byte*)(
            colr->layers_v1 + LAYER_V1_LIST_NUM_LAYERS_SIZE +
            colr->num_layers_v1 * LAYER_V1_LIST_PAINT_OFFSET_SIZE ) )
+      return 0;
+
+     /*
+     * Before reading, ensure that p is within COLRv1 and we can read a 4-byte
+     * ULONG.
+     */
+    if ( p < colr->layers_v1                                 ||
+         p > ( (FT_Byte*)colr->table + colr->table_size - 4 ) )
       return 0;
 
     paint_offset =
@@ -1005,10 +1100,12 @@
     if ( iterator->current_color_stop >= iterator->num_color_stops )
       return 0;
 
+    /* Subtract 3 times 2 because we need to succeed in reading */
+    /* three 2-byte short values. */
     if ( iterator->p +
-           ( ( iterator->num_color_stops - iterator->current_color_stop ) *
-             COLOR_STOP_SIZE ) >
-         ( (FT_Byte *)colr->table + colr->table_size ) )
+           ( iterator->num_color_stops - iterator->current_color_stop ) *
+           COLOR_STOP_SIZE >
+         (FT_Byte*)colr->table + colr->table_size - 1 - 2 - 2 - 2 )
       return 0;
 
     /* Iterator points at first `ColorStop` of `ColorLine`. */
@@ -1086,9 +1183,9 @@
       if ( face->root.internal->transform_flags & 2 )
       {
         paint->u.transform.affine.dx =
-          face->root.internal->transform_delta.x << 10;
+          face->root.internal->transform_delta.x * ( 1 << 10 );
         paint->u.transform.affine.dy =
-          face->root.internal->transform_delta.y << 10;
+          face->root.internal->transform_delta.y * ( 1 << 10 );
       }
       else
       {

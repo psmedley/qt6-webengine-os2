@@ -30,9 +30,11 @@
 #include "extensions/common/extension_set.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/features/feature_channel.h"
+#include "extensions/common/features/feature_developer_mode_only.h"
 #include "extensions/common/features/feature_session_type.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "ipc/ipc_channel_proxy.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "url/origin.h"
 
@@ -132,6 +134,10 @@ void RendererStartupHelper::InitializeProcess(
   if (activity_logging_enabled)
     renderer->SetActivityLoggingEnabled(activity_logging_enabled);
 
+  // extensions need to know the developer mode value for api restrictions.
+  renderer->SetDeveloperMode(
+      GetCurrentDeveloperMode(util::GetBrowserContextId(browser_context_)));
+
   // Extensions need to know the channel and the session type for API
   // restrictions. The values are sent to all renderers, as the non-extension
   // renderers may have content scripts.
@@ -224,7 +230,7 @@ void RendererStartupHelper::ActivateExtensionInProcess(
   if (!base::Contains(extension_process_map_, extension.id())) {
 #if DCHECK_IS_ON()
     NOTREACHED() << "Extension " << extension.id()
-                 << "activated before loading";
+                 << " activated before loading";
 #else
     base::debug::DumpWithoutCrashing();
     return;
@@ -249,7 +255,7 @@ void RendererStartupHelper::ActivateExtensionInProcess(
   // SetCorsOriginAccessListsForOrigin and CreateURLLoaderFactory are 2 methods
   // of the same mojom::NetworkContext interface).
   util::SetCorsOriginAccessListForExtension({process->GetBrowserContext()},
-                                            extension, base::DoNothing::Once());
+                                            extension, base::DoNothing());
 
   auto remote = process_mojo_map_.find(process);
   if (remote != process_mojo_map_.end()) {
@@ -261,11 +267,7 @@ void RendererStartupHelper::ActivateExtensionInProcess(
 }
 
 void RendererStartupHelper::OnExtensionLoaded(const Extension& extension) {
-  // Extension was already loaded.
-  // TODO(crbug.com/708230): Ensure that clients don't call this for an
-  // already loaded extension and change this to a DCHECK.
-  if (base::Contains(extension_process_map_, extension.id()))
-    return;
+  DCHECK(!base::Contains(extension_process_map_, extension.id()));
 
   // Mark the extension as loaded.
   std::set<content::RenderProcessHost*>& loaded_process_set =
@@ -299,11 +301,7 @@ void RendererStartupHelper::OnExtensionLoaded(const Extension& extension) {
 }
 
 void RendererStartupHelper::OnExtensionUnloaded(const Extension& extension) {
-  // Extension is not loaded.
-  // TODO(crbug.com/708230): Ensure that clients call this for a loaded
-  // extension only and change this to a DCHECK.
-  if (!base::Contains(extension_process_map_, extension.id()))
-    return;
+  DCHECK(base::Contains(extension_process_map_, extension.id()));
 
   const std::set<content::RenderProcessHost*>& loaded_process_set =
       extension_process_map_[extension.id()];
@@ -321,6 +319,19 @@ void RendererStartupHelper::OnExtensionUnloaded(const Extension& extension) {
 
   // Mark the extension as unloaded.
   extension_process_map_.erase(extension.id());
+}
+
+void RendererStartupHelper::OnDeveloperModeChanged(bool in_developer_mode) {
+  for (auto& process_entry : process_mojo_map_) {
+    content::RenderProcessHost* process = process_entry.first;
+    mojom::Renderer* renderer = GetRenderer(process);
+    if (renderer)
+      renderer->SetDeveloperMode(in_developer_mode);
+  }
+}
+
+void RendererStartupHelper::UnloadAllExtensionsForTest() {
+  extension_process_map_.clear();
 }
 
 mojo::PendingAssociatedRemote<mojom::Renderer>

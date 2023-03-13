@@ -63,12 +63,54 @@ namespace ui {
 
 namespace {
 
+EGLDeviceEXT GetPreferredEGLDevice() {
+  std::vector<EGLDeviceEXT> devices(DRM_MAX_MINOR, EGL_NO_DEVICE_EXT);
+  EGLint num_devices = 0;
+
+  eglQueryDevicesEXT(DRM_MAX_MINOR, devices.data(), &num_devices);
+  devices.resize(num_devices);
+
+  std::map<EGLDeviceEXT, std::string> device_drivers;
+  for (EGLDeviceEXT device : devices) {
+    const char* filename =
+        eglQueryDeviceStringEXT(device, EGL_DRM_DEVICE_FILE_EXT);
+    if (!filename)  // Not a DRM device.
+      continue;
+
+    const auto driver_name = GetDrmDriverNameFromPath(filename);
+    if (driver_name)
+      device_drivers.insert({device, driver_name.value()});
+  }
+
+  // Find the device with the most preferred driver.
+  const auto preferred_drivers = GetPreferredDrmDrivers();
+  for (const auto* preferred_driver : preferred_drivers) {
+    for (EGLDeviceEXT device : devices) {
+      const auto driver = device_drivers.find(device);
+      if (driver != device_drivers.end() &&
+          driver->second == preferred_driver) {
+        return device;
+      }
+    }
+  }
+
+  // Fall back to the first device.
+  if (!devices.empty())
+    return devices[0];
+
+  return EGL_NO_DEVICE_EXT;
+}
+
 class GLOzoneEGLGbm : public GLOzoneEGL {
  public:
   GLOzoneEGLGbm(GbmSurfaceFactory* surface_factory,
                 DrmThreadProxy* drm_thread_proxy)
       : surface_factory_(surface_factory),
         drm_thread_proxy_(drm_thread_proxy) {}
+
+  GLOzoneEGLGbm(const GLOzoneEGLGbm&) = delete;
+  GLOzoneEGLGbm& operator=(const GLOzoneEGLGbm&) = delete;
+
   ~GLOzoneEGLGbm() override {}
 
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
@@ -120,43 +162,10 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
       return native_display_;
     }
 
-    std::vector<EGLDeviceEXT> devices(DRM_MAX_MINOR, EGL_NO_DEVICE_EXT);
-    EGLDeviceEXT virgl_device = EGL_NO_DEVICE_EXT;
-    EGLDeviceEXT amdgpu_device = EGL_NO_DEVICE_EXT;
-    EGLDeviceEXT i915_device = EGL_NO_DEVICE_EXT;
-    EGLint num_devices = 0;
-
-    eglQueryDevicesEXT(DRM_MAX_MINOR, devices.data(), &num_devices);
-    devices.resize(num_devices);
-    for (EGLDeviceEXT device : devices) {
-      const char* filename =
-          eglQueryDeviceStringEXT(device, EGL_DRM_DEVICE_FILE_EXT);
-      if (!filename)  // Not a DRM device.
-        continue;
-      if (IsDriverName(filename, "virtio_gpu"))
-        virgl_device = device;
-      if (IsDriverName(filename, "amdgpu"))
-        amdgpu_device = device;
-      if (IsDriverName(filename, "i915"))
-        i915_device = device;
-    }
-
-    if (virgl_device != EGL_NO_DEVICE_EXT) {
+    const EGLDeviceEXT preferred_device = GetPreferredEGLDevice();
+    if (preferred_device != EGL_NO_DEVICE_EXT) {
       native_display_ = gl::EGLDisplayPlatform(
-          reinterpret_cast<EGLNativeDisplayType>(virgl_device),
-          EGL_PLATFORM_DEVICE_EXT);
-    }
-
-    if (amdgpu_device != EGL_NO_DEVICE_EXT) {
-      native_display_ = gl::EGLDisplayPlatform(
-          reinterpret_cast<EGLNativeDisplayType>(amdgpu_device),
-          EGL_PLATFORM_DEVICE_EXT);
-    }
-
-    // If we also have Intel integrated, use it instead.
-    if (i915_device != EGL_NO_DEVICE_EXT) {
-      native_display_ = gl::EGLDisplayPlatform(
-          reinterpret_cast<EGLNativeDisplayType>(i915_device),
+          reinterpret_cast<EGLNativeDisplayType>(preferred_device),
           EGL_PLATFORM_DEVICE_EXT);
     }
 
@@ -171,8 +180,6 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
   GbmSurfaceFactory* surface_factory_;
   DrmThreadProxy* drm_thread_proxy_;
   gl::EGLDisplayPlatform native_display_;
-
-  DISALLOW_COPY_AND_ASSIGN(GLOzoneEGLGbm);
 };
 
 std::vector<gfx::BufferFormat> EnumerateSupportedBufferFormatsForTexturing() {
@@ -201,8 +208,8 @@ std::vector<gfx::BufferFormat> EnumerateSupportedBufferFormatsForTexturing() {
       return supported_buffer_formats;
     }
 
-    for (int i = 0; i <= static_cast<int>(gfx::BufferFormat::LAST); ++i) {
-      const gfx::BufferFormat buffer_format = static_cast<gfx::BufferFormat>(i);
+    for (int j = 0; j <= static_cast<int>(gfx::BufferFormat::LAST); ++j) {
+      const gfx::BufferFormat buffer_format = static_cast<gfx::BufferFormat>(j);
       if (base::Contains(supported_buffer_formats, buffer_format))
         continue;
       if (gbm_device_is_format_supported(
@@ -263,14 +270,13 @@ GbmSurfaceFactory::GetAllowedGLImplementations() {
   return std::vector<gl::GLImplementationParts>{
       gl::GLImplementationParts(gl::kGLImplementationEGLGLES2),
       gl::GLImplementationParts(gl::kGLImplementationEGLANGLE),
-      gl::GLImplementationParts(gl::kGLImplementationSwiftShaderGL)};
+      gl::GLImplementationParts(gl::ANGLEImplementation::kSwiftShader)};
 }
 
 GLOzone* GbmSurfaceFactory::GetGLOzone(
     const gl::GLImplementationParts& implementation) {
   switch (implementation.gl) {
     case gl::kGLImplementationEGLGLES2:
-    case gl::kGLImplementationSwiftShaderGL:
     case gl::kGLImplementationEGLANGLE:
       return egl_implementation_.get();
     default:

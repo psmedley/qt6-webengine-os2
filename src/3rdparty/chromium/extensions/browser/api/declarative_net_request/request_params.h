@@ -7,7 +7,7 @@
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/url_pattern_index/url_pattern_index.h"
 #include "content/public/browser/global_routing_id.h"
 #include "extensions/browser/api/declarative_net_request/regex_rules_matcher.h"
@@ -34,10 +34,12 @@ struct RequestParams {
   explicit RequestParams(content::RenderFrameHost* host,
                          bool is_post_navigation);
   RequestParams();
+  RequestParams(const RequestParams&) = delete;
+  RequestParams& operator=(const RequestParams&) = delete;
   ~RequestParams();
 
   // This is a pointer to a GURL. Hence the GURL must outlive this struct.
-  const GURL* url = nullptr;
+  raw_ptr<const GURL> url = nullptr;
   url::Origin first_party_origin;
   url_pattern_index::flat::ElementType element_type =
       url_pattern_index::flat::ElementType_OTHER;
@@ -68,8 +70,6 @@ struct RequestParams {
   // request. Cached for performance.
   mutable base::flat_map<const RegexRulesMatcher*, std::vector<RegexRuleInfo>>
       potential_regex_matches;
-
-  DISALLOW_COPY_AND_ASSIGN(RequestParams);
 };
 
 }  // namespace declarative_net_request

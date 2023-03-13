@@ -30,14 +30,16 @@
 #include "base/process/launch.h"
 #include "base/process/process.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/single_thread_task_executor.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -46,7 +48,7 @@
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/disk_cache_test_util.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/logging_win.h"
 #endif
 
@@ -362,7 +364,7 @@ void CrashCallback() {
 }
 
 void RunSoon(scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  const base::TimeDelta kTaskDelay = base::TimeDelta::FromSeconds(10);
+  const base::TimeDelta kTaskDelay = base::Seconds(10);
   task_runner->PostDelayedTask(FROM_HERE, base::BindOnce(&CrashCallback),
                                kTaskDelay);
 }
@@ -387,7 +389,7 @@ void CrashHandler(const char* file,
 
 // -----------------------------------------------------------------------
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // {B9A153D4-31C3-48e4-9ABF-D54383F14A0D}
 const GUID kStressCacheTraceProviderName = {
     0xb9a153d4, 0x31c3, 0x48e4,
@@ -404,7 +406,7 @@ int main(int argc, const char* argv[]) {
   logging::ScopedLogAssertHandler scoped_assert_handler(
       base::BindRepeating(CrashHandler));
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   logging::LogEventProvider::Initialize(kStressCacheTraceProviderName);
 #else
   base::CommandLine::Init(argc, argv);
@@ -415,7 +417,7 @@ int main(int argc, const char* argv[]) {
 #endif
 
   // Some time for the memory manager to flush stuff.
-  base::PlatformThread::Sleep(base::TimeDelta::FromSeconds(3));
+  base::PlatformThread::Sleep(base::Seconds(3));
   base::SingleThreadTaskExecutor io_task_executor(base::MessagePumpType::IO);
 
   char* end;

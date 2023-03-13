@@ -7,14 +7,14 @@ import {reveal} from './Revealer.js';
 
 let consoleInstance: Console;
 
-export class Console extends ObjectWrapper {
-  private readonly messagesInternal: Message[];
+export class Console extends ObjectWrapper<EventTypes> {
+  readonly #messagesInternal: Message[];
   /**
    * Instantiable via the instance() factory below.
    */
   private constructor() {
     super();
-    this.messagesInternal = [];
+    this.#messagesInternal = [];
   }
 
   static instance({forceNew}: {
@@ -29,7 +29,7 @@ export class Console extends ObjectWrapper {
 
   addMessage(text: string, level: MessageLevel, show?: boolean): void {
     const message = new Message(text, level || MessageLevel.Info, Date.now(), show || false);
-    this.messagesInternal.push(message);
+    this.#messagesInternal.push(message);
     this.dispatchEventToListeners(Events.MessageAdded, message);
   }
 
@@ -46,11 +46,11 @@ export class Console extends ObjectWrapper {
   }
 
   messages(): Message[] {
-    return this.messagesInternal;
+    return this.#messagesInternal;
   }
 
   show(): void {
-    this.showPromise();
+    void this.showPromise();
   }
 
   showPromise(): Promise<void> {
@@ -63,6 +63,10 @@ export class Console extends ObjectWrapper {
 export enum Events {
   MessageAdded = 'messageAdded',
 }
+
+export type EventTypes = {
+  [Events.MessageAdded]: Message,
+};
 
 // TODO(crbug.com/1167717): Make this a const enum again
 // eslint-disable-next-line rulesdir/const_enum

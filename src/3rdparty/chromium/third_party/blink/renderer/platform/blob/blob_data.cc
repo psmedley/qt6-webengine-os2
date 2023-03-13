@@ -35,7 +35,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/data_pipe_getter.mojom-blink.h"
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
@@ -50,6 +50,7 @@
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/line_ending.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
+#include "third_party/blink/renderer/platform/wtf/thread_specific.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -118,7 +119,7 @@ Vector<mojom::blink::DataElementPtr> BlobData::ReleaseElements() {
 std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
     const String& path) {
   std::unique_ptr<BlobData> data = base::WrapUnique(
-      new BlobData(FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE));
+      new BlobData(FileCompositionStatus::kSingleUnknownSizeFile));
   data->elements_.push_back(DataElement::NewFile(DataElementFile::New(
       WebStringToFilePath(path), 0, BlobData::kToEndOfFile, base::Time())));
   return data;
@@ -128,7 +129,7 @@ std::unique_ptr<BlobData> BlobData::CreateForFileWithUnknownSize(
     const String& path,
     const absl::optional<base::Time>& expected_modification_time) {
   std::unique_ptr<BlobData> data = base::WrapUnique(
-      new BlobData(FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE));
+      new BlobData(FileCompositionStatus::kSingleUnknownSizeFile));
   data->elements_.push_back(DataElement::NewFile(
       DataElementFile::New(WebStringToFilePath(path), 0, BlobData::kToEndOfFile,
                            expected_modification_time)));
@@ -139,7 +140,7 @@ std::unique_ptr<BlobData> BlobData::CreateForFileSystemURLWithUnknownSize(
     const KURL& file_system_url,
     const absl::optional<base::Time>& expected_modification_time) {
   std::unique_ptr<BlobData> data = base::WrapUnique(
-      new BlobData(FileCompositionStatus::SINGLE_UNKNOWN_SIZE_FILE));
+      new BlobData(FileCompositionStatus::kSingleUnknownSizeFile));
   data->elements_.push_back(DataElement::NewFileFilesystem(
       DataElementFilesystemURL::New(file_system_url, 0, BlobData::kToEndOfFile,
                                     expected_modification_time)));
@@ -162,7 +163,7 @@ void BlobData::AppendFile(
     int64_t offset,
     int64_t length,
     const absl::optional<base::Time>& expected_modification_time) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
+  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
       << "Blobs with a unknown-size file cannot have other items.";
   DCHECK_NE(length, BlobData::kToEndOfFile)
       << "It is illegal to append file items that have an unknown size. To "
@@ -180,7 +181,7 @@ void BlobData::AppendFile(
 void BlobData::AppendBlob(scoped_refptr<BlobDataHandle> data_handle,
                           int64_t offset,
                           int64_t length) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
+  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
       << "Blobs with a unknown-size file cannot have other items.";
   DCHECK(!data_handle->IsSingleUnknownSizeFile())
       << "It is illegal to append an unknown size file blob.";
@@ -196,7 +197,7 @@ void BlobData::AppendFileSystemURL(
     int64_t offset,
     int64_t length,
     const absl::optional<base::Time>& expected_modification_time) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
+  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
       << "Blobs with a unknown-size file cannot have other items.";
   DCHECK_GE(length, 0);
   // Skip zero-byte items, as they don't matter for the contents of the blob.
@@ -209,7 +210,7 @@ void BlobData::AppendFileSystemURL(
 
 void BlobData::AppendText(const String& text,
                           bool do_normalize_line_endings_to_native) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
+  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
       << "Blobs with a unknown-size file cannot have other items.";
   std::string utf8_text = UTF8Encoding().Encode(text, WTF::kNoUnencodables);
 
@@ -259,7 +260,7 @@ uint64_t BlobData::length() const {
 
 void BlobData::AppendDataInternal(base::span<const char> data,
                                   scoped_refptr<RawData> raw_data) {
-  DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
+  DCHECK_EQ(file_composition_, FileCompositionStatus::kNoUnknownSizeFiles)
       << "Blobs with a unknown-size file cannot have other items.";
   // Skip zero-byte items, as they don't matter for the contents of the blob.
   if (data.empty())
@@ -336,11 +337,12 @@ BlobDataHandle::BlobDataHandle(std::unique_ptr<BlobData> data, uint64_t size)
       type_(data->ContentType().IsolatedCopy()),
       size_(size),
       is_single_unknown_size_file_(data->IsSingleUnknownSizeFile()) {
+  auto elements = data->ReleaseElements();
   TRACE_EVENT0("Blob", "Registry::RegisterBlob");
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER_THREAD_SAFE("Storage.Blob.RegisterBlobTime");
   GetThreadSpecificRegistry()->Register(
       blob_remote_.InitWithNewPipeAndPassReceiver(), uuid_,
-      type_.IsNull() ? "" : type_, "", data->ReleaseElements());
+      type_.IsNull() ? "" : type_, "", std::move(elements));
 }
 
 BlobDataHandle::BlobDataHandle(const String& uuid,
@@ -372,7 +374,7 @@ BlobDataHandle::BlobDataHandle(
 BlobDataHandle::~BlobDataHandle() = default;
 
 mojo::PendingRemote<mojom::blink::Blob> BlobDataHandle::CloneBlobRemote() {
-  MutexLocker locker(blob_remote_mutex_);
+  base::AutoLock locker(blob_remote_lock_);
   if (!blob_remote_.is_valid())
     return mojo::NullRemote();
   mojo::Remote<mojom::blink::Blob> blob(std::move(blob_remote_));
@@ -384,7 +386,7 @@ mojo::PendingRemote<mojom::blink::Blob> BlobDataHandle::CloneBlobRemote() {
 
 void BlobDataHandle::CloneBlobRemote(
     mojo::PendingReceiver<mojom::blink::Blob> receiver) {
-  MutexLocker locker(blob_remote_mutex_);
+  base::AutoLock locker(blob_remote_lock_);
   if (!blob_remote_.is_valid())
     return;
   mojo::Remote<mojom::blink::Blob> blob(std::move(blob_remote_));
@@ -394,7 +396,7 @@ void BlobDataHandle::CloneBlobRemote(
 
 mojo::PendingRemote<network::mojom::blink::DataPipeGetter>
 BlobDataHandle::AsDataPipeGetter() {
-  MutexLocker locker(blob_remote_mutex_);
+  base::AutoLock locker(blob_remote_lock_);
   if (!blob_remote_.is_valid())
     return mojo::NullRemote();
   mojo::PendingRemote<network::mojom::blink::DataPipeGetter> result;
@@ -407,7 +409,7 @@ BlobDataHandle::AsDataPipeGetter() {
 void BlobDataHandle::ReadAll(
     mojo::ScopedDataPipeProducerHandle pipe,
     mojo::PendingRemote<mojom::blink::BlobReaderClient> client) {
-  MutexLocker locker(blob_remote_mutex_);
+  base::AutoLock locker(blob_remote_lock_);
   mojo::Remote<mojom::blink::Blob> blob(std::move(blob_remote_));
   blob->ReadAll(std::move(pipe), std::move(client));
   blob_remote_ = blob.Unbind();
@@ -418,7 +420,7 @@ void BlobDataHandle::ReadRange(
     uint64_t length,
     mojo::ScopedDataPipeProducerHandle pipe,
     mojo::PendingRemote<mojom::blink::BlobReaderClient> client) {
-  MutexLocker locker(blob_remote_mutex_);
+  base::AutoLock locker(blob_remote_lock_);
   mojo::Remote<mojom::blink::Blob> blob(std::move(blob_remote_));
   blob->ReadRange(offset, length, std::move(pipe), std::move(client));
   blob_remote_ = blob.Unbind();
@@ -428,7 +430,7 @@ bool BlobDataHandle::CaptureSnapshot(
     uint64_t* snapshot_size,
     absl::optional<base::Time>* snapshot_modification_time) {
   // This method operates on a cloned blob remote; this lets us avoid holding
-  // the |blob_remote_mutex_| locked during the duration of the (synchronous)
+  // the |blob_remote_lock_| locked during the duration of the (synchronous)
   // CaptureSnapshot call.
   mojo::Remote<mojom::blink::Blob> remote(CloneBlobRemote());
   return remote->CaptureSnapshot(snapshot_size, snapshot_modification_time);

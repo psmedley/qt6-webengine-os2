@@ -4,10 +4,8 @@
 
 #include <deque>
 
-#include "base/command_line.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/no_destructor.h"
 #include "base/test/bind.h"
 #include "components/metrics/log_decoder.h"
 #include "components/metrics/metrics_log_uploader.h"
@@ -45,15 +43,14 @@ bool HasHistogramWithHash(const metrics::ChromeUserMetricsExtension& uma_log,
 class MetricsBrowserTest : public WebLayerBrowserTest {
  public:
   void SetUp() override {
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    command_line->AppendSwitch(metrics::switches::kForceEnableMetricsReporting);
+    metrics::ForceEnableMetricsReportingForTesting();
 
     InstallTestGmsBridge(GetConsentType(),
                          base::BindRepeating(&MetricsBrowserTest::OnLogMetrics,
                                              base::Unretained(this)));
     WebLayerMetricsServiceClient::GetInstance()->SetFastStartupForTesting(true);
     WebLayerMetricsServiceClient::GetInstance()->SetUploadIntervalForTesting(
-        base::TimeDelta::FromMilliseconds(10));
+        base::Milliseconds(10));
     WebLayerBrowserTest::SetUp();
   }
 

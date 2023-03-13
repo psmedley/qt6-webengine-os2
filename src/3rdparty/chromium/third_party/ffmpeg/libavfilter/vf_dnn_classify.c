@@ -197,19 +197,14 @@ static av_cold int dnn_classify_init(AVFilterContext *context)
     return 0;
 }
 
-static int dnn_classify_query_formats(AVFilterContext *context)
-{
-    static const enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24,
-        AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAYF32,
-        AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
-        AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
-        AV_PIX_FMT_NV12,
-        AV_PIX_FMT_NONE
-    };
-    AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
-    return ff_set_common_formats(context, fmts_list);
-}
+static const enum AVPixelFormat pix_fmts[] = {
+    AV_PIX_FMT_RGB24, AV_PIX_FMT_BGR24,
+    AV_PIX_FMT_GRAY8, AV_PIX_FMT_GRAYF32,
+    AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
+    AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
+    AV_PIX_FMT_NV12,
+    AV_PIX_FMT_NONE
+};
 
 static int dnn_classify_flush_frame(AVFilterLink *outlink, int64_t pts, int64_t *out_pts)
 {
@@ -218,21 +213,20 @@ static int dnn_classify_flush_frame(AVFilterLink *outlink, int64_t pts, int64_t 
     DNNAsyncStatusType async_state;
 
     ret = ff_dnn_flush(&ctx->dnnctx);
-    if (ret != DNN_SUCCESS) {
+    if (ret != 0) {
         return -1;
     }
 
     do {
         AVFrame *in_frame = NULL;
         AVFrame *out_frame = NULL;
-        async_state = ff_dnn_get_async_result(&ctx->dnnctx, &in_frame, &out_frame);
-        if (out_frame) {
-            av_assert0(in_frame == out_frame);
-            ret = ff_filter_frame(outlink, out_frame);
+        async_state = ff_dnn_get_result(&ctx->dnnctx, &in_frame, &out_frame);
+        if (async_state == DAST_SUCCESS) {
+            ret = ff_filter_frame(outlink, in_frame);
             if (ret < 0)
                 return ret;
             if (out_pts)
-                *out_pts = out_frame->pts + pts;
+                *out_pts = in_frame->pts + pts;
         }
         av_usleep(5000);
     } while (async_state >= DAST_NOT_READY);
@@ -259,7 +253,7 @@ static int dnn_classify_activate(AVFilterContext *filter_ctx)
         if (ret < 0)
             return ret;
         if (ret > 0) {
-            if (ff_dnn_execute_model_classification(&ctx->dnnctx, in, in, ctx->target) != DNN_SUCCESS) {
+            if (ff_dnn_execute_model_classification(&ctx->dnnctx, in, NULL, ctx->target) != 0) {
                 return AVERROR(EIO);
             }
         }
@@ -269,10 +263,9 @@ static int dnn_classify_activate(AVFilterContext *filter_ctx)
     do {
         AVFrame *in_frame = NULL;
         AVFrame *out_frame = NULL;
-        async_state = ff_dnn_get_async_result(&ctx->dnnctx, &in_frame, &out_frame);
-        if (out_frame) {
-            av_assert0(in_frame == out_frame);
-            ret = ff_filter_frame(outlink, out_frame);
+        async_state = ff_dnn_get_result(&ctx->dnnctx, &in_frame, &out_frame);
+        if (async_state == DAST_SUCCESS) {
+            ret = ff_filter_frame(outlink, in_frame);
             if (ret < 0)
                 return ret;
             got_frame = 1;
@@ -309,7 +302,6 @@ static const AVFilterPad dnn_classify_inputs[] = {
         .name         = "default",
         .type         = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 static const AVFilterPad dnn_classify_outputs[] = {
@@ -317,7 +309,6 @@ static const AVFilterPad dnn_classify_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_dnn_classify = {
@@ -326,9 +317,9 @@ const AVFilter ff_vf_dnn_classify = {
     .priv_size     = sizeof(DnnClassifyContext),
     .init          = dnn_classify_init,
     .uninit        = dnn_classify_uninit,
-    .query_formats = dnn_classify_query_formats,
-    .inputs        = dnn_classify_inputs,
-    .outputs       = dnn_classify_outputs,
+    FILTER_INPUTS(dnn_classify_inputs),
+    FILTER_OUTPUTS(dnn_classify_outputs),
+    FILTER_PIXFMTS_ARRAY(pix_fmts),
     .priv_class    = &dnn_classify_class,
     .activate      = dnn_classify_activate,
 };

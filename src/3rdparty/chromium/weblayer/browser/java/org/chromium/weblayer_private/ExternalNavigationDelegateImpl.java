@@ -6,17 +6,14 @@ package org.chromium.weblayer_private;
 
 import android.content.Context;
 import android.content.Intent;
-import android.content.pm.ResolveInfo;
 import android.os.RemoteException;
 
 import androidx.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.base.Function;
-import org.chromium.base.PackageManagerUtils;
 import org.chromium.components.embedder_support.util.UrlUtilities;
 import org.chromium.components.external_intents.ExternalNavigationDelegate;
-import org.chromium.components.external_intents.ExternalNavigationDelegate.StartActivityIfNeededResult;
 import org.chromium.components.external_intents.ExternalNavigationParams;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -70,26 +67,9 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public void didStartActivity(Intent intent) {}
-
-    @Override
-    public @StartActivityIfNeededResult int maybeHandleStartActivityIfNeeded(
-            Intent intent, boolean proxy) {
-        assert !proxy
-            : "|proxy| should be true only for instant apps, which WebLayer doesn't handle";
-
-        boolean isExternalProtocol = !UrlUtilities.isAcceptedScheme(intent.toUri(0));
-        boolean hasDefaultHandler = hasDefaultHandler(intent);
-
-        // Match CCT's custom behavior of keeping http(s) URLs with no default handler in the app.
-        // TODO(blundell): If/when CCT eliminates its special handling of this case, eliminate it
-        // from WebLayer as well.
-        if (!isExternalProtocol && !hasDefaultHandler) {
-            return StartActivityIfNeededResult.HANDLED_WITHOUT_ACTIVITY_START;
-        }
-
-        // Otherwise defer to ExternalNavigationHandler's default logic.
-        return StartActivityIfNeededResult.DID_NOT_HANDLE;
+    public boolean shouldAvoidDisambiguationDialog(Intent intent) {
+        // Don't show the disambiguation dialog if WebLayer can handle the intent.
+        return UrlUtilities.isAcceptedScheme(intent.toUri(0));
     }
 
     @Override
@@ -228,13 +208,18 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         return false;
     }
 
-    /**
-     * Resolve the default external handler of an intent.
-     * @return Whether the default external handler is found.
-     */
-    private boolean hasDefaultHandler(Intent intent) {
-        ResolveInfo info = PackageManagerUtils.resolveActivity(intent, 0);
-        if (info == null) return false;
-        return info.match != 0;
+    @Override
+    public boolean maybeSetTargetPackage(Intent intent) {
+        return false;
+    }
+
+    @Override
+    public boolean shouldEmbedderInitiatedNavigationsStayInBrowser() {
+        // WebLayer already has APIs that allow the embedder to specify that a navigation shouldn't
+        // result in an external intent (Navigation#disableIntentProcessing() and
+        // NavigateParams#disableIntentProcessing()), and historically embedder-initiated
+        // navigations have been allowed to leave the browser on the initial navigation, so we need
+        // to maintain that behavior.
+        return false;
     }
 }

@@ -26,13 +26,20 @@ namespace eager {
 
 void RemoteMgr::AddOperationOutputs(
     const gtl::ArraySlice<tensorflow::TensorHandle*> handles,
-    int64 operation_id) {
+    int64_t operation_id) {
   mutex_lock l(remote_tensor_handle_mu_);
-  for (int i = 0; i < handles.size(); i++) {
+  for (int i = 0, end = handles.size(); i < end; i++) {
     // TODO(nareshmodi): Correctly handle operation_id not being unique.
     remote_tensor_handle_map_.emplace(
         RemoteTensorHandleInternal(operation_id, i), handles[i]);
   }
+}
+
+void RemoteMgr::AddOperationOutput(tensorflow::TensorHandle* handle,
+                                   int64_t operation_id, int32_t output_num) {
+  mutex_lock l(remote_tensor_handle_mu_);
+  remote_tensor_handle_map_.emplace(
+      RemoteTensorHandleInternal(operation_id, output_num), handle);
 }
 
 Status RemoteMgr::GetTensorHandleImpl(
@@ -40,9 +47,15 @@ Status RemoteMgr::GetTensorHandleImpl(
     tensorflow::TensorHandle** handle) {
   auto iter = remote_tensor_handle_map_.find(remote_handle);
   if (iter == remote_tensor_handle_map_.end()) {
+    // TODO(b/217820532): Fix the tensor deallocation order issue.
     return errors::InvalidArgument(
         "Unable to find the relevant tensor remote_handle: Op ID: ",
-        remote_handle.op_id, ", Output num: ", remote_handle.output_num);
+        remote_handle.op_id, ", Output num: ", remote_handle.output_num,
+        ". One possible cause is that the tensor was accessed after "
+        "deallocation in a distributed worker setup. Try setting "
+        "`os.environ['TF_ENABLE_EAGER_CLIENT_STREAMING_ENQUEUE']='False'` in "
+        "your client to disable async streaming behavior to see if it fixes "
+        "the problem.");
   }
 
   *handle = iter->second;
@@ -63,9 +76,15 @@ Status RemoteMgr::GetMirroredResourceShape(
   tf_shared_lock l(mirrored_resource_shape_mu_);
   auto iter = mirrored_resource_shape_map_.find(remote_handle);
   if (iter == mirrored_resource_shape_map_.end()) {
+    // TODO(b/217820532): Fix the tensor deallocation order issue.
     return errors::InvalidArgument(
-        "Unable to find the relevant mirrored resource shape: Op ID: ",
-        remote_handle.op_id, ", Output num: ", remote_handle.output_num);
+        "Unable to find the relevant tensor remote_handle: Op ID: ",
+        remote_handle.op_id, ", Output num: ", remote_handle.output_num,
+        ". One possible cause is that the tensor was accessed after "
+        "deallocation in a distributed worker setup. Try setting "
+        "`os.environ['TF_ENABLE_EAGER_CLIENT_STREAMING_ENQUEUE']='False'` in "
+        "your client to disable async streaming behavior to see if it fixes "
+        "the problem.");
   }
 
   *handle = iter->second;
@@ -75,16 +94,9 @@ Status RemoteMgr::GetMirroredResourceShape(
 
 Status RemoteMgr::GetRemoteTensorHandle(const tensorflow::TensorHandle* handle,
                                         const bool wait_until_ready,
-                                        int64* op_id, int32* output_num) {
-  // TODO(allenl): Consider supporting remote handles on custom devices.
-  VariantDevice device = handle->device();
-  if (VariantDeviceIsCustom(device)) {
-    return errors::Unimplemented(
-        "Custom devices and remote execution are currently not supported "
-        "together.");
-  }
-  TF_RETURN_IF_ERROR(handle->RemoteAddress(
-      absl::get<Device*>(device), wait_until_ready, op_id, output_num));
+                                        int64_t* op_id, int32* output_num) {
+  TF_RETURN_IF_ERROR(handle->RemoteAddress(handle->device(), wait_until_ready,
+                                           op_id, output_num));
   tensorflow::TensorHandle* h;
   TF_RETURN_IF_ERROR(
       GetTensorHandleImpl(RemoteTensorHandleInternal(*op_id, *output_num), &h));
@@ -124,8 +136,8 @@ Status RemoteMgr::SerializeRemoteTensorHandle(
     TensorHandle* in, const bool wait_until_ready, RemoteTensorHandle* out,
     Device* device, const string& device_name,
     const bool serialize_resource_dtype_and_shape) {
-  int64 op_id;
-  int32 output_num;
+  int64_t op_id;
+  int32_t output_num;
   if (!in->RemoteAddress(device, wait_until_ready, &op_id, &output_num).ok()) {
     tf_shared_lock l(remote_tensor_handle_mu_);
     TF_RETURN_IF_ERROR(
@@ -160,13 +172,14 @@ Status RemoteMgr::DeserializeRemoteTensorHandle(const RemoteTensorHandle& in,
     (*out)->Ref();
   } else {
     // Create a remote TensorHandle for remote tensors which have not been
-    // copied to the local worker yet.
+    // copied to the local worker yet (e.g. remote function inputs).
     const string& device_name =
         in.op_device().empty() ? in.device() : in.op_device();
     TF_RETURN_IF_ERROR(
         parent_->FindDeviceFromName(device_name.c_str(), &device));
     *out = TensorHandle::CreateLazyRemoteHandle(in.op_id(), in.output_num(),
-                                                in.dtype(), device, parent_);
+                                                in.dtype(), device,
+                                                /*is_ready=*/true, parent_);
     std::vector<DtypeAndPartialTensorShape> dtypes_and_shapes;
     if (!GetMirroredResourceShape(RemoteTensorHandleInternal(in),
                                   &dtypes_and_shapes)

@@ -29,11 +29,26 @@
     ] Promise<MediaStream>
     getDisplayMedia(optional MediaStreamConstraints constraints = {});
 
+    [
+      RuntimeEnabled = GetDisplayMediaSet, CallWith = ScriptState, RaisesException
+    ] Promise<sequence<MediaStream>>
+    getDisplayMediaSet(optional MediaStreamConstraints constraints = {});
+
+    // https://w3c.github.io/mediacapture-handle/identity/
     // Allows an application APP to opt-in to exposing certain information to
     // applications which end up capturing APP.
-    // TODO(crbug.com/1208868): Link to the spec once it's published.
     [
       RuntimeEnabled = CaptureHandle, CallWith = ScriptState, RaisesException
     ] void
     setCaptureHandleConfig(optional CaptureHandleConfig config = {});
+
+    // https://w3c.github.io/mediacapture-region/
+    // Given an HTML element of specified type, produces an identifier for the
+    // element that can be used by SelfCaptureMediaStreamTrack.
+    // Repeated calls to this method will return the same value.
+    [
+      CallWith = ScriptState, RaisesException, MeasureAs = RegionCapture,
+      RuntimeEnabled = RegionCapture
+    ] Promise<DOMString>
+    produceCropId((HTMLDivElement or HTMLIFrameElement) target);
 };

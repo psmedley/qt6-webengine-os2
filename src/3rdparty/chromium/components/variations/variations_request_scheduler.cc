@@ -35,8 +35,7 @@ void VariationsRequestScheduler::ScheduleFetchShortly() {
   Reset();
   // The delay before attempting a fetch shortly, in minutes.
   const int kFetchShortlyDelayMinutes = 5;
-  one_shot_timer_.Start(FROM_HERE,
-                        base::TimeDelta::FromMinutes(kFetchShortlyDelayMinutes),
+  one_shot_timer_.Start(FROM_HERE, base::Minutes(kFetchShortlyDelayMinutes),
                         task_);
 }
 
@@ -50,23 +49,23 @@ base::TimeDelta VariationsRequestScheduler::GetFetchPeriod() const {
       GetVariationParamValue("VariationsServiceControl", "fetch_period_min");
   size_t period_min;
   if (base::StringToSizeT(period_min_str, &period_min))
-    return base::TimeDelta::FromMinutes(period_min);
+    return base::Minutes(period_min);
 
   // The default fetch interval is every 30 minutes.
-  return base::TimeDelta::FromMinutes(30);
+  return base::Minutes(30);
 }
 
 base::RepeatingClosure VariationsRequestScheduler::task() const {
   return task_;
 }
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 // static
 VariationsRequestScheduler* VariationsRequestScheduler::Create(
     const base::RepeatingClosure& task,
     PrefService* local_state) {
   return new VariationsRequestScheduler(task);
 }
-#endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
 
 }  // namespace variations

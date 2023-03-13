@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/files/scoped_file.h"
 #include "base/test/task_environment.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -42,14 +41,16 @@ class MockEventConverterEvdevImpl : public EventConverterEvdevImpl {
                                 dispatcher) {
     SetEnabled(true);
   }
+
+  MockEventConverterEvdevImpl(const MockEventConverterEvdevImpl&) = delete;
+  MockEventConverterEvdevImpl& operator=(const MockEventConverterEvdevImpl&) =
+      delete;
+
   ~MockEventConverterEvdevImpl() override { SetEnabled(false); }
 
   // EventConverterEvdevImpl:
   bool HasKeyboard() const override { return true; }
   bool HasTouchpad() const override { return true; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockEventConverterEvdevImpl);
 };
 
 }  // namespace ui
@@ -58,6 +59,10 @@ class MockEventConverterEvdevImpl : public EventConverterEvdevImpl {
 class EventConverterEvdevImplTest : public testing::Test {
  public:
   EventConverterEvdevImplTest() {}
+
+  EventConverterEvdevImplTest(const EventConverterEvdevImplTest&) = delete;
+  EventConverterEvdevImplTest& operator=(const EventConverterEvdevImplTest&) =
+      delete;
 
   // Overridden from testing::Test:
   void SetUp() override {
@@ -141,8 +146,6 @@ class EventConverterEvdevImplTest : public testing::Test {
   std::vector<std::unique_ptr<ui::Event>> dispatched_events_;
 
   base::ScopedFD events_out_;
-
-  DISALLOW_COPY_AND_ASSIGN(EventConverterEvdevImplTest);
 };
 
 TEST_F(EventConverterEvdevImplTest, KeyPress) {
@@ -158,7 +161,7 @@ TEST_F(EventConverterEvdevImplTest, KeyPress) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::KeyEvent* event;
@@ -197,7 +200,7 @@ TEST_F(EventConverterEvdevImplTest, KeyRepeat) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::KeyEvent* event;
@@ -242,7 +245,7 @@ TEST_F(EventConverterEvdevImplTest, KeyWithModifier) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(4u, size());
 
   ui::KeyEvent* event;
@@ -301,7 +304,7 @@ TEST_F(EventConverterEvdevImplTest, KeyWithDuplicateModifier) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(6u, size());
 
   ui::KeyEvent* event;
@@ -356,7 +359,7 @@ TEST_F(EventConverterEvdevImplTest, KeyWithLock) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::KeyEvent* event;
@@ -385,7 +388,7 @@ TEST_F(EventConverterEvdevImplTest, MouseButton) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::MouseEvent* event;
@@ -417,7 +420,7 @@ TEST_F(EventConverterEvdevImplTest, MouseBackButton) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0}
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::MouseEvent* event = nullptr;
@@ -449,7 +452,7 @@ TEST_F(EventConverterEvdevImplTest, MouseForwardButton) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0}
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::MouseEvent* event = nullptr;
@@ -472,7 +475,7 @@ TEST_F(EventConverterEvdevImplTest, MouseMove) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(1u, size());
 
   ui::MouseEvent* event;
@@ -493,7 +496,7 @@ TEST_F(EventConverterEvdevImplTest, UnmappedKeyPress) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(0u, size());
 }
 
@@ -505,7 +508,7 @@ TEST_F(EventConverterEvdevImplTest, ShouldReleaseKeysOnUnplug) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(1u, size());
 
   DestroyDevice();
@@ -530,7 +533,7 @@ TEST_F(EventConverterEvdevImplTest, ShouldReleaseKeysOnSynDropped) {
       {{0, 0}, EV_SYN, SYN_DROPPED, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(2u, size());
 
   ui::KeyEvent* event = dispatched_event(0);
@@ -550,7 +553,7 @@ TEST_F(EventConverterEvdevImplTest, ShouldReleaseKeysOnDisable) {
       {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(1u, size());
 
   dev->SetEnabled(false);
@@ -583,7 +586,7 @@ TEST_F(EventConverterEvdevImplTest, SetAllowedKeys) {
     {{0, 0}, EV_KEY, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
 
   ASSERT_EQ(4u, size());
   ui::KeyEvent* event = dispatched_event(0);
@@ -603,7 +606,7 @@ TEST_F(EventConverterEvdevImplTest, SetAllowedKeys) {
   std::vector<ui::DomCode> allowed_keys;
   allowed_keys.push_back(ui::DomCode::POWER);
   dev->SetKeyFilter(true /* enable_filter */, allowed_keys);
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
 
   ASSERT_EQ(2u, size());
   event = dispatched_event(0);
@@ -615,7 +618,7 @@ TEST_F(EventConverterEvdevImplTest, SetAllowedKeys) {
 
   ClearDispatchedEvents();
   dev->SetKeyFilter(false /* enable_filter */, std::vector<ui::DomCode>());
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
 
   event = dispatched_event(0);
   EXPECT_EQ(ui::ET_KEY_PRESSED, event->type());
@@ -645,7 +648,7 @@ TEST_F(EventConverterEvdevImplTest, SetAllowedKeysBlockedKeyPressed) {
     {{0, 0}, EV_SYN, SYN_REPORT, 0},
   };
 
-  dev->ProcessEvents(key_press, base::size(key_press));
+  dev->ProcessEvents(key_press, std::size(key_press));
   ASSERT_EQ(1u, size());
   ui::KeyEvent* event = dispatched_event(0);
   EXPECT_EQ(ui::ET_KEY_PRESSED, event->type());
@@ -661,7 +664,7 @@ TEST_F(EventConverterEvdevImplTest, SetAllowedKeysBlockedKeyPressed) {
 
   // The real key release should be dropped, whenever it comes.
   ClearDispatchedEvents();
-  dev->ProcessEvents(key_release, base::size(key_release));
+  dev->ProcessEvents(key_release, std::size(key_release));
   ASSERT_EQ(0u, size());
 }
 
@@ -688,7 +691,7 @@ TEST_F(EventConverterEvdevImplTest, ShouldSwapMouseButtonsFromUserPreference) {
   SetTestNowSeconds(1510019415);
   ClearDispatchedEvents();
   GetInputController()->SetPrimaryButtonRight(false);
-  dev->ProcessEvents(mock_kernel_queue, base::size(mock_kernel_queue));
+  dev->ProcessEvents(mock_kernel_queue, std::size(mock_kernel_queue));
   EXPECT_EQ(4u, size());
 
   ui::MouseEvent* event;
@@ -728,7 +731,7 @@ TEST_F(EventConverterEvdevImplTest, ShouldSwapMouseButtonsFromUserPreference) {
 
   ClearDispatchedEvents();
   GetInputController()->SetPrimaryButtonRight(true);
-  dev->ProcessEvents(mock_kernel_queue2, base::size(mock_kernel_queue2));
+  dev->ProcessEvents(mock_kernel_queue2, std::size(mock_kernel_queue2));
   EXPECT_EQ(4u, size());
 
   event = dispatched_mouse_event(0);

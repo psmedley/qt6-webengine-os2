@@ -18,24 +18,25 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "net/base/elements_upload_data_stream.h"
 #include "net/base/network_change_notifier.h"
+#include "net/base/proxy_string_util.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_element_reader.h"
 #include "net/base/upload_file_element_reader.h"
@@ -47,6 +48,8 @@
 #include "net/test/test_with_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher_delegate.h"
+#include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_test_util.h"
 #include "net/url_request/url_request_throttler_manager.h"
@@ -56,7 +59,6 @@
 namespace net {
 
 using base::Time;
-using base::TimeDelta;
 using net::test::IsError;
 using net::test::IsOk;
 
@@ -65,6 +67,10 @@ using net::test::IsOk;
 class WaitingURLFetcherDelegate : public URLFetcherDelegate {
  public:
   WaitingURLFetcherDelegate() : did_complete_(false) {}
+
+  WaitingURLFetcherDelegate(const WaitingURLFetcherDelegate&) = delete;
+  WaitingURLFetcherDelegate& operator=(const WaitingURLFetcherDelegate&) =
+      delete;
 
   void CreateFetcher(
       const GURL& url,
@@ -155,8 +161,6 @@ class WaitingURLFetcherDelegate : public URLFetcherDelegate {
       base::SequencedTaskRunnerHandle::Get();
   std::unique_ptr<base::RunLoop> run_loop_;
   base::OnceClosure on_complete_or_cancel_;
-
-  DISALLOW_COPY_AND_ASSIGN(WaitingURLFetcherDelegate);
 };
 
 namespace {
@@ -182,51 +186,32 @@ base::FilePath GetUploadFileTestPath() {
       FILE_PATH_LITERAL("net/data/url_request_unittest/BullRunSpeech.txt"));
 }
 
-// A TestURLRequestContext with a ThrottleManager and a MockHostResolver.
-class FetcherTestURLRequestContext : public TestURLRequestContext {
- public:
-  // All requests for |hanging_domain| will hang on host resolution until the
-  // mock_resolver()->ResolveAllPending() is called.
-  FetcherTestURLRequestContext(
-      const std::string& hanging_domain,
-      std::unique_ptr<ProxyResolutionService> proxy_resolution_service)
-      : TestURLRequestContext(true), mock_resolver_(new MockHostResolver()) {
-    mock_resolver_->set_ondemand_mode(true);
-    mock_resolver_->rules()->AddRule(hanging_domain, "127.0.0.1");
-    // Pass ownership to ContextStorage to ensure correct destruction order.
-    context_storage_.set_host_resolver(
-        std::unique_ptr<HostResolver>(mock_resolver_));
-    context_storage_.set_throttler_manager(
-        std::make_unique<URLRequestThrottlerManager>());
-    context_storage_.set_proxy_resolution_service(
-        std::move(proxy_resolution_service));
-    Init();
-  }
-
-  MockHostResolver* mock_resolver() { return mock_resolver_; }
-
- private:
-  MockHostResolver* mock_resolver_;
-
-  DISALLOW_COPY_AND_ASSIGN(FetcherTestURLRequestContext);
-};
-
 class FetcherTestURLRequestContextGetter : public URLRequestContextGetter {
  public:
   FetcherTestURLRequestContextGetter(
       scoped_refptr<base::SingleThreadTaskRunner> network_task_runner,
       const std::string& hanging_domain)
       : network_task_runner_(network_task_runner),
-        hanging_domain_(hanging_domain),
-        shutting_down_(false) {}
+        hanging_domain_(hanging_domain) {}
+
+  FetcherTestURLRequestContextGetter(
+      const FetcherTestURLRequestContextGetter&) = delete;
+  FetcherTestURLRequestContextGetter& operator=(
+      const FetcherTestURLRequestContextGetter&) = delete;
 
   // Sets callback to be invoked when the getter is destroyed.
   void set_on_destruction_callback(base::OnceClosure on_destruction_callback) {
     on_destruction_callback_ = std::move(on_destruction_callback);
   }
 
+  MockHostResolver* mock_resolver() {
+    DCHECK(context_);
+    // This cast is safe because we set a MockHostResolver in the constructor.
+    return static_cast<MockHostResolver*>(context_->host_resolver());
+  }
+
   // URLRequestContextGetter:
-  FetcherTestURLRequestContext* GetURLRequestContext() override {
+  URLRequestContext* GetURLRequestContext() override {
     // Calling this on the wrong thread may be either a bug in the test or a bug
     // in production code.
     EXPECT_TRUE(network_task_runner_->BelongsToCurrentThread());
@@ -235,8 +220,19 @@ class FetcherTestURLRequestContextGetter : public URLRequestContextGetter {
       return nullptr;
 
     if (!context_) {
-      context_ = std::make_unique<FetcherTestURLRequestContext>(
-          hanging_domain_, std::move(proxy_resolution_service_));
+      auto mock_resolver = std::make_unique<MockHostResolver>();
+      mock_resolver->set_ondemand_mode(true);
+      mock_resolver->rules()->AddRule(hanging_domain_, "127.0.0.1");
+
+      auto builder = CreateTestURLRequestContextBuilder();
+      builder->set_host_resolver(std::move(mock_resolver));
+      builder->set_throttling_enabled(true);
+      if (proxy_resolution_service_) {
+        builder->set_proxy_resolution_service(
+            std::move(proxy_resolution_service_));
+      }
+
+      context_ = builder->Build();
     }
 
     return context_.get();
@@ -301,9 +297,8 @@ class FetcherTestURLRequestContextGetter : public URLRequestContextGetter {
     context_.reset();
   }
 
-  // Convenience method to access the context as a FetcherTestURLRequestContext
-  // without going through GetURLRequestContext.
-  FetcherTestURLRequestContext* context() {
+  // Convenience method to access the context.
+  URLRequestContext* context() {
     DCHECK(network_task_runner_->BelongsToCurrentThread());
     return context_.get();
   }
@@ -330,12 +325,10 @@ class FetcherTestURLRequestContextGetter : public URLRequestContextGetter {
   // May be null.
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service_;
 
-  std::unique_ptr<FetcherTestURLRequestContext> context_;
-  bool shutting_down_;
+  std::unique_ptr<URLRequestContext> context_;
+  bool shutting_down_ = false;
 
   base::OnceClosure on_destruction_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(FetcherTestURLRequestContextGetter);
 };
 
 }  // namespace
@@ -509,7 +502,8 @@ TEST_F(URLFetcherTest, FetchedUsingProxy) {
 
   std::unique_ptr<ProxyResolutionService> proxy_resolution_service =
       ConfiguredProxyResolutionService::CreateFixedFromPacResult(
-          proxy_server.ToPacString(), TRAFFIC_ANNOTATION_FOR_TESTS);
+          ProxyServerToPacResultElement(proxy_server),
+          TRAFFIC_ANNOTATION_FOR_TESTS);
   context_getter->set_proxy_resolution_service(
       std::move(proxy_resolution_service));
 
@@ -622,7 +616,7 @@ TEST_F(URLFetcherTest, CancelAll) {
       CreateSameThreadContextGetter());
   // Force context creation.
   context_getter->GetURLRequestContext();
-  MockHostResolver* mock_resolver = context_getter->context()->mock_resolver();
+  MockHostResolver* mock_resolver = context_getter->mock_resolver();
 
   WaitingURLFetcherDelegate delegate;
   delegate.CreateFetcher(hanging_url(), URLFetcher::GET, context_getter);
@@ -644,7 +638,7 @@ TEST_F(URLFetcherTest, DontRetryOnNetworkChangedByDefault) {
       CreateSameThreadContextGetter());
   // Force context creation.
   context_getter->GetURLRequestContext();
-  MockHostResolver* mock_resolver = context_getter->context()->mock_resolver();
+  MockHostResolver* mock_resolver = context_getter->mock_resolver();
 
   WaitingURLFetcherDelegate delegate;
   delegate.CreateFetcher(hanging_url(), URLFetcher::GET, context_getter);
@@ -676,7 +670,7 @@ TEST_F(URLFetcherTest, RetryOnNetworkChangedAndFail) {
       CreateSameThreadContextGetter());
   // Force context creation.
   context_getter->GetURLRequestContext();
-  MockHostResolver* mock_resolver = context_getter->context()->mock_resolver();
+  MockHostResolver* mock_resolver = context_getter->mock_resolver();
 
   WaitingURLFetcherDelegate delegate;
   delegate.CreateFetcher(hanging_url(), URLFetcher::GET, context_getter);
@@ -722,7 +716,7 @@ TEST_F(URLFetcherTest, RetryOnNetworkChangedAndSucceed) {
       CreateSameThreadContextGetter());
   // Force context creation.
   context_getter->GetURLRequestContext();
-  MockHostResolver* mock_resolver = context_getter->context()->mock_resolver();
+  MockHostResolver* mock_resolver = context_getter->mock_resolver();
 
   WaitingURLFetcherDelegate delegate;
   delegate.CreateFetcher(hanging_url(), URLFetcher::GET, context_getter);
@@ -947,6 +941,11 @@ class CheckUploadProgressDelegate : public WaitingURLFetcherDelegate {
  public:
   CheckUploadProgressDelegate()
       : chunk_(1 << 16, 'a'), num_chunks_appended_(0), last_seen_progress_(0) {}
+
+  CheckUploadProgressDelegate(const CheckUploadProgressDelegate&) = delete;
+  CheckUploadProgressDelegate& operator=(const CheckUploadProgressDelegate&) =
+      delete;
+
   ~CheckUploadProgressDelegate() override = default;
 
   void OnURLFetchUploadProgress(const URLFetcher* source,
@@ -981,8 +980,6 @@ class CheckUploadProgressDelegate : public WaitingURLFetcherDelegate {
 
   int64_t num_chunks_appended_;
   int64_t last_seen_progress_;
-
-  DISALLOW_COPY_AND_ASSIGN(CheckUploadProgressDelegate);
 };
 
 TEST_F(URLFetcherTest, UploadProgress) {
@@ -1014,6 +1011,11 @@ class CheckDownloadProgressDelegate : public WaitingURLFetcherDelegate {
  public:
   CheckDownloadProgressDelegate(int64_t file_size)
       : file_size_(file_size), last_seen_progress_(0) {}
+
+  CheckDownloadProgressDelegate(const CheckDownloadProgressDelegate&) = delete;
+  CheckDownloadProgressDelegate& operator=(
+      const CheckDownloadProgressDelegate&) = delete;
+
   ~CheckDownloadProgressDelegate() override = default;
 
   void OnURLFetchDownloadProgress(const URLFetcher* source,
@@ -1032,8 +1034,6 @@ class CheckDownloadProgressDelegate : public WaitingURLFetcherDelegate {
  private:
   int64_t file_size_;
   int64_t last_seen_progress_;
-
-  DISALLOW_COPY_AND_ASSIGN(CheckDownloadProgressDelegate);
 };
 
 TEST_F(URLFetcherTest, DownloadProgress) {
@@ -1065,6 +1065,12 @@ TEST_F(URLFetcherTest, DownloadProgress) {
 class CancelOnUploadProgressDelegate : public WaitingURLFetcherDelegate {
  public:
   CancelOnUploadProgressDelegate() = default;
+
+  CancelOnUploadProgressDelegate(const CancelOnUploadProgressDelegate&) =
+      delete;
+  CancelOnUploadProgressDelegate& operator=(
+      const CancelOnUploadProgressDelegate&) = delete;
+
   ~CancelOnUploadProgressDelegate() override = default;
 
   void OnURLFetchUploadProgress(const URLFetcher* source,
@@ -1072,9 +1078,6 @@ class CancelOnUploadProgressDelegate : public WaitingURLFetcherDelegate {
                                 int64_t total) override {
     CancelFetch();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CancelOnUploadProgressDelegate);
 };
 
 // Check that a fetch can be safely cancelled/deleted during an upload progress
@@ -1102,6 +1105,12 @@ TEST_F(URLFetcherTest, CancelInUploadProgressCallback) {
 class CancelOnDownloadProgressDelegate : public WaitingURLFetcherDelegate {
  public:
   CancelOnDownloadProgressDelegate() = default;
+
+  CancelOnDownloadProgressDelegate(const CancelOnDownloadProgressDelegate&) =
+      delete;
+  CancelOnDownloadProgressDelegate& operator=(
+      const CancelOnDownloadProgressDelegate&) = delete;
+
   ~CancelOnDownloadProgressDelegate() override = default;
 
   void OnURLFetchDownloadProgress(const URLFetcher* source,
@@ -1110,9 +1119,6 @@ class CancelOnDownloadProgressDelegate : public WaitingURLFetcherDelegate {
                                   int64_t current_network_bytes) override {
     CancelFetch();
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CancelOnDownloadProgressDelegate);
 };
 
 // Check that a fetch can be safely cancelled/deleted during a download progress
@@ -1208,7 +1214,7 @@ TEST_F(URLFetcherTest, ThrottleOnRepeatedFetches) {
 
   // 20 requests were sent. Due to throttling, they should have collectively
   // taken over 1 second.
-  EXPECT_GE(Time::Now() - start_time, base::TimeDelta::FromSeconds(1));
+  EXPECT_GE(Time::Now() - start_time, base::Seconds(1));
 }
 
 // If throttling kicks in for a chunked upload, there should be no crash.
@@ -1276,7 +1282,7 @@ TEST_F(URLFetcherTest, ThrottleOn5xxRetries) {
   // The request should have been retried 11 times (12 times including the first
   // attempt).  Due to throttling, they should have collectively taken over 1
   // second.
-  EXPECT_GE(Time::Now() - start_time, base::TimeDelta::FromSeconds(1));
+  EXPECT_GE(Time::Now() - start_time, base::Seconds(1));
 }
 
 // Tests overload protection, when responses passed through.
@@ -1315,7 +1321,7 @@ TEST_F(URLFetcherTest, ProtectTestPassedThrough) {
 
   // The request should not have been retried at all.  If it had attempted all
   // 11 retries, that should have taken 2.5 minutes.
-  EXPECT_TRUE(Time::Now() - start_time < TimeDelta::FromMinutes(1));
+  EXPECT_TRUE(Time::Now() - start_time < base::Minutes(1));
 }
 
 // Used to check if a callback has been invoked.
@@ -1419,6 +1425,9 @@ class ReuseFetcherDelegate : public WaitingURLFetcherDelegate {
       : first_request_complete_(false),
         second_request_context_getter_(second_request_context_getter) {}
 
+  ReuseFetcherDelegate(const ReuseFetcherDelegate&) = delete;
+  ReuseFetcherDelegate& operator=(const ReuseFetcherDelegate&) = delete;
+
   ~ReuseFetcherDelegate() override = default;
 
   void OnURLFetchComplete(const URLFetcher* source) override {
@@ -1443,8 +1452,6 @@ class ReuseFetcherDelegate : public WaitingURLFetcherDelegate {
  private:
   bool first_request_complete_;
   scoped_refptr<URLRequestContextGetter> second_request_context_getter_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReuseFetcherDelegate);
 };
 
 TEST_F(URLFetcherTest, ReuseFetcherForSameURL) {

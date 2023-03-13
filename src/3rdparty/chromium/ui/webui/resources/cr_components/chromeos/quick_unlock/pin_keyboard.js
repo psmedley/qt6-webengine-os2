@@ -159,14 +159,6 @@ Polymer({
     },
 
     /**
-     * Enables letters to be displayed on the pin keyboard buttons.
-     */
-    enableLetters: {
-      type: Boolean,
-      value: false,
-    },
-
-    /**
      * The aria label to be used for the input element.
      */
     ariaLabel: {
@@ -439,6 +431,11 @@ Polymer({
     // Valid if the key is CTRL+-, CTRL+=, or CTRL+0 to zoom in, zoom out, and
     // zoom reset the screen.
     if (event.ctrlKey && [48, 187, 189].includes(event.keyCode)) {
+      return true;
+    }
+
+    // Valid for the ChromeVox combination.
+    if (event.ctrlKey && event.altKey && event.key === 'z') {
       return true;
     }
 

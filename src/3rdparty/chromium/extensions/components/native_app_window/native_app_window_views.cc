@@ -5,6 +5,7 @@
 #include "extensions/components/native_app_window/native_app_window_views.h"
 
 #include "base/bind.h"
+#include "base/observer_list.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -25,6 +26,7 @@
 namespace native_app_window {
 
 NativeAppWindowViews::NativeAppWindowViews() {
+  set_suppress_default_focus_handling();
   SetLayoutManager(std::make_unique<views::FillLayout>());
 }
 
@@ -51,7 +53,6 @@ void NativeAppWindowViews::Init(
         dialog->app_window_->OnNativeClose();
       },
       this));
-
   web_view_ = AddChildView(std::make_unique<views::WebView>(nullptr));
   web_view_->SetWebContents(app_window_->web_contents());
 
@@ -253,7 +254,7 @@ void NativeAppWindowViews::OnWidgetActivationChanged(views::Widget* widget,
 
 void NativeAppWindowViews::RenderFrameCreated(
     content::RenderFrameHost* render_frame_host) {
-  if (render_frame_host->GetParent())
+  if (render_frame_host->GetParentOrOuterDocument())
     return;
 
   if (app_window_->requested_alpha_enabled() && CanHaveAlphaEnabled()) {

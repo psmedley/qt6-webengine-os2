@@ -71,10 +71,10 @@ class GLSurfaceEglReadbackWayland : public GLSurfaceEglReadback,
   ~GLSurfaceEglReadbackWayland() override;
 
   // WaylandSurfaceGpu:
-  void OnSubmission(uint32_t buffer_id,
+  void OnSubmission(uint32_t frame_id,
                     const gfx::SwapResult& swap_result,
                     gfx::GpuFenceHandle release_fence) override;
-  void OnPresentation(uint32_t buffer_id,
+  void OnPresentation(uint32_t frame_id,
                       const gfx::PresentationFeedback& feedback) override;
 
   void DestroyBuffers();
@@ -86,6 +86,7 @@ class GLSurfaceEglReadbackWayland : public GLSurfaceEglReadback,
 
   // Size of the buffer.
   gfx::Size size_;
+  float surface_scale_factor_ = 1.f;
 
   // Available pixel buffers based on shared memory.
   std::vector<std::unique_ptr<PixelBuffer>> available_buffers_;

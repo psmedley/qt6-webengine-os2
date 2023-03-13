@@ -5,7 +5,9 @@
 #include "components/performance_manager/service_worker_context_adapter.h"
 
 #include "base/check_op.h"
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
+#include "base/observer_list.h"
 #include "base/scoped_observation.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
@@ -37,7 +39,7 @@ class ServiceWorkerContextAdapter::RunningServiceWorker
 
   // The adapter that owns |this|. Notified when RenderProcessExited() is
   // called.
-  ServiceWorkerContextAdapter* const adapter_;
+  const raw_ptr<ServiceWorkerContextAdapter> adapter_;
 
   base::ScopedObservation<content::RenderProcessHost,
                           content::RenderProcessHostObserver>
@@ -120,6 +122,7 @@ void ServiceWorkerContextAdapter::UnregisterServiceWorker(
 content::ServiceWorkerExternalRequestResult
 ServiceWorkerContextAdapter::StartingExternalRequest(
     int64_t service_worker_version_id,
+    content::ServiceWorkerExternalRequestTimeoutType timeout_type,
     const std::string& request_uuid) {
   NOTIMPLEMENTED();
   return content::ServiceWorkerExternalRequestResult::kOk;
@@ -139,8 +142,16 @@ size_t ServiceWorkerContextAdapter::CountExternalRequestsForTest(
   return 0u;
 }
 
-bool ServiceWorkerContextAdapter::MaybeHasRegistrationForOrigin(
-    const url::Origin& origin) {
+bool ServiceWorkerContextAdapter::ExecuteScriptForTest(
+    const std::string& script,
+    int64_t version_id,
+    content::ServiceWorkerScriptExecutionCallback callback) {
+  NOTIMPLEMENTED();
+  return false;
+}
+
+bool ServiceWorkerContextAdapter::MaybeHasRegistrationForStorageKey(
+    const blink::StorageKey& key) {
   NOTIMPLEMENTED();
   return false;
 }
@@ -269,8 +280,8 @@ void ServiceWorkerContextAdapter::OnVersionStoppedRunning(int64_t version_id) {
 #if DCHECK_IS_ON()
     // If this service worker could not be found, then it must be because its
     // render process exited early.
-    size_t removed = stopped_service_workers_.erase(version_id);
-    DCHECK_EQ(removed, 1u);
+    size_t removed_count = stopped_service_workers_.erase(version_id);
+    DCHECK_EQ(removed_count, 1u);
 #endif  // DCHECK_IS_ON()
     return;
   }

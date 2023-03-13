@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/webui/certificate_provisioning_ui_handler.h"
 
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -78,8 +79,7 @@ BA 48 53 4A E2 1C 42 24 EB E5 CD 46 E0 4E 9B 2B
 
 // Test values for creating CertProfile for MockCertProvisioningWorker.
 constexpr char kCertProfileVersion[] = "cert_profile_version_1";
-constexpr base::TimeDelta kCertProfileRenewalPeriod =
-    base::TimeDelta::FromSeconds(0);
+constexpr base::TimeDelta kCertProfileRenewalPeriod = base::Seconds(0);
 constexpr char kDeviceCertProfileId[] = "device_cert_profile_1";
 constexpr char kDeviceCertProfileName[] = "Device Certificate Profile 1";
 constexpr char kUserCertProfileId[] = "user_cert_profile_1";
@@ -106,7 +106,7 @@ void FormatDictRecurse(base::Value* value,
     return;
   }
   if (value->is_list()) {
-    for (base::Value& child : value->GetList())
+    for (base::Value& child : value->GetListDeprecated())
       FormatDictRecurse(&child, messages);
     return;
   }
@@ -134,8 +134,8 @@ base::Value FormatJsonDict(const base::StringPiece input,
 // |profile_id|.
 base::Value GetByProfileId(const base::Value& all_processes,
                            const std::string& profile_id) {
-  for (const base::Value& process : all_processes.GetList()) {
-    if (profile_id == *process.FindStringKey("certProfileId"))
+  for (const base::Value& process : all_processes.GetListDeprecated()) {
+    if (profile_id == *process.GetDict().FindString("certProfileId"))
       return process.Clone();
   }
   return base::Value();
@@ -202,8 +202,9 @@ class CertificateProvisioningUiHandlerTestBase : public ::testing::Test {
     if (!out_profile_ids)
       return;
     out_profile_ids->clear();
-    for (const base::Value& process : out_all_processes->GetList()) {
-      const std::string* profile_id = process.FindStringKey("certProfileId");
+    for (const base::Value& process : out_all_processes->GetListDeprecated()) {
+      const std::string* profile_id =
+          process.GetDict().FindString("certProfileId");
       ASSERT_TRUE(profile_id);
       out_profile_ids->push_back(*profile_id);
     }
@@ -280,7 +281,7 @@ TEST_F(CertificateProvisioningUiHandlerTest, NoProcesses) {
   base::Value all_processes;
   ASSERT_NO_FATAL_FAILURE(RefreshCertProvisioningProcesses(
       &all_processes, /*out_profile_ids=*/nullptr));
-  EXPECT_TRUE(all_processes.GetList().empty());
+  EXPECT_TRUE(all_processes.GetListDeprecated().empty());
 }
 
 TEST_F(CertificateProvisioningUiHandlerTest, HasProcesses) {
@@ -450,12 +451,7 @@ TEST_F(CertificateProvisioningUiHandlerTest, Updates) {
   content::TestWebUIListenerObserver result_waiter_2(
       &web_ui_, "certificate-provisioning-processes-changed");
   scheduler_observer_for_user_->OnVisibleStateChanged();
-  // Another update does not trigger a UI update for the holdoff time.
-  task_environment_.FastForwardBy(base::TimeDelta::FromMilliseconds(299));
-  EXPECT_EQ(0U, handler_->ReadAndResetUiRefreshCountForTesting());
 
-  // When the holdoff time has elapsed, an UI update is triggered.
-  task_environment_.FastForwardBy(base::TimeDelta::FromMilliseconds(2));
   EXPECT_EQ(1U, handler_->ReadAndResetUiRefreshCountForTesting());
   result_waiter_2.Wait();
 

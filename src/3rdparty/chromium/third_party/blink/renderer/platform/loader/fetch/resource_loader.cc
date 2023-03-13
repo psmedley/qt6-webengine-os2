@@ -49,6 +49,7 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/blob/blob_registry.mojom-blink.h"
 #include "third_party/blink/public/mojom/devtools/console_message.mojom-blink.h"
+#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-shared.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/public/platform/web_code_cache_loader.h"
@@ -90,6 +91,7 @@
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "url/url_constants.h"
 
 namespace blink {
 
@@ -235,7 +237,6 @@ class ResourceLoader::CodeCacheRequest {
         should_use_source_hash_(
             SchemeRegistry::SchemeSupportsCodeCacheWithHashing(
                 url.Protocol())) {
-    DCHECK(RuntimeEnabledFeatures::IsolatedCodeCacheEnabled());
   }
 
   ~CodeCacheRequest() = default;
@@ -390,7 +391,16 @@ void ResourceLoader::CodeCacheRequest::MaybeSendCachedCode(
 
   auto ClearCachedCodeIfPresent = [&]() {
     if (data.size() != 0) {
-      resource_loader->ClearCachedCode();
+      auto cache_type = resource_loader->GetCodeCacheType();
+      // TODO(crbug/1245526): Return early if we don't have a valid
+      // code_cache_loader_. This shouldn't happen but looks like we are hitting
+      // this case sometimes. This is a temporary fix to see if it fixes crashes
+      // and we should investigate why the code_cache_loader_ isn't valid here
+      // if this fixes the crashes. It is OK to return early here since the
+      // entry can be cleared on the next fetch.
+      if (!code_cache_loader_)
+        return;
+      code_cache_loader_->ClearCodeCacheEntry(cache_type, url_);
     }
   };
 
@@ -482,9 +492,6 @@ void ResourceLoader::Trace(Visitor* visitor) const {
 }
 
 bool ResourceLoader::ShouldFetchCodeCache() {
-  if (!RuntimeEnabledFeatures::IsolatedCodeCacheEnabled())
-    return false;
-
   // Since code cache requests use a per-frame interface, don't fetch cached
   // code for keep-alive requests. These are only used for beaconing and we
   // don't expect code cache to help there.
@@ -777,7 +784,8 @@ bool ResourceLoader::WillFollowRedirect(
     const WebString& new_method,
     const WebURLResponse& passed_redirect_response,
     bool& has_devtools_request_id,
-    std::vector<std::string>* removed_headers) {
+    std::vector<std::string>* removed_headers,
+    bool insecure_scheme_was_upgraded) {
   DCHECK(!passed_redirect_response.IsNull());
 
   if (passed_redirect_response.HasAuthorizationCoveredByWildcardOnPreflight()) {
@@ -840,10 +848,17 @@ bool ResourceLoader::WillFollowRedirect(
         unused_preload ? ReportingDisposition::kSuppressReporting
                        : ReportingDisposition::kReport;
 
+    // The network stack might have upgraded to https an http URL. Report-only
+    // CSP must be checked with the url prior to that upgrade.
+    KURL new_url_prior_upgrade = new_url;
+    if (insecure_scheme_was_upgraded && new_url.ProtocolIs(url::kHttpsScheme)) {
+      new_url_prior_upgrade.SetProtocol(url::kHttpScheme);
+    }
+
     // CanRequest() checks only enforced CSP, so check report-only here to
     // ensure that violations are sent.
     Context().CheckCSPForRequest(
-        request_context, request_destination, new_url, options,
+        request_context, request_destination, new_url_prior_upgrade, options,
         reporting_disposition, url_before_redirects,
         ResourceRequest::RedirectStatus::kFollowedRedirect);
 
@@ -940,11 +955,6 @@ void ResourceLoader::SendCachedCodeToResource(mojo_base::BigBuffer data) {
   resource_->SetSerializedCachedMetadata(std::move(data));
 }
 
-void ResourceLoader::ClearCachedCode() {
-  auto cache_type = GetCodeCacheType();
-  Platform::Current()->ClearCodeCacheEntry(cache_type, resource_->Url());
-}
-
 void ResourceLoader::DidSendData(uint64_t bytes_sent,
                                  uint64_t total_bytes_to_be_sent) {
   resource_->DidSendData(bytes_sent, total_bytes_to_be_sent);
@@ -978,13 +988,6 @@ void ResourceLoader::DidReceiveResponseInternal(
                                response.HttpStatusCode(),
                                request.GetUkmSourceId(), recorder.get(),
                                resource_);
-  }
-
-  if (fetcher_->GetProperties().IsDetached()) {
-    // If the fetch context is already detached, we don't need further signals,
-    // so let's cancel the request.
-    HandleError(ResourceError::CancelledError(response.CurrentRequestUrl()));
-    return;
   }
 
   ResourceType resource_type = resource_->GetType();
@@ -1089,6 +1092,9 @@ void ResourceLoader::DidReceiveResponseInternal(
       return;
   }
 
+  scheduler_->SetConnectionInfo(scheduler_client_id_,
+                                response.ConnectionInfo());
+
   // A response should not serve partial content if it was not requested via a
   // Range header: https://fetch.spec.whatwg.org/#main-fetch
   if (response.GetType() == network::mojom::FetchResponseType::kOpaque &&
@@ -1111,6 +1117,13 @@ void ResourceLoader::DidReceiveResponseInternal(
   }
 
   resource_->ResponseReceived(response);
+
+  if (resource_->Loader() && fetcher_->GetProperties().IsDetached()) {
+    // If the fetch context is already detached, we don't need further signals,
+    // so let's cancel the request.
+    HandleError(ResourceError::CancelledError(response.CurrentRequestUrl()));
+    return;
+  }
 
   // Send the cached code after we notify that the response is received.
   // Resource expects that we receive the response first before the
@@ -1138,7 +1151,7 @@ void ResourceLoader::DidReceiveResponseInternal(
 
   if (response.HttpStatusCode() >= 400 &&
       !resource_->ShouldIgnoreHTTPStatusCodeErrors()) {
-    HandleError(ResourceError::CancelledError(response.CurrentRequestUrl()));
+    HandleError(ResourceError::HttpError(response.CurrentRequestUrl()));
     return;
   }
 }
@@ -1298,7 +1311,8 @@ void ResourceLoader::HandleError(const ResourceError& error) {
         cors::GetErrorString(
             *error.CorsErrorStatus(), resource_->GetResourceRequest().Url(),
             resource_->LastResourceRequest().Url(), *resource_->GetOrigin(),
-            resource_->GetType(), resource_->Options().initiator_info.name));
+            resource_->GetType(), resource_->Options().initiator_info.name),
+        false /* discard_duplicates */, mojom::ConsoleMessageCategory::Cors);
   }
 
   Release(ResourceLoadScheduler::ReleaseOption::kReleaseAndSchedule,
@@ -1344,14 +1358,11 @@ void ResourceLoader::RequestSynchronously(const ResourceRequestHead& request) {
   WebBlobInfo downloaded_blob;
 
   if (CanHandleDataURLRequestLocally(request)) {
-    ResourceResponse response;
-    scoped_refptr<SharedBuffer> data;
-    int result;
-    // It doesn't have to verify mime type again since it's allowed to handle
+    // We don't have to verify mime type again since it's allowed to handle
     // the data url with invalid mime type in some cases.
     // CanHandleDataURLRequestLocally() has already checked if the data url can
     // be handled here.
-    std::tie(result, response, data) =
+    auto [result, response, data] =
         network_utils::ParseDataURL(resource_->Url(), request.HttpMethod());
     if (result != net::OK) {
       error_out = WebURLError(result, resource_->Url());
@@ -1574,14 +1585,11 @@ void ResourceLoader::HandleDataUrl() {
   }
 
   // Extract a ResourceResponse from the data url.
-  ResourceResponse response;
-  scoped_refptr<SharedBuffer> data;
-  int result;
-  // We doesn't have to verify mime type again since it's allowed to handle the
+  // We don't have to verify mime type again since it's allowed to handle the
   // data url with invalid mime type in some cases.
   // CanHandleDataURLRequestLocally() has already checked if the data url can be
   // handled here.
-  std::tie(result, response, data) = network_utils::ParseDataURL(
+  auto [result, response, data] = network_utils::ParseDataURL(
       resource_->Url(), resource_->GetResourceRequest().HttpMethod());
   if (result != net::OK) {
     HandleError(ResourceError(result, resource_->Url(), absl::nullopt));

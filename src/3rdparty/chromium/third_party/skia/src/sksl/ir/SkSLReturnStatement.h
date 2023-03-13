@@ -18,14 +18,15 @@ namespace SkSL {
  */
 class ReturnStatement final : public Statement {
 public:
-    static constexpr Kind kStatementKind = Kind::kReturn;
+    inline static constexpr Kind kStatementKind = Kind::kReturn;
 
-    ReturnStatement(int offset, std::unique_ptr<Expression> expression)
-        : INHERITED(offset, kStatementKind)
+    ReturnStatement(Position pos, std::unique_ptr<Expression> expression)
+        : INHERITED(pos, kStatementKind)
         , fExpression(std::move(expression)) {}
 
-    static std::unique_ptr<Statement> Make(int offset, std::unique_ptr<Expression> expression) {
-        return std::make_unique<ReturnStatement>(offset, std::move(expression));
+    static std::unique_ptr<Statement> Make(Position pos,
+            std::unique_ptr<Expression> expression) {
+        return std::make_unique<ReturnStatement>(pos, std::move(expression));
     }
 
     std::unique_ptr<Expression>& expression() {
@@ -41,14 +42,15 @@ public:
     }
 
     std::unique_ptr<Statement> clone() const override {
-        return std::make_unique<ReturnStatement>(fOffset, this->expression()->clone());
+        return std::make_unique<ReturnStatement>(fPosition,
+                this->expression() ? this->expression()->clone() : nullptr);
     }
 
-    String description() const override {
+    std::string description() const override {
         if (this->expression()) {
             return "return " + this->expression()->description() + ";";
         } else {
-            return String("return;");
+            return "return;";
         }
     }
 

@@ -4,20 +4,22 @@
 
 #include "device/bluetooth/chromeos/bluetooth_utils.h"
 
-#include "ash/constants/ash_features.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
-#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
+#include "build/chromeos_buildflags.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
 #include "device/bluetooth/test/mock_bluetooth_device.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+#include "chromeos/lacros/lacros_test_helper.h"
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 
 namespace device {
 
@@ -35,6 +37,10 @@ const size_t kMaxDevicesForFilter = 5;
 class BluetoothUtilsTest : public testing::Test {
  protected:
   BluetoothUtilsTest() = default;
+
+  BluetoothUtilsTest(const BluetoothUtilsTest&) = delete;
+  BluetoothUtilsTest& operator=(const BluetoothUtilsTest&) = delete;
+
   base::HistogramTester histogram_tester;
 
   void SetUp() override {
@@ -72,18 +78,13 @@ class BluetoothUtilsTest : public testing::Test {
     EXPECT_EQ(num_expected_remaining_devices, filtered_device_list.size());
   }
 
-  void DisableAggressiveAppearanceFilter() {
-    feature_list_.InitAndDisableFeature(
-        chromeos::features::kBluetoothAggressiveAppearanceFilter);
-  }
-
  private:
   base::test::TaskEnvironment task_environment_;
   scoped_refptr<MockBluetoothAdapter> adapter_ =
       base::MakeRefCounted<testing::NiceMock<MockBluetoothAdapter>>();
-  base::test::ScopedFeatureList feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothUtilsTest);
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  chromeos::ScopedLacrosServiceTestHelper scoped_lacros_service_test_helper_;
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 };
 
 TEST_F(BluetoothUtilsTest,
@@ -199,36 +200,11 @@ TEST_F(
 
 TEST_F(
     BluetoothUtilsTest,
-    TestFilterBluetoothDeviceList_FilterKnown_DualDevicesWithoutAppearances_KeepWithFilterFlagDisabled) {
-  DisableAggressiveAppearanceFilter();
-
-  AddMockBluetoothDeviceToAdapter(BLUETOOTH_TRANSPORT_DUAL);
-
-  VerifyFilterBluetoothDeviceList(BluetoothFilterType::KNOWN,
-                                  1u /* num_expected_remaining_devices */);
-}
-
-TEST_F(
-    BluetoothUtilsTest,
     TestFilterBluetoothDeviceList_FilterKnown_DualDevicesWithoutAppearances_RemoveWithFilterFlagEnabled) {
   AddMockBluetoothDeviceToAdapter(BLUETOOTH_TRANSPORT_DUAL);
 
   VerifyFilterBluetoothDeviceList(BluetoothFilterType::KNOWN,
                                   0u /* num_expected_remaining_devices */);
-}
-
-TEST_F(
-    BluetoothUtilsTest,
-    TestFilterBluetoothDeviceList_FilterKnown_AppearanceComputer_KeepWithFilterFlagDisabled) {
-  DisableAggressiveAppearanceFilter();
-
-  auto* mock_bluetooth_device =
-      AddMockBluetoothDeviceToAdapter(BLUETOOTH_TRANSPORT_CLASSIC);
-  ON_CALL(*mock_bluetooth_device, GetDeviceType)
-      .WillByDefault(testing::Return(BluetoothDeviceType::COMPUTER));
-
-  VerifyFilterBluetoothDeviceList(BluetoothFilterType::KNOWN,
-                                  1u /* num_expected_remaining_devices */);
 }
 
 TEST_F(
@@ -285,7 +261,7 @@ TEST_F(BluetoothUtilsTest, TestUserAttemptedReconnectionMetric) {
   RecordUserInitiatedReconnectionAttemptDuration(
       device::ConnectionFailureReason::kFailed,
       device::BluetoothTransport::BLUETOOTH_TRANSPORT_CLASSIC,
-      base::TimeDelta::FromSeconds(2));
+      base::Seconds(2));
 
   histogram_tester.ExpectBucketCount(
       "Bluetooth.ChromeOS.UserInitiatedReconnectionAttempt.Duration.Failure",
@@ -294,6 +270,12 @@ TEST_F(BluetoothUtilsTest, TestUserAttemptedReconnectionMetric) {
       "Bluetooth.ChromeOS.UserInitiatedReconnectionAttempt.Duration.Failure."
       "Classic",
       2000, 1);
+}
+
+TEST_F(BluetoothUtilsTest, TestDisconnectMetric) {
+  RecordDeviceDisconnect(BluetoothDeviceType::MOUSE);
+  histogram_tester.ExpectBucketCount("Bluetooth.ChromeOS.DeviceDisconnect",
+                                     BluetoothDeviceType::MOUSE, 1);
 }
 
 }  // namespace device

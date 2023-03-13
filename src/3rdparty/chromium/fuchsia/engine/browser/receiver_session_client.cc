@@ -21,7 +21,7 @@ ReceiverSessionClient::ReceiverSessionClient(
 ReceiverSessionClient::~ReceiverSessionClient() = default;
 
 void ReceiverSessionClient::SetCastStreamingReceiver(
-    mojo::AssociatedRemote<mojom::CastStreamingReceiver>
+    mojo::AssociatedRemote<cast_streaming::mojom::CastStreamingReceiver>
         cast_streaming_receiver) {
   DCHECK(message_port_request_);
 
@@ -31,12 +31,12 @@ void ReceiverSessionClient::SetCastStreamingReceiver(
   // out by build flags.
   auto stream_config =
       std::make_unique<cast_streaming::ReceiverSession::AVConstraints>(
-          cast_streaming::ToVideoCaptureConfigCodecs(
-              media::VideoCodec::kCodecH264, media::VideoCodec::kCodecVP8),
+          cast_streaming::ToVideoCaptureConfigCodecs(media::VideoCodec::kH264,
+                                                     media::VideoCodec::kVP8),
           video_only_receiver_
               ? std::vector<openscreen::cast::AudioCodec>()
               : cast_streaming::ToAudioCaptureConfigCodecs(
-                    media::AudioCodec::kCodecAAC, media::AudioCodec::kCodecOpus));
+                    media::AudioCodec::kAAC, media::AudioCodec::kOpus));
 
   receiver_session_ = cast_streaming::ReceiverSession::Create(
       std::move(stream_config),
@@ -47,6 +47,5 @@ void ReceiverSessionClient::SetCastStreamingReceiver(
                 std::move(port));
           },
           std::move(message_port_request_)));
-  receiver_session_->SetCastStreamingReceiver(
-      std::move(cast_streaming_receiver));
+  receiver_session_->StartStreamingAsync(std::move(cast_streaming_receiver));
 }

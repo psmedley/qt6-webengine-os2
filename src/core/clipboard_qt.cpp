@@ -1,41 +1,5 @@
-/****************************************************************************
-**
-** Copyright (C) 2021 The Qt Company Ltd.
-** Contact: https://www.qt.io/licensing/
-**
-** This file is part of the QtWebEngine module of the Qt Toolkit.
-**
-** $QT_BEGIN_LICENSE:LGPL$
-** Commercial License Usage
-** Licensees holding valid commercial Qt licenses may use this file in
-** accordance with the commercial license agreement provided with the
-** Software or, alternatively, in accordance with the terms contained in
-** a written agreement between you and The Qt Company. For licensing terms
-** and conditions see https://www.qt.io/terms-conditions. For further
-** information use the contact form at https://www.qt.io/contact-us.
-**
-** GNU Lesser General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU Lesser
-** General Public License version 3 as published by the Free Software
-** Foundation and appearing in the file LICENSE.LGPL3 included in the
-** packaging of this file. Please review the following information to
-** ensure the GNU Lesser General Public License version 3 requirements
-** will be met: https://www.gnu.org/licenses/lgpl-3.0.html.
-**
-** GNU General Public License Usage
-** Alternatively, this file may be used under the terms of the GNU
-** General Public License version 2.0 or (at your option) the GNU General
-** Public license version 3 or any later version approved by the KDE Free
-** Qt Foundation. The licenses are as published by the Free Software
-** Foundation and appearing in the file LICENSE.GPL2 and LICENSE.GPL3
-** included in the packaging of this file. Please review the following
-** information to ensure the GNU General Public License requirements will
-** be met: https://www.gnu.org/licenses/gpl-2.0.html and
-** https://www.gnu.org/licenses/gpl-3.0.html.
-**
-** $QT_END_LICENSE$
-**
-****************************************************************************/
+// Copyright (C) 2021 The Qt Company Ltd.
+// SPDX-License-Identifier: LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only
 
 // Copyright (c) 2012 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -54,10 +18,13 @@
 #include "ui/base/clipboard/clipboard_monitor.h"
 #include "ui/base/clipboard/clipboard_constants.h"
 #include "ui/base/clipboard/clipboard_format_type.h"
+#include "ui/base/data_transfer_policy/data_transfer_endpoint.h"
 #include "ui/base/ui_base_features.h"
 
+#include <QBuffer>
 #include <QGuiApplication>
 #include <QImage>
+#include <QImageWriter>
 #include <QMimeData>
 
 namespace QtWebEngineCore {
@@ -230,7 +197,12 @@ bool ClipboardQt::IsFormatAvailable(const ui::ClipboardFormatType &format,
 {
     const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData(
             type == ui::ClipboardBuffer::kCopyPaste ? QClipboard::Clipboard : QClipboard::Selection);
-    return mimeData && mimeData->hasFormat(QString::fromStdString(format.GetName()));
+
+    if (!mimeData)
+        return false;
+    if (format == ui::ClipboardFormatType::PngType())
+        return mimeData->hasImage();
+    return mimeData->hasFormat(QString::fromStdString(format.GetName()));
 }
 
 void ClipboardQt::Clear(ui::ClipboardBuffer type)
@@ -254,18 +226,13 @@ void ClipboardQt::ReadAvailableTypes(ui::ClipboardBuffer type,
             type == ui::ClipboardBuffer::kCopyPaste ? QClipboard::Clipboard : QClipboard::Selection);
     if (!mimeData)
         return;
-    if (mimeData->hasImage() && !mimeData->formats().contains(QStringLiteral("image/png")))
-        types->push_back(toString16(QStringLiteral("image/png")));
-    const QStringList formats = mimeData->formats();
-    for (const QString &mimeType : formats) {
-        // Special handling for chromium/x-web-custom-data. We must read the data
-        // and deserialize it to find the list of mime types to report.
-        if (mimeType == QString::fromLatin1(ui::kMimeTypeWebCustomData)) {
-            const QByteArray customData = mimeData->data(QString::fromLatin1(ui::kMimeTypeWebCustomData));
-            ui::ReadCustomDataTypes(customData.constData(), customData.size(), types);
-        } else {
-            types->push_back(toString16(mimeType));
-        }
+
+    for (const auto& mime_type : GetStandardFormats(type, data_dst))
+        types->push_back(mime_type);
+
+    if (mimeData->hasFormat(QString::fromLatin1(ui::kMimeTypeWebCustomData))) {
+        const QByteArray customData = mimeData->data(QString::fromLatin1(ui::kMimeTypeWebCustomData));
+        ui::ReadCustomDataTypes(customData.constData(), customData.size(), types);
     }
 }
 
@@ -347,38 +314,21 @@ void ClipboardQt::ReadRTF(ui::ClipboardBuffer type,
     *result = std::string(byteArray.constData(), byteArray.length());
 }
 
-void ClipboardQt::ReadImage(ui::ClipboardBuffer type,
-                            const ui::DataTransferEndpoint *data_dst,
-                            ReadImageCallback callback) const
+void ClipboardQt::ReadPng(ui::ClipboardBuffer type, const ui::DataTransferEndpoint *, ui::Clipboard::ReadPngCallback callback) const
 {
     const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData(
             type == ui::ClipboardBuffer::kCopyPaste ? QClipboard::Clipboard : QClipboard::Selection);
     if (!mimeData)
-        return std::move(callback).Run(SkBitmap());
+        return std::move(callback).Run({});
     QImage image = qvariant_cast<QImage>(mimeData->imageData());
 
-    image = image.convertToFormat(QImage::Format_ARGB32);
-    SkBitmap bitmap;
-
-    bitmap.allocN32Pixels(image.width(), image.height(), true);
-    const size_t bytesPerRowDst = bitmap.rowBytes();
-    const size_t bytesPerLineSrc = static_cast<size_t>(image.bytesPerLine());
-    const size_t dataBytes = std::min(bytesPerRowDst, bytesPerLineSrc);
-    uchar *dst = static_cast<uchar *>(bitmap.getPixels());
-    const uchar *src = image.constBits();
-    for (int y = 0; y < image.height(); ++y) {
-        memcpy(dst, src, dataBytes);
-        dst += bytesPerRowDst;
-        src += bytesPerLineSrc;
-    }
-
-    return std::move(callback).Run(bitmap);
-}
-
-void ClipboardQt::ReadPng(ui::ClipboardBuffer type, const ui::DataTransferEndpoint *, ui::Clipboard::ReadPngCallback callback) const
-{
-    // TODO(crbug.com/1201018): Implement this.
-    NOTIMPLEMENTED();
+    QBuffer buffer;
+    QImageWriter writer(&buffer, "png");
+    writer.write(image);
+    std::vector<uint8_t> pngData;
+    pngData.resize(buffer.size());
+    memcpy(pngData.data(), buffer.data().data(), buffer.size());
+    return std::move(callback).Run(std::move(pngData));
 }
 
 void ClipboardQt::ReadCustomData(ui::ClipboardBuffer clipboard_type, const std::u16string &type,
@@ -475,17 +425,34 @@ bool ClipboardQt::IsSelectionBufferAvailable() const
 }
 #endif
 
-std::vector<std::u16string> ClipboardQt::ReadAvailablePlatformSpecificFormatNames(ui::ClipboardBuffer buffer, const ui::DataTransferEndpoint *data_dst) const
+// This is the same as ReadAvailableTypes minus dealing with custom-data
+std::vector<std::u16string> ClipboardQt::GetStandardFormats(ui::ClipboardBuffer buffer, const ui::DataTransferEndpoint *data_dst) const
 {
     Q_UNUSED(data_dst);
     const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData(
             buffer == ui::ClipboardBuffer::kCopyPaste ? QClipboard::Clipboard : QClipboard::Selection);
     if (!mimeData)
         return {};
+
     std::vector<std::u16string> types;
+    if (mimeData->hasImage())
+        types.push_back(base::UTF8ToUTF16(ui::kMimeTypePNG));
+    if (mimeData->hasHtml())
+        types.push_back(base::UTF8ToUTF16(ui::kMimeTypeHTML));
+    if (mimeData->hasText())
+        types.push_back(base::UTF8ToUTF16(ui::kMimeTypeText));
+    if (mimeData->hasUrls())
+        types.push_back(base::UTF8ToUTF16(ui::kMimeTypeURIList));
     const QStringList formats = mimeData->formats();
-    for (const QString &mimeType : formats)
-        types.push_back(toString16(mimeType));
+    for (const QString &mimeType : formats) {
+        auto mime_type = mimeType.toStdString();
+        // Only add white-listed formats here
+        if (mime_type == ui::ClipboardFormatType::SvgType().GetName() ||
+            mime_type == ui::ClipboardFormatType::RtfType().GetName()) {
+          types.push_back(base::UTF8ToUTF16(mime_type));
+          continue;
+        }
+    }
     return types;
 }
 

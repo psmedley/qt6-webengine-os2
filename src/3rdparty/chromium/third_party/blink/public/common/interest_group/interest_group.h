@@ -33,6 +33,10 @@ struct BLINK_COMMON_EXPORT InterestGroup {
     Ad(GURL render_url, absl::optional<std::string> metadata);
     ~Ad();
 
+    // Returns the approximate size of the contents of this InterestGroup::Ad,
+    // in bytes.
+    size_t EstimateSize() const;
+
     // Must use https.
     GURL render_url;
     // Opaque JSON data, passed as an object to auction worklet.
@@ -53,12 +57,15 @@ struct BLINK_COMMON_EXPORT InterestGroup {
       base::Time expiry,
       url::Origin owner,
       std::string name,
+      double priority,
       absl::optional<GURL> bidding_url,
-      absl::optional<GURL> update_url,
+      absl::optional<GURL> bidding_wasm_helper_url,
+      absl::optional<GURL> daily_update_url,
       absl::optional<GURL> trusted_bidding_signals_url,
       absl::optional<std::vector<std::string>> trusted_bidding_signals_keys,
       absl::optional<std::string> user_bidding_signals,
-      absl::optional<std::vector<InterestGroup::Ad>> ads);
+      absl::optional<std::vector<InterestGroup::Ad>> ads,
+      absl::optional<std::vector<InterestGroup::Ad>> ad_components);
 
   ~InterestGroup();
 
@@ -66,17 +73,49 @@ struct BLINK_COMMON_EXPORT InterestGroup {
   // Automatically checked when passing InterestGroups over Mojo.
   bool IsValid() const;
 
+  // Returns the approximate size of the contents of this InterestGroup, in
+  // bytes.
+  size_t EstimateSize() const;
+
   bool IsEqualForTesting(const InterestGroup& other) const;
 
   base::Time expiry;
   url::Origin owner;
   std::string name;
+  absl::optional<double> priority;  // Needs to be optional for updates.
   absl::optional<GURL> bidding_url;
-  absl::optional<GURL> update_url;
+  absl::optional<GURL> bidding_wasm_helper_url;
+  absl::optional<GURL> daily_update_url;
   absl::optional<GURL> trusted_bidding_signals_url;
   absl::optional<std::vector<std::string>> trusted_bidding_signals_keys;
   absl::optional<std::string> user_bidding_signals;
-  absl::optional<std::vector<InterestGroup::Ad>> ads;
+  absl::optional<std::vector<InterestGroup::Ad>> ads, ad_components;
+
+  static_assert(__LINE__ == 94, R"(
+If modifying InterestGroup fields, make sure to also modify:
+
+* IsValid(), EstimateSize(), and IsEqualForTesting() in this class
+* auction_ad_interest_group.idl
+* navigator_auction.cc
+* interest_group_types.mojom
+* validate_blink_interest_group.cc
+* validate_blink_interest_group_test.cc
+* interest_group_mojom_traits[.h/.cc/.test].
+* bidder_worklet.cc (to pass the InterestGroup to generateBid()).
+
+In interest_group_storage.cc, add the new field and any respective indices,
+and also add a new database version and migration, and migration test.
+
+If the new field is to be updatable via dailyUpdateUrl, also update *all* of
+these:
+
+* InterestGroupStorage::DoStoreInterestGroupUpdate()
+* ParseUpdateJson in interest_group_update_manager.cc
+* Update AdAuctionServiceImplTest.UpdateAllUpdatableFields
+
+See crrev.com/c/3517534 for an example (adding the priority field), and also
+remember to update bidder_worklet.cc too.
+)");
 };
 
 }  // namespace blink

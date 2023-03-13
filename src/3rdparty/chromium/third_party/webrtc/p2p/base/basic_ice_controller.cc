@@ -83,6 +83,8 @@ void BasicIceController::OnConnectionDestroyed(const Connection* connection) {
   pinged_connections_.erase(connection);
   unpinged_connections_.erase(connection);
   connections_.erase(absl::c_find(connections_, connection));
+  if (selected_connection_ == connection)
+    selected_connection_ = nullptr;
 }
 
 bool BasicIceController::HasPingableConnection() const {
@@ -739,6 +741,31 @@ int BasicIceController::CompareCandidatePairNetworks(
     return compare_a_b_by_network_preference;
   }
 
+  bool a_vpn = a->network()->IsVpn();
+  bool b_vpn = b->network()->IsVpn();
+  switch (config_.vpn_preference) {
+    case webrtc::VpnPreference::kDefault:
+      break;
+    case webrtc::VpnPreference::kOnlyUseVpn:
+    case webrtc::VpnPreference::kPreferVpn:
+      if (a_vpn && !b_vpn) {
+        return a_is_better;
+      } else if (!a_vpn && b_vpn) {
+        return b_is_better;
+      }
+      break;
+    case webrtc::VpnPreference::kNeverUseVpn:
+    case webrtc::VpnPreference::kAvoidVpn:
+      if (a_vpn && !b_vpn) {
+        return b_is_better;
+      } else if (!a_vpn && b_vpn) {
+        return a_is_better;
+      }
+      break;
+    default:
+      break;
+  }
+
   uint32_t a_cost = a->ComputeNetworkCost();
   uint32_t b_cost = b->ComputeNetworkCost();
   // Prefer lower network cost.
@@ -821,7 +848,7 @@ bool BasicIceController::GetUseCandidateAttr(const Connection* conn,
       return selected || better_than_selected;
     }
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       return false;
   }
 }

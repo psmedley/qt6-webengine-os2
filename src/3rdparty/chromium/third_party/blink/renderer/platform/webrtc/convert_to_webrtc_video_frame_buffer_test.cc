@@ -65,7 +65,7 @@ TEST_P(ConvertToWebRtcVideoFrameBufferParamTest, ToI420) {
   EXPECT_EQ(i420_frame->height(), kNaturalSize.height());
 }
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     ConvertToWebRtcVideoFrameBufferParamTest,
     ConvertToWebRtcVideoFrameBufferParamTest,
     ::testing::ValuesIn(TestParams()),
@@ -130,7 +130,6 @@ TEST(ConvertToWebRtcVideoFrameBufferTest,
   EXPECT_EQ(nv12_frame->height(), kNaturalSize.height());
 
   // Even though we have an NV12 frame, ToI420 should return an I420 frame.
-  EXPECT_FALSE(gmb_frame_buffer->GetI420());
   auto i420_frame = gmb_frame_buffer->ToI420();
   ASSERT_TRUE(i420_frame);
   EXPECT_EQ(i420_frame->width(), kNaturalSize.width());
@@ -164,7 +163,6 @@ TEST(ConvertToWebRtcVideoFrameBufferTest, Nv12ScalesGmbWithFeature) {
   EXPECT_EQ(nv12_frame->height(), kNaturalSize.height());
 
   // Even though we have an NV12 frame, ToI420 should return an I420 frame.
-  EXPECT_FALSE(gmb_frame_buffer->GetI420());
   auto i420_frame = gmb_frame_buffer->ToI420();
   ASSERT_TRUE(i420_frame);
   EXPECT_EQ(i420_frame->width(), kNaturalSize.width());
@@ -275,7 +273,8 @@ TEST(ConvertToWebRtcVideoFrameBufferTest,
 
   // Should call texture conversion.
   resources->ExpectCreateFrameWithRealImplementation();
-  resources->ExpectCreateTemporaryFrameWithRealImplementation();
+  resources->ExpectCreateTemporaryVectorBufferWithRealImplementation();
+  resources->ExpectReleaseTemporaryVectorBufferWithRealImplementation();
   EXPECT_CALL(*resources, ConstructVideoFrameFromTexture(_))
       .WillOnce(Return(memory_frame));
 

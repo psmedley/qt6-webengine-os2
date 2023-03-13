@@ -11,7 +11,7 @@
 #include "base/bind.h"
 #include "base/check_op.h"
 #include "base/i18n/rtl.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/accessibility/ax_action_data.h"
@@ -142,8 +142,12 @@ class EditableCombobox::EditableComboboxMenuModel
         filter_on_edit_(filter_on_edit),
         show_on_empty_(show_on_empty) {
     UpdateItemsShown();
-    observation_.Observe(combobox_model_);
+    observation_.Observe(combobox_model_.get());
   }
+
+  EditableComboboxMenuModel(const EditableComboboxMenuModel&) = delete;
+  EditableComboboxMenuModel& operator=(const EditableComboboxMenuModel&) =
+      delete;
 
   ~EditableComboboxMenuModel() override = default;
 
@@ -186,8 +190,13 @@ class EditableCombobox::EditableComboboxMenuModel
     return combobox_model_->GetDropDownIconAt(items_shown_[index].index);
   }
 
+  // ComboboxModelObserver:
   void OnComboboxModelChanged(ui::ComboboxModel* model) override {
     UpdateItemsShown();
+  }
+
+  void OnComboboxModelDestroying(ui::ComboboxModel* model) override {
+    observation_.Reset();
   }
 
   int GetItemCount() const override { return items_shown_.size(); }
@@ -255,8 +264,8 @@ class EditableCombobox::EditableComboboxMenuModel
 
   MenuModel* GetSubmenuModelAt(int index) const override { return nullptr; }
 
-  EditableCombobox* owner_;            // Weak. Owns |this|.
-  ui::ComboboxModel* combobox_model_;  // Weak.
+  raw_ptr<EditableCombobox> owner_;            // Weak. Owns |this|.
+  raw_ptr<ui::ComboboxModel> combobox_model_;  // Weak.
 
   // Whether to adapt the items shown to the textfield content.
   const bool filter_on_edit_;
@@ -273,8 +282,6 @@ class EditableCombobox::EditableComboboxMenuModel
 
   base::ScopedObservation<ui::ComboboxModel, ui::ComboboxModelObserver>
       observation_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(EditableComboboxMenuModel);
 };
 
 // This class adds itself as the pre-target handler for the RootView of the
@@ -287,6 +294,11 @@ class EditableCombobox::EditableComboboxPreTargetHandler
       : owner_(owner), root_view_(root_view) {
     root_view_->AddPreTargetHandler(this);
   }
+
+  EditableComboboxPreTargetHandler(const EditableComboboxPreTargetHandler&) =
+      delete;
+  EditableComboboxPreTargetHandler& operator=(
+      const EditableComboboxPreTargetHandler&) = delete;
 
   ~EditableComboboxPreTargetHandler() override { StopObserving(); }
 
@@ -317,10 +329,8 @@ class EditableCombobox::EditableComboboxPreTargetHandler
     root_view_ = nullptr;
   }
 
-  EditableCombobox* owner_;
-  View* root_view_;
-
-  DISALLOW_COPY_AND_ASSIGN(EditableComboboxPreTargetHandler);
+  raw_ptr<EditableCombobox> owner_;
+  raw_ptr<View> root_view_;
 };
 
 EditableCombobox::EditableCombobox()
@@ -342,17 +352,16 @@ EditableCombobox::EditableCombobox(
       show_on_empty_(show_on_empty),
       showing_password_text_(type != Type::kPassword) {
   SetModel(std::move(combobox_model));
-  observation_.Observe(textfield_);
+  observation_.Observe(textfield_.get());
   textfield_->set_controller(this);
   textfield_->SetFontList(GetFontList());
   textfield_->SetTextInputType((type == Type::kPassword)
                                    ? ui::TEXT_INPUT_TYPE_PASSWORD
                                    : ui::TEXT_INPUT_TYPE_TEXT);
-  AddChildView(textfield_);
+  AddChildView(textfield_.get());
   if (display_arrow) {
-    textfield_->SetExtraInsets(gfx::Insets(
-        /*top=*/0, /*left=*/0, /*bottom=*/0,
-        /*right=*/kComboboxArrowContainerWidth - kComboboxArrowPaddingWidth));
+    textfield_->SetExtraInsets(gfx::Insets::TLBR(
+        0, 0, 0, kComboboxArrowContainerWidth - kComboboxArrowPaddingWidth));
     arrow_ = AddChildView(std::make_unique<Arrow>(base::BindRepeating(
         &EditableCombobox::ArrowButtonPressed, base::Unretained(this))));
   }

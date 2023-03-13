@@ -12,7 +12,8 @@
 namespace weblayer {
 
 PrerenderTabHelper::PrerenderTabHelper(content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {}
+    : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<PrerenderTabHelper>(*web_contents) {}
 
 PrerenderTabHelper::~PrerenderTabHelper() = default;
 
@@ -31,10 +32,10 @@ void PrerenderTabHelper::DidFinishNavigation(
           web_contents()->GetBrowserContext());
 
   if (no_state_prefetch_manager &&
-      !no_state_prefetch_manager->IsWebContentsPrerendering(web_contents()))
+      !no_state_prefetch_manager->IsWebContentsPrefetching(web_contents()))
     no_state_prefetch_manager->RecordNavigation(navigation_handle->GetURL());
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(PrerenderTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(PrerenderTabHelper);
 
 }  // namespace weblayer

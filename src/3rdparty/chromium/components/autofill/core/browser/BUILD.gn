@@ -7,6 +7,11 @@ import("//build/config/jumbo.gni")
 import("//build/util/version.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//tools/grit/grit_rule.gni")
+if (is_android) {
+  import("//build/config/android/rules.gni")
+}
+
+import("//build/config/features.gni")
 
 grit("autofill_address_rewriter_resources") {
   source = "autofill_address_rewriter_resources.grd"
@@ -19,15 +24,13 @@ grit("autofill_address_rewriter_resources") {
   output_dir = "$root_gen_dir/components/autofill/core/browser"
 }
 
-action("default_regex_patterns_cc") {
+action("regex_patterns_inl_h") {
   visibility = [ ":*" ]
-  sources = [ "pattern_provider/resources/regex_patterns.json" ]
-  script = "pattern_provider/transpile_default_regex_patterns.py"
-  args = [
-    rebase_path("pattern_provider/resources/regex_patterns.json"),
-    rebase_path("$target_gen_dir/pattern_provider/default_regex_patterns.cc"),
-  ]
-  outputs = [ "$target_gen_dir/pattern_provider/default_regex_patterns.cc" ]
+  sources = [ "form_parsing/resources/regex_patterns.json" ]
+  script = "form_parsing/transpile_regex_patterns.py"
+  outputs = [ "$target_gen_dir/form_parsing/regex_patterns_inl.h" ]
+  args = rebase_path(sources, root_build_dir) +
+         rebase_path(outputs, root_build_dir)
 }
 
 jumbo_static_library("browser") {
@@ -60,8 +63,6 @@ jumbo_static_library("browser") {
     "autofill_download_manager.cc",
     "autofill_download_manager.h",
     "autofill_driver.h",
-    "autofill_driver_factory.cc",
-    "autofill_driver_factory.h",
     "autofill_experiments.cc",
     "autofill_experiments.h",
     "autofill_external_delegate.cc",
@@ -70,8 +71,6 @@ jumbo_static_library("browser") {
     "autofill_field.h",
     "autofill_manager.cc",
     "autofill_manager.h",
-    "autofill_metrics.cc",
-    "autofill_metrics.h",
     "autofill_observer.cc",
     "autofill_observer.h",
     "autofill_profile_import_process.cc",
@@ -82,10 +81,6 @@ jumbo_static_library("browser") {
     "autofill_profile_sync_util.h",
     "autofill_profile_update_strike_database.cc",
     "autofill_profile_update_strike_database.h",
-    "autofill_profile_validation_util.cc",
-    "autofill_profile_validation_util.h",
-    "autofill_profile_validator.cc",
-    "autofill_profile_validator.h",
     "autofill_regex_constants.cc",
     "autofill_regex_constants.h",
     "autofill_regexes.cc",
@@ -125,6 +120,8 @@ jumbo_static_library("browser") {
     "data_model/autofill_structured_address_utils.h",
     "data_model/autofillable_data.cc",
     "data_model/autofillable_data.h",
+    "data_model/birthdate.cc",
+    "data_model/birthdate.h",
     "data_model/borrowed_transliterator.cc",
     "data_model/borrowed_transliterator.h",
     "data_model/contact_info.cc",
@@ -151,7 +148,6 @@ jumbo_static_library("browser") {
     "form_data_importer.h",
     "form_parsing/address_field.cc",
     "form_parsing/address_field.h",
-    "form_parsing/autofill_parsing_utils.cc",
     "form_parsing/autofill_parsing_utils.h",
     "form_parsing/autofill_scanner.cc",
     "form_parsing/autofill_scanner.h",
@@ -171,6 +167,8 @@ jumbo_static_library("browser") {
     "form_parsing/phone_field.h",
     "form_parsing/price_field.cc",
     "form_parsing/price_field.h",
+    "form_parsing/regex_patterns.cc",
+    "form_parsing/regex_patterns.h",
     "form_parsing/search_field.cc",
     "form_parsing/search_field.h",
     "form_parsing/travel_field.cc",
@@ -197,8 +195,6 @@ jumbo_static_library("browser") {
     "geo/country_names.h",
     "geo/country_names_for_locale.cc",
     "geo/country_names_for_locale.h",
-    "geo/mock_alternative_state_name_map_updater.cc",
-    "geo/mock_alternative_state_name_map_updater.h",
     "geo/phone_number_i18n.cc",
     "geo/phone_number_i18n.h",
     "geo/region_data_loader.h",
@@ -216,29 +212,33 @@ jumbo_static_library("browser") {
     "logging/log_receiver.h",
     "logging/log_router.cc",
     "logging/log_router.h",
-    "metrics/address_form_event_logger.cc",
-    "metrics/address_form_event_logger.h",
-    "metrics/credit_card_form_event_logger.cc",
-    "metrics/credit_card_form_event_logger.h",
-    "metrics/form_event_logger_base.cc",
-    "metrics/form_event_logger_base.h",
-    "metrics/form_events.h",
-    "pattern_provider/default_regex_patterns.h",
-    "pattern_provider/pattern_configuration_parser.cc",
-    "pattern_provider/pattern_configuration_parser.h",
-    "pattern_provider/pattern_provider.cc",
-    "pattern_provider/pattern_provider.h",
+    "metrics/autofill_metrics.cc",
+    "metrics/autofill_metrics.h",
+    "metrics/form_events/address_form_event_logger.cc",
+    "metrics/form_events/address_form_event_logger.h",
+    "metrics/form_events/credit_card_form_event_logger.cc",
+    "metrics/form_events/credit_card_form_event_logger.h",
+    "metrics/form_events/form_event_logger_base.cc",
+    "metrics/form_events/form_event_logger_base.h",
+    "metrics/form_events/form_events.h",
+    "metrics/payments/save_credit_card_prompt_metrics.cc",
+    "metrics/payments/save_credit_card_prompt_metrics.h",
+    "metrics/payments/virtual_card_enrollment_metrics.cc",
+    "metrics/payments/virtual_card_enrollment_metrics.h",
     "payments/account_info_getter.h",
     "payments/autofill_offer_manager.cc",
     "payments/autofill_offer_manager.h",
     "payments/autofill_wallet_model_type_controller.cc",
     "payments/autofill_wallet_model_type_controller.h",
+    "payments/card_unmask_challenge_option.h",
     "payments/card_unmask_delegate.cc",
     "payments/card_unmask_delegate.h",
     "payments/credit_card_access_manager.cc",
     "payments/credit_card_access_manager.h",
     "payments/credit_card_cvc_authenticator.cc",
     "payments/credit_card_cvc_authenticator.h",
+    "payments/credit_card_otp_authenticator.cc",
+    "payments/credit_card_otp_authenticator.h",
     "payments/credit_card_save_manager.cc",
     "payments/credit_card_save_manager.h",
     "payments/credit_card_save_strike_database.cc",
@@ -247,15 +247,33 @@ jumbo_static_library("browser") {
     "payments/full_card_request.h",
     "payments/legal_message_line.cc",
     "payments/legal_message_line.h",
+    "payments/offer_notification_handler.cc",
+    "payments/offer_notification_handler.h",
+    "payments/otp_unmask_delegate.h",
+    "payments/otp_unmask_result.h",
     "payments/payments_client.cc",
     "payments/payments_client.h",
     "payments/payments_customer_data.h",
-    "payments/payments_request.h",
+    "payments/payments_requests/get_details_for_enrollment_request.cc",
+    "payments/payments_requests/get_details_for_enrollment_request.h",
+    "payments/payments_requests/payments_request.cc",
+    "payments/payments_requests/payments_request.h",
+    "payments/payments_requests/select_challenge_option_request.cc",
+    "payments/payments_requests/select_challenge_option_request.h",
+    "payments/payments_requests/unmask_card_request.cc",
+    "payments/payments_requests/unmask_card_request.h",
+    "payments/payments_requests/update_virtual_card_enrollment_request.cc",
+    "payments/payments_requests/update_virtual_card_enrollment_request.h",
     "payments/payments_service_url.cc",
     "payments/payments_service_url.h",
     "payments/payments_util.cc",
     "payments/payments_util.h",
     "payments/risk_data_loader.h",
+    "payments/virtual_card_enrollment_flow.h",
+    "payments/virtual_card_enrollment_manager.cc",
+    "payments/virtual_card_enrollment_manager.h",
+    "payments/virtual_card_enrollment_strike_database.cc",
+    "payments/virtual_card_enrollment_strike_database.h",
     "payments/wait_for_signal_or_timeout.cc",
     "payments/wait_for_signal_or_timeout.h",
     "payments/webauthn_callback_types.h",
@@ -268,6 +286,10 @@ jumbo_static_library("browser") {
     "randomized_encoder.h",
     "rationalization_util.cc",
     "rationalization_util.h",
+    "single_field_form_fill_router.cc",
+    "single_field_form_fill_router.h",
+    "single_field_form_filler.cc",
+    "single_field_form_filler.h",
     "strike_database.cc",
     "strike_database.h",
     "strike_database_base.cc",
@@ -306,6 +328,7 @@ jumbo_static_library("browser") {
     "ui/payments/card_unmask_prompt_controller_impl.h",
     "ui/payments/card_unmask_prompt_view.h",
     "ui/payments/payments_bubble_closed_reasons.h",
+    "ui/payments/virtual_card_enroll_bubble_controller.h",
     "ui/popup_item_ids.h",
     "ui/popup_types.h",
     "ui/region_combobox_model.cc",
@@ -353,7 +376,7 @@ jumbo_static_library("browser") {
     "webdata/system_encryptor.h",
   ]
 
-  sources += get_target_outputs(":default_regex_patterns_cc")
+  sources += get_target_outputs(":regex_patterns_inl_h")
 
   if (is_win) {
     sources += [
@@ -382,6 +405,9 @@ jumbo_static_library("browser") {
       "payments/autofill_save_card_infobar_mobile.h",
       "payments/autofill_save_card_ui_utils_mobile.cc",
       "payments/autofill_save_card_ui_utils_mobile.h",
+      "payments/autofill_virtual_card_enrollment_infobar_delegate_mobile.cc",
+      "payments/autofill_virtual_card_enrollment_infobar_delegate_mobile.h",
+      "payments/autofill_virtual_card_enrollment_infobar_mobile.h",
       "ui/mobile_label_formatter.cc",
       "ui/mobile_label_formatter.h",
       "ui/payments/card_expiration_date_fix_flow_controller.h",
@@ -429,7 +455,7 @@ jumbo_static_library("browser") {
   ]
   deps = [
     ":autofill_address_rewriter_resources",
-    ":default_regex_patterns_cc",
+    ":regex_patterns_inl_h",
     "//base",
     "//base:i18n",
     "//build:branding_buildflags",
@@ -500,6 +526,64 @@ jumbo_static_library("browser") {
       "//ui/native_theme:native_theme_browser",
     ]
   }
+
+  if (use_qt) {
+    sources = []
+    sources = [
+      "autofill_client.cc",
+      "autofill_client.h",
+      "autofill_driver.h",
+      "autofill_external_delegate.cc",
+      "autofill_external_delegate.h",
+      "autofill_manager.cc",
+      "autofill_manager.h",
+      "browser_autofill_manager.cc",
+      "browser_autofill_manager.h",
+      "ui/popup_item_ids.h",
+      "ui/popup_types.h",
+      "ui/suggestion.cc",
+      "ui/suggestion.h",
+    ]
+
+    public_deps = []
+    public_deps = [
+      "//components/autofill/core/browser/proto",
+      "//components/autofill/core/common",
+      "//components/autofill/core/common/mojom:mojo_types",
+      "//third_party/abseil-cpp:absl",
+      "//ui/base",
+      "//ui/gfx/geometry",
+      "//ui/gfx/range",
+      "//url",
+    ]
+
+    deps = []
+    deps = [
+      "//base",
+      "//base:i18n",
+      "//build:branding_buildflags",
+      "//build:chromeos_buildflags",
+      "//components/pref_registry",
+      "//components/prefs",
+      "//ui/accessibility:accessibility",
+    ]
+  }
+}
+
+if (is_android) {
+  java_cpp_enum("java_enum_srcjar") {
+    # External code should depend on ":card_unmask_challenge_option_type_java" instead.
+    visibility = [ ":*" ]
+    sources = [ "payments/card_unmask_challenge_option.h" ]
+  }
+
+  android_library("card_unmask_challenge_option_type_java") {
+    srcjar_deps = [ ":java_enum_srcjar" ]
+
+    # Important: the generated enum uses the @IntDef annotation provided by
+    # this dependency.
+    deps = [ "//third_party/androidx:androidx_annotation_annotation_java" ]
+  }
 }
 
 jumbo_static_library("test_support") {
@@ -509,16 +593,20 @@ jumbo_static_library("test_support") {
     "autofill_form_test_utils.h",
     "autofill_test_utils.cc",
     "autofill_test_utils.h",
-    "data_driven_test.cc",
-    "data_driven_test.h",
     "geo/alternative_state_name_map_test_utils.cc",
     "geo/alternative_state_name_map_test_utils.h",
+    "geo/mock_alternative_state_name_map_updater.cc",
+    "geo/mock_alternative_state_name_map_updater.h",
     "geo/test_region_data_loader.cc",
     "geo/test_region_data_loader.h",
     "logging/stub_log_manager.cc",
     "logging/stub_log_manager.h",
     "mock_autocomplete_history_manager.cc",
     "mock_autocomplete_history_manager.h",
+    "mock_single_field_form_fill_router.cc",
+    "mock_single_field_form_fill_router.h",
+    "payments/test/test_credit_card_otp_authenticator.cc",
+    "payments/test/test_credit_card_otp_authenticator.h",
     "payments/test_authentication_requester.cc",
     "payments/test_authentication_requester.h",
     "payments/test_credit_card_save_manager.cc",
@@ -530,6 +618,8 @@ jumbo_static_library("test_support") {
     "payments/test_payments_client.h",
     "payments/test_strike_database.cc",
     "payments/test_strike_database.h",
+    "payments/test_virtual_card_enrollment_manager.cc",
+    "payments/test_virtual_card_enrollment_manager.h",
     "test_address_normalizer.cc",
     "test_address_normalizer.h",
     "test_autofill_async_observer.cc",
@@ -544,10 +634,6 @@ jumbo_static_library("test_support") {
     "test_autofill_driver.h",
     "test_autofill_external_delegate.cc",
     "test_autofill_external_delegate.h",
-    "test_autofill_profile_validator.cc",
-    "test_autofill_profile_validator.h",
-    "test_autofill_profile_validator_delayed.cc",
-    "test_autofill_profile_validator_delayed.h",
     "test_autofill_tick_clock.cc",
     "test_autofill_tick_clock.h",
     "test_browser_autofill_manager.cc",
@@ -677,17 +763,14 @@ source_set("unit_tests") {
     "autofill_credit_card_policy_handler_unittest.cc",
     "autofill_data_util_unittest.cc",
     "autofill_download_manager_unittest.cc",
-    "autofill_driver_factory_unittest.cc",
     "autofill_experiments_unittest.cc",
     "autofill_external_delegate_unittest.cc",
+    "autofill_manager_unittest.cc",
     "autofill_merge_unittest.cc",
-    "autofill_metrics_unittest.cc",
     "autofill_profile_import_process_unittest.cc",
     "autofill_profile_save_strike_database_unittest.cc",
     "autofill_profile_sync_util_unittest.cc",
     "autofill_profile_update_strike_database_unittest.cc",
-    "autofill_profile_validation_util_unittest.cc",
-    "autofill_profile_validator_unittest.cc",
     "autofill_regexes_unittest.cc",
     "autofill_subject_unittest.cc",
     "autofill_suggestion_generator_unittest.cc",
@@ -704,6 +787,7 @@ source_set("unit_tests") {
     "data_model/autofill_structured_address_test_utils.h",
     "data_model/autofill_structured_address_unittest.cc",
     "data_model/autofill_structured_address_utils_unittest.cc",
+    "data_model/birthdate_unittest.cc",
     "data_model/borrowed_transliterator_unittest.cc",
     "data_model/contact_info_unittest.cc",
     "data_model/credit_card_unittest.cc",
@@ -721,6 +805,7 @@ source_set("unit_tests") {
     "form_parsing/parsing_test_utils.h",
     "form_parsing/phone_field_unittest.cc",
     "form_parsing/price_field_unittest.cc",
+    "form_parsing/regex_patterns_unittest.cc",
     "form_parsing/search_field_unittest.cc",
     "form_processing/label_processing_util_unittest.cc",
     "form_processing/name_processing_util_unittest.cc",
@@ -736,18 +821,21 @@ source_set("unit_tests") {
     "logging/log_buffer_submitter_unittest.cc",
     "logging/log_manager_unittest.cc",
     "logging/log_router_unittest.cc",
-    "pattern_provider/default_regex_patterns_unittest.cc",
-    "pattern_provider/pattern_configuration_parser_unittest.cc",
-    "pattern_provider/pattern_provider_unittest.cc",
+    "metrics/autofill_metrics_unittest.cc",
     "payments/autofill_offer_manager_unittest.cc",
     "payments/credit_card_access_manager_unittest.cc",
     "payments/credit_card_cvc_authenticator_unittest.cc",
+    "payments/credit_card_otp_authenticator_unittest.cc",
     "payments/credit_card_save_manager_unittest.cc",
     "payments/full_card_request_unittest.cc",
     "payments/legal_message_line_unittest.cc",
     "payments/payments_client_unittest.cc",
+    "payments/payments_requests/get_details_for_enrollment_request_unittest.cc",
+    "payments/payments_requests/update_virtual_card_enrollment_request_unittest.cc",
     "payments/payments_service_url_unittest.cc",
     "payments/payments_util_unittest.cc",
+    "payments/virtual_card_enrollment_manager_unittest.cc",
+    "payments/virtual_card_enrollment_strike_database_unittest.cc",
     "payments/wait_for_signal_or_timeout_unittest.cc",
     "personal_data_manager_unittest.cc",
     "randomized_encoder_unittest.cc",
@@ -855,6 +943,7 @@ source_set("unit_tests") {
     "//services/network:test_support",
     "//services/network/public/cpp",
     "//sql",
+    "//testing/data_driven_testing",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/libaddressinput:test_support",
@@ -862,6 +951,7 @@ source_set("unit_tests") {
     "//third_party/libphonenumber",
     "//third_party/re2:re2",
     "//ui/base",
+    "//ui/base:test_support",
     "//ui/gfx:test_support",
     "//ui/resources",
     "//url",

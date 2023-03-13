@@ -4,29 +4,22 @@ Tests passing various requiredLimits to GPUAdapter.requestDevice.
 
 import { Fixture } from '../../../../common/framework/fixture.js';
 import { makeTestGroup } from '../../../../common/framework/test_group.js';
-import { keysOf } from '../../../../common/util/data_tables.js';
+import { getGPU } from '../../../../common/util/navigator_gpu.js';
 import { assert } from '../../../../common/util/util.js';
-import { DefaultLimits } from '../../../constants.js';
-import { getGPU } from '../../../util/navigator_gpu.js';
-
-const kLimitTypes = keysOf(DefaultLimits);
-
-const kMaxUnsignedLongValue = 4294967295;
-/** Clamps a numeric value to the valid unsigned long range, as defined by WebIDL */
-function clampToUnsignedLong(value: number): number {
-  return Math.min(kMaxUnsignedLongValue, Math.max(0, value));
-}
+import { kLimitInfo, kLimits } from '../../../capability_info.js';
+import { clamp, isPowerOfTwo } from '../../../util/math.js';
 
 export const g = makeTestGroup(Fixture);
 
 g.test('unknown_limits')
   .desc(
     `
-    Test that specifiying limits that aren't part of the supported limit set causes
+    Test that specifying limits that aren't part of the supported limit set causes
     requestDevice to reject.`
   )
   .fn(async t => {
-    const adapter = await navigator.gpu.requestAdapter();
+    const gpu = getGPU();
+    const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
     const requiredLimits: Record<string, number> = { unknownLimitName: 9000 };
@@ -42,11 +35,7 @@ g.test('supported_limits')
     - Tests each limit with the supported values given by the adapter`
   )
   .params(u =>
-    u
-      .combine('limit', kLimitTypes)
-      .unless(p => typeof DefaultLimits[p.limit] !== 'number')
-      .beginSubcases()
-      .combine('limitValue', ['default', 'adapter'])
+    u.combine('limit', kLimits).beginSubcases().combine('limitValue', ['default', 'adapter'])
   )
   .fn(async t => {
     const { limit, limitValue } = t.params;
@@ -58,7 +47,7 @@ g.test('supported_limits')
     let value: number = -1;
     switch (limitValue) {
       case 'default':
-        value = DefaultLimits[limit] as number;
+        value = kLimitInfo[limit].default;
         break;
       case 'adapter':
         value = adapter.limits[limit] as number;
@@ -83,22 +72,34 @@ g.test('better_than_supported')
   )
   .params(u =>
     u
-      .combine('limit', kLimitTypes)
-      .unless(p => typeof DefaultLimits[p.limit] !== 'number')
+      .combine('limit', kLimits)
       .beginSubcases()
-      .combine('over', [1, 32, 65535])
+      .expandWithParams(p => {
+        switch (kLimitInfo[p.limit].class) {
+          case 'maximum':
+            return [
+              { mul: 1, add: 1 },
+              { mul: 1, add: 100 },
+            ];
+          case 'alignment':
+            return [
+              { mul: 1, add: -1 },
+              { mul: 1 / 2, add: 0 },
+              { mul: 1 / 1024, add: 0 },
+            ];
+        }
+      })
   )
   .fn(async t => {
-    const { limit, over } = t.params;
+    const { limit, mul, add } = t.params;
 
     const gpu = getGPU();
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
-    const mult = limit.startsWith('min') ? -1 : 1;
-
+    const value = adapter.limits[limit] * mul + add;
     const requiredLimits = {
-      [limit]: clampToUnsignedLong(adapter.limits[limit] + over * mult),
+      [limit]: clamp(value, { min: 0, max: kLimitInfo[limit].maximumValue }),
     };
 
     t.shouldReject('OperationError', adapter.requestDevice({ requiredLimits }));
@@ -114,28 +115,54 @@ g.test('worse_than_default')
   )
   .params(u =>
     u
-      .combine('limit', kLimitTypes)
-      .unless(p => typeof DefaultLimits[p.limit] !== 'number')
+      .combine('limit', kLimits)
       .beginSubcases()
-      .combine('under', [1, 32, 65535])
+      .expandWithParams(p => {
+        switch (kLimitInfo[p.limit].class) {
+          case 'maximum':
+            return [
+              { mul: 1, add: -1 },
+              { mul: 1, add: -100 },
+            ];
+          case 'alignment':
+            return [
+              { mul: 1, add: 1 },
+              { mul: 2, add: 0 },
+              { mul: 1024, add: 0 },
+            ];
+        }
+      })
   )
   .fn(async t => {
-    const { limit, under } = t.params;
+    const { limit, mul, add } = t.params;
 
     const gpu = getGPU();
     const adapter = await gpu.requestAdapter();
     assert(adapter !== null);
 
-    const mult = limit.startsWith('min') ? -1 : 1;
-
+    const value = kLimitInfo[limit].default * mul + add;
     const requiredLimits = {
-      [limit]: clampToUnsignedLong((DefaultLimits[limit] as number) - under * mult),
+      [limit]: clamp(value, { min: 0, max: kLimitInfo[limit].maximumValue }),
     };
 
-    const device = await adapter.requestDevice({ requiredLimits });
-    assert(device !== null);
-    t.expect(
-      device.limits[limit] === DefaultLimits[limit],
-      'Devices reported limit should match the default limit'
-    );
+    let success;
+    switch (kLimitInfo[limit].class) {
+      case 'alignment':
+        success = isPowerOfTwo(value);
+        break;
+      case 'maximum':
+        success = true;
+        break;
+    }
+
+    if (success) {
+      const device = await adapter.requestDevice({ requiredLimits });
+      assert(device !== null);
+      t.expect(
+        device.limits[limit] === kLimitInfo[limit].default,
+        'Devices reported limit should match the default limit'
+      );
+    } else {
+      t.shouldReject('OperationError', adapter.requestDevice({ requiredLimits }));
+    }
   });

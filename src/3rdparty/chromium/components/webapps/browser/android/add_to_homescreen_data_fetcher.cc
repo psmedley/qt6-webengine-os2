@@ -13,9 +13,9 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/sequenced_task_runner.h"
+#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -121,12 +121,12 @@ AddToHomescreenDataFetcher::AddToHomescreenDataFetcher(
     content::WebContents* web_contents,
     int data_timeout_ms,
     Observer* observer)
-    : content::WebContentsObserver(web_contents),
+    : web_contents_(web_contents->GetWeakPtr()),
       installable_manager_(InstallableManager::FromWebContents(web_contents)),
       observer_(observer),
       shortcut_info_(GetShortcutUrl(web_contents)),
       has_maskable_primary_icon_(false),
-      data_timeout_ms_(base::TimeDelta::FromMilliseconds(data_timeout_ms)),
+      data_timeout_ms_(base::Milliseconds(data_timeout_ms)),
       is_waiting_for_manifest_(true) {
   DCHECK(shortcut_info_.url.is_valid());
 
@@ -147,7 +147,7 @@ AddToHomescreenDataFetcher::~AddToHomescreenDataFetcher() = default;
 void AddToHomescreenDataFetcher::OnDidGetWebPageMetadata(
     mojo::AssociatedRemote<mojom::WebPageMetadataAgent> metadata_agent,
     mojom::WebPageMetadataPtr web_page_metadata) {
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   // Note, the title should have already been clipped on the renderer side.
@@ -159,9 +159,11 @@ void AddToHomescreenDataFetcher::OnDidGetWebPageMetadata(
   }
 
   // Set the user-editable title to be the page's title.
-  shortcut_info_.user_title = web_page_metadata->application_name.empty()
-                                  ? web_contents()->GetTitle()
-                                  : web_page_metadata->application_name;
+  std::u16string app_name;
+  base::TrimWhitespace(web_page_metadata->application_name,
+                       base::TrimPositions::TRIM_ALL, &app_name);
+  shortcut_info_.user_title =
+      app_name.empty() ? web_contents_->GetTitle() : app_name;
   shortcut_info_.short_name = shortcut_info_.user_title;
   shortcut_info_.name = shortcut_info_.user_title;
 
@@ -214,9 +216,10 @@ void AddToHomescreenDataFetcher::OnDataTimedout() {
   RecordAddToHomescreenDialogDuration(data_timeout_ms_);
   weak_ptr_factory_.InvalidateWeakPtrs();
 
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
+  installable_status_code_ = InstallableStatusCode::DATA_TIMED_OUT;
   observer_->OnUserTitleAvailable(shortcut_info_.user_title, shortcut_info_.url,
                                   /*is_webapk_compatible=*/false);
 
@@ -225,7 +228,7 @@ void AddToHomescreenDataFetcher::OnDataTimedout() {
 
 void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
     const InstallableData& data) {
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   is_waiting_for_manifest_ = false;
@@ -239,6 +242,9 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
   // Do this after updating from the manifest for the case where a site has
   // a manifest with name and standalone specified, but no icons.
   if (blink::IsEmptyManifest(data.manifest) || !data.primary_icon) {
+    DCHECK_GT(data.errors.size(), 0u);
+    if (!data.errors.empty())
+      installable_status_code_ = data.errors[0];
     observer_->OnUserTitleAvailable(shortcut_info_.user_title,
                                     shortcut_info_.url,
                                     /*is_webapk_compatible=*/false);
@@ -252,15 +258,7 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
   shortcut_info_.best_primary_icon_url = data.primary_icon_url;
 
   // Save the splash screen URL for the later download.
-  shortcut_info_.ideal_splash_image_size_in_px =
-      WebappsIconUtils::GetIdealSplashImageSizeInPx();
-  shortcut_info_.minimum_splash_image_size_in_px =
-      WebappsIconUtils::GetMinimumSplashImageSizeInPx();
-  shortcut_info_.splash_image_url =
-      blink::ManifestIconSelector::FindBestMatchingSquareIcon(
-          data.manifest.icons, shortcut_info_.ideal_splash_image_size_in_px,
-          shortcut_info_.minimum_splash_image_size_in_px,
-          blink::mojom::ManifestImageResource_Purpose::ANY);
+  shortcut_info_.UpdateBestSplashIcon(data.manifest);
 
   installable_manager_->GetData(
       ParamsToPerformInstallableCheck(),
@@ -272,12 +270,15 @@ void AddToHomescreenDataFetcher::OnDidPerformInstallableCheck(
     const InstallableData& data) {
   StopTimer();
 
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   bool webapk_compatible =
       (data.NoBlockingErrors() && data.valid_manifest && data.has_worker &&
        WebappsUtils::AreWebManifestUrlsWebApkCompatible(data.manifest));
+  if (!webapk_compatible && !data.errors.empty()) {
+    installable_status_code_ = data.errors[0];
+  }
   observer_->OnUserTitleAvailable(
       webapk_compatible ? shortcut_info_.name : shortcut_info_.user_title,
       shortcut_info_.url, webapk_compatible);
@@ -302,7 +303,7 @@ void AddToHomescreenDataFetcher::OnDidPerformInstallableCheck(
 }
 
 void AddToHomescreenDataFetcher::FetchFavicon() {
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   // Grab the best, largest icon we can find to represent this bookmark.
@@ -316,7 +317,7 @@ void AddToHomescreenDataFetcher::FetchFavicon() {
   // otherwise using the largest icon among all available icons.
   int threshold_to_get_any_largest_icon =
       WebappsIconUtils::GetIdealHomescreenIconSizeInPx() - 1;
-  favicon::GetLargeFaviconProvider(web_contents()->GetBrowserContext())
+  favicon::GetLargeFaviconProvider(web_contents_->GetBrowserContext())
       ->GetLargestRawFaviconForPageURL(
           shortcut_info_.url, icon_types, threshold_to_get_any_largest_icon,
           base::BindOnce(&AddToHomescreenDataFetcher::OnFaviconFetched,
@@ -328,7 +329,7 @@ void AddToHomescreenDataFetcher::OnFaviconFetched(
     const favicon_base::FaviconRawBitmapResult& bitmap_result) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   shortcut_info_.best_primary_icon_url = bitmap_result.icon_url;
@@ -370,7 +371,7 @@ void AddToHomescreenDataFetcher::OnIconCreated(bool use_for_launcher,
                                                const SkBitmap& icon_for_view,
                                                bool is_icon_generated) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  if (!web_contents())
+  if (!web_contents_)
     return;
 
   if (use_for_launcher)
@@ -378,7 +379,8 @@ void AddToHomescreenDataFetcher::OnIconCreated(bool use_for_launcher,
   if (is_icon_generated)
     shortcut_info_.best_primary_icon_url = GURL();
 
-  observer_->OnDataAvailable(shortcut_info_, icon_for_view);
+  observer_->OnDataAvailable(shortcut_info_, icon_for_view,
+                             installable_status_code_);
 }
 
 }  // namespace webapps

@@ -61,6 +61,11 @@ export interface ViewRegistration {
    * Whether the view is permanently visible or can be opened temporarily.
    */
   persistence?: ViewPersistence;
+
+  /**
+   * Whether the view is a preview feature (a corresponding icon is shown then).
+   */
+  isPreviewFeature?: boolean;
   /**
    * Unique identifier of the view.
    */
@@ -151,6 +156,12 @@ export function registerLocationResolver(registration: LocationResolverRegistrat
 
 export function getRegisteredLocationResolvers(): Array<LocationResolverRegistration> {
   return registeredLocationResolvers;
+}
+
+export function resetViewRegistration(): void {
+  registeredViewExtensions.length = 0;
+  registeredLocationResolvers.length = 0;
+  viewLocationNameSet.clear();
 }
 
 // TODO(crbug.com/1181019)

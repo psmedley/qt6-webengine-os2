@@ -41,7 +41,6 @@ class AutofillSuggestionGeneratorTest : public testing::Test {
                         /*pref_service=*/autofill_client_.GetPrefs(),
                         /*local_state=*/autofill_client_.GetPrefs(),
                         /*identity_manager=*/nullptr,
-                        /*client_profile_validator=*/nullptr,
                         /*history_service=*/nullptr,
                         /*strike_database=*/nullptr,
                         /*image_fetcher=*/nullptr,
@@ -81,7 +80,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
   all_card_data.reserve(kNumCards);
   all_card_ptrs.reserve(kNumCards);
   for (size_t i = 0; i < kNumCards; ++i) {
-    constexpr base::TimeDelta k30Days = base::TimeDelta::FromDays(30);
+    constexpr base::TimeDelta k30Days = base::Days(30);
     all_card_data.emplace_back(base::GenerateGUID(), "https://example.com");
     if (i < 5) {
       all_card_data.back().set_use_date(kNow - (i + i + 1) * k30Days);
@@ -109,7 +108,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
     // Filter the cards while capturing histograms.
     base::HistogramTester histogram_tester;
     AutofillSuggestionGenerator::RemoveExpiredCreditCardsNotUsedSinceTimestamp(
-        kNow, kNow - base::TimeDelta::FromDays(175), &cards);
+        kNow, kNow - base::Days(175), &cards);
 
     // Validate that we get the expected filtered cards and histograms.
     EXPECT_EQ(expected_cards, cards);
@@ -131,7 +130,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
     // Filter the cards while capturing histograms.
     base::HistogramTester histogram_tester;
     AutofillSuggestionGenerator::RemoveExpiredCreditCardsNotUsedSinceTimestamp(
-        kNow, kNow - base::TimeDelta::FromDays(115), &cards);
+        kNow, kNow - base::Days(115), &cards);
 
     // Validate that we get the expected filtered cards and histograms.
     EXPECT_EQ(expected_cards, cards);
@@ -143,7 +142,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
   // days ago and are expired.
   {
     // A handy constant.
-    const base::Time k115DaysAgo = kNow - base::TimeDelta::FromDays(115);
+    const base::Time k115DaysAgo = kNow - base::Days(115);
 
     // Created a shuffled primary copy of the card pointers.
     std::vector<CreditCard*> shuffled_cards(all_card_ptrs);
@@ -193,7 +192,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
     // Filter the cards while capturing histograms.
     base::HistogramTester histogram_tester;
     AutofillSuggestionGenerator::RemoveExpiredCreditCardsNotUsedSinceTimestamp(
-        kNow, kNow - base::TimeDelta::FromDays(720), &cards);
+        kNow, kNow - base::Days(720), &cards);
 
     // Validate that we get the expected filtered cards and histograms.
     EXPECT_EQ(all_card_ptrs, cards);
@@ -212,7 +211,7 @@ TEST_F(AutofillSuggestionGeneratorTest,
     // Filter the cards while capturing histograms.
     base::HistogramTester histogram_tester;
     AutofillSuggestionGenerator::RemoveExpiredCreditCardsNotUsedSinceTimestamp(
-        kNow, kNow + base::TimeDelta::FromDays(1), &cards);
+        kNow, kNow + base::Days(1), &cards);
 
     // Validate that we get the expected filtered cards and histograms.
     EXPECT_TRUE(cards.empty());

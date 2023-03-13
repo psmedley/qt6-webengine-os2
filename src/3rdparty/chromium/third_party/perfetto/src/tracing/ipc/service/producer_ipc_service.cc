@@ -84,17 +84,6 @@ void ProducerIPCService::InitializeConnection(
       break;
   }
 
-#if PERFETTO_DCHECK_IS_ON()
-  if (req.build_flags() ==
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_OFF) {
-    PERFETTO_LOG(
-        "The producer is built with NDEBUG but the service binary was built "
-        "with the DEBUG flag. This will likely cause crashes.");
-    // The other way round (DEBUG producer with NDEBUG service) is expected to
-    // work.
-  }
-#endif
-
   // If the producer provided an SMB, tell the service to attempt to adopt it.
   std::unique_ptr<SharedMemory> shmem;
   if (req.producer_provided_shmem()) {
@@ -128,7 +117,7 @@ void ProducerIPCService::InitializeConnection(
 
   // ConnectProducer will call OnConnect() on the next task.
   producer->service_endpoint = core_service_->ConnectProducer(
-      producer.get(), client_info.uid(), req.producer_name(),
+      producer.get(), client_info.uid(), client_info.pid(), req.producer_name(),
       req.shared_memory_size_hint_bytes(),
       /*in_process=*/false, smb_scraping_mode,
       req.shared_memory_page_size_hint_bytes(), std::move(shmem),
@@ -173,6 +162,29 @@ void ProducerIPCService::RegisterDataSource(
   if (response.IsBound()) {
     response.Resolve(
         ipc::AsyncResult<protos::gen::RegisterDataSourceResponse>::Create());
+  }
+}
+
+// Called by the remote Producer through the IPC channel.
+void ProducerIPCService::UpdateDataSource(
+    const protos::gen::UpdateDataSourceRequest& req,
+    DeferredUpdateDataSourceResponse response) {
+  RemoteProducer* producer = GetProducerForCurrentRequest();
+  if (!producer) {
+    PERFETTO_DLOG(
+        "Producer invoked UpdateDataSource() before InitializeConnection()");
+    if (response.IsBound())
+      response.Reject();
+    return;
+  }
+
+  const DataSourceDescriptor& dsd = req.data_source_descriptor();
+  GetProducerForCurrentRequest()->service_endpoint->UpdateDataSource(dsd);
+
+  // UpdateDataSource doesn't expect any meaningful response.
+  if (response.IsBound()) {
+    response.Resolve(
+        ipc::AsyncResult<protos::gen::UpdateDataSourceResponse>::Create());
   }
 }
 

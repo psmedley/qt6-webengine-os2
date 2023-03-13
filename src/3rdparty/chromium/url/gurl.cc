@@ -111,17 +111,17 @@ void GURL::InitializeFromCanonicalSpec() {
       // removed from a "foo:hello #ref" URL (see http://crbug.com/291747).
       GURL test_url(spec_, RETAIN_TRAILING_PATH_WHITEPACE);
 
-      DCHECK(test_url.is_valid_ == is_valid_);
-      DCHECK(test_url.spec_ == spec_);
+      DCHECK_EQ(test_url.is_valid_, is_valid_);
+      DCHECK_EQ(test_url.spec_, spec_);
 
-      DCHECK(test_url.parsed_.scheme == parsed_.scheme);
-      DCHECK(test_url.parsed_.username == parsed_.username);
-      DCHECK(test_url.parsed_.password == parsed_.password);
-      DCHECK(test_url.parsed_.host == parsed_.host);
-      DCHECK(test_url.parsed_.port == parsed_.port);
-      DCHECK(test_url.parsed_.path == parsed_.path);
-      DCHECK(test_url.parsed_.query == parsed_.query);
-      DCHECK(test_url.parsed_.ref == parsed_.ref);
+      DCHECK_EQ(test_url.parsed_.scheme, parsed_.scheme);
+      DCHECK_EQ(test_url.parsed_.username, parsed_.username);
+      DCHECK_EQ(test_url.parsed_.password, parsed_.password);
+      DCHECK_EQ(test_url.parsed_.host, parsed_.host);
+      DCHECK_EQ(test_url.parsed_.port, parsed_.port);
+      DCHECK_EQ(test_url.parsed_.path, parsed_.path);
+      DCHECK_EQ(test_url.parsed_.query, parsed_.query);
+      DCHECK_EQ(test_url.parsed_.ref, parsed_.ref);
     }
   }
 #endif
@@ -224,8 +224,7 @@ GURL GURL::Resolve(base::StringPiece16 relative) const {
 }
 
 // Note: code duplicated below (it's inconvenient to use a template here).
-GURL GURL::ReplaceComponents(
-    const url::Replacements<char>& replacements) const {
+GURL GURL::ReplaceComponents(const Replacements& replacements) const {
   GURL result;
 
   // Not allowed for invalid URLs.
@@ -239,13 +238,12 @@ GURL GURL::ReplaceComponents(
 
   output.Complete();
 
-  ProcessFileOrFileSystemURLAfterReplaceComponents(result);
+  result.ProcessFileSystemURLAfterReplaceComponents();
   return result;
 }
 
 // Note: code duplicated above (it's inconvenient to use a template here).
-GURL GURL::ReplaceComponents(
-    const url::Replacements<char16_t>& replacements) const {
+GURL GURL::ReplaceComponents(const ReplacementsW& replacements) const {
   GURL result;
 
   // Not allowed for invalid URLs.
@@ -259,43 +257,30 @@ GURL GURL::ReplaceComponents(
 
   output.Complete();
 
-  ProcessFileOrFileSystemURLAfterReplaceComponents(result);
+  result.ProcessFileSystemURLAfterReplaceComponents();
 
   return result;
 }
 
-void GURL::ProcessFileOrFileSystemURLAfterReplaceComponents(GURL& url) const {
-  if (!url.is_valid_)
+void GURL::ProcessFileSystemURLAfterReplaceComponents() {
+  if (!is_valid_)
     return;
-  if (url.SchemeIsFileSystem()) {
-    url.inner_url_ =
-        std::make_unique<GURL>(url.spec_.data(), url.parsed_.Length(),
-                               *url.parsed_.inner_parsed(), true);
+  if (SchemeIsFileSystem()) {
+    inner_url_ = std::make_unique<GURL>(spec_.data(), parsed_.Length(),
+                                        *parsed_.inner_parsed(), true);
   }
-#ifdef WIN32
-  if (url.SchemeIsFile()) {
-    // On Win32, some file URLs created through ReplaceComponents used to lose
-    // its hostname after getting reparsed (e.g. when it's sent through IPC) due
-    // to special handling of file URLs with Windows-drive paths in the URL
-    // parser. To make the behavior for URLs modified through ReplaceComponents
-    // (instead of getting fully reparsed) the same, immediately reparse the
-    // URL here to trigger the special handling.
-    // See https://crbug.com/1214098.
-    url = GURL(url.spec());
-  }
-#endif
 }
 
-GURL GURL::GetOrigin() const {
+GURL GURL::DeprecatedGetOriginAsURL() const {
   // This doesn't make sense for invalid or nonstandard URLs, so return
   // the empty URL.
   if (!is_valid_ || (!IsStandard() && !IsCustom()))
     return GURL();
 
   if (SchemeIsFileSystem())
-    return inner_url_->GetOrigin();
+    return inner_url_->DeprecatedGetOriginAsURL();
 
-  url::Replacements<char> replacements;
+  Replacements replacements;
   replacements.ClearUsername();
   replacements.ClearPassword();
   replacements.ClearPath();
@@ -312,7 +297,7 @@ GURL GURL::GetAsReferrer() const {
   if (!has_ref() && !has_username() && !has_password())
     return GURL(*this);
 
-  url::Replacements<char> replacements;
+  Replacements replacements;
   replacements.ClearRef();
   replacements.ClearUsername();
   replacements.ClearPassword();
@@ -367,7 +352,7 @@ bool GURL::SchemeIs(base::StringPiece lower_ascii_scheme) const {
   DCHECK(base::IsStringASCII(lower_ascii_scheme));
   DCHECK(base::ToLowerASCII(lower_ascii_scheme) == lower_ascii_scheme);
 
-  if (parsed_.scheme.len <= 0)
+  if (!has_scheme())
     return lower_ascii_scheme.empty();
   return scheme_piece() == lower_ascii_scheme;
 }
@@ -381,7 +366,7 @@ bool GURL::SchemeIsWSOrWSS() const {
 }
 
 bool GURL::SchemeIsCryptographic() const {
-  if (parsed_.scheme.len <= 0)
+  if (!has_scheme())
     return false;
   return SchemeIsCryptographic(scheme_piece());
 }
@@ -392,6 +377,13 @@ bool GURL::SchemeIsCryptographic(base::StringPiece lower_ascii_scheme) {
 
   return lower_ascii_scheme == url::kHttpsScheme ||
          lower_ascii_scheme == url::kWssScheme;
+}
+
+bool GURL::SchemeIsLocal() const {
+  // The `filesystem:` scheme is not in the Fetch spec, but Chromium still
+  // supports it in large part. It should be treated as a local scheme too.
+  return SchemeIs(url::kAboutScheme) || SchemeIs(url::kBlobScheme) ||
+         SchemeIs(url::kDataScheme) || SchemeIs(url::kFileSystemScheme);
 }
 
 int GURL::IntPort() const {
@@ -564,3 +556,15 @@ bool operator!=(const GURL& x, const base::StringPiece& spec) {
 bool operator!=(const base::StringPiece& spec, const GURL& x) {
   return !(x == spec);
 }
+
+namespace url::debug {
+
+ScopedUrlCrashKey::ScopedUrlCrashKey(base::debug::CrashKeyString* crash_key,
+                                     const GURL& url)
+    : scoped_string_value_(
+          crash_key,
+          url.is_empty() ? "<empty url>" : url.possibly_invalid_spec()) {}
+
+ScopedUrlCrashKey::~ScopedUrlCrashKey() = default;
+
+}  // namespace url::debug

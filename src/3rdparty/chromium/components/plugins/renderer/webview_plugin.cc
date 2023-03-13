@@ -15,7 +15,7 @@
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gin/converter.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
@@ -119,9 +119,6 @@ bool WebViewPlugin::Initialize(WebPluginContainer* container) {
 
   old_title_ = container_->GetElement().GetAttribute("title");
 
-  // Propagate device scale and zoom level to inner webview to load the correct
-  // resources when images have a "srcset" attribute.
-  web_view()->SetDeviceScaleFactor(container_->DeviceScaleFactor());
   web_view()->SetZoomLevel(
       blink::PageZoomFactorToZoomLevel(container_->PageZoomFactor()));
 
@@ -171,6 +168,9 @@ void WebViewPlugin::Paint(cc::PaintCanvas* canvas, const gfx::Rect& rect) {
 
   canvas->save();
   canvas->translate(SkIntToScalar(rect_.x()), SkIntToScalar(rect_.y()));
+  web_view()->MainFrameWidget()->UpdateLifecycle(
+      blink::WebLifecycleUpdate::kAll,
+      blink::DocumentUpdateReason::kBeginMainFrame);
   web_view()->PaintContent(canvas, paint_rect);
   canvas->restore();
 }
@@ -264,17 +264,18 @@ WebViewPlugin::WebViewHelper::WebViewHelper(
       agent_group_scheduler_(
           blink::scheduler::WebThreadScheduler::MainThreadScheduler()
               ->CreateAgentGroupScheduler()) {
-  web_view_ =
-      WebView::Create(/*client=*/this,
-                      /*is_hidden=*/false,
-                      /*is_prerendering=*/false,
-                      /*is_inside_portal=*/false,
-                      /*compositing_enabled=*/false,
-                      /*widgets_never_composited=*/false,
-                      /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
-                      *agent_group_scheduler_,
-                      /*session_storage_namespace_id=*/base::EmptyString(),
-                      /*page_base_background_color=*/absl::nullopt);
+  web_view_ = WebView::Create(
+      /*client=*/this,
+      /*is_hidden=*/false,
+      /*is_prerendering=*/false,
+      /*is_inside_portal=*/false,
+      /*fenced_frame_mode=*/absl::nullopt,
+      /*compositing_enabled=*/false,
+      /*widgets_never_composited=*/false,
+      /*opener=*/nullptr, mojo::NullAssociatedReceiver(),
+      *agent_group_scheduler_,
+      /*session_storage_namespace_id=*/base::EmptyString(),
+      /*page_base_background_color=*/absl::nullopt);
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   blink::WebView::ApplyWebPreferences(parent_web_preferences, web_view_);
@@ -318,6 +319,13 @@ void WebViewPlugin::WebViewHelper::UpdateTooltipFromKeyboard(
     base::i18n::TextDirection hint,
     const gfx::Rect& bounds) {
   UpdateTooltip(tooltip_text);
+}
+
+void WebViewPlugin::WebViewHelper::ClearKeyboardTriggeredTooltip() {
+  // This is an exception to the "only clear it if its set from keyboard" since
+  // there are no way of knowing whether the tooltips were set from keyboard or
+  // cursor in this class. In any case, this will clear the tooltip.
+  UpdateTooltip(std::u16string());
 }
 
 void WebViewPlugin::WebViewHelper::UpdateTooltip(
@@ -427,7 +435,6 @@ void WebViewPlugin::UpdatePluginForNewGeometry(
   // The delegate may instantiate a new plugin.
   delegate_->OnUnobscuredRectUpdate(gfx::Rect(unobscured_rect));
   // The delegate may have dirtied style and layout of the WebView.
-  // See for example the resizePoster function in plugin_poster.html.
   // Run the lifecycle now so that it is clean.
   DCHECK(web_view()->MainFrameWidget());
   web_view()->MainFrameWidget()->UpdateAllLifecyclePhases(

@@ -163,46 +163,13 @@ void av1_rd_pick_inter_mode_sb_seg_skip(
     struct macroblock *x, int mi_row, int mi_col, struct RD_STATS *rd_cost,
     BLOCK_SIZE bsize, PICK_MODE_CONTEXT *ctx, int64_t best_rd_so_far);
 
-// TODO(any): The defs below could potentially be moved to rdopt_utils.h instead
-// because they are not the main rdopt functions.
-/*!\cond */
-// The best edge strength seen in the block, as well as the best x and y
-// components of edge strength seen.
-typedef struct {
-  uint16_t magnitude;
-  uint16_t x;
-  uint16_t y;
-} EdgeInfo;
-/*!\endcond */
-
-/** Returns an integer indicating the strength of the edge.
- * 0 means no edge found, 556 is the strength of a solid black/white edge,
- * and the number may range higher if the signal is even stronger (e.g., on a
- * corner). high_bd is a bool indicating the source should be treated
- * as a 16-bit array. bd is the bit depth.
- */
-EdgeInfo av1_edge_exists(const uint8_t *src, int src_stride, int w, int h,
-                         bool high_bd, int bd);
-
-/** Applies a Gaussian blur with sigma = 1.3. Used by av1_edge_exists and
- * tests.
- */
-void av1_gaussian_blur(const uint8_t *src, int src_stride, int w, int h,
-                       uint8_t *dst, bool high_bd, int bd);
-
-/*!\cond */
-/* Applies standard 3x3 Sobel matrix. */
-typedef struct {
-  int16_t x;
-  int16_t y;
-} sobel_xy;
-/*!\endcond */
-
-sobel_xy av1_sobel(const uint8_t *input, int stride, int i, int j,
-                   bool high_bd);
-
 void av1_inter_mode_data_init(struct TileDataEnc *tile_data);
 void av1_inter_mode_data_fit(TileDataEnc *tile_data, int rdmult);
+
+void av1_block_yrd(const AV1_COMP *const cpi, MACROBLOCK *x, int mi_row,
+                   int mi_col, RD_STATS *this_rdc, int *skippable,
+                   BLOCK_SIZE bsize, TX_SIZE tx_size, TX_TYPE tx_type,
+                   int is_inter_mode);
 
 static INLINE int coded_to_superres_mi(int mi_col, int denom) {
   return (mi_col * denom + SCALE_NUMERATOR / 2) / SCALE_NUMERATOR;
@@ -224,18 +191,6 @@ static INLINE int av1_get_sb_mi_size(const AV1_COMMON *const cm) {
   int sb_mi_size = sb_mi_rows * sb_mi_rows;
 
   return sb_mi_size;
-}
-
-// This function will copy usable ref_mv_stack[ref_frame][4] and
-// weight[ref_frame][4] information from ref_mv_stack[ref_frame][8] and
-// weight[ref_frame][8].
-static INLINE void av1_copy_usable_ref_mv_stack_and_weight(
-    const MACROBLOCKD *xd, MB_MODE_INFO_EXT *const mbmi_ext,
-    MV_REFERENCE_FRAME ref_frame) {
-  memcpy(mbmi_ext->weight[ref_frame], xd->weight[ref_frame],
-         USABLE_REF_MV_STACK_SIZE * sizeof(xd->weight[0][0]));
-  memcpy(mbmi_ext->ref_mv_stack[ref_frame], xd->ref_mv_stack[ref_frame],
-         USABLE_REF_MV_STACK_SIZE * sizeof(xd->ref_mv_stack[0][0]));
 }
 
 // This function prunes the mode if either of the reference frame falls in the

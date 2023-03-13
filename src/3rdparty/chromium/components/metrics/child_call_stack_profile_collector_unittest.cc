@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/run_loop.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,6 +26,10 @@ class ChildCallStackProfileCollectorTest : public testing::Test {
     explicit Receiver(
         mojo::PendingReceiver<mojom::CallStackProfileCollector> receiver)
         : receiver_(this, std::move(receiver)) {}
+
+    Receiver(const Receiver&) = delete;
+    Receiver& operator=(const Receiver&) = delete;
+
     ~Receiver() override {}
 
     void Collect(base::TimeTicks start_timestamp,
@@ -36,13 +41,16 @@ class ChildCallStackProfileCollectorTest : public testing::Test {
 
    private:
     mojo::Receiver<mojom::CallStackProfileCollector> receiver_;
-
-    DISALLOW_COPY_AND_ASSIGN(Receiver);
   };
 
   ChildCallStackProfileCollectorTest()
       : receiver_impl_(
             new Receiver(collector_remote_.InitWithNewPipeAndPassReceiver())) {}
+
+  ChildCallStackProfileCollectorTest(
+      const ChildCallStackProfileCollectorTest&) = delete;
+  ChildCallStackProfileCollectorTest& operator=(
+      const ChildCallStackProfileCollectorTest&) = delete;
 
   void CollectEmptyProfile() {
     child_collector_.Collect(base::TimeTicks::Now(), SampledProfile());
@@ -57,9 +65,6 @@ class ChildCallStackProfileCollectorTest : public testing::Test {
   mojo::PendingRemote<mojom::CallStackProfileCollector> collector_remote_;
   std::unique_ptr<Receiver> receiver_impl_;
   ChildCallStackProfileCollector child_collector_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ChildCallStackProfileCollectorTest);
 };
 
 // Test the behavior when an interface is provided.
@@ -70,8 +75,7 @@ TEST_F(ChildCallStackProfileCollectorTest, InterfaceProvided) {
   CollectEmptyProfile();
   ASSERT_EQ(1u, profiles().size());
   base::TimeTicks start_timestamp = profiles()[0].start_timestamp;
-  EXPECT_GE(base::TimeDelta::FromMilliseconds(10),
-            base::TimeTicks::Now() - start_timestamp);
+  EXPECT_GE(base::Milliseconds(10), base::TimeTicks::Now() - start_timestamp);
 
   // Set the interface. The profiles should be passed to it.
   child_collector_.SetParentProfileCollector(std::move(collector_remote_));
@@ -86,7 +90,7 @@ TEST_F(ChildCallStackProfileCollectorTest, InterfaceProvided) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0u, profiles().size());
   ASSERT_EQ(1u, receiver_impl_->profile_start_times.size());
-  EXPECT_GE(base::TimeDelta::FromMilliseconds(10),
+  EXPECT_GE(base::Milliseconds(10),
             (base::TimeTicks::Now() - receiver_impl_->profile_start_times[0]));
 }
 
@@ -96,7 +100,7 @@ TEST_F(ChildCallStackProfileCollectorTest, InterfaceNotProvided) {
   // Add a profile before providing a null interface.
   CollectEmptyProfile();
   ASSERT_EQ(1u, profiles().size());
-  EXPECT_GE(base::TimeDelta::FromMilliseconds(10),
+  EXPECT_GE(base::Milliseconds(10),
             base::TimeTicks::Now() - profiles()[0].start_timestamp);
 
   // Set the null interface. The profile should be flushed.

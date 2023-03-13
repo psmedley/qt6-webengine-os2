@@ -22,26 +22,28 @@ from blinkpy.web_tests.builder_list import BuilderList
 class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     command_constructor = RebaselineCL
+    command_constructor.flag_specific_builder = (
+        lambda self, flag_specific: frozenset(["MOCK Try Highdpi"]))
 
     def setUp(self):
         BaseTestCase.setUp(self)
         LoggingTestCase.setUp(self)
         self.maxDiff = None
-        builds = {
-            Build('MOCK Try Win', 5000):
+        self.builds = {
+            Build('MOCK Try Win', 5000, 'Build-1'):
             TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000):
+            Build('MOCK Try Mac', 4000, 'Build-2'):
             TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Linux', 6000):
+            Build('MOCK Try Linux', 6000, 'Build-3'):
             TryJobStatus('COMPLETED', 'FAILURE'),
             # Test the special case for experimental builders
             # Highdpi is an experimental builder whose status
             # is returned as ('COMPLETED', 'SUCCESS') even with failures.
-            Build('MOCK Try Highdpi', 8000):
+            Build('MOCK Try Highdpi', 8000, 'Build-4'):
             TryJobStatus('COMPLETED', 'SUCCESS'),
         }
 
-        self.command.git_cl = MockGitCL(self.tool, builds)
+        self.command.git_cl = MockGitCL(self.tool, self.builds)
 
         git = MockGit(
             filesystem=self.tool.filesystem, executive=self.tool.executive)
@@ -146,8 +148,71 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
                 },
             },
         })
+        self.web_test_resultsdb = WebTestResults([{
+            "name": "tests/two/image-fail.html/results/2",
+            "testId": "ninja://:blink_web_tests/two/image-fail.html",
+            "resultId": "2",
+            "variant": {
+                "def": {
+                    "builder": "",
+                    "os": "",
+                    "test_suite": "blink_web_tests"
+                }
+            },
+            "status": "FAIL"
+        }, {
+            "name": "tests/one/missing.html/results/1",
+            "testId": "ninja://:blink_web_tests/one/missing.html",
+            "resultId": "1",
+            "variant": {
+                "def": {
+                    "builder": "",
+                    "os": "",
+                    "test_suite": "blink_web_tests"
+                }
+            },
+            "status": "FAIL"
+        }, {
+            "name": "tests/one/crash.html/results/3",
+            "testId": "ninja://:blink_web_tests/one/crash.html",
+            "resultId": "3",
+            "variant": {
+                "def": {
+                    "builder": "",
+                    "os": "",
+                    "test_suite": "blink_web_tests"
+                }
+            },
+            "status": "CRASH"
+        }])
+        self.test_artifacts_list = {
+            "tests/one/missing.html/results/1": [{
+                "name":
+                "invocations/task-chromium-swarm.appspot.com-1/tests/ninja:%2F%2F:blink_web_tests%2Fone%2Fmissing.html/results/1",
+                "artifactId": "actual_image",
+                "fetchUrl":
+                "https://results.usercontent.cr.dev/invocations/task-chromium-swarm.appspot.com-1/tests/ninja:%2F%2F:blink_web_tests%2Fone%2Fmissing.html/results/artifacts/actual_image?token=1",
+                "contentType": "image/png",
+            }],
+            "tests/two/image-fail.html/results/2": [{
+                "name":
+                "invocations/task-chromium-swarm.appspot.com-2/tests/ninja:%2F%2F:blink_web_tests%2Ftwo%2Fimage-fail.html/results/2",
+                "artifactId": "actual_image",
+                "fetchUrl":
+                "https://results.usercontent.cr.dev/invocations/task-chromium-swarm.appspot.com-2/tests/ninja:%2F%2F:blink_web_tests%2Ftwo%2Fimage-fail.html/results/artifacts/actual_image?token=2",
+                "contentType": "image/png",
+            }],
+            "tests/one/crash.html/results/3": [{
+                "name":
+                "invocations/task-chromium-swarm.appspot.com-2/tests/ninja:%2F%2F:blink_web_tests%2Ftwo%2Fcrash.html/results/3",
+                "artifactId": "actual_text",
+                "fetchUrl":
+                "https://results.usercontent.cr.dev/invocations/task-chromium-swarm.appspot.com-2/tests/ninja:%2F%2F:blink_web_tests%2Fone%2Fcrash.html/results/artifacts/actual_text?token=3",
+                "contentType": "text",
+            }]
+        }
 
-        for build in builds:
+        for build in self.builds:
             self.tool.results_fetcher.set_results(build, web_test_results)
             self.tool.results_fetcher.set_retry_sumary_json(
                 build,
@@ -196,7 +261,28 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
             'builders': [],
             'patchset': None,
             'use_blink_try_bots_only': False,
-            'flag_specific': None
+            'flag_specific': None,
+            'resultDB': None
+        }
+        options.update(kwargs)
+        return optparse.Values(dict(**options))
+
+    @staticmethod
+    def command_options_resultDB(**kwargs):
+        options = {
+            'dry_run': False,
+            'only_changed_tests': False,
+            'trigger_jobs': True,
+            'fill_missing': None,
+            'optimize': True,
+            'results_directory': None,
+            'test_name_file': None,
+            'verbose': False,
+            'builders': [],
+            'patchset': None,
+            'use_blink_try_bots_only': False,
+            'flag_specific': None,
+            'resultDB': True
         }
         options.update(kwargs)
         return optparse.Values(dict(**options))
@@ -215,11 +301,28 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
             'INFO: Rebaselining two/image-fail.html\n',
         ])
 
+    def test_execute_basic_resultDB(self):
+        # By default, with no arguments or options, rebaseline-cl rebaselines
+        # all of the tests that unexpectedly failed.
+        for build in self.builds:
+            self.tool.results_fetcher.set_results_to_resultdb(
+                build, self.web_test_resultsdb)
+            self.tool.results_fetcher.set_artifact_list_for_test(
+                build, self.test_artifacts_list)
+        exit_code = self.command.execute(self.command_options_resultDB(), [],
+                                         self.tool)
+        self.assertEqual(exit_code, 0)
+        self.assertLog([
+            'INFO: Finished try jobs found for all try bots.\n',
+            'INFO: Rebaselining one/missing.html\n',
+            'INFO: Rebaselining two/image-fail.html\n',
+        ])
+
     def test_execute_with_test_name_file(self):
         fs = self.mac_port.host.filesystem
         test_name_file = fs.mktemp()
-        fs.write_text_file(
-            test_name_file,
+        file = fs.open_text_file_for_writing(test_name_file)
+        file.write(
             textwrap.dedent('''
             one/flaky-fail.html
               one/missing.html
@@ -238,6 +341,35 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
             'INFO: Rebaselining one/flaky-fail.html\n',
             'INFO: Rebaselining one/missing.html\n',
             'INFO: Rebaselining one/text-fail.html\n',
+            'INFO: Rebaselining two/image-fail.html\n',
+        ])
+
+    def test_execute_with_test_name_file_resultDB(self):
+        fs = self.mac_port.host.filesystem
+        test_name_file = fs.mktemp()
+        file = fs.open_text_file_for_writing(test_name_file)
+        file.write(
+            textwrap.dedent('''
+            one/missing.html
+              two/missing.html
+            # one/slow-fail.html
+            #
+
+                two/image-fail.html   '''))
+        for build in self.builds:
+            self.tool.results_fetcher.set_results_to_resultdb(
+                build, self.web_test_resultsdb)
+            self.tool.results_fetcher.set_artifact_list_for_test(
+                build, self.test_artifacts_list)
+        exit_code = self.command.execute(
+            self.command_options(test_name_file=test_name_file, resultDB=True),
+            [], self.tool)
+        self.assertEqual(exit_code, 0)
+        self.assertLog([
+            'INFO: Finished try jobs found for all try bots.\n',
+            'INFO: Reading list of tests to rebaseline from %s\n' %
+            test_name_file,
+            'INFO: Rebaselining one/missing.html\n',
             'INFO: Rebaselining two/image-fail.html\n',
         ])
 
@@ -307,9 +439,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_unfinished_jobs(self):
         builds = {
-            Build('MOCK Try Win', 5000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000): TryJobStatus('STARTED'),
-            Build('MOCK Try Linux', 6000): TryJobStatus('SCHEDULED'),
+            Build('MOCK Try Win', 5000, 'Build-1'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Mac', 4000, 'Build-2'):
+            TryJobStatus('STARTED'),
+            Build('MOCK Try Linux', 6000, 'Build-3'):
+            TryJobStatus('SCHEDULED'),
         }
         self.command.git_cl = MockGitCL(self.tool, builds)
         exit_code = self.command.execute(self.command_options(), [], self.tool)
@@ -329,10 +464,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_canceled_job(self):
         builds = {
-            Build('MOCK Try Win', 5000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Linux', 6000): TryJobStatus(
-                'COMPLETED', 'CANCELED'),
+            Build('MOCK Try Win', 5000, 'Build-1'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Mac', 4000, 'Build-2'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Linux', 6000, 'Build-3'):
+            TryJobStatus('COMPLETED', 'CANCELED'),
         }
         self.command.git_cl = MockGitCL(self.tool, builds)
         exit_code = self.command.execute(self.command_options(), [], self.tool)
@@ -347,10 +484,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_passing_jobs(self):
         builds = {
-            Build('MOCK Try Win', 5000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000): TryJobStatus('COMPLETED', 'SUCCESS'),
-            Build('MOCK Try Linux', 6000): TryJobStatus(
-                'COMPLETED', 'SUCCESS'),
+            Build('MOCK Try Win', 5000, 'Build-1'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Mac', 4000, 'Build-2'):
+            TryJobStatus('COMPLETED', 'SUCCESS'),
+            Build('MOCK Try Linux', 6000, 'Build-3'):
+            TryJobStatus('COMPLETED', 'SUCCESS'),
         }
         self.command.git_cl = MockGitCL(self.tool, builds)
         exit_code = self.command.execute(self.command_options(), [], self.tool)
@@ -366,8 +505,10 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_with_no_trigger_jobs_option(self):
         builds = {
-            Build('MOCK Try Win', 5000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000): TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Win', 5000, 'Build-1'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Mac', 4000, 'Build-2'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
         }
         self.command.git_cl = MockGitCL(self.tool, builds)
         exit_code = self.command.execute(
@@ -399,10 +540,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         # In this example, one test failed both with and without the patch
         # in the try job, so it is not rebaselined.
         builds = {
-            Build('MOCK Try Win', 5000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Mac', 4000): TryJobStatus('COMPLETED', 'FAILURE'),
-            Build('MOCK Try Linux', 6000): TryJobStatus(
-                'COMPLETED', 'FAILURE'),
+            Build('MOCK Try Win', 5000, 'Build-1'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Mac', 4000, 'Build-2'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
+            Build('MOCK Try Linux', 6000, 'Build-3'):
+            TryJobStatus('COMPLETED', 'FAILURE'),
         }
         for build in builds:
             self.tool.results_fetcher.set_retry_sumary_json(
@@ -422,7 +565,7 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         # In this example, the retry summary could not be downloaded, so
         # a warning is printed and all tests are rebaselined.
         self.tool.results_fetcher.set_retry_sumary_json(
-            Build('MOCK Try Win', 5000), None)
+            Build('MOCK Try Win', 5000, 'Build-1'), None)
         exit_code = self.command.execute(self.command_options(), [], self.tool)
         self.assertEqual(exit_code, 0)
         self.assertLog([
@@ -440,7 +583,6 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
             self.command_options(flag_specific='highdpi'), [], self.tool)
         self.assertEqual(exit_code, 0)
         self.assertLog([
-            'INFO: Running the tool with highdpi builder only.\n',
             'INFO: Finished try jobs found for all try bots.\n',
             'INFO: Rebaselining one/flaky-fail.html\n',
             'INFO: Rebaselining one/missing.html\n',
@@ -458,8 +600,8 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
                                          'one/flaky-fail.html')
         self._write(path, 'contents')
         test_baseline_set = TestBaselineSet(self.tool)
-        test_baseline_set.add('one/flaky-fail.html', Build(
-            'MOCK Try Win', 5000))
+        test_baseline_set.add('one/flaky-fail.html',
+                              Build('MOCK Try Win', 5000, 'Build-1'))
         self.command.rebaseline(self.command_options(), test_baseline_set)
         self.assertEqual(self.tool.executive.calls,
                          [[[
@@ -518,7 +660,7 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_missing_results_with_no_fill_missing_prompts(self):
         self.tool.results_fetcher.set_results(
-            Build('MOCK Try Win', 5000), None)
+            Build('MOCK Try Win', 5000, 'Build-1'), None)
         exit_code = self.command.execute(self.command_options(), [], self.tool)
         self.assertEqual(exit_code, 1)
         self.assertLog([
@@ -535,7 +677,7 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
 
     def test_execute_missing_results_with_fill_missing_continues(self):
         self.tool.results_fetcher.set_results(
-            Build('MOCK Try Win', 5000), None)
+            Build('MOCK Try Win', 5000, 'Build-1'), None)
         exit_code = self.command.execute(
             self.command_options(fill_missing=True), ['one/flaky-fail.html'],
             self.tool)
@@ -597,11 +739,12 @@ class RebaselineCLTest(BaseTestCase, LoggingTestCase):
         test_baseline_set.add('one/flaky-fail.html', Build('MOCK Bar4', 200))
         self.command.fill_in_missing_results(test_baseline_set)
         self.assertEqual(
-            test_baseline_set.build_port_pairs('one/flaky-fail.html'), [
-                (Build('MOCK Foo12', 100), 'foo-foo12'),
-                (Build('MOCK Bar4', 200), 'bar-bar4'),
-                (Build('MOCK Foo12', 100), 'foo-foo45'),
+            sorted(test_baseline_set.build_port_pairs('one/flaky-fail.html')),
+            [
                 (Build('MOCK Bar4', 200), 'bar-bar3'),
+                (Build('MOCK Bar4', 200), 'bar-bar4'),
+                (Build('MOCK Foo12', 100), 'foo-foo12'),
+                (Build('MOCK Foo12', 100), 'foo-foo45'),
             ])
         self.assertLog([
             'INFO: For one/flaky-fail.html:\n',

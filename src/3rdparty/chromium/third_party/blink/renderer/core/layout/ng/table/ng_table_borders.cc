@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/layout/ng/table/ng_table_borders.h"
 
+#include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
@@ -232,13 +233,13 @@ scoped_refptr<NGTableBorders> NGTableBorders::ComputeTableBorders(
                                       table_writing_direction,
                                       *table_borders.get());
   VisitLayoutNGTableColumn(
-      const_cast<Vector<NGBlockNode>&>(grouped_children.columns),
+      const_cast<HeapVector<NGBlockNode>&>(grouped_children.columns),
       table_column_count, &col_borders_marker);
   ColgroupBordersMarker colgroup_borders_marker(table_row_count, ++box_order,
                                                 table_writing_direction,
                                                 *table_borders.get());
   VisitLayoutNGTableColumn(
-      const_cast<Vector<NGBlockNode>&>(grouped_children.columns),
+      const_cast<HeapVector<NGBlockNode>&>(grouped_children.columns),
       table_column_count, &colgroup_borders_marker);
 
   // Mark table borders.
@@ -248,6 +249,16 @@ scoped_refptr<NGTableBorders> NGTableBorders::ComputeTableBorders(
 
   table_borders->ComputeCollapsedTableBorderPadding(table_row_count,
                                                     table_column_count);
+
+  // https://github.com/w3c/csswg-drafts/issues/6230
+  if (table_borders->collapsed_visual_inline_start_ !=
+          table_borders->cached_table_border_->inline_start ||
+      table_borders->collapsed_visual_inline_end_ !=
+          table_borders->cached_table_border_->inline_end) {
+    UseCounter::Count(table.GetDocument(),
+                      WebFeature::kTableCollapsedBorderDifferentToVisual);
+  }
+
   return table_borders;
 }
 
@@ -399,14 +410,6 @@ void NGTableBorders::ComputeCollapsedTableBorderPadding(
       GetCellBorders(0, 0, table_row_count, table_column_count);
   collapsed_visual_inline_start_ = borders.inline_start;
   collapsed_visual_inline_end_ = borders.inline_end;
-  wtf_size_t inline_start_edge = 0;
-  wtf_size_t inline_end_edge = 2 * table_column_count;
-  borders.inline_start = CanPaint(inline_start_edge)
-                             ? BorderWidth(inline_start_edge) / 2
-                             : LayoutUnit();
-  borders.inline_end = CanPaint(inline_end_edge)
-                           ? BorderWidth(inline_end_edge) / 2
-                           : LayoutUnit();
   cached_table_border_ = borders;
 }
 

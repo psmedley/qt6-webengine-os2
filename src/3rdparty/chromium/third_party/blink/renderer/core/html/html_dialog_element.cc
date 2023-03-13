@@ -27,7 +27,9 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_focus_options.h"
 #include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
+#include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/events/native_event_listener.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -93,11 +95,23 @@ static void SetFocusForDialog(HTMLDialogElement* dialog) {
   doc.TopDocument().FinalizeAutofocus();
 }
 
-static void InertSubtreesChanged(Document& document) {
-  // SetIsInert recurses through subframes to propagate the inert bit.
-  if (document.GetFrame()) {
-    document.GetFrame()->SetIsInert(document.LocalOwner() &&
-                                    document.LocalOwner()->IsInert());
+static void InertSubtreesChanged(Document& document,
+                                 Element* old_modal_dialog) {
+  Element* new_modal_dialog = document.ActiveModalDialog();
+  if (old_modal_dialog == new_modal_dialog)
+    return;
+
+  // Update IsInert() flags.
+  const StyleChangeReasonForTracing& reason =
+      StyleChangeReasonForTracing::Create(style_change_reason::kDialog);
+  if (old_modal_dialog && new_modal_dialog) {
+    old_modal_dialog->SetNeedsStyleRecalc(kLocalStyleChange, reason);
+    new_modal_dialog->SetNeedsStyleRecalc(kLocalStyleChange, reason);
+  } else {
+    if (Element* root = document.documentElement())
+      root->SetNeedsStyleRecalc(kLocalStyleChange, reason);
+    if (Element* fullscreen = Fullscreen::FullscreenElementFrom(document))
+      fullscreen->SetNeedsStyleRecalc(kLocalStyleChange, reason);
   }
 
   // When a modal dialog opens or closes, nodes all over the accessibility
@@ -123,10 +137,10 @@ void HTMLDialogElement::close(const String& return_value) {
   SetBooleanAttribute(html_names::kOpenAttr, false);
   SetIsModal(false);
 
-  HTMLDialogElement* active_modal_dialog = GetDocument().ActiveModalDialog();
-  GetDocument().RemoveFromTopLayer(this);
-  if (active_modal_dialog == this)
-    InertSubtreesChanged(GetDocument());
+  Document& document = GetDocument();
+  HTMLDialogElement* old_modal_dialog = document.ActiveModalDialog();
+  document.RemoveFromTopLayer(this);
+  InertSubtreesChanged(document, old_modal_dialog);
 
   if (!return_value.IsNull())
     return_value_ = return_value;
@@ -143,6 +157,9 @@ void HTMLDialogElement::close(const String& return_value) {
     previously_focused_element_ = nullptr;
     previously_focused_element->focus(focus_options);
   }
+
+  if (close_watcher_)
+    close_watcher_->destroy();
 }
 
 void HTMLDialogElement::SetIsModal(bool is_modal) {
@@ -163,7 +180,8 @@ void HTMLDialogElement::show() {
   SetBooleanAttribute(html_names::kOpenAttr, true);
 
   // Showing a <dialog> should hide all open popups.
-  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled()) {
+  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled() ||
+      RuntimeEnabledFeatures::HTMLPopupAttributeEnabled()) {
     GetDocument().HideAllPopupsUntil(nullptr);
   }
 
@@ -175,6 +193,28 @@ void HTMLDialogElement::show() {
 
   SetFocusForDialog(this);
 }
+
+class DialogCloseWatcherEventListener : public NativeEventListener {
+ public:
+  explicit DialogCloseWatcherEventListener(HTMLDialogElement* dialog)
+      : dialog_(dialog) {}
+
+  void Invoke(ExecutionContext*, Event* event) override {
+    DCHECK(dialog_);
+    if (event->type() == event_type_names::kCancel)
+      dialog_->CloseWatcherFiredCancel();
+    if (event->type() == event_type_names::kClose)
+      dialog_->CloseWatcherFiredClose();
+  }
+
+  void Trace(Visitor* visitor) const override {
+    visitor->Trace(dialog_);
+    NativeEventListener::Trace(visitor);
+  }
+
+ private:
+  WeakMember<HTMLDialogElement> dialog_;
+};
 
 void HTMLDialogElement::showModal(ExceptionState& exception_state) {
   if (FastHasAttribute(html_names::kOpenAttr)) {
@@ -190,41 +230,62 @@ void HTMLDialogElement::showModal(ExceptionState& exception_state) {
     return;
   }
 
+  Document& document = GetDocument();
+  HTMLDialogElement* old_modal_dialog = document.ActiveModalDialog();
+
   // See comment in |Fullscreen::RequestFullscreen|.
   if (Fullscreen::IsInFullscreenElementStack(*this)) {
-    UseCounter::Count(GetDocument(),
+    UseCounter::Count(document,
                       WebFeature::kShowModalForElementInFullscreenStack);
   }
 
   // Showing a <dialog> should hide all open popups.
-  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled()) {
-    GetDocument().HideAllPopupsUntil(nullptr);
+  if (RuntimeEnabledFeatures::HTMLPopupElementEnabled() ||
+      RuntimeEnabledFeatures::HTMLPopupAttributeEnabled()) {
+    document.HideAllPopupsUntil(nullptr);
   }
 
-  GetDocument().AddToTopLayer(this);
+  document.AddToTopLayer(this);
   SetBooleanAttribute(html_names::kOpenAttr, true);
 
   SetIsModal(true);
-  GetDocument().UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
+  document.UpdateStyleAndLayout(DocumentUpdateReason::kJavaScript);
 
   // Throw away the AX cache first, so the subsequent steps don't have a chance
   // of queuing up AX events on objects that would be invalidated when the cache
   // is thrown away.
-  InertSubtreesChanged(GetDocument());
+  InertSubtreesChanged(document, old_modal_dialog);
 
-  previously_focused_element_ = GetDocument().FocusedElement();
+  previously_focused_element_ = document.FocusedElement();
+
+  if (RuntimeEnabledFeatures::CloseWatcherEnabled()) {
+    if (LocalDOMWindow* window = GetDocument().domWindow()) {
+      close_watcher_ = CloseWatcher::Create(window, /*options=*/nullptr);
+      if (close_watcher_) {
+        auto* event_listener =
+            MakeGarbageCollected<DialogCloseWatcherEventListener>(this);
+        close_watcher_->addEventListener(event_type_names::kClose,
+                                         event_listener);
+        close_watcher_->addEventListener(event_type_names::kCancel,
+                                         event_listener);
+      }
+    }
+  }
 
   SetFocusForDialog(this);
 }
 
 void HTMLDialogElement::RemovedFrom(ContainerNode& insertion_point) {
+  Document& document = GetDocument();
+  HTMLDialogElement* old_modal_dialog = document.ActiveModalDialog();
   HTMLElement::RemovedFrom(insertion_point);
-  InertSubtreesChanged(GetDocument());
+  InertSubtreesChanged(document, old_modal_dialog);
   SetIsModal(false);
 }
 
 void HTMLDialogElement::DefaultEventHandler(Event& event) {
-  if (event.type() == event_type_names::kCancel) {
+  if (!RuntimeEnabledFeatures::CloseWatcherEnabled() &&
+      event.type() == event_type_names::kCancel) {
     close();
     event.SetDefaultHandled();
     return;
@@ -232,8 +293,28 @@ void HTMLDialogElement::DefaultEventHandler(Event& event) {
   HTMLElement::DefaultEventHandler(event);
 }
 
+void HTMLDialogElement::CloseWatcherFiredCancel() {
+  cancel_fired_since_last_close_ = true;
+}
+
+void HTMLDialogElement::CloseWatcherFiredClose() {
+  // https://wicg.github.io/close-watcher/#cancel-the-dialog
+  if (cancel_fired_since_last_close_) {
+    cancel_fired_since_last_close_ = false;
+
+    Event* cancel_event = Event::CreateCancelable(event_type_names::kCancel);
+    DispatchEvent(*cancel_event);
+    if (cancel_event->defaultPrevented())
+      return;
+    cancel_event->SetDefaultHandled();
+  }
+
+  close();
+}
+
 void HTMLDialogElement::Trace(Visitor* visitor) const {
   visitor->Trace(previously_focused_element_);
+  visitor->Trace(close_watcher_);
   HTMLElement::Trace(visitor);
 }
 

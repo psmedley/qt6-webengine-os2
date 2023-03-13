@@ -20,7 +20,6 @@
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
-#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle.h"
 
 namespace base {
@@ -33,8 +32,10 @@ class SiteForCookies;
 
 namespace blink {
 
-class WebURLRequest;
+class CodeCacheHost;
 class WebDocumentSubresourceFilter;
+class WebURLLoaderFactory;
+class WebURLRequest;
 
 // Helper class allowing DedicatedOrSharedWorkerFetchContextImpl to notify blink
 // upon an accept languages update. This class will be extended by
@@ -90,7 +91,7 @@ class WebWorkerFetchContext : public base::RefCounted<WebWorkerFetchContext> {
   // interface. Update worklets to use context specific interface and check that
   // code_cache_host is not a nullptr.
   virtual std::unique_ptr<WebCodeCacheLoader> CreateCodeCacheLoader(
-      blink::mojom::CodeCacheHost* code_cache_host) {
+      CodeCacheHost* code_cache_host) {
     return nullptr;
   }
 

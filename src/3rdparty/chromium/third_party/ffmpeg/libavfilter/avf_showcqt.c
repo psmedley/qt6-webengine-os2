@@ -1325,7 +1325,8 @@ static int query_formats(AVFilterContext *ctx)
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUV444P, AV_PIX_FMT_RGB24, AV_PIX_FMT_NONE
     };
-    static const int64_t channel_layouts[] = { AV_CH_LAYOUT_STEREO, AV_CH_LAYOUT_STEREO_DOWNMIX, -1 };
+    static const AVChannelLayout channel_layouts[] = { AV_CHANNEL_LAYOUT_STEREO,
+                                                       AV_CHANNEL_LAYOUT_STEREO_DOWNMIX, { 0 } };
     int ret;
 
     /* set input audio formats */
@@ -1333,7 +1334,7 @@ static int query_formats(AVFilterContext *ctx)
     if ((ret = ff_formats_ref(formats, &inlink->outcfg.formats)) < 0)
         return ret;
 
-    layouts = ff_make_format64_list(channel_layouts);
+    layouts = ff_make_channel_layout_list(channel_layouts);
     if ((ret = ff_channel_layouts_ref(layouts, &inlink->outcfg.channel_layouts)) < 0)
         return ret;
 
@@ -1577,7 +1578,6 @@ static const AVFilterPad showcqt_inputs[] = {
         .type         = AVMEDIA_TYPE_AUDIO,
         .filter_frame = filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad showcqt_outputs[] = {
@@ -1587,7 +1587,6 @@ static const AVFilterPad showcqt_outputs[] = {
         .config_props  = config_output,
         .request_frame = request_frame,
     },
-    { NULL }
 };
 
 const AVFilter ff_avf_showcqt = {
@@ -1595,9 +1594,9 @@ const AVFilter ff_avf_showcqt = {
     .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a CQT (Constant/Clamped Q Transform) spectrum video output."),
     .init          = init,
     .uninit        = uninit,
-    .query_formats = query_formats,
     .priv_size     = sizeof(ShowCQTContext),
-    .inputs        = showcqt_inputs,
-    .outputs       = showcqt_outputs,
+    FILTER_INPUTS(showcqt_inputs),
+    FILTER_OUTPUTS(showcqt_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .priv_class    = &showcqt_class,
 };

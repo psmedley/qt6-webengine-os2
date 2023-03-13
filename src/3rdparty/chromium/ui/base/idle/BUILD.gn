@@ -59,22 +59,11 @@ component("idle") {
 
   if (is_linux) {
     sources += [ "idle_linux.cc" ]
+    deps += [ "//ui/display" ]
     if (use_dbus) {
       deps += [ "//dbus" ]
       defines += [ "USE_DBUS" ]
     }
-  }
-
-  if (use_xscrnsaver) {
-    defines += [ "USE_XSCRNSAVER" ]
-    deps += [ "//ui/base/x" ]
-  }
-
-  if (use_ozone) {
-    deps += [
-      "//ui/base:features",
-      "//ui/display",
-    ]
   }
 
   if (is_android) {

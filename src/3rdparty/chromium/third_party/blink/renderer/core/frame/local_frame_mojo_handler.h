@@ -6,18 +6,20 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_LOCAL_FRAME_MOJO_HANDLER_H_
 
 #include "build/build_config.h"
+#include "components/power_scheduler/power_mode_voter.h"
 #include "services/device/public/mojom/device_posture_provider.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-blink.h"
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/mojom/media/fullscreen_video_element.mojom-blink.h"
 #include "third_party/blink/public/mojom/reporting/reporting.mojom-blink.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_associated_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "third_party/blink/public/mojom/input/text_input_host.mojom-blink.h"
 #endif
 
@@ -62,7 +64,7 @@ class LocalFrameMojoHandler
   mojom::blink::BackForwardCacheControllerHost&
   BackForwardCacheControllerHostRemote();
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   mojom::blink::TextInputHost& TextInputHost();
   void ResetTextInputHostForTesting();
   void RebindTextInputHostForTesting();
@@ -124,7 +126,7 @@ class LocalFrameMojoHandler
   void AdvanceFocusInFrame(
       mojom::blink::FocusType focus_type,
       const absl::optional<RemoteFrameToken>& source_frame_token) final;
-  void AdvanceFocusInForm(mojom::blink::FocusType focus_type) final;
+  void AdvanceFocusForIME(mojom::blink::FocusType focus_type) final;
   void ReportContentSecurityPolicyViolation(
       network::mojom::blink::CSPViolationPtr csp_violation) final;
   // Updates the snapshotted policy attributes (sandbox flags and permissions
@@ -133,7 +135,6 @@ class LocalFrameMojoHandler
   // frame's sandbox flags or container policy. The new policy won't take effect
   // until the next navigation.
   void DidUpdateFramePolicy(const FramePolicy& frame_policy) final;
-  void OnScreensChange() final;
   void PostMessageEvent(
       const absl::optional<RemoteFrameToken>& source_frame_token,
       const String& source_origin,
@@ -142,7 +143,7 @@ class LocalFrameMojoHandler
   void JavaScriptMethodExecuteRequest(
       const String& object_name,
       const String& method_name,
-      base::Value arguments,
+      base::Value::List arguments,
       bool wants_result,
       JavaScriptMethodExecuteRequestCallback callback) final;
   void JavaScriptExecuteRequest(
@@ -160,7 +161,7 @@ class LocalFrameMojoHandler
       bool wants_result,
       int32_t world_id,
       JavaScriptExecuteRequestInIsolatedWorldCallback callback) final;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void GetCharacterIndexAtPoint(const gfx::Point& point) final;
   void GetFirstRectForRange(const gfx::Range& range) final;
   void GetStringForRange(const gfx::Range& range,
@@ -183,13 +184,16 @@ class LocalFrameMojoHandler
       mojo::PendingAssociatedRemote<mojom::blink::DevToolsAgentHost> host,
       mojo::PendingAssociatedReceiver<mojom::blink::DevToolsAgent> receiver)
       final;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   void ExtractSmartClipData(const gfx::Rect& rect,
                             ExtractSmartClipDataCallback callback) final;
 #endif
   void HandleRendererDebugURL(const KURL& url) final;
   void GetCanonicalUrlForSharing(
       GetCanonicalUrlForSharingCallback callback) final;
+
+  void SetNavigationApiHistoryEntriesForRestore(
+      mojom::blink::NavigationApiHistoryEntryArraysPtr) final;
 
   // blink::mojom::LocalMainFrame overrides:
   void AnimateDoubleTapZoom(const gfx::Point& point,
@@ -203,12 +207,9 @@ class LocalFrameMojoHandler
   void EnablePreferredSizeChangedMode() override;
   void ZoomToFindInPageRect(const gfx::Rect& rect_in_root_frame) override;
   void InstallCoopAccessMonitor(
-      network::mojom::blink::CoopAccessReportType report_type,
       const FrameToken& accessed_window,
-      mojo::PendingRemote<
-          network::mojom::blink::CrossOriginOpenerPolicyReporter> reporter,
-      bool endpoint_defined,
-      const WTF::String& reported_window_url) final;
+      network::mojom::blink::CrossOriginOpenerPolicyReporterParamsPtr
+          coop_reporter_params) final;
   void OnPortalActivated(
       const PortalToken& portal_token,
       mojo::PendingAssociatedRemote<mojom::blink::Portal> portal,
@@ -239,7 +240,7 @@ class LocalFrameMojoHandler
   HeapMojoAssociatedRemote<mojom::blink::BackForwardCacheControllerHost>
       back_forward_cache_controller_host_remote_{nullptr};
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   HeapMojoRemote<mojom::blink::TextInputHost> text_input_host_{nullptr};
 #endif
 
@@ -274,6 +275,9 @@ class LocalFrameMojoHandler
 
   device::mojom::blink::DevicePostureType current_device_posture_ =
       device::mojom::blink::DevicePostureType::kContinuous;
+
+  std::unique_ptr<power_scheduler::PowerModeVoter>
+      script_execution_power_mode_voter_;
 };
 
 class ActiveURLMessageFilter : public mojo::MessageFilter {

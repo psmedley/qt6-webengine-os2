@@ -6,6 +6,7 @@
 
 #include "base/notreached.h"
 #include "base/time/time.h"
+#include "ui/gfx/geometry/point.h"
 
 namespace ui {
 
@@ -19,13 +20,19 @@ gfx::AcceleratedWidget PlatformScreen::GetLocalProcessWidgetAtPoint(
   return gfx::kNullAcceleratedWidget;
 }
 
+bool PlatformScreen::IsAcceleratedWidgetUnderCursor(
+    gfx::AcceleratedWidget widget) const {
+  return GetAcceleratedWidgetAtScreenPoint(GetCursorScreenPoint()) == widget;
+}
+
 std::string PlatformScreen::GetCurrentWorkspace() {
   NOTIMPLEMENTED_LOG_ONCE();
   return {};
 }
 
-void PlatformScreen::SetScreenSaverSuspended(bool suspend) {
+bool PlatformScreen::SetScreenSaverSuspended(bool suspend) {
   NOTIMPLEMENTED_LOG_ONCE();
+  return false;
 }
 
 bool PlatformScreen::IsScreenSaverActive() const {
@@ -35,7 +42,7 @@ bool PlatformScreen::IsScreenSaverActive() const {
 
 base::TimeDelta PlatformScreen::CalculateIdleTime() const {
   NOTIMPLEMENTED_LOG_ONCE();
-  return base::TimeDelta::FromSeconds(0);
+  return base::Seconds(0);
 }
 
 std::vector<base::Value> PlatformScreen::GetGpuExtraInfo(

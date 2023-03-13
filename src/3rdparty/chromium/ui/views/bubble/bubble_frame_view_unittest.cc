@@ -7,10 +7,12 @@
 #include <memory>
 #include <utility>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
@@ -78,8 +80,8 @@ class TestBubbleFrameViewWidgetDelegate : public WidgetDelegate {
   }
 
  private:
-  Widget* const widget_;
-  View* contents_view_ = nullptr;  // Owned by |widget_|.
+  const raw_ptr<Widget> widget_;
+  raw_ptr<View> contents_view_ = nullptr;  // Owned by |widget_|.
   bool should_show_close_ = false;
 };
 
@@ -98,6 +100,10 @@ class TestBubbleFrameView : public BubbleFrameView {
     params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
     widget_->Init(std::move(params));
   }
+
+  TestBubbleFrameView(const TestBubbleFrameView&) = delete;
+  TestBubbleFrameView& operator=(const TestBubbleFrameView&) = delete;
+
   ~TestBubbleFrameView() override = default;
 
   void SetAvailableAnchorWindowBounds(gfx::Rect bounds) {
@@ -105,16 +111,14 @@ class TestBubbleFrameView : public BubbleFrameView {
   }
 
   BubbleBorder::Arrow GetBorderArrow() const {
-    return bubble_border_for_testing()->arrow();
+    return bubble_border()->arrow();
   }
 
   SkColor GetBorderBackgroundColor() const {
-    return bubble_border_for_testing()->background_color();
+    return bubble_border()->background_color();
   }
 
-  gfx::Insets GetBorderInsets() const {
-    return bubble_border_for_testing()->GetInsets();
-  }
+  gfx::Insets GetBorderInsets() const { return bubble_border()->GetInsets(); }
 
   // BubbleFrameView:
   Widget* GetWidget() override { return widget_.get(); }
@@ -139,8 +143,6 @@ class TestBubbleFrameView : public BubbleFrameView {
 
   std::unique_ptr<TestBubbleFrameViewWidgetDelegate> widget_delegate_;
   std::unique_ptr<Widget> widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestBubbleFrameView);
 };
 
 }  // namespace
@@ -177,13 +179,13 @@ TEST_F(BubbleFrameViewTest, GetBoundsForClientViewWithClose) {
 
 TEST_F(BubbleFrameViewTest, RemoveFootnoteView) {
   TestBubbleFrameView frame(this);
-  EXPECT_EQ(nullptr, frame.footnote_container_);
+  EXPECT_EQ(nullptr, frame.footnote_container_.get());
   auto footnote = std::make_unique<StaticSizedView>(gfx::Size(200, 200));
   View* footnote_dummy_view = footnote.get();
   frame.SetFootnoteView(std::move(footnote));
   EXPECT_EQ(footnote_dummy_view->parent(), frame.footnote_container_);
   frame.SetFootnoteView(nullptr);
-  EXPECT_EQ(nullptr, frame.footnote_container_);
+  EXPECT_EQ(nullptr, frame.footnote_container_.get());
 }
 
 TEST_F(BubbleFrameViewTest,
@@ -835,7 +837,7 @@ TEST_F(BubbleFrameViewTest, GetMinimumSize) {
 TEST_F(BubbleFrameViewTest, GetMaximumSize) {
   TestBubbleFrameView frame(this);
   gfx::Rect maximum_rect(frame.GetMaximumSize());
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, GetMaximumSize causes problems with DWM, so it should just be 0
   // (unlimited). See http://crbug.com/506206.
   EXPECT_EQ(gfx::Size(), maximum_rect.size());
@@ -918,6 +920,11 @@ class TestBubbleDialogDelegateView : public BubbleDialogDelegateView {
     SetAnchorRect(gfx::Rect());
     DialogDelegate::SetButtons(ui::DIALOG_BUTTON_OK);
   }
+
+  TestBubbleDialogDelegateView(const TestBubbleDialogDelegateView&) = delete;
+  TestBubbleDialogDelegateView& operator=(const TestBubbleDialogDelegateView&) =
+      delete;
+
   ~TestBubbleDialogDelegateView() override = default;
 
   void ChangeTitle(const std::u16string& title) {
@@ -951,8 +958,6 @@ class TestBubbleDialogDelegateView : public BubbleDialogDelegateView {
  private:
   std::u16string title_;
   bool should_show_close_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TestBubbleDialogDelegateView);
 };
 
 class TestAnchor {
@@ -963,12 +968,13 @@ class TestAnchor {
     widget_.Show();
   }
 
+  TestAnchor(const TestAnchor&) = delete;
+  TestAnchor& operator=(const TestAnchor&) = delete;
+
   Widget& widget() { return widget_; }
 
  private:
   Widget widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestAnchor);
 };
 
 // BubbleDialogDelegate with no margins to test width snapping.
@@ -983,8 +989,8 @@ class TestWidthSnapDelegate : public TestBubbleDialogDelegateView {
     GetWidget()->Show();
   }
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(TestWidthSnapDelegate);
+  TestWidthSnapDelegate(const TestWidthSnapDelegate&) = delete;
+  TestWidthSnapDelegate& operator=(const TestWidthSnapDelegate&) = delete;
 };
 
 }  // namespace
@@ -1266,8 +1272,7 @@ TEST_F(BubbleFrameViewTest, IgnorePossiblyUnintendedClicksClose) {
   test::ButtonTestApi(frame->close_)
       .NotifyClick(ui::MouseEvent(
           ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-          ui::EventTimeForNow() +
-              base::TimeDelta::FromMilliseconds(GetDoubleClickInterval()),
+          ui::EventTimeForNow() + base::Milliseconds(GetDoubleClickInterval()),
           ui::EF_NONE, ui::EF_NONE));
   EXPECT_TRUE(bubble->IsClosed());
 }
@@ -1293,8 +1298,7 @@ TEST_F(BubbleFrameViewTest, IgnorePossiblyUnintendedClicksMinimize) {
   test::ButtonTestApi(frame->minimize_)
       .NotifyClick(ui::MouseEvent(
           ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
-          ui::EventTimeForNow() +
-              base::TimeDelta::FromMilliseconds(GetDoubleClickInterval()),
+          ui::EventTimeForNow() + base::Milliseconds(GetDoubleClickInterval()),
           ui::EF_NONE, ui::EF_NONE));
   EXPECT_TRUE(bubble->IsMinimized());
 }

@@ -12,6 +12,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Poppins&display=swap" rel="stylesheet">
     <meta name="viewport" content="width=device-width" />
+    <!-- Chrome Origin Trial token for https://gpuweb.github.io (see dev_server.ts for localhost tokens) -->
+    <meta http-equiv="origin-trial" content="AlAxCx2zrQWmYZ8e+gE9fXx37/KdefwfFtkcDBUaU7LvF8icSiaCoD7gQd010XjcAnHQ/tHUAjvqLPIWzlOFog0AAABQeyJvcmlnaW4iOiJodHRwczovL2dwdXdlYi5naXRodWIuaW86NDQzIiwiZmVhdHVyZSI6IldlYkdQVSIsImV4cGlyeSI6MTY1MjgzMTk5OX0=">
     <link rel="stylesheet" href="third_party/normalize.min.css" />
     <script src="third_party/jquery/jquery-3.3.1.min.js"></script>
     <style>
@@ -107,16 +109,17 @@
         display: inline;
         flex: 10 0 4em;
       }
-      .nodequery {
+      .nodecolumns {
         position: absolute;
         left: 220px;
-
+      }
+      .nodequery {
         font-weight: bold;
         background: transparent;
         border: none;
         padding: 2px;
         margin: 0 0.5em;
-        width: calc(100vw - 260px);
+        width: calc(100vw - 360px);
       }
       .nodedescription {
         margin: 0 0 0 1em;
@@ -268,6 +271,7 @@
     <h1><img class="logo" src="webgpu-logo-notext.svg">WebGPU Conformance Test Suite</h1>
     <p>
       <input type=button id=expandall value="Expand All (slow!)">
+      <label><input type=checkbox id=autoCloseOnPass> Auto-close each subtree when it passes</label>
     </p>
 
     <div id="info"></div>

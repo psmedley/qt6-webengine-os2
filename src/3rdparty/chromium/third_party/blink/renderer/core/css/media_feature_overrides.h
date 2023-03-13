@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_MEDIA_FEATURE_OVERRIDES_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_MEDIA_FEATURE_OVERRIDES_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
@@ -15,7 +16,8 @@ class CORE_EXPORT MediaFeatureOverrides {
  public:
   void SetOverride(const AtomicString& feature, const String& value_string);
   MediaQueryExpValue GetOverride(const AtomicString& feature) const {
-    return overrides_.DeprecatedAtOrEmptyValue(feature);
+    auto it = overrides_.find(feature);
+    return it != overrides_.end() ? it->value : MediaQueryExpValue();
   }
 
  private:

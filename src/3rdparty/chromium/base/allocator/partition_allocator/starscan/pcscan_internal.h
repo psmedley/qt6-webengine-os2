@@ -6,8 +6,12 @@
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_PCSCAN_INTERNAL_H_
 
 #include <array>
+#include <functional>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "base/allocator/partition_allocator/starscan/metadata_allocator.h"
 #include "base/allocator/partition_allocator/starscan/pcscan.h"
@@ -16,9 +20,10 @@
 #include "base/memory/scoped_refptr.h"
 #include "base/no_destructor.h"
 
-namespace base {
+// TODO(crbug.com/1288247): Remove this when migration is complete.
+namespace partition_alloc::internal {
 
-namespace internal {
+class StarScanSnapshot;
 
 class PCScanTask;
 
@@ -50,20 +55,20 @@ class PCScanInternal final {
 
   ~PCScanInternal();
 
-  void Initialize(PCScan::WantedWriteProtectionMode);
+  void Initialize(PCScan::InitConfig);
   bool is_initialized() const { return is_initialized_; }
 
   void PerformScan(PCScan::InvocationMode);
   void PerformScanIfNeeded(PCScan::InvocationMode);
-  void PerformDelayedScan(TimeDelta delay);
+  void PerformDelayedScan(base::TimeDelta delay);
   void JoinScan();
 
   TaskHandle CurrentPCScanTask() const;
   void SetCurrentPCScanTask(TaskHandle task);
   void ResetCurrentPCScanTask();
 
-  void RegisterScannableRoot(Root* root);
-  void RegisterNonScannableRoot(Root* root);
+  void RegisterScannableRoot(Root*);
+  void RegisterNonScannableRoot(Root*);
 
   RootsMap& scannable_roots() { return scannable_roots_; }
   const RootsMap& scannable_roots() const { return scannable_roots_; }
@@ -98,19 +103,22 @@ class PCScanInternal final {
   void UnprotectPages(uintptr_t begin, size_t size);
 
   void ClearRootsForTesting();                               // IN-TEST
-  void ReinitForTesting(PCScan::WantedWriteProtectionMode);  // IN-TEST
+  void ReinitForTesting(PCScan::InitConfig);                 // IN-TEST
   void FinishScanForTesting();                               // IN-TEST
+
+  void RegisterStatsReporter(partition_alloc::StatsReporter* reporter);
+  partition_alloc::StatsReporter& GetReporter();
 
  private:
   friend base::NoDestructor<PCScanInternal>;
-  friend class StarScanSnapshot;
+  friend class partition_alloc::internal::StarScanSnapshot;
 
   using StackTops = std::unordered_map<
-      PlatformThreadId,
+      ::base::PlatformThreadId,
       void*,
-      std::hash<PlatformThreadId>,
+      std::hash<::base::PlatformThreadId>,
       std::equal_to<>,
-      MetadataAllocator<std::pair<const PlatformThreadId, void*>>>;
+      MetadataAllocator<std::pair<const ::base::PlatformThreadId, void*>>>;
 
   PCScanInternal();
 
@@ -133,12 +141,18 @@ class PCScanInternal final {
   const SimdSupport simd_support_;
 
   std::unique_ptr<WriteProtector> write_protector_;
+  partition_alloc::StatsReporter* stats_reporter_ = nullptr;
 
   bool is_initialized_ = false;
 };
 
-}  // namespace internal
+}  // namespace partition_alloc::internal
 
-}  // namespace base
+// TODO(crbug.com/1288247): Remove this when migration is complete.
+namespace base::internal {
+
+using ::partition_alloc::internal::PCScanInternal;
+
+}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_PCSCAN_INTERNAL_H_

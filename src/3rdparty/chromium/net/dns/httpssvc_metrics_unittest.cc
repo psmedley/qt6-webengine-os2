@@ -43,9 +43,7 @@ using MetricsTestParamTuple = std::tuple<bool, HttpssvcFeatureTuple>;
 // Create a comma-separated list of |domains| with the given |quirks|.
 std::string FlattenDomainList(const std::vector<std::string>& domains,
                               DomainListQuirksTuple quirks) {
-  int num_domains;
-  bool leading_comma, trailing_comma;
-  std::tie(num_domains, leading_comma, trailing_comma) = quirks;
+  auto [num_domains, leading_comma, trailing_comma] = quirks;
 
   CHECK_EQ(static_cast<size_t>(num_domains), domains.size());
   std::string flattened = base::JoinString(domains, ",");
@@ -111,11 +109,8 @@ class HttpssvcDomainParsingTest
     : public ::testing::TestWithParam<ParsingTestParamTuple> {
  public:
   void SetUp() override {
-    DomainListQuirksTuple domain_quirks_experimental;
-    DomainListQuirksTuple domain_quirks_control;
-    HttpssvcFeatureTuple httpssvc_feature;
-    std::tie(domain_quirks_experimental, domain_quirks_control,
-             httpssvc_feature) = GetParam();
+    auto [domain_quirks_experimental, domain_quirks_control, httpssvc_feature] =
+        GetParam();
 
     expected_experiment_domains_ = GenerateDomainList(
         "experiment", std::get<0>(domain_quirks_experimental));
@@ -382,7 +377,7 @@ TEST_P(HttpssvcDomainParsingTest, ParseFeatureParamIntegrityDomains) {
 
 // Only record metrics for a non-integrity query.
 TEST_P(HttpssvcMetricsTest, AddressAndExperimentalMissing) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForAddressQuery(absl::nullopt, kResolveTime,
                                HttpssvcDnsRcode::kNoError);
@@ -396,9 +391,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndExperimentalMissing) {
 }
 
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntact) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kNoError, {true},
                             kResolveTimeIntegrity);
@@ -432,9 +426,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntact) {
 }
 
 TEST_P(HttpssvcMetricsTest, AddressAndHttpsParsable) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForHttps(absl::nullopt, HttpssvcDnsRcode::kNoError, {true},
                         kResolveTimeHttps);
@@ -469,11 +462,9 @@ TEST_P(HttpssvcMetricsTest, AddressAndHttpsParsable) {
 }
 
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntactAndHttpsParsable) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(20);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(20);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kNoError, {true},
                             kResolveTimeIntegrity);
@@ -520,9 +511,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntactAndHttpsParsable) {
 // This test simulates an INTEGRITY response that includes no INTEGRITY records,
 // but does have an error value for the RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityMissingWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
 
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {},
@@ -560,9 +550,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityMissingWithRcode) {
 // This test simulates an HTTPS response that includes no HTTPS records,
 // but does have an error value for the RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndHttpsMissingWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(15);
 
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForHttps(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {},
@@ -600,9 +589,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndHttpsMissingWithRcode) {
 // This test simulates an INTEGRITY response that includes an intact INTEGRITY
 // record, but also has an error RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntactWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
 
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {true},
@@ -641,9 +629,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityIntactWithRcode) {
 // This test simulates an HTTPS response that includes a parsable HTTPS
 // record, but also has an error RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndHttpsParsableWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(15);
 
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForHttps(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {true},
@@ -684,9 +671,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndHttpsParsableWithRcode) {
 // This test simulates an INTEGRITY response that includes a mangled INTEGRITY
 // record *and* has an error RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityMangledWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {false},
                             kResolveTimeIntegrity);
@@ -724,9 +710,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityMangledWithRcode) {
 // This test simulates an HTTPS response that includes a mangled HTTPS
 // record *and* has an error RCODE.
 TEST_P(HttpssvcMetricsTest, AddressAndHttpsMangledWithRcode) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForHttps(absl::nullopt, HttpssvcDnsRcode::kNxDomain, {false},
                         kResolveTimeHttps);
@@ -766,9 +751,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndHttpsMangledWithRcode) {
 // This test simulates successful address queries and an INTEGRITY query that
 // timed out.
 TEST_P(HttpssvcMetricsTest, AddressAndIntegrityTimedOut) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeIntegrity =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeIntegrity = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForIntegrity(absl::nullopt, HttpssvcDnsRcode::kTimedOut, {},
                             kResolveTimeIntegrity);
@@ -806,9 +790,8 @@ TEST_P(HttpssvcMetricsTest, AddressAndIntegrityTimedOut) {
 // This test simulates successful address queries and an HTTPS query that
 // timed out.
 TEST_P(HttpssvcMetricsTest, AddressAndHttpsTimedOut) {
-  const base::TimeDelta kResolveTime = base::TimeDelta::FromMilliseconds(10);
-  const base::TimeDelta kResolveTimeHttps =
-      base::TimeDelta::FromMilliseconds(15);
+  const base::TimeDelta kResolveTime = base::Milliseconds(10);
+  const base::TimeDelta kResolveTimeHttps = base::Milliseconds(15);
   absl::optional<HttpssvcMetrics> metrics(querying_experimental_);
   metrics->SaveForHttps(absl::nullopt, HttpssvcDnsRcode::kTimedOut, {},
                         kResolveTimeHttps);

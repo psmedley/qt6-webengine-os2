@@ -16,10 +16,11 @@
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/gfx/font_list.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
-#include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/label.h"
 #include "ui/views/view_class_properties.h"
 
@@ -185,6 +186,18 @@ void StyledLabel::SetAutoColorReadabilityEnabled(bool auto_color_readability) {
 
   auto_color_readability_enabled_ = auto_color_readability;
   OnPropertyChanged(&auto_color_readability_enabled_, kPropertyEffectsPaint);
+}
+
+bool StyledLabel::GetSubpixelRenderingEnabled() const {
+  return subpixel_rendering_enabled_;
+}
+
+void StyledLabel::SetSubpixelRenderingEnabled(bool subpixel_rendering_enabled) {
+  if (subpixel_rendering_enabled_ == subpixel_rendering_enabled)
+    return;
+
+  subpixel_rendering_enabled_ = subpixel_rendering_enabled;
+  OnPropertyChanged(&subpixel_rendering_enabled_, kPropertyEffectsPaint);
 }
 
 const StyledLabel::LayoutSizeInfo& StyledLabel::GetLayoutSizeInfoForWidth(
@@ -546,14 +559,13 @@ std::unique_ptr<Label> StyledLabel::CreateLabel(
   if (displayed_on_background_color_)
     result->SetBackgroundColor(displayed_on_background_color_.value());
   result->SetAutoColorReadabilityEnabled(auto_color_readability_enabled_);
-
+  result->SetSubpixelRenderingEnabled(subpixel_rendering_enabled_);
   return result;
 }
 
 void StyledLabel::UpdateLabelBackgroundColor() {
-  SkColor new_color =
-      displayed_on_background_color_.value_or(GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_DialogBackground));
+  SkColor new_color = displayed_on_background_color_.value_or(
+      GetColorProvider()->GetColor(ui::kColorDialogBackground));
   for (View* child : children()) {
     if (!child->GetProperty(kStyledLabelCustomViewKey)) {
       // TODO(kylixrd): Should updating the label background color even be

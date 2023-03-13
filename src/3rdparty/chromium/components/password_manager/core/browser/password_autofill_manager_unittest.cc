@@ -33,6 +33,7 @@
 #include "components/device_reauth/mock_biometric_authenticator.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
 #include "components/password_manager/core/browser/mock_password_feature_manager.h"
+#include "components/password_manager/core/browser/mock_webauthn_credentials_delegate.h"
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/stub_password_manager_client.h"
@@ -45,12 +46,13 @@
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_unittest_util.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
@@ -83,6 +85,7 @@ using testing::Field;
 using testing::Invoke;
 using testing::NiceMock;
 using testing::Return;
+using testing::ReturnRef;
 using testing::SizeIs;
 using testing::Unused;
 
@@ -175,6 +178,10 @@ class TestPasswordManagerClient : public StubPasswordManagerClient {
   MOCK_METHOD(void,
               NavigateToManagePasswordsPage,
               (ManagePasswordsReferrer),
+              (override));
+  MOCK_METHOD(WebAuthnCredentialsDelegate*,
+              GetWebAuthnCredentialsDelegate,
+              (),
               (override));
 
  private:
@@ -305,6 +312,13 @@ class PasswordAutofillManagerTest : public testing::Test {
     testing::Mock::VerifyAndClearExpectations(client);
     // Suppress the warnings in the tests.
     EXPECT_CALL(*client, GetFaviconService()).WillRepeatedly(Return(nullptr));
+
+    webauthn_credentials_delegate_ =
+        std::make_unique<MockWebAuthnCredentialsDelegate>();
+    ON_CALL(*client, GetWebAuthnCredentialsDelegate)
+        .WillByDefault(Return(webauthn_credentials_delegate_.get()));
+    ON_CALL(*webauthn_credentials_delegate_, IsWebAuthnAutofillEnabled)
+        .WillByDefault(Return(false));
   }
 
   autofill::PasswordFormFillData CreateTestFormFillData() {
@@ -337,6 +351,9 @@ class PasswordAutofillManagerTest : public testing::Test {
 
   scoped_refptr<device_reauth::MockBiometricAuthenticator> authenticator_ =
       base::MakeRefCounted<device_reauth::MockBiometricAuthenticator>();
+
+  std::unique_ptr<MockWebAuthnCredentialsDelegate>
+      webauthn_credentials_delegate_;
 
   std::u16string test_username_;
   std::u16string test_password_;
@@ -1209,8 +1226,8 @@ TEST_F(PasswordAutofillManagerTest, PreviewAndFillEmptyUsernameSuggestion) {
   // Check that preview of the empty username works.
   EXPECT_CALL(*client.mock_driver(),
               PreviewSuggestion(std::u16string(), test_password_));
-  password_autofill_manager_->DidSelectSuggestion(no_username_string,
-                                                  0 /*not used*/);
+  password_autofill_manager_->DidSelectSuggestion(
+      no_username_string, 0 /*not used*/, std::string() /*not used*/);
   testing::Mock::VerifyAndClearExpectations(client.mock_driver());
 
   // Check that fill of the empty username works.
@@ -1471,7 +1488,7 @@ TEST_F(PasswordAutofillManagerTest, DisplayAccountSuggestionsIndicatorIcon) {
       autofill::ShowPasswordSuggestionsOptions(), element_bounds);
   ASSERT_THAT(open_args.suggestions.size(),
               testing::Ge(1u));  // No footer on Android.
-  EXPECT_THAT(open_args.suggestions[0].store_indicator_icon, "google");
+  EXPECT_THAT(open_args.suggestions[0].trailing_icon, "google");
   EXPECT_FALSE(open_args.autoselect_first_suggestion);
   EXPECT_EQ(open_args.popup_type, PopupType::kPasswords);
 }
@@ -1510,7 +1527,8 @@ TEST_F(PasswordAutofillManagerTest, FillsSuggestionIfAuthNotAvailable) {
                 FillSuggestion(test_username_, test_password_));
 
     // The authenticator exists, but cannot be used for authentication.
-    EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+    EXPECT_CALL(*authenticator_.get(),
+                CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
         .WillOnce(Return(BiometricsAvailability::kNoHardware));
 
     // Accept the suggestion to start the filing process which tries to
@@ -1562,7 +1580,8 @@ TEST_F(PasswordAutofillManagerTest, FillsSuggestionIfAuthSuccessful) {
         HideAutofillPopup(autofill::PopupHidingReason::kAcceptSuggestion));
 
     // The authenticator exists and is available.
-    EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+    EXPECT_CALL(*authenticator_.get(),
+                CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
         .WillOnce(Return(BiometricsAvailability::kAvailable));
     EXPECT_CALL(*authenticator_.get(),
                 Authenticate(BiometricAuthRequester::kAutofillSuggestion, _))
@@ -1617,7 +1636,8 @@ TEST_F(PasswordAutofillManagerTest, DoesntFillSuggestionIfAuthFailed) {
         HideAutofillPopup(autofill::PopupHidingReason::kAcceptSuggestion));
 
     // The authenticator exists and is available.
-    EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+    EXPECT_CALL(*authenticator_.get(),
+                CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
         .WillOnce(Return(BiometricsAvailability::kAvailable));
     EXPECT_CALL(*authenticator_.get(),
                 Authenticate(BiometricAuthRequester::kAutofillSuggestion, _))
@@ -1659,7 +1679,8 @@ TEST_F(PasswordAutofillManagerTest, CancelsOngoingBiometricAuthOnDestroy) {
       .Times(0);
 
   // The authenticator exists and is available.
-  EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+  EXPECT_CALL(*authenticator_.get(),
+              CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
       .WillOnce(Return(BiometricsAvailability::kAvailable));
   EXPECT_CALL(*authenticator_.get(),
               Authenticate(BiometricAuthRequester::kAutofillSuggestion, _));
@@ -1702,7 +1723,8 @@ TEST_F(PasswordAutofillManagerTest,
       .Times(0);
 
   // The authenticator exists and is available.
-  EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+  EXPECT_CALL(*authenticator_.get(),
+              CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
       .WillOnce(Return(BiometricsAvailability::kAvailable));
   EXPECT_CALL(*authenticator_.get(),
               Authenticate(BiometricAuthRequester::kAutofillSuggestion, _));
@@ -1746,7 +1768,8 @@ TEST_F(PasswordAutofillManagerTest,
       .Times(0);
 
   // The authenticator exists and is available.
-  EXPECT_CALL(*authenticator_.get(), CanAuthenticate())
+  EXPECT_CALL(*authenticator_.get(),
+              CanAuthenticate(BiometricAuthRequester::kAutofillSuggestion))
       .WillOnce(Return(BiometricsAvailability::kAvailable));
   EXPECT_CALL(*authenticator_.get(),
               Authenticate(BiometricAuthRequester::kAutofillSuggestion, _));
@@ -1759,6 +1782,67 @@ TEST_F(PasswordAutofillManagerTest,
   EXPECT_CALL(*authenticator_.get(),
               Cancel(BiometricAuthRequester::kAutofillSuggestion));
   password_autofill_manager_->OnAddPasswordFillData(CreateTestFormFillData());
+}
+
+TEST_F(PasswordAutofillManagerTest, ShowsWebAuthnSuggestions) {
+  TestPasswordManagerClient client;
+  NiceMock<MockAutofillClient> autofill_client;
+  MockWebAuthnCredentialsDelegate webauthn_credentials_delegate;
+  InitializePasswordAutofillManager(&client, &autofill_client);
+
+  // Return a WebAuthn credential.
+  const std::string kId = "abcd";
+  const std::u16string kName = u"nadeshiko@example.com";
+  const std::u16string kDisplayName = u"Nadeshiko Kagamihara";
+  autofill::Suggestion webauthn_credential(kDisplayName);
+  webauthn_credential.frontend_id = autofill::POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL;
+  webauthn_credential.backend_id = kId;
+  webauthn_credential.label = kName;
+  ON_CALL(webauthn_credentials_delegate, IsWebAuthnAutofillEnabled)
+      .WillByDefault(Return(true));
+  EXPECT_CALL(client, GetWebAuthnCredentialsDelegate)
+      .WillRepeatedly(Return(&webauthn_credentials_delegate));
+  auto webauthn_credential_list =
+      std::vector<autofill::Suggestion>{webauthn_credential};
+  EXPECT_CALL(webauthn_credentials_delegate, GetWebAuthnSuggestions)
+      .WillOnce(ReturnRef(webauthn_credential_list));
+
+  // Show password suggestions including WebAuthn credentials.
+  autofill::AutofillClient::PopupOpenArgs open_args;
+  EXPECT_CALL(autofill_client, ShowAutofillPopup)
+      .WillOnce(testing::SaveArg<0>(&open_args));
+  gfx::RectF element_bounds;
+  password_autofill_manager_->OnShowPasswordSuggestions(
+      base::i18n::RIGHT_TO_LEFT, /*typed_username=*/std::u16string(),
+      autofill::ShowPasswordSuggestionsOptions::ACCEPTS_WEBAUTHN_CREDENTIALS,
+      element_bounds);
+  ASSERT_THAT(open_args.suggestions,
+              SuggestionVectorIdsAre(ElementsAre(
+                  autofill::POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL,
+                  autofill::POPUP_ITEM_ID_USERNAME_ENTRY,
+                  autofill::POPUP_ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY)));
+  EXPECT_EQ(open_args.suggestions[0].backend_id, kId);
+  EXPECT_EQ(open_args.suggestions[0].frontend_id,
+            autofill::POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL);
+  EXPECT_EQ(open_args.suggestions[0].value, kDisplayName);
+  EXPECT_EQ(open_args.suggestions[0].label, kName);
+  testing::Mock::VerifyAndClearExpectations(client.mock_driver());
+
+  // Check that preview of the "username" (i.e. the credential name) works.
+  EXPECT_CALL(*client.mock_driver(),
+              PreviewSuggestion(kName, /*password=*/std::u16string(u"")));
+  password_autofill_manager_->DidSelectSuggestion(
+      kName, autofill::POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL,
+      std::string() /*not used*/);
+  testing::Mock::VerifyAndClearExpectations(client.mock_driver());
+
+  // Check that selecting the credential reports back to the client.
+  EXPECT_CALL(webauthn_credentials_delegate, SelectWebAuthnCredential(kId));
+  EXPECT_CALL(
+      autofill_client,
+      HideAutofillPopup(autofill::PopupHidingReason::kAcceptSuggestion));
+  password_autofill_manager_->DidAcceptSuggestion(
+      kName, autofill::POPUP_ITEM_ID_WEBAUTHN_CREDENTIAL, kId, /*position=*/1);
 }
 
 }  // namespace password_manager

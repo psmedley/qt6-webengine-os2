@@ -37,6 +37,9 @@ using ElementTypeMap =
 // supported by Declarative Net Request.
 class ProtoToJSONRuleConverter {
  public:
+  ProtoToJSONRuleConverter(const ProtoToJSONRuleConverter&) = delete;
+  ProtoToJSONRuleConverter& operator=(const ProtoToJSONRuleConverter&) = delete;
+
   // Returns a dictionary value corresponding to a Declarative Net Request rule
   // on success. On error, returns an empty/null value and populates |error|.
   // |error| must be non-null.
@@ -242,13 +245,16 @@ class ProtoToJSONRuleConverter {
   bool PopulateDomainsInternal(base::StringPiece sub_key, bool exclude_value) {
     base::Value domains(base::Value::Type::LIST);
 
-    for (const proto::DomainListItem& item : input_rule_.domains()) {
+    // Note: This isn't always correct. Filters consider the $domain option to
+    //       match the request domain for main_frame requests - not the
+    //       initiator domain.
+    for (const proto::DomainListItem& item : input_rule_.initiator_domains()) {
       if (item.exclude() == exclude_value)
         domains.Append(item.domain());
     }
 
     // Omit empty domain list.
-    if (!domains.GetList().empty()) {
+    if (!domains.GetListDeprecated().empty()) {
       CHECK(
           json_rule_.SetPath({kRuleConditionKey, sub_key}, std::move(domains)));
     }
@@ -308,6 +314,12 @@ class ProtoToJSONRuleConverter {
           break;
         case proto::ELEMENT_TYPE_WEBSOCKET:
           resource_type = dnr_api::RESOURCE_TYPE_WEBSOCKET;
+          break;
+        case proto::ELEMENT_TYPE_WEBTRANSPORT:
+          resource_type = dnr_api::RESOURCE_TYPE_WEBTRANSPORT;
+          break;
+        case proto::ELEMENT_TYPE_WEBBUNDLE:
+          resource_type = dnr_api::RESOURCE_TYPE_WEBBUNDLE;
           break;
         case proto::ELEMENT_TYPE_ALL:
           CHECK(false);
@@ -446,8 +458,6 @@ class ProtoToJSONRuleConverter {
   int rule_id_;
   std::string error_;
   base::Value json_rule_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProtoToJSONRuleConverter);
 };
 
 // Writes rules/extension to |output_path| in the format supported by
@@ -462,6 +472,9 @@ class DNRJsonRuleOutputStream : public subresource_filter::RuleOutputStream {
         output_path_(output_path),
         write_type_(type),
         noisy_(noisy) {}
+
+  DNRJsonRuleOutputStream(const DNRJsonRuleOutputStream&) = delete;
+  DNRJsonRuleOutputStream& operator=(const DNRJsonRuleOutputStream&) = delete;
 
   bool PutUrlRule(const proto::UrlRule& rule) override {
     std::string error;
@@ -513,8 +526,6 @@ class DNRJsonRuleOutputStream : public subresource_filter::RuleOutputStream {
   const base::FilePath output_path_;
   const filter_list_converter::WriteType write_type_;
   const bool noisy_;
-
-  DISALLOW_COPY_AND_ASSIGN(DNRJsonRuleOutputStream);
 };
 
 }  // namespace

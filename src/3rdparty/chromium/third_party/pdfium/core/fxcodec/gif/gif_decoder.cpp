@@ -7,7 +7,6 @@
 #include "core/fxcodec/gif/gif_decoder.h"
 
 #include "core/fxcodec/cfx_codec_memory.h"
-#include "core/fxcodec/fx_codec.h"
 #include "core/fxcodec/gif/cfx_gifcontext.h"
 #include "core/fxge/dib/fx_dib.h"
 
@@ -66,8 +65,7 @@ FX_FILESIZE GifDecoder::GetAvailInput(
 
 // static
 bool GifDecoder::Input(ProgressiveDecoderIface::Context* pContext,
-                       RetainPtr<CFX_CodecMemory> codec_memory,
-                       CFX_DIBAttribute*) {
+                       RetainPtr<CFX_CodecMemory> codec_memory) {
   auto* ctx = static_cast<CFX_GifContext*>(pContext);
   ctx->SetInputBuffer(std::move(codec_memory));
   return true;

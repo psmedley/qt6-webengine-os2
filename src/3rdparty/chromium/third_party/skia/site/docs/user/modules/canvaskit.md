@@ -63,7 +63,7 @@ Skia's [Lottie animation](https://skia.org/docs/user/modules/skottie) support.
   <figure>
     <canvas id=shader1 width=512 height=512></canvas>
     <figcaption>
-      <a href="https://jsfiddle.skia.org/canvaskit/b382d3b660c4f314eb6a6eae9c0f1e0aadc95c0a2747b707e0dbe3f65a8b0a14"
+      <a href="https://jsfiddle.skia.org/canvaskit/ac0574825f9e517f2dfa8e822126ee75b005e8156c3de4a95d4ffd17ab6ca57b"
           target=_blank rel=noopener>
         Shader JSFiddle</a>
     </figcaption>
@@ -71,7 +71,7 @@ Skia's [Lottie animation](https://skia.org/docs/user/modules/skottie) support.
   <figure>
     <canvas id=camera3d width=400 height=400></canvas>
     <figcaption>
-      <a href="https://jsfiddle.skia.org/canvaskit/a5f9e976f1af65ef13bd978a5e265bdcb92110f5e64699fba5e8871c54be22b6"
+      <a href="https://jsfiddle.skia.org/canvaskit/289946b783390c3242cb5cc117d7bcaf2bcb610bf3d1e67a1dd9c46c1e66b968"
           target=_blank rel=noopener>
         3D Cube JSFiddle</a>
     </figcaption>
@@ -479,8 +479,7 @@ half4 main(float2 p) {
         Math.sin(Date.now() / 2000) / 5,
         256, 256,
         1, 0, 0, 1,
-        0, 1, 0, 1],
-        true/*=opaque*/);
+        0, 1, 0, 1]);
 
       paint.setShader(shader);
       canvas.drawRect(CanvasKit.LTRBRect(0, 0, 512, 512), paint);
@@ -559,7 +558,7 @@ half4 main(float2 p) {
       }
 
       half4 main(float2 p) {
-        float3 norm = convert_normal_sample(sample(normal_map, p));
+        float3 norm = convert_normal_sample(normal_map.eval(p));
         float3 plane_norm = normalize(localToWorldAdjInv * float4(norm, 0)).xyz;
 
         float3 plane_pos = (localToWorld * float4(p, 0, 1)).xyz;
@@ -569,7 +568,7 @@ half4 main(float2 p) {
         float dp = dot(plane_norm, light_dir);
         float scale = min(ambient + max(dp, 0), 1);
 
-        return sample(color_map, p) * half4(float4(scale, scale, scale, 1));
+        return color_map.eval(p) * half4(float4(scale, scale, scale, 1));
       }
 `;
 
@@ -660,7 +659,7 @@ half4 main(float2 p) {
       const uniforms = [...lightWorldPos, ...localToWorld, ...normalMatrix(localToWorld)];
       const paint = new CanvasKit.Paint();
       paint.setAntiAlias(true);
-      const shader = fact.makeShaderWithChildren(uniforms, true /*=opaque*/, children);
+      const shader = fact.makeShaderWithChildren(uniforms, children);
       paint.setShader(shader);
       canvas.drawRRect(rr, paint);
     }
@@ -819,6 +818,6 @@ Test your code on our [CanvasKit Fiddle](https://jsfiddle.skia.org/canvaskit)
 Get [CanvasKit on NPM](https://www.npmjs.com/package/canvaskit-wasm).
 Documentation and Typescript definitions are available in the `types/` subfolder
 of the npm package or from the
-[Skia repo](https://github.com/google/skia/tree/master/modules/canvaskit/npm_build/types).
+[Skia repo](https://github.com/google/skia/tree/main/modules/canvaskit/npm_build/types).
 
 Check out the [quickstart guide](../quickstart) as well.

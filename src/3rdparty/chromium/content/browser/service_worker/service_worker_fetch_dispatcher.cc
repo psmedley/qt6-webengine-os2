@@ -12,6 +12,7 @@
 #include "base/callback_helpers.h"
 #include "base/containers/queue.h"
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -99,6 +100,11 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
     AddDevToolsCallback(
         base::BindOnce(&NotifyNavigationPreloadRequestSent, request));
   }
+
+  DelegatingURLLoaderClient(const DelegatingURLLoaderClient&) = delete;
+  DelegatingURLLoaderClient& operator=(const DelegatingURLLoaderClient&) =
+      delete;
+
   ~DelegatingURLLoaderClient() override {
     if (!completed_) {
       // Let the service worker know that the request has been canceled.
@@ -133,7 +139,8 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override {
     client_->OnReceiveEarlyHints(std::move(early_hints));
   }
-  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head) override {
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr head,
+                         mojo::ScopedDataPipeConsumerHandle body) override {
     if (devtools_enabled_) {
       // Make a deep copy of URLResponseHead before posting it to a task.
       auto deep_copied_response = head.Clone();
@@ -146,7 +153,7 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
           base::BindOnce(&NotifyNavigationPreloadResponseReceived, url_,
                          std::move(deep_copied_response)));
     }
-    client_->OnReceiveResponse(std::move(head));
+    client_->OnReceiveResponse(std::move(head), std::move(body));
   }
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          network::mojom::URLResponseHeadPtr head) override {
@@ -220,7 +227,6 @@ class DelegatingURLLoaderClient final : public network::mojom::URLLoaderClient {
   std::string devtools_request_id_;
   base::queue<base::OnceCallback<void(const WorkerId&, const std::string&)>>
       devtools_callbacks;
-  DISALLOW_COPY_AND_ASSIGN(DelegatingURLLoaderClient);
 };
 
 using EventType = ServiceWorkerMetrics::EventType;
@@ -231,6 +237,8 @@ EventType RequestDestinationToEventType(
       return EventType::FETCH_MAIN_FRAME;
     case network::mojom::RequestDestination::kIframe:
       return EventType::FETCH_SUB_FRAME;
+    case network::mojom::RequestDestination::kFencedframe:
+      return EventType::FETCH_FENCED_FRAME;
     case network::mojom::RequestDestination::kSharedWorker:
       return EventType::FETCH_SHARED_WORKER;
     case network::mojom::RequestDestination::kServiceWorker:
@@ -267,20 +275,20 @@ const net::NetworkTrafficAnnotationTag kNavigationPreloadTrafficAnnotation =
         "be done by disabling cookie and site data under Settings, Content "
         "Settings, Cookies."
       chrome_policy {
-        URLBlacklist {
-          URLBlacklist: { entries: '*' }
+        URLBlocklist {
+          URLBlocklist: { entries: '*' }
         }
       }
       chrome_policy {
-        URLWhitelist {
-          URLWhitelist { }
+        URLAllowlist {
+          URLAllowlist { }
         }
       }
     }
     comments:
       "Chrome would be unable to use service workers if this feature were "
       "disabled, which could result in a degraded experience for websites that "
-      "register a service worker. Using either URLBlacklist or URLWhitelist "
+      "register a service worker. Using either URLBlocklist or URLAllowlist "
       "policies (or a combination of both) limits the scope of these requests."
 )");
 
@@ -361,6 +369,9 @@ class ServiceWorkerFetchDispatcher::ResponseCallback
         &ResponseCallback::OnDisconnected, base::Unretained(this)));
   }
 
+  ResponseCallback(const ResponseCallback&) = delete;
+  ResponseCallback& operator=(const ResponseCallback&) = delete;
+
   ~ResponseCallback() override { DCHECK(fetch_event_id_.has_value()); }
 
   void set_fetch_event_id(int id) {
@@ -426,13 +437,11 @@ class ServiceWorkerFetchDispatcher::ResponseCallback
   mojo::Receiver<blink::mojom::ServiceWorkerFetchResponseCallback> receiver_;
   base::WeakPtr<ServiceWorkerFetchDispatcher> fetch_dispatcher_;
   // Owns |this| via pending_requests_.
-  ServiceWorkerVersion* version_;
+  raw_ptr<ServiceWorkerVersion> version_;
   // Must be set to a non-nullopt value before the corresponding mojo
   // handle is passed to the other end (i.e. before any of OnResponse*
   // is called).
   absl::optional<int> fetch_event_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResponseCallback);
 };
 
 // This class keeps the URL loader related assets alive while the FetchEvent is
@@ -455,6 +464,9 @@ class ServiceWorkerFetchDispatcher::URLLoaderAssets
         url_loader_(std::move(url_loader)),
         url_loader_client_(std::move(url_loader_client)) {}
 
+  URLLoaderAssets(const URLLoaderAssets&) = delete;
+  URLLoaderAssets& operator=(const URLLoaderAssets&) = delete;
+
   void MaybeReportToDevTools(std::pair<int, int> worker_id,
                              int fetch_event_id) {
     url_loader_client_->MaybeReportToDevTools(worker_id, fetch_event_id);
@@ -473,8 +485,6 @@ class ServiceWorkerFetchDispatcher::URLLoaderAssets
 
   // Both:
   std::unique_ptr<DelegatingURLLoaderClient> url_loader_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLLoaderAssets);
 };
 
 ServiceWorkerFetchDispatcher::ServiceWorkerFetchDispatcher(
@@ -713,7 +723,8 @@ bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
     int frame_tree_node_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (destination_ != network::mojom::RequestDestination::kDocument &&
-      destination_ != network::mojom::RequestDestination::kIframe) {
+      destination_ != network::mojom::RequestDestination::kIframe &&
+      destination_ != network::mojom::RequestDestination::kFencedframe) {
     return false;
   }
   if (!version_->navigation_preload_state().enabled)
@@ -740,7 +751,8 @@ bool ServiceWorkerFetchDispatcher::MaybeStartNavigationPreload(
     resource_request.resource_type = static_cast<int>(
         blink::mojom::ResourceType::kNavigationPreloadMainFrame);
   } else {
-    DCHECK_EQ(network::mojom::RequestDestination::kIframe, destination_);
+    DCHECK(destination_ == network::mojom::RequestDestination::kIframe ||
+           destination_ == network::mojom::RequestDestination::kFencedframe);
     resource_request.resource_type = static_cast<int>(
         blink::mojom::ResourceType::kNavigationPreloadSubFrame);
   }

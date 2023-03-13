@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/avstring.h"
 #include "libavutil/internal.h"
 #include "libavutil/opt.h"
@@ -167,6 +169,8 @@ static int file_check(URLContext *h, int mask)
     return ret;
 }
 
+#if CONFIG_FILE_PROTOCOL
+
 static int file_delete(URLContext *h)
 {
 #if HAVE_UNISTD_H
@@ -202,8 +206,6 @@ static int file_move(URLContext *h_src, URLContext *h_dst)
 
     return 0;
 }
-
-#if CONFIG_FILE_PROTOCOL
 
 static int file_open(URLContext *h, const char *filename, int flags)
 {
@@ -266,7 +268,8 @@ static int64_t file_seek(URLContext *h, int64_t pos, int whence)
 static int file_close(URLContext *h)
 {
     FileContext *c = h->priv_data;
-    return close(c->fd);
+    int ret = close(c->fd);
+    return (ret == -1) ? AVERROR(errno) : 0;
 }
 
 static int file_open_dir(URLContext *h)

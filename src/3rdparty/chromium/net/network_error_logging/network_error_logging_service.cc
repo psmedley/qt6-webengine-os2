@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/time/clock.h"
@@ -128,7 +128,7 @@ const struct {
 void GetPhaseAndTypeFromNetError(Error error,
                                  std::string* phase_out,
                                  std::string* type_out) {
-  for (size_t i = 0; i < base::size(kErrorTypes); ++i) {
+  for (size_t i = 0; i < std::size(kErrorTypes); ++i) {
     DCHECK(kErrorTypes[i].phase != nullptr);
     DCHECK(kErrorTypes[i].type != nullptr);
     if (kErrorTypes[i].error == error) {
@@ -227,8 +227,9 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
         base::Unretained(this), std::move(details), request_received_time));
   }
 
-  void RemoveBrowsingData(const base::RepeatingCallback<bool(const GURL&)>&
-                              origin_filter) override {
+  void RemoveBrowsingData(
+      const base::RepeatingCallback<bool(const url::Origin&)>& origin_filter)
+      override {
     // base::Unretained is safe because the callback gets stored in
     // task_backlog_, so the callback will not outlive |*this|.
     DoOrBacklogTask(
@@ -319,7 +320,7 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
   // null. If |store_| is null, then NEL policies will be in-memory only.
   // The store is owned by the URLRequestContext because Reporting also needs
   // access to it.
-  PersistentNelStore* store_;
+  raw_ptr<PersistentNelStore> store_;
 
   // Set to true when we have told the store to load NEL policies. This is to
   // make sure we don't try to load policies multiple times.
@@ -489,9 +490,11 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
              << ", depth=" << details.reporting_upload_depth << ") for "
              << details.uri;
 
+    // A null reporting source token is used since this report is not associated
+    // with any particular document.
     reporting_service_->QueueReport(
-        details.uri, details.network_isolation_key, details.user_agent,
-        policy->report_to, kReportType,
+        details.uri, absl::nullopt, details.network_isolation_key,
+        details.user_agent, policy->report_to, kReportType,
         CreateReportBody(phase_string, type_string, sampling_fraction.value(),
                          details),
         details.reporting_upload_depth);
@@ -537,21 +540,23 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
       return;
     }
 
+    // A null reporting source token is used since this report is not associated
+    // with any particular document.
     reporting_service_->QueueReport(
-        details.outer_url, details.network_isolation_key, details.user_agent,
-        policy->report_to, kReportType,
+        details.outer_url, absl::nullopt, details.network_isolation_key,
+        details.user_agent, policy->report_to, kReportType,
         CreateSignedExchangeReportBody(details, sampling_fraction.value()),
         0 /* depth */);
     RecordSignedExchangeRequestOutcome(RequestOutcome::kQueued);
   }
 
   void DoRemoveBrowsingData(
-      const base::RepeatingCallback<bool(const GURL&)>& origin_filter) {
+      const base::RepeatingCallback<bool(const url::Origin&)>& origin_filter) {
     DCHECK(initialized_);
     for (auto it = policies_.begin(); it != policies_.end();) {
       const NelPolicyKey& key = it->first;
       // Remove policies matching the filter.
-      if (origin_filter.Run(key.origin.GetURL())) {
+      if (origin_filter.Run(key.origin)) {
         it = RemovePolicy(it);
       } else {
         ++it;
@@ -629,9 +634,8 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
     policy_out->include_subdomains = include_subdomains;
     policy_out->success_fraction = success_fraction;
     policy_out->failure_fraction = failure_fraction;
-    policy_out->expires = max_age_sec > 0
-                              ? now + base::TimeDelta::FromSeconds(max_age_sec)
-                              : base::Time();
+    policy_out->expires =
+        max_age_sec > 0 ? now + base::Seconds(max_age_sec) : base::Time();
     return true;
   }
 
@@ -803,7 +807,8 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
     body->SetInteger(kStatusCodeKey, details.status_code);
     body->SetInteger(kElapsedTimeKey, details.elapsed_time.InMilliseconds());
 
-    auto sxg_body = std::make_unique<base::DictionaryValue>();
+    auto* sxg_body = body->SetKey(kSignedExchangeBodyKey,
+                                  base::Value(base::Value::Type::DICTIONARY));
     sxg_body->SetKey(kOuterUrlKey, base::Value(details.outer_url.spec()));
     if (details.inner_url.is_valid())
       sxg_body->SetKey(kInnerUrlKey, base::Value(details.inner_url.spec()));
@@ -812,7 +817,6 @@ class NetworkErrorLoggingServiceImpl : public NetworkErrorLoggingService {
     if (details.cert_url.is_valid())
       cert_url_list.Append(base::Value(details.cert_url.spec()));
     sxg_body->SetKey(kCertUrlKey, std::move(cert_url_list));
-    body->SetDictionary(kSignedExchangeBodyKey, std::move(sxg_body));
 
     return std::move(body);
   }

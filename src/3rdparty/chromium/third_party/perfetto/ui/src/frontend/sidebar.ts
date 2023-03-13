@@ -31,6 +31,7 @@ import {
   openFileWithLegacyTraceViewer,
 } from './legacy_trace_viewer';
 import {showModal} from './modal';
+import {Router} from './router';
 import {isDownloadable, isShareable} from './trace_attrs';
 import {
   convertToJson,
@@ -99,10 +100,12 @@ const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
 select query,
     round((max(ended - started, 0))/1e6) as runtime_ms,
-    round((max(started - queued, 0))/1e6) as latency_ms,
     round((started - first.ts)/1e6) as t_start_ms
 from sqlstats, first
 order by started desc`;
+
+const GITILES_URL =
+    'https://android.googlesource.com/platform/external/perfetto';
 
 let lastTabTitle = '';
 
@@ -251,66 +254,55 @@ const SECTIONS: Section[] = [
   },
 
   {
-    title: 'Sample queries',
-    summary: 'Compute summary statistics',
+    title: 'Support',
+    expanded: true,
+    summary: 'Documentation & Bugs',
     items: [
+      {t: 'Keyboard shortcuts', a: openHelp, i: 'help'},
+      {t: 'Documentation', a: 'https://perfetto.dev', i: 'find_in_page'},
+      {t: 'Flags', a: navigateFlags, i: 'emoji_flags'},
       {
-        t: 'Show Debug Track',
-        a: showDebugTrack(),
-        i: 'view_day',
-      },
-      {
-        t: 'All Processes',
-        a: createCannedQuery(ALL_PROCESSES_QUERY),
-        i: 'search',
-      },
-      {
-        t: 'CPU Time by process',
-        a: createCannedQuery(CPU_TIME_FOR_PROCESSES),
-        i: 'search',
-      },
-      {
-        t: 'Cycles by p-state by CPU',
-        a: createCannedQuery(CYCLES_PER_P_STATE_PER_CPU),
-        i: 'search',
-      },
-      {
-        t: 'CPU Time by CPU by process',
-        a: createCannedQuery(CPU_TIME_BY_CPU_BY_PROCESS),
-        i: 'search',
-      },
-      {
-        t: 'Heap Graph: Bytes per type',
-        a: createCannedQuery(HEAP_GRAPH_BYTES_PER_TYPE),
-        i: 'search',
-      },
-      {
-        t: 'Debug SQL performance',
-        a: createCannedQuery(SQL_STATS),
-        i: 'bug_report',
+        t: 'Report a bug',
+        a: 'https://goto.google.com/perfetto-ui-bug',
+        i: 'bug_report'
       },
     ],
   },
 
   {
-    title: 'Support',
-    summary: 'Documentation & Bugs',
+    title: 'Sample queries',
+    summary: 'Compute summary statistics',
     items: [
+      {t: 'Show Debug Track', a: showDebugTrack(), i: 'view_day'},
       {
-        t: 'Controls',
-        a: openHelp,
-        i: 'help',
+        t: 'All Processes',
+        a: createCannedQuery(ALL_PROCESSES_QUERY),
+        i: 'search'
       },
       {
-        t: 'Documentation',
-        a: 'https://perfetto.dev',
-        i: 'find_in_page',
+        t: 'CPU Time by process',
+        a: createCannedQuery(CPU_TIME_FOR_PROCESSES),
+        i: 'search'
       },
-      {t: 'Flags', a: navigateFlags, i: 'emoji_flags'},
       {
-        t: 'Report a bug',
-        a: 'https://goto.google.com/perfetto-ui-bug',
-        i: 'bug_report',
+        t: 'Cycles by p-state by CPU',
+        a: createCannedQuery(CYCLES_PER_P_STATE_PER_CPU),
+        i: 'search'
+      },
+      {
+        t: 'CPU Time by CPU by process',
+        a: createCannedQuery(CPU_TIME_BY_CPU_BY_PROCESS),
+        i: 'search'
+      },
+      {
+        t: 'Heap Graph: Bytes per type',
+        a: createCannedQuery(HEAP_GRAPH_BYTES_PER_TYPE),
+        i: 'search'
+      },
+      {
+        t: 'Debug SQL performance',
+        a: createCannedQuery(SQL_STATS),
+        i: 'bug_report'
       },
     ],
   },
@@ -418,7 +410,7 @@ function convertTraceToJson(e: Event) {
       });
 }
 
-function isTraceLoaded(): boolean {
+export function isTraceLoaded(): boolean {
   const engine = Object.values(globals.state.engines)[0];
   return engine !== undefined;
 }
@@ -427,7 +419,6 @@ function openTraceUrl(url: string): (e: Event) => void {
   return e => {
     globals.logging.logEvent('Trace Actions', 'Open example trace');
     e.preventDefault();
-    globals.frontendLocalState.localOnlyMode = false;
     globals.dispatch(Actions.openTraceFromUrl({url}));
   };
 }
@@ -440,8 +431,6 @@ function onInputElementFileSelectionChanged(e: Event) {
   const file = e.target.files[0];
   // Reset the value so onchange will be fired with the same file.
   e.target.value = '';
-
-  globals.frontendLocalState.localOnlyMode = false;
 
   if (e.target.dataset['useCatapultLegacyUi'] === '1') {
     openWithLegacyUi(file);
@@ -520,32 +509,32 @@ function openInOldUIWithSizeCheck(trace: Blob) {
 
 function navigateRecord(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/record'}));
+  Router.navigate('#!/record');
 }
 
 function navigateAnalyze(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/query'}));
+  Router.navigate('#!/query');
 }
 
 function navigateFlags(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/flags'}));
+  Router.navigate('#!/flags');
 }
 
 function navigateMetrics(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/metrics'}));
+  Router.navigate('#!/metrics');
 }
 
 function navigateInfo(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/info'}));
+  Router.navigate('#!/info');
 }
 
 function navigateViewer(e: Event) {
   e.preventDefault();
-  globals.dispatch(Actions.navigate({route: '/viewer'}));
+  Router.navigate('#!/viewer');
 }
 
 function shareTrace(e: Event) {
@@ -763,12 +752,11 @@ const SidebarFooter: m.Component = {
             '.version',
             m('a',
               {
-                href: `https://github.com/google/perfetto/tree/${
-                    version.SCM_REVISION}/ui`,
+                href: `${GITILES_URL}/+/${version.SCM_REVISION}/ui`,
                 title: `Channel: ${getCurrentChannel()}`,
                 target: '_blank',
               },
-              `${version.VERSION}`),
+              `${version.VERSION.substr(0, 11)}`),
             ),
     );
   }
@@ -793,6 +781,7 @@ export class Sidebar implements m.ClassComponent {
           href: typeof item.a === 'string' ? item.a : '#',
           target: typeof item.a === 'string' ? '_blank' : null,
           disabled: false,
+          id: item.t.toLowerCase().replace(/[^\w]/g, '_')
         };
         if (item.isPending && item.isPending()) {
           attrs.onclick = e => e.preventDefault();
@@ -810,6 +799,7 @@ export class Sidebar implements m.ClassComponent {
             href: '#',
             target: null,
             disabled: true,
+            id: ''
           };
         }
         vdomItems.push(m(

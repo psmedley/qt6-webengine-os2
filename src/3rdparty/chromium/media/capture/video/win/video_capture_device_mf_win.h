@@ -20,8 +20,8 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/queue.h"
-#include "base/macros.h"
 #include "base/sequence_checker.h"
+#include "base/synchronization/waitable_event.h"
 #include "media/base/win/dxgi_device_manager.h"
 #include "media/capture/capture_export.h"
 #include "media/capture/video/video_capture_device.h"
@@ -47,6 +47,8 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
   static VideoCaptureControlSupport GetControlSupport(
       Microsoft::WRL::ComPtr<IMFMediaSource> source);
 
+  VideoCaptureDeviceMFWin() = delete;
+
   explicit VideoCaptureDeviceMFWin(
       const VideoCaptureDeviceDescriptor& device_descriptor,
       Microsoft::WRL::ComPtr<IMFMediaSource> source,
@@ -56,6 +58,9 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
       Microsoft::WRL::ComPtr<IMFMediaSource> source,
       scoped_refptr<DXGIDeviceManager> dxgi_device_manager,
       Microsoft::WRL::ComPtr<IMFCaptureEngine> engine);
+
+  VideoCaptureDeviceMFWin(const VideoCaptureDeviceMFWin&) = delete;
+  VideoCaptureDeviceMFWin& operator=(const VideoCaptureDeviceMFWin&) = delete;
 
   ~VideoCaptureDeviceMFWin() override;
 
@@ -71,8 +76,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
   void GetPhotoState(GetPhotoStateCallback callback) override;
   void SetPhotoOptions(mojom::PhotoSettingsPtr settings,
                        SetPhotoOptionsCallback callback) override;
-  void OnUtilizationReport(int frame_feedback_id,
-                           media::VideoCaptureFeedback feedback) override;
+  void OnUtilizationReport(media::VideoCaptureFeedback feedback) override;
 
   // Captured new video data.
   void OnIncomingCapturedData(IMFMediaBuffer* buffer,
@@ -143,8 +147,12 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
       base::TimeTicks reference_time,
       base::TimeDelta timestamp,
       VideoCaptureFrameDropReason& frame_drop_reason);
+  bool RecreateMFSource();
+  void AllocateAndStartLocked(
+      const VideoCaptureParams& params,
+      std::unique_ptr<VideoCaptureDevice::Client> client);
 
-  VideoFacingMode facing_mode_;
+  VideoCaptureDeviceDescriptor device_descriptor_;
   CreateMFPhotoCallbackCB create_mf_photo_callback_;
   scoped_refptr<MFVideoCallback> video_callback_;
   bool is_initialized_;
@@ -157,7 +165,7 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
   base::Lock lock_;
 
   std::unique_ptr<VideoCaptureDevice::Client> client_;
-  const Microsoft::WRL::ComPtr<IMFMediaSource> source_;
+  Microsoft::WRL::ComPtr<IMFMediaSource> source_;
   Microsoft::WRL::ComPtr<IAMCameraControl> camera_control_;
   Microsoft::WRL::ComPtr<IAMVideoProcAmp> video_control_;
   Microsoft::WRL::ComPtr<IMFCaptureEngine> engine_;
@@ -175,12 +183,12 @@ class CAPTURE_EXPORT VideoCaptureDeviceMFWin : public VideoCaptureDevice {
   base::WaitableEvent capture_error_;
   scoped_refptr<DXGIDeviceManager> dxgi_device_manager_;
   absl::optional<int> camera_rotation_;
+  VideoCaptureParams params_;
+  int num_restarts_ = 0;
 
   media::VideoCaptureFeedback last_feedback_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_IMPLICIT_CONSTRUCTORS(VideoCaptureDeviceMFWin);
 };
 
 }  // namespace media

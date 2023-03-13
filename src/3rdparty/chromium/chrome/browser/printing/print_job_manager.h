@@ -9,11 +9,14 @@
 #include <set>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+
+namespace content {
+struct GlobalRenderFrameHostId;
+}
 
 namespace printing {
 
@@ -24,6 +27,9 @@ class PrinterQuery;
 class PrintQueriesQueue : public base::RefCountedThreadSafe<PrintQueriesQueue> {
  public:
   PrintQueriesQueue();
+
+  PrintQueriesQueue(const PrintQueriesQueue&) = delete;
+  PrintQueriesQueue& operator=(const PrintQueriesQueue&) = delete;
 
   // Queues a semi-initialized worker thread. Can be called from any thread.
   // Current use case is queuing from the I/O thread.
@@ -36,8 +42,7 @@ class PrintQueriesQueue : public base::RefCountedThreadSafe<PrintQueriesQueue> {
 
   // Creates new query. Virtual so that tests can override it.
   virtual std::unique_ptr<PrinterQuery> CreatePrinterQuery(
-      int render_process_id,
-      int render_frame_id);
+      content::GlobalRenderFrameHostId rfh_id);
 
   void Shutdown();
 
@@ -49,17 +54,19 @@ class PrintQueriesQueue : public base::RefCountedThreadSafe<PrintQueriesQueue> {
   friend class base::RefCountedThreadSafe<PrintQueriesQueue>;
   using PrinterQueries = std::vector<std::unique_ptr<PrinterQuery>>;
 
-  // Used to serialize access to |queued_queries_|.
+  // Used to serialize access to `queued_queries_`.
   base::Lock lock_;
 
   PrinterQueries queued_queries_;
-
-  DISALLOW_COPY_AND_ASSIGN(PrintQueriesQueue);
 };
 
 class PrintJobManager : public content::NotificationObserver {
  public:
   PrintJobManager();
+
+  PrintJobManager(const PrintJobManager&) = delete;
+  PrintJobManager& operator=(const PrintJobManager&) = delete;
+
   ~PrintJobManager() override;
 
   // On browser quit, we should wait to have the print job finished.
@@ -96,8 +103,6 @@ class PrintJobManager : public content::NotificationObserver {
   scoped_refptr<PrintQueriesQueue> queue_;
 
   bool is_shutdown_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(PrintJobManager);
 };
 
 }  // namespace printing

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
 
+#include "base/run_loop.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
@@ -21,6 +22,7 @@
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -29,8 +31,7 @@
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/input/context_menu_allowed_scope.h"
 #include "third_party/blink/renderer/core/page/context_menu_controller.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_descriptor.h"
 #include "third_party/blink/renderer/platform/testing/empty_web_media_player.h"
@@ -39,6 +40,7 @@
 #include "third_party/blink/renderer/platform/testing/weburl_loader_mock.h"
 #include "third_party/blink/renderer/platform/testing/weburl_loader_mock_factory_impl.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "ui/gfx/geometry/rect.h"
 
 using testing::Return;
 
@@ -644,7 +646,7 @@ TEST_P(ContextMenuControllerTest, ShowNonLocatedContextMenuEvent) {
   EXPECT_EQ(context_menu_data.selected_text, "Sample Input Text");
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 // Mac has no way to open a context menu based on a keyboard event.
 TEST_P(ContextMenuControllerTest,
        ValidateNonLocatedContextMenuOnLargeImageElement) {
@@ -698,14 +700,14 @@ TEST_P(ContextMenuControllerTest, SelectionRectClipped) {
   EXPECT_EQ(context_menu_data.selected_text, "Sample");
 
   // The selection rect is not clipped.
-  IntRect anchor, focus;
+  gfx::Rect anchor, focus;
   selection.ComputeAbsoluteBounds(anchor, focus);
   anchor = document->GetFrame()->View()->FrameToViewport(anchor);
   focus = document->GetFrame()->View()->FrameToViewport(focus);
-  int left = std::min(focus.X(), anchor.X());
-  int top = std::min(focus.Y(), anchor.Y());
-  int right = std::max(focus.MaxX(), anchor.MaxX());
-  int bottom = std::max(focus.MaxY(), anchor.MaxY());
+  int left = std::min(focus.x(), anchor.x());
+  int top = std::min(focus.y(), anchor.y());
+  int right = std::max(focus.right(), anchor.right());
+  int bottom = std::max(focus.bottom(), anchor.bottom());
   gfx::Rect selection_rect(left, top, right - left, bottom - top);
   EXPECT_EQ(context_menu_data.selection_rect, selection_rect);
 
@@ -717,14 +719,15 @@ TEST_P(ContextMenuControllerTest, SelectionRectClipped) {
   EXPECT_EQ(context_menu_data.selected_text, "Sample editable text");
 
   // The selection rect is clipped by the editable box.
-  IntRect clip_bound = editable_element->VisibleBoundsInVisualViewport();
+  gfx::Rect clip_bound = editable_element->VisibleBoundsInVisualViewport();
   selection.ComputeAbsoluteBounds(anchor, focus);
   anchor = document->GetFrame()->View()->FrameToViewport(anchor);
   focus = document->GetFrame()->View()->FrameToViewport(focus);
-  left = std::max(clip_bound.X(), std::min(focus.X(), anchor.X()));
-  top = std::max(clip_bound.Y(), std::min(focus.Y(), anchor.Y()));
-  right = std::min(clip_bound.MaxX(), std::max(focus.MaxX(), anchor.MaxX()));
-  bottom = std::min(clip_bound.MaxY(), std::max(focus.MaxY(), anchor.MaxY()));
+  left = std::max(clip_bound.x(), std::min(focus.x(), anchor.x()));
+  top = std::max(clip_bound.y(), std::min(focus.y(), anchor.y()));
+  right = std::min(clip_bound.right(), std::max(focus.right(), anchor.right()));
+  bottom =
+      std::min(clip_bound.bottom(), std::max(focus.bottom(), anchor.bottom()));
   selection_rect = gfx::Rect(left, top, right - left, bottom - top);
   EXPECT_EQ(context_menu_data.selection_rect, selection_rect);
 }
@@ -1711,6 +1714,34 @@ TEST_P(ContextMenuControllerTest, OpenedFromHighlight) {
   EXPECT_TRUE(ShowContextMenuForElement(third_element, kMenuSourceMouse));
   context_menu_data = GetWebFrameClient().GetContextMenuData();
   EXPECT_TRUE(context_menu_data.opened_from_highlight);
+}
+
+// Test that opening context menu with keyboard does not change text selection.
+TEST_P(ContextMenuControllerTest,
+       KeyboardTriggeredContextMenuPreservesSelection) {
+  ContextMenuAllowedScope context_menu_allowed_scope;
+
+  GetDocument()->documentElement()->setInnerHTML(R"HTML(
+    <body>
+      <p id='first'>This is a sample text."</p>
+    </body>
+  )HTML");
+
+  Node* first_paragraph = GetDocument()->getElementById("first")->firstChild();
+  const auto& selected_start = Position(first_paragraph, 5);
+  const auto& selected_end = Position(first_paragraph, 9);
+
+  GetDocument()->GetFrame()->Selection().SetSelection(
+      SelectionInDOMTree::Builder()
+          .SetBaseAndExtent(selected_start, selected_end)
+          .Build(),
+      SetSelectionOptions());
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(GetDocument()->GetFrame()->Selection().SelectedText(), "is a");
+
+  PhysicalOffset location(LayoutUnit(5), LayoutUnit(5));
+  EXPECT_TRUE(ShowContextMenu(location, kMenuSourceKeyboard));
+  EXPECT_EQ(GetDocument()->GetFrame()->Selection().SelectedText(), "is a");
 }
 
 // TODO(crbug.com/1184996): Add additional unit test for blocking frame logging.

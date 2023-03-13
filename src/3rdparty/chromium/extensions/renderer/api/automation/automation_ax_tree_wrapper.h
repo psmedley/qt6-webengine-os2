@@ -24,6 +24,10 @@ class AutomationAXTreeWrapper : public ui::AXTreeObserver,
  public:
   AutomationAXTreeWrapper(ui::AXTreeID tree_id,
                           AutomationInternalCustomBindings* owner);
+
+  AutomationAXTreeWrapper(const AutomationAXTreeWrapper&) = delete;
+  AutomationAXTreeWrapper& operator=(const AutomationAXTreeWrapper&) = delete;
+
   ~AutomationAXTreeWrapper() override;
 
   // Returns the AutomationAXTreeWrapper that lists |tree_id| as one of its
@@ -40,7 +44,7 @@ class AutomationAXTreeWrapper : public ui::AXTreeObserver,
   static AutomationAXTreeWrapper* GetParentTreeWrapperForAppID(
       const std::string& app_id,
       const AutomationInternalCustomBindings* owner);
-  static ui::AXNode* GetChildTreeNodeForAppID(
+  static std::vector<ui::AXNode*> GetChildTreeNodesForAppID(
       const std::string& app_id,
       const AutomationInternalCustomBindings* owner);
 
@@ -100,6 +104,10 @@ class AutomationAXTreeWrapper : public ui::AXTreeObserver,
   bool HasEventListener(api::automation::EventType event_type,
                         ui::AXNode* node);
 
+  // Indicates whether this tree is ignored due to a hosting ancestor tree/node
+  // being ignored.
+  bool IsTreeIgnored();
+
   // AXTreeManager overrides.
   ui::AXNode* GetNodeFromTree(const ui::AXTreeID tree_id,
                               const ui::AXNodeID node_id) const override;
@@ -143,11 +151,9 @@ class AutomationAXTreeWrapper : public ui::AXTreeObserver,
   // Maps a node to a set containing events for which the node has listeners.
   std::map<int32_t, std::set<api::automation::EventType>> node_id_to_events_;
 
-  // A collection of all app ids in this tree nodes'
-  // ax::mojom::StringAttribute::kParentTreeNodeAppId.
-  std::set<std::string> all_parent_tree_node_app_ids_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutomationAXTreeWrapper);
+  // A collection of all nodes with
+  // ax::mojom::StringAttribute::kAppId set.
+  std::set<std::string> all_tree_node_app_ids_;
 };
 
 }  // namespace extensions

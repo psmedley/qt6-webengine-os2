@@ -8,13 +8,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/timer/timer.h"
 #include "components/search_engines/keyword_table.h"
 #include "components/search_engines/template_url_id.h"
 #include "components/webdata/common/web_data_service_base.h"
-#include "components/webdata/common/web_database.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -54,17 +53,22 @@ class KeywordWebDataService : public WebDataServiceBase {
   class BatchModeScoper {
    public:
     explicit BatchModeScoper(KeywordWebDataService* service);
+
+    BatchModeScoper(const BatchModeScoper&) = delete;
+    BatchModeScoper& operator=(const BatchModeScoper&) = delete;
+
     ~BatchModeScoper();
 
    private:
-    KeywordWebDataService* service_;
-
-    DISALLOW_COPY_AND_ASSIGN(BatchModeScoper);
+    raw_ptr<KeywordWebDataService> service_;
   };
 
   KeywordWebDataService(
       scoped_refptr<WebDatabaseService> wdbs,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+
+  KeywordWebDataService(const KeywordWebDataService&) = delete;
+  KeywordWebDataService& operator=(const KeywordWebDataService&) = delete;
 
   // As the database processes requests at a later date, all deletion is done on
   // the background sequence.
@@ -87,6 +91,9 @@ class KeywordWebDataService : public WebDataServiceBase {
   // Sets the version of the builtin keywords.
   void SetBuiltinKeywordVersion(int version);
 
+  // Sets the version of the starter pack keywords.
+  void SetStarterPackKeywordVersion(int version);
+
   // WebDataServiceBase:
   void ShutdownOnUISequence() override;
 
@@ -104,8 +111,6 @@ class KeywordWebDataService : public WebDataServiceBase {
   KeywordTable::Operations queued_keyword_operations_;
   base::RetainingOneShotTimer timer_;  // Used to commit updates no more often
                                        // than every five seconds.
-
-  DISALLOW_COPY_AND_ASSIGN(KeywordWebDataService);
 };
 
 #endif  // COMPONENTS_SEARCH_ENGINES_KEYWORD_WEB_DATA_SERVICE_H__

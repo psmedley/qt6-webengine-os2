@@ -31,6 +31,8 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) CrossOriginOpenerPolicy final {
   mojom::CrossOriginOpenerPolicyValue report_only_value =
       mojom::CrossOriginOpenerPolicyValue::kUnsafeNone;
   absl::optional<std::string> report_only_reporting_endpoint;
+  mojom::CrossOriginOpenerPolicyValue soap_by_default_value =
+      mojom::CrossOriginOpenerPolicyValue::kUnsafeNone;
 };
 
 COMPONENT_EXPORT(NETWORK_CPP_BASE)
@@ -41,7 +43,8 @@ const char* CoopAccessReportTypeToString(mojom::CoopAccessReportType type);
 
 COMPONENT_EXPORT(NETWORK_CPP_BASE)
 void AugmentCoopWithCoep(CrossOriginOpenerPolicy* coop,
-                         const CrossOriginEmbedderPolicy& coep);
+                         const CrossOriginEmbedderPolicy& coep,
+                         bool is_coop_soap_plus_coep_enabled);
 
 }  // namespace network
 

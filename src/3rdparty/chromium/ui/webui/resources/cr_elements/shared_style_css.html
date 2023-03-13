@@ -11,13 +11,13 @@
     <style include="cr-hidden-style cr-icons">
       html,
       :host {
-        --scrollable-border-color: var(--google-grey-refresh-300);
+        --scrollable-border-color: var(--google-grey-300);
       }
 
       @media (prefers-color-scheme: dark) {
         html,
         :host {
-          --scrollable-border-color: var(--google-grey-refresh-700);
+          --scrollable-border-color: var(--google-grey-700);
         }
       }
 
@@ -181,6 +181,10 @@
       :host-context([dir=rtl]) .cr-vertical-tab::before {
         /* Border-radius based on block/inline is not yet supported. */
         transform: scaleX(-1);
+      }
+
+      .iph-anchor-highlight {
+        background-color: var(--cr-iph-anchor-highlight-color);
       }
     </style>
   </template>

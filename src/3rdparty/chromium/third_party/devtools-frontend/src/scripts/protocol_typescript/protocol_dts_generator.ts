@@ -62,15 +62,10 @@ const emitHeaderComments = () => {
   emitLine();
 };
 
-const emitModule = (moduleName: string, domains: Protocol.Domain[]) => {
-  moduleName = toTitleCase(moduleName);
+const emitModule = (domains: Protocol.Domain[]) => {
   emitHeaderComments();
-  emitOpenBlock(`declare namespace ${moduleName}`);
   emitGlobalTypeDefs();
   domains.forEach(emitDomain);
-  emitCloseBlock();
-  emitLine();
-  emitLine('export = Protocol;');
 };
 
 const emitGlobalTypeDefs = () => {
@@ -217,19 +212,17 @@ const emitInlineEnums = (prefix: string, propertyTypes?: Protocol.PropertyType[]
   }
 };
 
-// Please keep `knownIdentifierTypes` sorted.
-const knownIdentifierTypes = [
-  'Accessibility.AXNodeId',   'Audits.IssueId',
-  'Browser.BrowserContextID', 'Browser.WindowID',
-  'CacheStorage.CacheId',     'CSS.StyleSheetId',
-  'DOM.BackendNodeId',        'DOM.NodeId',
-  'Fetch.RequestId',          'LayerTree.LayerId',
-  'Media.PlayerId',           'Network.InterceptionId',
-  'Network.LoaderId',         'Network.RequestId',
-  'Security.CertificateId',   'Target.SessionID',
-  'Target.TargetID',          'ServiceWorker.RegistrationID',
-  'WebAudio.GraphObjectId',   'WebAuthn.AuthenticatorId',
-];
+// Please keep the keys sorted.
+const identifierTypesOverride = new Map([
+  ['IO.StreamHandle', true],
+  ['Page.ScriptIdentifier', true],
+]);
+
+function isIdentifierTypeName(identifierName: string): boolean {
+  const looksLikeIdentifierName = identifierName.endsWith('Id') || identifierName.endsWith('ID');
+  const override = identifierTypesOverride.get(identifierName);
+  return looksLikeIdentifierName && override !== false || override;
+}
 
 const emitDomainType = (domain: Protocol.Domain, type: Protocol.DomainType) => {
   // Check if this type is an object that declares inline enum types for some of its properties.
@@ -244,7 +237,7 @@ const emitDomainType = (domain: Protocol.Domain, type: Protocol.DomainType) => {
   } else if (type.type === 'string' && type.enum) {
     // Explicit enums declared as separate types that inherit from 'string'.
     emitEnum(type.id, type.enum);
-  } else if (knownIdentifierTypes.includes(`${domain.domain}.${type.id}`)) {
+  } else if (isIdentifierTypeName(`${domain.domain}.${type.id}`)) {
     const representationType = getPropertyType(type.id, type);
     const tag = `Protocol.${domain.domain}.${type.id}`;
     const opaqueType = `OpaqueIdentifier<${representationType}, '${tag}'>`;
@@ -445,9 +438,9 @@ const flushEmitToFile = (path: string) => {
 const main = () => {
   const FRONTEND_GENERATED_DIR = path.resolve(__dirname, path.join('../../front_end/generated'));
 
-  const destProtocolFilePath = path.join(FRONTEND_GENERATED_DIR, 'protocol.d.ts');
-  const protocolModuleName = path.basename(destProtocolFilePath, '.d.ts');
-  emitModule(protocolModuleName, protocolDomains);
+  const destProtocolFilePath = path.join(FRONTEND_GENERATED_DIR, 'protocol.ts');
+  const protocolModuleName = path.basename(destProtocolFilePath, '.ts');
+  emitModule(protocolDomains);
   flushEmitToFile(destProtocolFilePath);
 
   const destMappingFilePath = path.join(FRONTEND_GENERATED_DIR, 'protocol-mapping.d.ts');

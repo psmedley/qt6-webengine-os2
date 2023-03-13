@@ -9,8 +9,8 @@
 #include "base/check.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/strcat.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/unguessable_token.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "services/network/public/cpp/features.h"
@@ -54,7 +54,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/cors/cors.h"
@@ -82,7 +82,7 @@
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "v8.h"
+#include "v8/include/v8.h"
 
 using network::mojom::CredentialsMode;
 using network::mojom::FetchResponseType;
@@ -323,7 +323,7 @@ FetchManager::Loader::Loader(ExecutionContext* execution_context,
   // to the fetch() call.
   v8::Local<v8::Value> exception =
       V8ThrowException::CreateTypeError(isolate, "Failed to fetch");
-  exception_.Set(isolate, exception);
+  exception_.Reset(isolate, exception);
 }
 
 FetchManager::Loader::~Loader() {
@@ -450,6 +450,8 @@ void FetchManager::Loader::DidReceiveResponse(
       NOTREACHED();
       break;
   }
+  // TODO(crbug.com/1288221): Remove this once the investigation is done.
+  CHECK(tainted_response);
 
   response_has_no_store_header_ = response.CacheControlContainsNoStore();
 
@@ -797,11 +799,9 @@ void FetchManager::Loader::PerformHTTPFetch() {
   }
   request.SetCacheMode(fetch_request_data_->CacheMode());
   request.SetRedirectMode(fetch_request_data_->Redirect());
-  request.SetFetchImportanceMode(fetch_request_data_->Importance());
+  request.SetFetchPriorityHint(fetch_request_data_->FetchPriorityHint());
   request.SetPriority(fetch_request_data_->Priority());
   request.SetUseStreamOnResponse(true);
-  request.SetExternalRequestStateFromRequestorAddressSpace(
-      execution_context_->AddressSpace());
   request.SetReferrerString(fetch_request_data_->ReferrerString());
   request.SetReferrerPolicy(fetch_request_data_->GetReferrerPolicy());
 
@@ -862,7 +862,7 @@ void FetchManager::Loader::PerformDataFetch() {
   request.SetHttpMethod(fetch_request_data_->Method());
   request.SetCredentialsMode(network::mojom::CredentialsMode::kOmit);
   request.SetRedirectMode(RedirectMode::kError);
-  request.SetFetchImportanceMode(fetch_request_data_->Importance());
+  request.SetFetchPriorityHint(fetch_request_data_->FetchPriorityHint());
   request.SetPriority(fetch_request_data_->Priority());
   // We intentionally skip 'setExternalRequestStateFromRequestorAddressSpace',
   // as 'data:' can never be external.
@@ -891,9 +891,13 @@ void FetchManager::Loader::Failed(
   if (!message.IsEmpty() && !issue_only) {
     // CORS issues are reported via network service instrumentation, with the
     // exception of early errors reported in FileIssueAndPerformNetworkError.
-    execution_context_->AddConsoleMessage(MakeGarbageCollected<ConsoleMessage>(
-        mojom::ConsoleMessageSource::kJavaScript,
-        mojom::ConsoleMessageLevel::kError, message));
+    auto* console_message = MakeGarbageCollected<ConsoleMessage>(
+        mojom::blink::ConsoleMessageSource::kJavaScript,
+        mojom::blink::ConsoleMessageLevel::kError, message);
+    if (issue_id) {
+      console_message->SetCategory(mojom::blink::ConsoleMessageCategory::Cors);
+    }
+    execution_context_->AddConsoleMessage(console_message);
   }
   if (resolver_) {
     ScriptState* state = resolver_->GetScriptState();
@@ -901,8 +905,8 @@ void FetchManager::Loader::Failed(
     if (dom_exception) {
       resolver_->Reject(dom_exception);
     } else {
-      v8::Local<v8::Value> value = exception_.NewLocal(state->GetIsolate());
-      exception_.Clear();
+      v8::Local<v8::Value> value = exception_.Get(state->GetIsolate());
+      exception_.Reset();
       if (RuntimeEnabledFeatures::ExceptionMetaDataForDevToolsEnabled()) {
         ThreadDebugger* debugger = ThreadDebugger::From(state->GetIsolate());
         if (devtools_request_id) {

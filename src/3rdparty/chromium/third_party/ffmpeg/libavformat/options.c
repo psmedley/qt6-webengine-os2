@@ -146,51 +146,37 @@ static int io_open_default(AVFormatContext *s, AVIOContext **pb,
     return ffio_open_whitelist(pb, url, flags, &s->interrupt_callback, options, s->protocol_whitelist, s->protocol_blacklist);
 }
 
-static void io_close_default(AVFormatContext *s, AVIOContext *pb)
+static int io_close2_default(AVFormatContext *s, AVIOContext *pb)
 {
-    avio_close(pb);
-}
-
-static void avformat_get_context_defaults(AVFormatContext *s)
-{
-    memset(s, 0, sizeof(AVFormatContext));
-
-    s->av_class = &av_format_context_class;
-
-    s->io_open  = io_open_default;
-    s->io_close = io_close_default;
-
-    av_opt_set_defaults(s);
+    return avio_close(pb);
 }
 
 AVFormatContext *avformat_alloc_context(void)
 {
-    AVFormatContext *ic;
-    AVFormatInternal *internal;
-    ic = av_malloc(sizeof(AVFormatContext));
-    if (!ic) return ic;
+    FFFormatContext *const si = av_mallocz(sizeof(*si));
+    AVFormatContext *s;
 
-    internal = av_mallocz(sizeof(*internal));
-    if (!internal) {
-        av_free(ic);
+    if (!si)
+        return NULL;
+
+    s = &si->pub;
+    s->av_class = &av_format_context_class;
+    s->io_open  = io_open_default;
+    s->io_close = ff_format_io_close_default;
+    s->io_close2= io_close2_default;
+
+    av_opt_set_defaults(s);
+
+    si->pkt = av_packet_alloc();
+    si->parse_pkt = av_packet_alloc();
+    if (!si->pkt || !si->parse_pkt) {
+        avformat_free_context(s);
         return NULL;
     }
-    internal->pkt = av_packet_alloc();
-    internal->parse_pkt = av_packet_alloc();
-    if (!internal->pkt || !internal->parse_pkt) {
-        av_packet_free(&internal->pkt);
-        av_packet_free(&internal->parse_pkt);
-        av_free(internal);
-        av_free(ic);
-        return NULL;
-    }
-    avformat_get_context_defaults(ic);
-    ic->internal = internal;
-    ic->internal->offset = AV_NOPTS_VALUE;
-    ic->internal->raw_packet_buffer_remaining_size = RAW_PACKET_BUFFER_SIZE;
-    ic->internal->shortest_end = AV_NOPTS_VALUE;
 
-    return ic;
+    si->shortest_end = AV_NOPTS_VALUE;
+
+    return s;
 }
 
 enum AVDurationEstimationMethod av_fmt_ctx_get_duration_estimation_method(const AVFormatContext* ctx)

@@ -19,8 +19,8 @@
 #include "core/fpdfdoc/cpvt_wordrange.h"
 #include "core/fxcrt/fx_codepage_forward.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/widestring.h"
 
 class CPVT_Section;
 class CPVT_Word;
@@ -79,7 +79,6 @@ class CPVT_VariableText {
   void SetAlignment(int32_t nFormat) { m_nAlignment = nFormat; }
   void SetPasswordChar(uint16_t wSubWord) { m_wSubWord = wSubWord; }
   void SetLimitChar(int32_t nLimitChar) { m_nLimitChar = nLimitChar; }
-  void SetCharSpace(float fCharSpace) { m_fCharSpace = fCharSpace; }
   void SetMultiLine(bool bMultiLine) { m_bMultiLine = bMultiLine; }
   void SetAutoReturn(bool bAuto) { m_bLimitWidth = bAuto; }
   void SetFontSize(float fFontSize) { m_fFontSize = fFontSize; }
@@ -107,7 +106,6 @@ class CPVT_VariableText {
   int32_t GetCharArray() const { return m_nCharArray; }
   int32_t GetLimitChar() const { return m_nLimitChar; }
   bool IsMultiLine() const { return m_bMultiLine; }
-  float GetCharSpace() const { return m_fCharSpace; }
   bool IsAutoReturn() const { return m_bLimitWidth; }
 
   CPVT_WordPlace GetBeginWordPlace() const;
@@ -139,7 +137,6 @@ class CPVT_VariableText {
   CFX_PointF InToOut(const CFX_PointF& point) const;
   CFX_PointF OutToIn(const CFX_PointF& point) const;
   CFX_FloatRect InToOut(const CPVT_FloatRect& rect) const;
-  CPVT_FloatRect OutToIn(const CFX_FloatRect& rect) const;
 
   float GetFontAscent(int32_t nFontIndex, float fFontSize) const;
   float GetFontDescent(int32_t nFontIndex, float fFontSize) const;
@@ -149,7 +146,6 @@ class CPVT_VariableText {
   float GetWordWidth(int32_t nFontIndex,
                      uint16_t Word,
                      uint16_t SubWord,
-                     float fCharSpace,
                      float fFontSize,
                      float fWordTail) const;
   float GetWordAscent(const CPVT_WordInfo& WordInfo) const;
@@ -196,7 +192,6 @@ class CPVT_VariableText {
   int32_t m_nCharArray = 0;
   int32_t m_nAlignment = 0;
   float m_fLineLeading = 0.0f;
-  float m_fCharSpace = 0.0f;
   float m_fFontSize = 0.0f;
   std::vector<std::unique_ptr<CPVT_Section>> m_SectionArray;
   UnownedPtr<Provider> m_pVTProvider;

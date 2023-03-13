@@ -16,23 +16,22 @@
 #include "ui/accessibility/ax_serializable_tree.h"
 #include "ui/accessibility/platform/ax_android_constants.h"
 #include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/transform.h"
 #include "ui/gfx/range/range.h"
-#include "ui/gfx/transform.h"
 
 namespace ui {
 
 namespace {
 
 // TODO(muyuanli): share with BrowserAccessibility.
-bool IsTextField(const AXNode* node, uint32_t state) {
+bool IsTextField(const AXNode* node) {
   return node->data().IsTextField();
 }
 
 bool IsRichTextEditable(const AXNode* node) {
   const AXNode* parent = node->GetUnignoredParent();
-  return node->data().HasState(ax::mojom::State::kRichlyEditable) &&
-         (!parent ||
-          !parent->data().HasState(ax::mojom::State::kRichlyEditable));
+  return node->HasState(ax::mojom::State::kRichlyEditable) &&
+         (!parent || !parent->HasState(ax::mojom::State::kRichlyEditable));
 }
 
 bool IsAtomicTextField(const AXNode* node) {
@@ -58,7 +57,7 @@ bool IsLeaf(const AXNode* node) {
     return true;
   }
 
-  switch (node->data().role) {
+  switch (node->GetRole()) {
     case ax::mojom::Role::kImage:
     case ax::mojom::Role::kMeter:
     case ax::mojom::Role::kScrollBar:
@@ -79,9 +78,9 @@ std::u16string GetInnerText(const AXNode* node) {
     return node->GetString16Attribute(ax::mojom::StringAttribute::kName);
   }
   std::u16string text;
-  for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
-    AXNode* child = node->GetUnignoredChildAtIndex(i);
-    text += GetInnerText(child);
+  for (auto iter = node->UnignoredChildrenBegin();
+       iter != node->UnignoredChildrenEnd(); ++iter) {
+    text += GetInnerText(iter.get());
   }
   return text;
 }
@@ -90,27 +89,26 @@ std::u16string GetValue(const AXNode* node) {
   std::u16string value =
       node->GetString16Attribute(ax::mojom::StringAttribute::kValue);
 
-  if (value.empty() &&
-      (IsTextField(node, node->data().state) || IsRichTextEditable(node)) &&
+  if (value.empty() && (IsTextField(node) || IsRichTextEditable(node)) &&
       !IsAtomicTextField(node)) {
     value = GetInnerText(node);
   }
 
   // Always obscure passwords.
-  if (node->data().HasState(ax::mojom::State::kProtected))
+  if (node->HasState(ax::mojom::State::kProtected))
     value = std::u16string(value.size(), kSecurePasswordBullet);
 
   return value;
 }
 
 std::u16string GetText(const AXNode* node) {
-  if (node->data().role == ax::mojom::Role::kPdfRoot ||
-      node->data().role == ax::mojom::Role::kIframe ||
-      node->data().role == ax::mojom::Role::kIframePresentational) {
+  if (node->GetRole() == ax::mojom::Role::kPdfRoot ||
+      node->GetRole() == ax::mojom::Role::kIframe ||
+      node->GetRole() == ax::mojom::Role::kIframePresentational) {
     return std::u16string();
   }
 
-  ax::mojom::NameFrom name_from = node->data().GetNameFrom();
+  ax::mojom::NameFrom name_from = node->GetNameFrom();
 
   if (!ui::IsLeaf(node) && name_from == ax::mojom::NameFrom::kContents) {
     return std::u16string();
@@ -119,10 +117,10 @@ std::u16string GetText(const AXNode* node) {
   std::u16string value = GetValue(node);
 
   if (!value.empty()) {
-    if (node->data().HasState(ax::mojom::State::kEditable))
+    if (node->HasState(ax::mojom::State::kEditable))
       return value;
 
-    switch (node->data().role) {
+    switch (node->GetRole()) {
       case ax::mojom::Role::kComboBoxMenuButton:
       case ax::mojom::Role::kTextFieldWithComboBox:
       case ax::mojom::Role::kPopUpButton:
@@ -133,7 +131,7 @@ std::u16string GetText(const AXNode* node) {
     }
   }
 
-  if (node->data().role == ax::mojom::Role::kColorWell) {
+  if (node->GetRole() == ax::mojom::Role::kColorWell) {
     unsigned int color = static_cast<unsigned int>(
         node->GetIntAttribute(ax::mojom::IntAttribute::kColorValue));
     unsigned int red = color >> 16 & 0xFF;
@@ -156,20 +154,20 @@ std::u16string GetText(const AXNode* node) {
   if (text.empty())
     text = value;
 
-  if (node->data().role == ax::mojom::Role::kRootWebArea ||
-      node->data().role == ax::mojom::Role::kPdfRoot) {
+  if (node->GetRole() == ax::mojom::Role::kRootWebArea ||
+      node->GetRole() == ax::mojom::Role::kPdfRoot) {
     return text;
   }
 
   if (text.empty() && IsLeaf(node)) {
-    for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
-      AXNode* child = node->GetUnignoredChildAtIndex(i);
-      text += GetText(child);
+    for (auto iter = node->UnignoredChildrenBegin();
+         iter != node->UnignoredChildrenEnd(); ++iter) {
+      text += GetInnerText(iter.get());
     }
   }
 
-  if (text.empty() && (ui::IsLink(node->data().role) ||
-                       node->data().role == ax::mojom::Role::kImage)) {
+  if (text.empty() && (ui::IsLink(node->GetRole()) ||
+                       node->GetRole() == ax::mojom::Role::kImage)) {
     std::u16string url =
         node->GetString16Attribute(ax::mojom::StringAttribute::kUrl);
     text = AXUrlBaseText(url);
@@ -241,33 +239,28 @@ void WalkAXTreeDepthFirst(const AXNode* node,
                           AssistantNode* result) {
   result->text = GetText(node);
   result->class_name =
-      AXRoleToAndroidClassName(node->data().role, node->GetUnignoredParent());
-  result->role = AXRoleToString(node->data().role);
+      AXRoleToAndroidClassName(node->GetRole(), node->GetUnignoredParent());
+  result->role = AXRoleToString(node->GetRole());
 
   result->text_size = -1.0;
   result->bgcolor = 0;
   result->color = 0;
-  result->bold = 0;
-  result->italic = 0;
-  result->line_through = 0;
-  result->underline = 0;
+  result->bold = false;
+  result->italic = false;
+  result->line_through = false;
+  result->underline = false;
 
   if (node->HasFloatAttribute(ax::mojom::FloatAttribute::kFontSize)) {
-    gfx::RectF text_size_rect(
-        0, 0, 1, node->GetFloatAttribute(ax::mojom::FloatAttribute::kFontSize));
-    gfx::Rect scaled_text_size_rect =
-        gfx::ToEnclosingRect(tree->RelativeToTreeBounds(node, text_size_rect));
-    result->text_size = scaled_text_size_rect.height();
-
+    result->text_size =
+        node->GetFloatAttribute(ax::mojom::FloatAttribute::kFontSize);
     result->color = node->GetIntAttribute(ax::mojom::IntAttribute::kColor);
     result->bgcolor =
         node->GetIntAttribute(ax::mojom::IntAttribute::kBackgroundColor);
-    result->bold = node->data().HasTextStyle(ax::mojom::TextStyle::kBold);
-    result->italic = node->data().HasTextStyle(ax::mojom::TextStyle::kItalic);
+    result->bold = node->HasTextStyle(ax::mojom::TextStyle::kBold);
+    result->italic = node->HasTextStyle(ax::mojom::TextStyle::kItalic);
     result->line_through =
-        node->data().HasTextStyle(ax::mojom::TextStyle::kLineThrough);
-    result->underline =
-        node->data().HasTextStyle(ax::mojom::TextStyle::kUnderline);
+        node->HasTextStyle(ax::mojom::TextStyle::kLineThrough);
+    result->underline = node->HasTextStyle(ax::mojom::TextStyle::kUnderline);
   }
 
   const gfx::Rect& absolute_rect =
@@ -306,18 +299,18 @@ void WalkAXTreeDepthFirst(const AXNode* node,
       node->GetStringAttribute(ax::mojom::StringAttribute::kHtmlTag);
   result->css_display =
       node->GetStringAttribute(ax::mojom::StringAttribute::kDisplay);
-  result->html_attributes = node->data().html_attributes;
+  result->html_attributes = node->GetHtmlAttributes();
 
   std::string class_name =
       node->GetStringAttribute(ax::mojom::StringAttribute::kClassName);
   if (!class_name.empty())
     result->html_attributes.push_back({"class", class_name});
 
-  for (size_t i = 0; i < node->GetUnignoredChildCount(); ++i) {
-    AXNode* child = node->GetUnignoredChildAtIndex(i);
+  for (auto iter = node->UnignoredChildrenBegin();
+       iter != node->UnignoredChildrenEnd(); ++iter) {
     auto* n = AddChild(assistant_tree);
     result->children_indices.push_back(assistant_tree->nodes.size() - 1);
-    WalkAXTreeDepthFirst(child, absolute_rect, update, tree, config,
+    WalkAXTreeDepthFirst(iter.get(), absolute_rect, update, tree, config,
                          assistant_tree, n);
   }
 }
@@ -381,16 +374,19 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
     case ax::mojom::Role::kColorWell:
     case ax::mojom::Role::kComboBoxMenuButton:
     case ax::mojom::Role::kDate:
+    case ax::mojom::Role::kDateTime:
     case ax::mojom::Role::kInputTime:
       return kAXSpinnerClassname;
     case ax::mojom::Role::kButton:
     case ax::mojom::Role::kPdfActionableHighlight:
       return kAXButtonClassname;
     case ax::mojom::Role::kCheckBox:
-    case ax::mojom::Role::kSwitch:
       return kAXCheckBoxClassname;
     case ax::mojom::Role::kRadioButton:
       return kAXRadioButtonClassname;
+    case ax::mojom::Role::kRadioGroup:
+      return kAXRadioGroupClassname;
+    case ax::mojom::Role::kSwitch:
     case ax::mojom::Role::kToggleButton:
       return kAXToggleButtonClassname;
     case ax::mojom::Role::kCanvas:
@@ -419,6 +415,7 @@ const char* AXRoleToAndroidClassName(ax::mojom::Role role, bool has_parent) {
     case ax::mojom::Role::kMenuItemCheckBox:
     case ax::mojom::Role::kMenuItemRadio:
       return kAXMenuItemClassname;
+    case ax::mojom::Role::kPre:
     case ax::mojom::Role::kStaticText:
       return kAXTextViewClassname;
     default:

@@ -9,11 +9,11 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "media/capture/video/linux/v4l2_capture_delegate.h"
 
-#if defined(OS_OPENBSD)
+#if BUILDFLAG(IS_OPENBSD)
 #include <sys/videoio.h>
 #else
 #include <linux/videodev2.h>

@@ -53,6 +53,7 @@
 
 interface CoreProbes {
 
+  class ClassicScript;
   class ConsoleMessage;
   class FontCustomPlatformData;
   class FontFace;
@@ -110,7 +111,7 @@ interface CoreProbes {
   void DidReceiveScriptResponse(ExecutionContext*, uint64_t identifier);
   void DomContentLoadedEventFired([Keep] LocalFrame*);
   void LoadEventFired([Keep] LocalFrame*);
-  void FrameAttachedToParent([Keep] LocalFrame*);
+  void FrameAttachedToParent([Keep] LocalFrame*, const absl::optional<AdTracker::AdScriptIdentifier>& ad_script_on_stack);
   void FrameDetachedFromParent([Keep] LocalFrame*, FrameDetachType);
   void DidStartProvisionalLoad([Keep] LocalFrame*);
   void DidFailProvisionalLoad([Keep] LocalFrame*);
@@ -119,6 +120,7 @@ interface CoreProbes {
   void DidNavigateWithinDocument([Keep] LocalFrame*);
   void DidRestoreFromBackForwardCache([Keep] LocalFrame*);
   void DidOpenDocument([Keep] LocalFrame*, DocumentLoader*);
+  void WillCreateDocumentParser(Document*, bool& force_sync_parsing);
   void FrameDocumentUpdated([Keep] LocalFrame*);
   void FrameOwnerContentUpdated([Keep] LocalFrame*, HTMLFrameOwnerElement*);
   void FrameStartedLoading([Keep] LocalFrame*);
@@ -136,11 +138,8 @@ interface CoreProbes {
   void WebTransportCreated([Keep] ExecutionContext*, uint64_t transport_id, const KURL& request_url);
   void WebTransportConnectionEstablished(ExecutionContext*, uint64_t transport_id);
   void WebTransportClosed(ExecutionContext*, uint64_t transport_id);
-  void NetworkStateChanged([Keep] LocalFrame*, bool online);
-  void UpdateApplicationCacheStatus([Keep] LocalFrame*);
   /* This is for pre-BlinkGenPropertyTrees. TODO(wangxianzhu): Remove this function for BlinkGenPropertyTrees. */
   void LayerTreeDidChange(LocalFrame*);
-  /* For BlinkGenPropertyTrees/CompositeAfterPaint. */
   void LayerTreePainted(LocalFrame*);
   void PseudoElementCreated([Keep] PseudoElement*);
   void PseudoElementDestroyed([Keep] PseudoElement*);
@@ -156,8 +155,8 @@ interface CoreProbes {
   void BreakableLocation(ExecutionContext* context, const char* name);
   RecalculateStyle(Document* document);
   UpdateLayout(Document* document);
-  ExecuteScript([Keep] ExecutionContext* context, const String& script_url, int script_id);
-  CallFunction([Keep] ExecutionContext* context, v8::Local<v8::Function> function, int depth = 0);
+  ExecuteScript([Keep] ExecutionContext* context, const v8::Local<v8::Context>& v8_context, const String& script_url, int script_id);
+  CallFunction([Keep] ExecutionContext* context, const v8::Local<v8::Context>& v8_context, v8::Local<v8::Function> function, int depth = 0);
   UserCallback([Keep] ExecutionContext* context, const char* name, const AtomicString& atomic_name, bool recurring, EventTarget* event_target = nullptr);
   V8Compile([Keep] ExecutionContext* context, const String& file_name, int line, int column);
   ParseHTML(Document* document, HTMLDocumentParser* parser);
@@ -174,8 +173,8 @@ interface CoreProbes {
   void DidCloseAudioContext(Document*);
   void DidResumeAudioContext(Document*);
   void DidSuspendAudioContext(Document*);
-  void DidProduceCompilationCache(CoreProbeSink*, const ScriptSourceCode& source, v8::Local<v8::Script> script);
-  void ApplyCompilationModeOverride(ExecutionContext*, const ScriptSourceCode& source, v8::ScriptCompiler::CachedData** cached_data, v8::ScriptCompiler::CompileOptions*);
+  void DidProduceCompilationCache(CoreProbeSink*, const ClassicScript&, v8::Local<v8::Script> script);
+  void ApplyCompilationModeOverride(ExecutionContext*, const ClassicScript&, v8::ScriptCompiler::CachedData** cached_data, v8::ScriptCompiler::CompileOptions*);
   void NodeCreated([Keep] Node* node);
   void PortalRemoteFrameCreated(Document*, HTMLPortalElement* portal_element);
   void FileChooserOpened([Keep] LocalFrame* frame, HTMLInputElement* element, bool* intercepted);
@@ -189,7 +188,8 @@ interface CoreProbes {
   void LocalFontsEnabled(ExecutionContext*, bool* result);
   void DidUpdateComputedStyle([Keep] Element*, const ComputedStyle* old_style, const ComputedStyle* new_style);
   void GetDisabledImageTypes(ExecutionContext*, HashSet<String>* result);
-  void OnContentSecurityPolicyViolation(ExecutionContext* context, const blink::ContentSecurityPolicy::ContentSecurityPolicyViolationType violationType);
+  void OnContentSecurityPolicyViolation(ExecutionContext* context, const blink::ContentSecurityPolicyViolationType violationType);
   void IsCacheDisabled(ExecutionContext*, bool* is_cache_disabled);
   void PerformanceEntryAdded([Keep] ExecutionContext*, PerformanceEntry*);
+  void ApplyAutomationOverride(ExecutionContext*, bool& enabled);
 }

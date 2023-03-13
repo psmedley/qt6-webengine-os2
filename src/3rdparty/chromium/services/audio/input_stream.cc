@@ -16,6 +16,7 @@
 #include "media/audio/audio_manager.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/user_input_monitor.h"
+#include "media/mojo/mojom/audio_processing.mojom.h"
 #include "mojo/public/cpp/system/buffer.h"
 #include "mojo/public/cpp/system/handle.h"
 #include "mojo/public/cpp/system/platform_handle.h"
@@ -70,8 +71,11 @@ InputStream::InputStream(
     mojo::PendingRemote<media::mojom::AudioInputStreamObserver> observer,
     mojo::PendingRemote<media::mojom::AudioLog> log,
     media::AudioManager* audio_manager,
+    AecdumpRecordingManager* aecdump_recording_manager,
     std::unique_ptr<UserInputMonitor> user_input_monitor,
     InputStreamActivityMonitor* activity_monitor,
+    DeviceOutputListener* device_output_listener,
+    media::mojom::AudioProcessingConfigPtr processing_config,
     const std::string& device_id,
     const media::AudioParameters& params,
     uint32_t shared_memory_count,
@@ -132,7 +136,8 @@ InputStream::InputStream(
 
   controller_ = InputController::Create(
       audio_manager, this, writer_.get(), user_input_monitor_.get(),
-      activity_monitor, params, device_id, enable_agc);
+      activity_monitor, device_output_listener, aecdump_recording_manager,
+      std::move(processing_config), params, device_id, enable_agc);
 }
 
 InputStream::~InputStream() {
@@ -194,7 +199,7 @@ void InputStream::SetVolume(double volume) {
                                       volume);
 
   if (volume < 0 || volume > 1) {
-    mojo::ReportBadMessage("Invalid volume");
+    receiver_.ReportBadMessage("Invalid volume");
     OnStreamPlatformError();
     return;
   }

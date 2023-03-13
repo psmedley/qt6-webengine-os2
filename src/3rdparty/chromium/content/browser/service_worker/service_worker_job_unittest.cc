@@ -11,14 +11,16 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/check.h"
-#include "base/cxx17_backports.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_future.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
+#include "components/services/storage/service_worker/service_worker_database.h"
 #include "content/browser/renderer_host/frame_tree_node.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
@@ -46,6 +48,7 @@
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_headers.h"
 #include "services/network/public/cpp/features.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/common/features.h"
@@ -58,14 +61,17 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration_options.mojom.h"
 #include "url/origin.h"
 
-using net::IOBuffer;
-using net::TestCompletionCallback;
-using net::WrappedIOBuffer;
-
 // Unit tests for testing all job registration tasks.
 namespace content {
 
 namespace {
+
+using net::IOBuffer;
+using net::TestCompletionCallback;
+using net::WrappedIOBuffer;
+
+using ::testing::Eq;
+using ::testing::Pointee;
 
 void SaveRegistrationCallback(
     blink::ServiceWorkerStatusCode expected_status,
@@ -209,6 +215,15 @@ class ServiceWorkerJobTest : public testing::Test {
   scoped_refptr<ServiceWorkerRegistration> CreateRegistrationWithControllee(
       const GURL& script_url,
       const GURL& scope_url);
+  std::vector<int64_t> GetPurgingResourceIdsForLiveVersion(int64_t version_id) {
+    base::test::TestFuture<storage::ServiceWorkerDatabase::Status,
+                           std::vector<int64_t>>
+        future;
+    context()->GetStorageControl()->GetPurgingResourceIdsForLiveVersionForTest(
+        version_id, future.GetCallback<storage::ServiceWorkerDatabase::Status,
+                                       const std::vector<int64_t>&>());
+    return future.Get<1>();
+  }
 
   BrowserTaskEnvironment task_environment_;
   std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
@@ -276,8 +291,10 @@ ServiceWorkerContainerHost* ServiceWorkerJobTest::CreateControllee() {
   remote_endpoints_.emplace_back();
   base::WeakPtr<ServiceWorkerContainerHost> container_host =
       CreateContainerHostForWindow(
-          33 /* dummy render process id */, true /* is_parent_frame_secure */,
-          helper_->context()->AsWeakPtr(), &remote_endpoints_.back());
+          GlobalRenderFrameHostId(/*mock process_id=*/33,
+                                  /*mock frame_routing_id=*/1),
+          /*is_parent_frame_secure=*/true, helper_->context()->AsWeakPtr(),
+          &remote_endpoints_.back());
   return container_host.get();
 }
 
@@ -298,7 +315,8 @@ ServiceWorkerJobTest::CreateRegistrationWithControllee(const GURL& script_url,
 
   ServiceWorkerContainerHost* container_host = CreateControllee();
   container_host->UpdateUrls(scope_url, net::SiteForCookies::FromUrl(scope_url),
-                             url::Origin::Create(scope_url));
+                             url::Origin::Create(scope_url),
+                             blink::StorageKey(url::Origin::Create(scope_url)));
   container_host->SetControllerRegistration(registration,
                                             /*notify_controllerchange=*/false);
   return registration;
@@ -958,6 +976,100 @@ TEST_F(ServiceWorkerJobTest,
   EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, version->status());
 }
 
+TEST_F(ServiceWorkerJobTest, RegisterSameWhileUninstalling) {
+  GURL script("https://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = GURL("https://www.example.com/one/");
+  blink::StorageKey key(url::Origin::Create(options.scope));
+
+  scoped_refptr<ServiceWorkerRegistration> registration =
+      RunRegisterJob(script, key, options);
+  // Wait until the worker becomes active.
+  base::RunLoop().RunUntilIdle();
+  auto runner = base::MakeRefCounted<base::TestSimpleTaskRunner>();
+  registration->SetTaskRunnerForTest(runner);
+
+  // Add a controllee and queue an unregister to force the uninstalling state.
+  ServiceWorkerContainerHost* container_host = CreateControllee();
+  scoped_refptr<ServiceWorkerVersion> version = registration->active_version();
+  version->AddControllee(container_host);
+  RunUnregisterJob(options.scope, key);
+  // Make sure the registration is deleted and purgable resources
+  // set for purging once the version goes dead.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_NE(0u, GetPurgingResourceIdsForLiveVersion(
+                    registration->active_version()->version_id())
+                    .size());
+
+  // Register same script again.
+  EXPECT_EQ(registration, RunRegisterJob(script, key, options));
+  // Wait until the worker becomes installed.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(0u, GetPurgingResourceIdsForLiveVersion(
+                    registration->active_version()->version_id())
+                    .size());
+
+  EXPECT_EQ(version, registration->active_version());
+  EXPECT_FALSE(registration->is_uninstalling());
+  EXPECT_FALSE(registration->is_uninstalled());
+  EXPECT_EQ(nullptr, registration->installing_version());
+  EXPECT_EQ(nullptr, registration->waiting_version());
+  EXPECT_EQ(EmbeddedWorkerStatus::RUNNING, version->running_status());
+  EXPECT_EQ(ServiceWorkerVersion::ACTIVATED, version->status());
+}
+
+TEST_F(ServiceWorkerJobTest, RegisterSameWhileUninstallingAndUnregister) {
+  GURL script("https://www.example.com/service_worker.js");
+  blink::mojom::ServiceWorkerRegistrationOptions options;
+  options.scope = GURL("https://www.example.com/one/");
+  blink::StorageKey key(url::Origin::Create(options.scope));
+
+  scoped_refptr<ServiceWorkerRegistration> registration =
+      RunRegisterJob(script, key, options);
+  // Wait until the worker becomes active.
+  base::RunLoop().RunUntilIdle();
+  auto runner = base::MakeRefCounted<base::TestSimpleTaskRunner>();
+  registration->SetTaskRunnerForTest(runner);
+
+  // Add a controllee and queue an unregister to force the uninstalling state.
+  ServiceWorkerContainerHost* container_host = CreateControllee();
+  scoped_refptr<ServiceWorkerVersion> version = registration->active_version();
+  version->AddControllee(container_host);
+  RunUnregisterJob(options.scope, key);
+  // Make sure the registration is deleted and purgable resources
+  // set for purging once the version goes dead.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_NE(0u, GetPurgingResourceIdsForLiveVersion(
+                    registration->active_version()->version_id())
+                    .size());
+
+  // Register same script again.
+  EXPECT_EQ(registration, RunRegisterJob(script, key, options));
+  // Wait until the worker becomes installed.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(0u, GetPurgingResourceIdsForLiveVersion(
+                    registration->active_version()->version_id())
+                    .size());
+
+  EXPECT_EQ(version, registration->active_version());
+  EXPECT_FALSE(registration->is_uninstalling());
+  EXPECT_FALSE(registration->is_uninstalled());
+  EXPECT_EQ(nullptr, registration->installing_version());
+  EXPECT_EQ(nullptr, registration->waiting_version());
+  EXPECT_EQ(EmbeddedWorkerStatus::RUNNING, version->running_status());
+  EXPECT_EQ(ServiceWorkerVersion::ACTIVATED, version->status());
+
+  // Unregister again and make sure its resources will be purged despite
+  // purge being cancelled previously.
+  RunUnregisterJob(options.scope, key);
+  // Make sure the registration is deleted and purgable resources
+  // set for purging once the version goes dead.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_NE(0u, GetPurgingResourceIdsForLiveVersion(
+                    registration->active_version()->version_id())
+                    .size());
+}
+
 TEST_F(ServiceWorkerJobTest, RegisterWhileUninstalling) {
   GURL script1("https://www.example.com/service_worker.js");
   GURL script2("https://www.example.com/service_worker.js?new");
@@ -1108,8 +1220,19 @@ TEST_F(ServiceWorkerJobTest, RegisterSameScriptMultipleTimesWhileUninstalling) {
   RunUnregisterJob(options.scope, key);
 
   EXPECT_TRUE(registration->is_uninstalling());
+  // Make sure it's deleted.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_NE(
+      0u,
+      GetPurgingResourceIdsForLiveVersion(new_version->version_id()).size());
 
   EXPECT_EQ(registration, RunRegisterJob(script2, key, options));
+
+  // Make sure it's installed and nothing will get purged.
+  base::RunLoop().RunUntilIdle();
+  EXPECT_EQ(
+      0u,
+      GetPurgingResourceIdsForLiveVersion(new_version->version_id()).size());
 
   EXPECT_FALSE(registration->is_uninstalling());
   EXPECT_EQ(new_version, registration->waiting_version());
@@ -1196,7 +1319,8 @@ TEST_F(ServiceWorkerJobTest, AddRegistrationToMatchingerHosts) {
   // Make an in-scope client.
   ServiceWorkerContainerHost* client = CreateControllee();
   client->UpdateUrls(in_scope, net::SiteForCookies::FromUrl(in_scope),
-                     url::Origin::Create(in_scope));
+                     url::Origin::Create(in_scope),
+                     blink::StorageKey(url::Origin::Create(in_scope)));
 
   // Make an in-scope reserved client.
   std::unique_ptr<ServiceWorkerContainerHostAndInfo> host_and_info =
@@ -1205,13 +1329,15 @@ TEST_F(ServiceWorkerJobTest, AddRegistrationToMatchingerHosts) {
   base::WeakPtr<ServiceWorkerContainerHost> reserved_client =
       host_and_info->host;
   reserved_client->UpdateUrls(in_scope, net::SiteForCookies::FromUrl(in_scope),
-                              url::Origin::Create(in_scope));
+                              url::Origin::Create(in_scope),
+                              blink::StorageKey(url::Origin::Create(in_scope)));
 
   // Make an out-scope client.
   ServiceWorkerContainerHost* out_scope_client = CreateControllee();
-  out_scope_client->UpdateUrls(out_scope,
-                               net::SiteForCookies::FromUrl(out_scope),
-                               url::Origin::Create(out_scope));
+  out_scope_client->UpdateUrls(
+      out_scope, net::SiteForCookies::FromUrl(out_scope),
+      url::Origin::Create(out_scope),
+      blink::StorageKey(url::Origin::Create(out_scope)));
 
   // Make a new registration.
   GURL script("https://www.example.com/service_worker.js");
@@ -1278,7 +1404,7 @@ void WriteStringResponse(
     const std::string& body) {
   mojo_base::BigBuffer body_buffer(base::as_bytes(base::make_span(body)));
   const char kHttpHeaders[] = "HTTP/1.0 200 HONKYDORY\0\0";
-  std::string headers(kHttpHeaders, base::size(kHttpHeaders));
+  std::string headers(kHttpHeaders, std::size(kHttpHeaders));
   WriteResponse(writer, headers, std::move(body_buffer));
 }
 
@@ -1351,13 +1477,12 @@ class UpdateJobTestHelper : public EmbeddedWorkerTestHelper,
         blink::mojom::ServiceWorkerRegistrationObjectInfoPtr,
         blink::mojom::ServiceWorkerObjectInfoPtr,
         blink::mojom::FetchHandlerExistence,
-        std::unique_ptr<blink::PendingURLLoaderFactoryBundle>,
         mojo::PendingReceiver<blink::mojom::ReportingObserver>) override {
       client_->SimulateFailureOfScriptEvaluation();
     }
 
    private:
-    ScriptFailureEmbeddedWorkerInstanceClient* client_;
+    raw_ptr<ScriptFailureEmbeddedWorkerInstanceClient> client_;
   };
 
   ServiceWorkerJobCoordinator* job_coordinator() {
@@ -1420,13 +1545,13 @@ class UpdateJobTestHelper : public EmbeddedWorkerTestHelper,
       // Spoof caching the script for the initial version.
       WriteStringResponse(writer, kBody);
       version->script_cache_map()->NotifyFinishedCaching(
-          script, base::size(kBody), net::OK, std::string());
+          script, std::size(kBody), net::OK, std::string());
     } else {
-      EXPECT_NE(GURL(kNoChangeOrigin), script.GetOrigin());
+      EXPECT_NE(GURL(kNoChangeOrigin), script.DeprecatedGetOriginAsURL());
       // The script must be changed.
       WriteStringResponse(writer, kNewBody);
       version->script_cache_map()->NotifyFinishedCaching(
-          script, base::size(kNewBody), net::OK, std::string());
+          script, std::size(kNewBody), net::OK, std::string());
     }
 
     version->SetMainScriptResponse(CreateMainScriptResponse());
@@ -1463,8 +1588,8 @@ class UpdateJobTestHelper : public EmbeddedWorkerTestHelper,
     update_found_ = true;
   }
 
-  FakeEmbeddedWorkerInstanceClient* initial_embedded_worker_instance_client_ =
-      nullptr;
+  raw_ptr<FakeEmbeddedWorkerInstanceClient>
+      initial_embedded_worker_instance_client_ = nullptr;
   scoped_refptr<ServiceWorkerRegistration> observed_registration_;
   std::vector<AttributeChangeLogEntry> attribute_change_log_;
   std::vector<StateChangeLogEntry> state_change_log_;
@@ -1505,7 +1630,7 @@ class ServiceWorkerUpdateJobTest : public ServiceWorkerJobTest {
 
  protected:
   std::unique_ptr<StoragePartitionImpl> storage_partition_impl_;
-  UpdateJobTestHelper* update_helper_;
+  raw_ptr<UpdateJobTestHelper> update_helper_;
 };
 
 // Make sure that the same registration is used and the update_via_cache value
@@ -1593,8 +1718,7 @@ TEST_F(ServiceWorkerUpdateJobTest, Update_NoChange) {
 
 TEST_F(ServiceWorkerUpdateJobTest, Update_BumpLastUpdateCheckTime) {
   const base::Time kToday = base::Time::Now();
-  const base::Time kYesterday =
-      kToday - base::TimeDelta::FromDays(1) - base::TimeDelta::FromHours(1);
+  const base::Time kYesterday = kToday - base::Days(1) - base::Hours(1);
   const GURL kNewVersionOrigin("https://newversion/");
 
   scoped_refptr<ServiceWorkerRegistration> registration =
@@ -1845,7 +1969,7 @@ TEST_F(ServiceWorkerUpdateJobTest, Update_ScriptUrlChanged) {
   version->script_cache_map()->NotifyStartedCaching(new_script, resource_id);
   WriteStringResponse(writer, kBody);
   version->script_cache_map()->NotifyFinishedCaching(
-      new_script, base::size(kBody), net::OK, std::string());
+      new_script, std::size(kBody), net::OK, std::string());
 
   // Run the update job.
   base::RunLoop().RunUntilIdle();
@@ -2102,24 +2226,16 @@ Cross-Origin-Embedder-Policy: none
 )";
 
   const base::Time kToday = base::Time::Now();
-  const base::Time kYesterday =
-      kToday - base::TimeDelta::FromDays(1) - base::TimeDelta::FromHours(1);
+  const base::Time kYesterday = kToday - base::Days(1) - base::Hours(1);
 
   scoped_refptr<ServiceWorkerRegistration> registration =
       update_helper_->SetupInitialRegistration(kNewVersionOrigin);
   ASSERT_TRUE(registration.get());
-  if (base::FeatureList::IsEnabled(features::kPlzServiceWorker)) {
-    // COEP is populated here because the worker's script is loaded as a part of
-    // the start worker sequence before registration and the response header is
-    // reflected to the version at that point
-    EXPECT_EQ(CrossOriginEmbedderPolicyNone(),
-              registration->active_version()->cross_origin_embedder_policy());
-  } else {
-    // COEP is not set to the version because the script is not loaded before
-    // starting the worker.
-    EXPECT_FALSE(
-        registration->active_version()->cross_origin_embedder_policy());
-  }
+  // COEP is populated here because the worker's script is loaded as a part of
+  // the start worker sequence before registration and the response header is
+  // reflected to the version at that point
+  EXPECT_THAT(registration->active_version()->cross_origin_embedder_policy(),
+              Pointee(Eq(CrossOriginEmbedderPolicyNone())));
 
   registration->AddListener(update_helper_);
 
@@ -2150,8 +2266,8 @@ Cross-Origin-Embedder-Policy: none
     EXPECT_LT(kYesterday, registration->last_update_check());
     EXPECT_TRUE(update_helper_->update_found_);
     ASSERT_NE(nullptr, registration->waiting_version());
-    EXPECT_EQ(CrossOriginEmbedderPolicyRequireCorp(),
-              registration->waiting_version()->cross_origin_embedder_policy());
+    EXPECT_THAT(registration->waiting_version()->cross_origin_embedder_policy(),
+                Pointee(Eq(CrossOriginEmbedderPolicyRequireCorp())));
   }
 
   // Run an update again where the COEP value and the body has been updated. The
@@ -2167,8 +2283,8 @@ Cross-Origin-Embedder-Policy: none
     EXPECT_LT(kYesterday, registration->last_update_check());
     EXPECT_TRUE(update_helper_->update_found_);
     ASSERT_NE(nullptr, registration->waiting_version());
-    EXPECT_EQ(CrossOriginEmbedderPolicyNone(),
-              registration->waiting_version()->cross_origin_embedder_policy());
+    EXPECT_THAT(registration->waiting_version()->cross_origin_embedder_policy(),
+                Pointee(Eq(CrossOriginEmbedderPolicyNone())));
   }
 }
 
@@ -2206,7 +2322,7 @@ TEST_F(ServiceWorkerJobTest, TimeoutBadJobs) {
       SaveRegistration(blink::ServiceWorkerStatusCode::kErrorTimeout,
                        &registration1, loop1.QuitClosure()));
 
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_environment_.FastForwardBy(base::Minutes(1));
 
   // Make a job that gets stuck due to a worker that doesn't finish the install
   // event. The callback is called with kOk, but the job will be stuck until
@@ -2222,7 +2338,7 @@ TEST_F(ServiceWorkerJobTest, TimeoutBadJobs) {
       SaveRegistration(blink::ServiceWorkerStatusCode::kOk, &registration2,
                        loop2.QuitClosure()));
 
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_environment_.FastForwardBy(base::Minutes(1));
 
   // Make a normal job.
   base::RunLoop loop3;
@@ -2234,10 +2350,10 @@ TEST_F(ServiceWorkerJobTest, TimeoutBadJobs) {
       SaveRegistration(blink::ServiceWorkerStatusCode::kOk, &registration3,
                        loop3.QuitClosure()));
 
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(1));
+  task_environment_.FastForwardBy(base::Minutes(1));
 
   // Timeout the first job.
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(2));
+  task_environment_.FastForwardBy(base::Minutes(2));
   loop1.Run();
 
   // Let the second job run until the install event is dispatched, then
@@ -2247,7 +2363,7 @@ TEST_F(ServiceWorkerJobTest, TimeoutBadJobs) {
       registration2->installing_version();
   ASSERT_TRUE(version);
   EXPECT_EQ(ServiceWorkerVersion::INSTALLING, version->status());
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(5));
+  task_environment_.FastForwardBy(base::Minutes(5));
   EXPECT_EQ(ServiceWorkerVersion::REDUNDANT, version->status());
 
   // Let the third job finish successfully. It might have already been

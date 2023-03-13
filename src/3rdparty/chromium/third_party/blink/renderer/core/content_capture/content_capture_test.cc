@@ -22,7 +22,8 @@
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/thread_state.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 
 namespace blink {
@@ -30,7 +31,7 @@ namespace blink {
 namespace {
 
 gfx::Rect GetRect(LayoutObject* layout_object) {
-  return gfx::Rect(EnclosingIntRect(layout_object->VisualRectInDocument()));
+  return ToEnclosingRect(layout_object->VisualRectInDocument());
 }
 
 void FindNodeVectorsDiff(const Vector<Persistent<Node>>& a,
@@ -80,7 +81,7 @@ class WebContentCaptureClientTestHelper : public WebContentCaptureClient {
   ~WebContentCaptureClientTestHelper() override = default;
 
   base::TimeDelta GetTaskInitialDelay() const override {
-    return base::TimeDelta::FromMilliseconds(500);
+    return base::Milliseconds(500);
   }
 
   void DidCaptureContent(const WebVector<WebContentHolder>& data,
@@ -138,58 +139,6 @@ class WebContentCaptureClientTestHelper : public WebContentCaptureClient {
   Vector<String> captured_text_;
 };
 
-class ContentCaptureTaskTestHelper : public ContentCaptureTask {
- public:
-  ContentCaptureTaskTestHelper(LocalFrame& local_frame_root,
-                               TaskSession& task_session,
-                               WebContentCaptureClient& content_capture_client)
-      : ContentCaptureTask(local_frame_root, task_session),
-        content_capture_client_(&content_capture_client) {}
-  void SetTaskStopState(TaskState state) { task_stop_state_ = state; }
-
- protected:
-  WebContentCaptureClient* GetWebContentCaptureClient(
-      const Document& document) override {
-    return content_capture_client_;
-  }
-
-  bool ShouldPause() override {
-    return GetTaskStateForTesting() == task_stop_state_;
-  }
-
- private:
-  WebContentCaptureClient* content_capture_client_;
-  TaskState task_stop_state_ = TaskState::kStop;
-};
-
-class ContentCaptureManagerTestHelper : public ContentCaptureManager {
- public:
-  ContentCaptureManagerTestHelper(
-      LocalFrame& local_frame_root,
-      WebContentCaptureClientTestHelper& content_capture_client)
-      : ContentCaptureManager(local_frame_root) {
-    content_capture_task_ = MakeGarbageCollected<ContentCaptureTaskTestHelper>(
-        local_frame_root, GetTaskSessionForTesting(), content_capture_client);
-  }
-
-  ContentCaptureTaskTestHelper* GetContentCaptureTask() {
-    return content_capture_task_;
-  }
-
-  void Trace(Visitor* visitor) const override {
-    visitor->Trace(content_capture_task_);
-    ContentCaptureManager::Trace(visitor);
-  }
-
- protected:
-  ContentCaptureTask* CreateContentCaptureTask() override {
-    return content_capture_task_;
-  }
-
- private:
-  Member<ContentCaptureTaskTestHelper> content_capture_task_;
-};
-
 class ContentCaptureLocalFrameClientHelper : public EmptyLocalFrameClient {
  public:
   ContentCaptureLocalFrameClientHelper(WebContentCaptureClient& client)
@@ -233,24 +182,21 @@ class ContentCaptureTest
         "<div id='d1'></div>"
         "<p id='invisible'>invisible</p>");
     platform()->SetAutoAdvanceNowToPendingTasks(false);
-    // TODO(michaelbai): ContentCaptureManager should be get from LocalFrame.
-    content_capture_manager_ =
-        MakeGarbageCollected<ContentCaptureManagerTestHelper>(
-            GetFrame(), *content_capture_client_);
-
     InitNodeHolders();
     // Setup captured content to ContentCaptureTask, it isn't necessary once
     // ContentCaptureManager is created by LocalFrame.
-    content_capture_manager_->GetContentCaptureTask()
+    GetOrResetContentCaptureManager()
+        ->GetContentCaptureTaskForTesting()
         ->SetCapturedContentForTesting(node_ids_);
     InitScrollingTestData();
   }
 
   void SimulateScrolling(wtf_size_t step) {
     CHECK_LT(step, 4u);
-    content_capture_manager_->GetContentCaptureTask()
+    GetOrResetContentCaptureManager()
+        ->GetContentCaptureTaskForTesting()
         ->SetCapturedContentForTesting(scrolling_node_ids_[step]);
-    content_capture_manager_->OnScrollPositionChanged();
+    GetOrResetContentCaptureManager()->OnScrollPositionChanged();
   }
 
   void CreateTextNodeAndNotifyManager() {
@@ -261,15 +207,18 @@ class ContentCaptureTest
     Element* div_element = GetElementById("d1");
     div_element->appendChild(element);
     UpdateAllLifecyclePhasesForTest();
-    GetContentCaptureManager()->ScheduleTaskIfNeeded(*node);
+    GetOrResetContentCaptureManager()->ScheduleTaskIfNeeded(*node);
     created_node_id_ = DOMNodeIds::IdForNode(node);
     Vector<cc::NodeInfo> captured_content{
         cc::NodeInfo(created_node_id_, GetRect(node->GetLayoutObject()))};
-    content_capture_manager_->GetContentCaptureTask()
+    GetOrResetContentCaptureManager()
+        ->GetContentCaptureTaskForTesting()
         ->SetCapturedContentForTesting(captured_content);
   }
 
-  ContentCaptureManagerTestHelper* GetContentCaptureManager() const {
+  ContentCaptureManager* GetOrResetContentCaptureManager() {
+    if (content_capture_manager_ == nullptr)
+      content_capture_manager_ = GetFrame().GetOrResetContentCaptureManager();
     return content_capture_manager_;
   }
 
@@ -277,8 +226,8 @@ class ContentCaptureTest
     return content_capture_client_.get();
   }
 
-  ContentCaptureTaskTestHelper* GetContentCaptureTask() const {
-    return GetContentCaptureManager()->GetContentCaptureTask();
+  ContentCaptureTask* GetContentCaptureTask() {
+    return GetOrResetContentCaptureManager()->GetContentCaptureTaskForTesting();
   }
 
   void RunContentCaptureTask() {
@@ -296,7 +245,7 @@ class ContentCaptureTest
   void RemoveNode(Node* node) {
     // Remove the node.
     node->remove();
-    GetContentCaptureManager()->OnLayoutTextWillBeDestroyed(*node);
+    GetOrResetContentCaptureManager()->OnLayoutTextWillBeDestroyed(*node);
   }
 
   void RemoveUnsentNode(const WebVector<WebContentHolder>& sent_nodes) {
@@ -351,7 +300,7 @@ class ContentCaptureTest
       CHECK(layout_object);
       CHECK(layout_object->IsText());
       nodes.push_back(node);
-      GetContentCaptureManager()->ScheduleTaskIfNeeded(*node);
+      GetOrResetContentCaptureManager()->ScheduleTaskIfNeeded(*node);
       node_ids.push_back(
           cc::NodeInfo(DOMNodeIds::IdForNode(node), GetRect(layout_object)));
     }
@@ -409,7 +358,7 @@ class ContentCaptureTest
   Vector<Vector<int64_t>> scrolling_expected_removed_nodes_{4};
   Vector<Vector<cc::NodeInfo>> scrolling_node_ids_{4};
   std::unique_ptr<WebContentCaptureClientTestHelper> content_capture_client_;
-  Persistent<ContentCaptureManagerTestHelper> content_capture_manager_;
+  Persistent<ContentCaptureManager> content_capture_manager_;
   Persistent<ContentCaptureLocalFrameClientHelper> local_frame_client_;
   DOMNodeId created_node_id_ = kInvalidDOMNodeId;
   base::test::ScopedFeatureList feature_list_;
@@ -450,7 +399,7 @@ TEST_P(ContentCaptureTest, Scrolling) {
 
 TEST_P(ContentCaptureTest, PauseAndResume) {
   // The task stops before captures content.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kCaptureContent);
   RunContentCaptureTask();
   EXPECT_FALSE(GetWebContentCaptureClient()->FirstData());
@@ -458,7 +407,7 @@ TEST_P(ContentCaptureTest, PauseAndResume) {
   EXPECT_TRUE(GetWebContentCaptureClient()->RemovedData().empty());
 
   // The task stops before sends the captured content out.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessCurrentSession);
   RunContentCaptureTask();
   EXPECT_FALSE(GetWebContentCaptureClient()->FirstData());
@@ -467,7 +416,7 @@ TEST_P(ContentCaptureTest, PauseAndResume) {
 
   // The task should be stop at kProcessRetryTask because the captured content
   // needs to be sent with 2 batch.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->FirstData());
@@ -478,7 +427,7 @@ TEST_P(ContentCaptureTest, PauseAndResume) {
 
   // Run task until it stops, task will not capture content, because there is no
   // content change, so we have 3 NodeHolders.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kStop);
   RunContentCaptureTask();
   EXPECT_FALSE(GetWebContentCaptureClient()->FirstData());
@@ -495,7 +444,7 @@ TEST_P(ContentCaptureTest, NodeOnlySendOnce) {
   EXPECT_EQ(GetExpectedSecondResultSize(),
             GetWebContentCaptureClient()->Data().size());
 
-  GetContentCaptureManager()->OnScrollPositionChanged();
+  GetOrResetContentCaptureManager()->OnScrollPositionChanged();
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
   EXPECT_TRUE(GetWebContentCaptureClient()->RemovedData().empty());
@@ -510,7 +459,7 @@ TEST_P(ContentCaptureTest, UnsentNode) {
 
   // Simulates the |invisible_node_| being changed, and verifies no content
   // change because |invisible_node_| wasn't captured.
-  GetContentCaptureManager()->OnNodeTextChanged(invisible_node());
+  GetOrResetContentCaptureManager()->OnNodeTextChanged(invisible_node());
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
   EXPECT_TRUE(GetWebContentCaptureClient()->UpdatedData().empty());
@@ -518,7 +467,8 @@ TEST_P(ContentCaptureTest, UnsentNode) {
 
   // Simulates the |invisible_node_| being removed, and verifies no content
   // change because |invisible_node_| wasn't captured.
-  GetContentCaptureManager()->OnLayoutTextWillBeDestroyed(invisible_node());
+  GetOrResetContentCaptureManager()->OnLayoutTextWillBeDestroyed(
+      invisible_node());
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
   EXPECT_TRUE(GetWebContentCaptureClient()->UpdatedData().empty());
@@ -527,14 +477,14 @@ TEST_P(ContentCaptureTest, UnsentNode) {
 
 TEST_P(ContentCaptureTest, RemoveNodeBeforeSendingOut) {
   // Capture the content, but didn't send them.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessCurrentSession);
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
 
   // Remove the node and sent the captured content out.
   RemoveNode(Nodes().at(0));
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   EXPECT_EQ(GetExpectedFirstResultSize(),
@@ -553,13 +503,13 @@ TEST_P(ContentCaptureTest, RemoveNodeBeforeSendingOut) {
 
 TEST_P(ContentCaptureTest, RemoveNodeInBetweenSendingOut) {
   // Capture the content, but didn't send them.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessCurrentSession);
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
 
   // Sends first batch.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   EXPECT_EQ(GetExpectedFirstResultSize(),
@@ -568,7 +518,7 @@ TEST_P(ContentCaptureTest, RemoveNodeInBetweenSendingOut) {
 
   // This relies on each node to have different value.
   RemoveUnsentNode(GetWebContentCaptureClient()->Data());
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   // Total 7 content returned instead of 8.
@@ -583,13 +533,13 @@ TEST_P(ContentCaptureTest, RemoveNodeInBetweenSendingOut) {
 
 TEST_P(ContentCaptureTest, RemoveNodeAfterSendingOut) {
   // Captures the content, but didn't send them.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessCurrentSession);
   RunContentCaptureTask();
   EXPECT_TRUE(GetWebContentCaptureClient()->Data().empty());
 
   // Sends first batch.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   EXPECT_EQ(GetExpectedFirstResultSize(),
@@ -617,7 +567,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
   base::HistogramTester histograms;
 
   // The task stops before captures content.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kCaptureContent);
   RunContentCaptureTask();
   // Verify no histogram reported yet.
@@ -635,7 +585,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
       ContentCaptureTaskHistogramReporter::kTaskDelayInMs, 1u);
 
   // The task stops before sends the captured content out.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessCurrentSession);
   RunContentCaptureTask();
   // Verify has one CaptureContentTime record.
@@ -650,7 +600,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
 
   // The task stops at kProcessRetryTask because the captured content
   // needs to be sent with 2 batch.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kProcessRetryTask);
   RunContentCaptureTask();
   // Verify has one CaptureContentTime, one SendContentTime and one
@@ -666,7 +616,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
 
   // Run task until it stops, task will not capture content, because there is no
   // content change.
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kStop);
   RunContentCaptureTask();
   // Verify has two SendContentTime records.
@@ -692,7 +642,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
 
   // Create a node and run task until it stops.
   CreateTextNodeAndNotifyManager();
-  GetContentCaptureTask()->SetTaskStopState(
+  GetContentCaptureTask()->SetTaskStopForTesting(
       ContentCaptureTask::TaskState::kStop);
   RunNextContentCaptureTask();
   histograms.ExpectTotalCount(
@@ -732,7 +682,7 @@ TEST_P(ContentCaptureTest, TaskHistogramReporter) {
 
 TEST_P(ContentCaptureTest, RescheduleTask) {
   // This test assumes test runs much faster than task's long delay which is 5s.
-  Persistent<ContentCaptureTaskTestHelper> task = GetContentCaptureTask();
+  Persistent<ContentCaptureTask> task = GetContentCaptureTask();
   task->CancelTaskForTesting();
   EXPECT_TRUE(task->GetTaskNextFireIntervalForTesting().is_zero());
   task->Schedule(
@@ -746,7 +696,7 @@ TEST_P(ContentCaptureTest, RescheduleTask) {
 
 TEST_P(ContentCaptureTest, NotRescheduleTask) {
   // This test assumes test runs much faster than task's long delay which is 5s.
-  Persistent<ContentCaptureTaskTestHelper> task = GetContentCaptureTask();
+  Persistent<ContentCaptureTask> task = GetContentCaptureTask();
   task->CancelTaskForTesting();
   EXPECT_TRUE(task->GetTaskNextFireIntervalForTesting().is_zero());
   task->Schedule(
@@ -780,12 +730,12 @@ class ContentCaptureSimTest : public SimTest {
     GetDocument()
         .GetFrame()
         ->LocalFrameRoot()
-        .GetContentCaptureManager()
+        .GetOrResetContentCaptureManager()
         ->GetContentCaptureTaskForTesting()
         ->RunTaskForTestingUntil(state);
     // Cancels the scheduled task to simulate that the task is running by
     // scheduler.
-    GetContentCaptureManager()
+    GetOrResetContentCaptureManager()
         ->GetContentCaptureTaskForTesting()
         ->CancelTaskForTesting();
   }
@@ -839,31 +789,31 @@ class ContentCaptureSimTest : public SimTest {
                  main_frame_expected_text_.end(), old_text, new_text);
   }
 
-  ContentCaptureManager* GetContentCaptureManager() {
+  ContentCaptureManager* GetOrResetContentCaptureManager() {
     return DynamicTo<LocalFrame>(LocalFrameRoot().GetFrame())
-        ->GetContentCaptureManager();
+        ->GetOrResetContentCaptureManager();
   }
 
   void SimulateUserInputOnMainFrame() {
-    GetContentCaptureManager()->NotifyInputEvent(
+    GetOrResetContentCaptureManager()->NotifyInputEvent(
         WebInputEvent::Type::kMouseDown,
         *DynamicTo<LocalFrame>(MainFrame().GetFrame()));
   }
 
   void SimulateUserInputOnChildFrame() {
-    GetContentCaptureManager()->NotifyInputEvent(
+    GetOrResetContentCaptureManager()->NotifyInputEvent(
         WebInputEvent::Type::kMouseDown, *child_document_->GetFrame());
   }
 
   base::TimeDelta GetNextTaskDelay() {
-    return GetContentCaptureManager()
+    return GetOrResetContentCaptureManager()
         ->GetContentCaptureTaskForTesting()
         ->GetTaskDelayForTesting()
         .GetNextTaskDelay();
   }
 
   base::TimeDelta GetTaskNextFireInterval() {
-    return GetContentCaptureManager()
+    return GetOrResetContentCaptureManager()
         ->GetContentCaptureTaskForTesting()
         ->GetTaskNextFireIntervalForTesting();
   }
@@ -977,7 +927,7 @@ class ContentCaptureSimTest : public SimTest {
     GetDocument()
         .GetFrame()
         ->LocalFrameRoot()
-        .GetContentCaptureManager()
+        .GetOrResetContentCaptureManager()
         ->GetContentCaptureTaskForTesting()
         ->SetCapturedContentForTesting(captured_content);
   }
@@ -1148,12 +1098,10 @@ TEST_F(ContentCaptureSimTest, DeleteNodeContent) {
 
 TEST_F(ContentCaptureSimTest, UserActivatedDelay) {
   base::TimeDelta expected_delays[] = {
-      base::TimeDelta::FromMilliseconds(500), base::TimeDelta::FromSeconds(1),
-      base::TimeDelta::FromSeconds(2),        base::TimeDelta::FromSeconds(4),
-      base::TimeDelta::FromSeconds(8),        base::TimeDelta::FromSeconds(16),
-      base::TimeDelta::FromSeconds(32),       base::TimeDelta::FromSeconds(64),
-      base::TimeDelta::FromSeconds(128)};
-  size_t expected_delays_size = base::size(expected_delays);
+      base::Milliseconds(500), base::Seconds(1),  base::Seconds(2),
+      base::Seconds(4),        base::Seconds(8),  base::Seconds(16),
+      base::Seconds(32),       base::Seconds(64), base::Seconds(128)};
+  size_t expected_delays_size = std::size(expected_delays);
   // The first task has been scheduled but not run yet, the delay will be
   // increased until current task starts to run. Verifies the value is
   // unchanged.

@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/memory/raw_ptr.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/browser/browser_context.h"
 #include "extensions/browser/api/idle/idle_api_constants.h"
@@ -41,7 +42,7 @@ class DefaultEventDelegate : public IdleManager::EventDelegate {
   void UnregisterObserver(EventRouter::Observer* observer) override;
 
  private:
-  content::BrowserContext* const context_;
+  const raw_ptr<content::BrowserContext> context_;
 };
 
 DefaultEventDelegate::DefaultEventDelegate(content::BrowserContext* context)
@@ -55,9 +56,9 @@ void DefaultEventDelegate::OnStateChanged(const std::string& extension_id,
                                           ui::IdleState new_state) {
   std::unique_ptr<base::ListValue> args(new base::ListValue());
   args->Append(IdleManager::CreateIdleValue(new_state));
-  auto event = std::make_unique<Event>(events::IDLE_ON_STATE_CHANGED,
-                                       idle::OnStateChanged::kEventName,
-                                       std::move(*args).TakeList(), context_);
+  auto event = std::make_unique<Event>(
+      events::IDLE_ON_STATE_CHANGED, idle::OnStateChanged::kEventName,
+      std::move(*args).TakeListDeprecated(), context_);
   EventRouter::Get(context_)
       ->DispatchEventToExtension(extension_id, std::move(event));
 }
@@ -180,6 +181,13 @@ void IdleManager::SetThreshold(const std::string& extension_id, int threshold) {
   GetMonitor(extension_id)->threshold = threshold;
 }
 
+int IdleManager::GetThresholdForTest(const std::string& extension_id) const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  auto it = monitors_.find(extension_id);
+
+  return it == monitors_.end() ? kDefaultIdleThreshold : it->second.threshold;
+}
+
 base::TimeDelta IdleManager::GetAutoLockDelay() const {
   DCHECK(thread_checker_.CalledOnValidThread());
 #if BUILDFLAG(IS_CHROMEOS_ASH)
@@ -187,8 +195,9 @@ base::TimeDelta IdleManager::GetAutoLockDelay() const {
       ->GetMaxPolicyAutoScreenLockDelay();
 #elif BUILDFLAG(IS_CHROMEOS_LACROS)
   return chromeos::LacrosService::Get()->system_idle_cache()->auto_lock_delay();
-#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
+#else
   return base::TimeDelta();
+#endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
 }
 
 // static
@@ -233,8 +242,8 @@ IdleMonitor* IdleManager::GetMonitor(const std::string& extension_id) {
 void IdleManager::StartPolling() {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (!poll_timer_.IsRunning()) {
-    poll_timer_.Start(FROM_HERE, base::TimeDelta::FromSeconds(kPollInterval),
-                      this, &IdleManager::UpdateIdleState);
+    poll_timer_.Start(FROM_HERE, base::Seconds(kPollInterval), this,
+                      &IdleManager::UpdateIdleState);
   }
 }
 

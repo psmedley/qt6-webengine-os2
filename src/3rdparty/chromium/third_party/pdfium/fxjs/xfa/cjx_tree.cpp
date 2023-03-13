@@ -6,7 +6,6 @@
 
 #include "fxjs/xfa/cjx_tree.h"
 
-#include <memory>
 #include <vector>
 
 #include "fxjs/fxv8.h"
@@ -15,6 +14,8 @@
 #include "fxjs/xfa/cfxjse_engine.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "v8/include/cppgc/allocation.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
 #include "xfa/fxfa/parser/cxfa_arraynodelist.h"
 #include "xfa/fxfa/parser/cxfa_attachnodelist.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
@@ -47,7 +48,7 @@ CJS_Result CJX_Tree::resolveNode(
   if (pRefNode->GetElementType() == XFA_Element::Xfa)
     pRefNode = pScriptContext->GetThisObject();
 
-  Optional<CFXJSE_Engine::ResolveResult> maybeResult =
+  absl::optional<CFXJSE_Engine::ResolveResult> maybeResult =
       pScriptContext->ResolveObjects(
           ToNode(pRefNode), wsExpression.AsStringView(),
           Mask<XFA_ResolveFlag>{
@@ -102,7 +103,7 @@ void CJX_Tree::all(v8::Isolate* pIsolate,
                    bool bSetting,
                    XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   const Mask<XFA_ResolveFlag> kFlags = {XFA_ResolveFlag::kSiblings,
@@ -116,7 +117,7 @@ void CJX_Tree::classAll(v8::Isolate* pIsolate,
                         bool bSetting,
                         XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
   const Mask<XFA_ResolveFlag> kFlags = {XFA_ResolveFlag::kSiblings,
@@ -132,7 +133,7 @@ void CJX_Tree::nodes(v8::Isolate* pIsolate,
                      XFA_Attribute eAttribute) {
   if (bSetting) {
     WideString wsMessage = L"Unable to set ";
-    FXJSE_ThrowMessage(wsMessage.ToUTF8().AsStringView());
+    FXJSE_ThrowMessage(pIsolate, wsMessage.ToUTF8().AsStringView());
     return;
   }
 
@@ -151,7 +152,7 @@ void CJX_Tree::parent(v8::Isolate* pIsolate,
                       bool bSetting,
                       XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 
@@ -168,7 +169,7 @@ void CJX_Tree::index(v8::Isolate* pIsolate,
                      bool bSetting,
                      XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 
@@ -183,7 +184,7 @@ void CJX_Tree::classIndex(v8::Isolate* pIsolate,
                           bool bSetting,
                           XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 
@@ -198,7 +199,7 @@ void CJX_Tree::somExpression(v8::Isolate* pIsolate,
                              bool bSetting,
                              XFA_Attribute eAttribute) {
   if (bSetting) {
-    ThrowInvalidPropertyException();
+    ThrowInvalidPropertyException(pIsolate);
     return;
   }
 
@@ -219,7 +220,7 @@ v8::Local<v8::Value> CJX_Tree::ResolveNodeList(v8::Isolate* pIsolate,
   pDoc->GetNodeOwner()->PersistList(pNodeList);
 
   CFXJSE_Engine* pScriptContext = pDoc->GetScriptContext();
-  Optional<CFXJSE_Engine::ResolveResult> maybeResult =
+  absl::optional<CFXJSE_Engine::ResolveResult> maybeResult =
       pScriptContext->ResolveObjects(refNode, wsExpression.AsStringView(),
                                      dwFlag);
 

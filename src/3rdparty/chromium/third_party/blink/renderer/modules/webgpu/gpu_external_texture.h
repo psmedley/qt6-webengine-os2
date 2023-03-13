@@ -18,19 +18,27 @@ class GPUExternalTexture : public DawnObject<WGPUExternalTexture> {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static GPUExternalTexture* FromVideo(
+  static GPUExternalTexture* Create(
       GPUDevice* device,
       const GPUExternalTextureDescriptor* webgpu_desc,
       ExceptionState& exception_state);
   explicit GPUExternalTexture(
       GPUDevice* device,
-      WGPUExternalTexture externalTexture,
+      WGPUExternalTexture external_texture,
       scoped_refptr<WebGPUMailboxTexture> mailbox_texture);
+
+  GPUExternalTexture(const GPUExternalTexture&) = delete;
+  GPUExternalTexture& operator=(const GPUExternalTexture&) = delete;
+
   void Destroy();
 
  private:
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().externalTextureSetLabel(GetHandle(), utf8_label.c_str());
+  }
+
   scoped_refptr<WebGPUMailboxTexture> mailbox_texture_;
-  DISALLOW_COPY_AND_ASSIGN(GPUExternalTexture);
 };
 
 }  // namespace blink

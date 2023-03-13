@@ -30,13 +30,15 @@
 #include <cassert>
 #include <memory>
 
-#include "base/cxx17_backports.h"
-#include "base/single_thread_task_runner.h"
+#include "base/debug/crash_logging.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -113,11 +115,11 @@ const char* const kHeaderPrefixesToIgnoreAfterRevalidation[] = {
 
 static inline bool ShouldUpdateHeaderAfterRevalidation(
     const AtomicString& header) {
-  for (size_t i = 0; i < base::size(kHeadersToIgnoreAfterRevalidation); i++) {
+  for (size_t i = 0; i < std::size(kHeadersToIgnoreAfterRevalidation); i++) {
     if (EqualIgnoringASCIICase(header, kHeadersToIgnoreAfterRevalidation[i]))
       return false;
   }
-  for (size_t i = 0; i < base::size(kHeaderPrefixesToIgnoreAfterRevalidation);
+  for (size_t i = 0; i < std::size(kHeaderPrefixesToIgnoreAfterRevalidation);
        i++) {
     if (header.StartsWithIgnoringASCIICase(
             kHeaderPrefixesToIgnoreAfterRevalidation[i]))
@@ -253,10 +255,14 @@ void Resource::AppendData(const char* data, size_t length) {
   DCHECK(!is_revalidating_);
   DCHECK(!ErrorOccurred());
   if (options_.data_buffering_policy == kBufferData) {
-    if (data_)
+    if (data_) {
       data_->Append(data, length);
-    else
+    } else {
+      // TODO(crbug.com/1302204): Remove this once the crash is fixed.
+      SCOPED_CRASH_KEY_STRING32("Resource", "append_data_length",
+                                base::NumberToString(length));
       data_ = SharedBuffer::Create(data, length);
+    }
     SetEncodedSize(data_->size());
   }
   NotifyDataReceived(data, length);
@@ -411,7 +417,7 @@ static base::TimeDelta CurrentAge(const ResourceResponse& response,
 
 static base::TimeDelta FreshnessLifetime(const ResourceResponse& response,
                                          base::Time response_timestamp) {
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // On desktop, local files should be reloaded in case they change.
   if (response.CurrentRequestUrl().IsLocalFile())
     return base::TimeDelta();
@@ -525,7 +531,6 @@ void Resource::ResponseReceived(const ResourceResponse& response) {
 
 void Resource::SetSerializedCachedMetadata(mojo_base::BigBuffer data) {
   DCHECK(!is_revalidating_);
-  DCHECK(!GetResponse().IsNull());
 }
 
 bool Resource::CodeCacheHashRequired() const {
@@ -618,9 +623,6 @@ void Resource::AddClient(ResourceClient* client,
 
 void Resource::RemoveClient(ResourceClient* client) {
   CHECK(!is_add_remove_client_prohibited_);
-
-  // This code may be called in a pre-finalizer, where weak members in the
-  // HashCountedSet are already swept out.
 
   if (finished_clients_.Contains(client))
     finished_clients_.erase(client);
@@ -922,10 +924,6 @@ void Resource::SetCachePolicyBypassingCache() {
   resource_request_.SetCacheMode(mojom::FetchCacheMode::kBypassCache);
 }
 
-void Resource::SetPreviewsState(PreviewsState previews_state) {
-  resource_request_.SetPreviewsState(previews_state);
-}
-
 void Resource::ClearRangeRequestHeader() {
   resource_request_.ClearHttpHeaderField("range");
 }
@@ -1097,6 +1095,8 @@ static const char* InitiatorTypeNameToString(
     const AtomicString& initiator_type_name) {
   if (initiator_type_name == fetch_initiator_type_names::kAudio)
     return "Audio";
+  if (initiator_type_name == fetch_initiator_type_names::kAttributionsrc)
+    return "Attribution resource";
   if (initiator_type_name == fetch_initiator_type_names::kCSS)
     return "CSS resource";
   if (initiator_type_name == fetch_initiator_type_names::kDocument)
@@ -1125,7 +1125,7 @@ static const char* InitiatorTypeNameToString(
     return "XMLHttpRequest";
 
   static_assert(
-      fetch_initiator_type_names::kNamesCount == 17,
+      fetch_initiator_type_names::kNamesCount == 18,
       "New FetchInitiatorTypeNames should be handled correctly here.");
 
   return "Resource";

@@ -11,11 +11,11 @@
 
 #include "base/bind.h"
 #include "base/containers/contains.h"
+#include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/guid.h"
 #include "base/i18n/case_conversion.h"
 #include "base/i18n/string_search.h"
-#include "base/macros.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -144,7 +144,7 @@ std::string TruncateUrl(const std::string& url) {
 // returned.
 GURL GetUrlFromClipboard(bool notify_if_restricted) {
   std::u16string url_text;
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
   ui::DataTransferEndpoint data_dst = ui::DataTransferEndpoint(
       ui::EndpointType::kDefault, notify_if_restricted);
   ui::Clipboard::GetForCurrentThread()->ReadText(
@@ -152,24 +152,6 @@ GURL GetUrlFromClipboard(bool notify_if_restricted) {
 #endif
   return GURL(url_text);
 }
-
-class VectorIterator {
- public:
-  explicit VectorIterator(std::vector<const BookmarkNode*>* nodes)
-      : nodes_(nodes), current_(nodes->begin()) {}
-  bool has_next() { return (current_ != nodes_->end()); }
-  const BookmarkNode* Next() {
-    const BookmarkNode* result = *current_;
-    ++current_;
-    return result;
-  }
-
- private:
-  std::vector<const BookmarkNode*>* nodes_;
-  std::vector<const BookmarkNode*>::iterator current_;
-
-  DISALLOW_COPY_AND_ASSIGN(VectorIterator);
-};
 
 template <class type>
 void GetBookmarksMatchingPropertiesImpl(
@@ -196,7 +178,7 @@ void GetBookmarksMatchingPropertiesImpl(
   }
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // Returns whether or not a bookmark model contains any bookmarks aside of the
 // permanent nodes.
 bool HasUserCreatedBookmarks(BookmarkModel* model) {
@@ -212,6 +194,21 @@ bool HasUserCreatedBookmarks(BookmarkModel* model) {
 
 QueryFields::QueryFields() {}
 QueryFields::~QueryFields() {}
+
+VectorIterator::VectorIterator(std::vector<const BookmarkNode*>* nodes)
+    : nodes_(nodes), current_(nodes->begin()) {}
+
+VectorIterator::~VectorIterator() = default;
+
+bool VectorIterator::has_next() {
+  return (current_ != nodes_->end());
+}
+
+const BookmarkNode* VectorIterator::Next() {
+  const BookmarkNode* result = *current_;
+  ++current_;
+  return result;
+}
 
 void CloneBookmarkNode(BookmarkModel* model,
                        const std::vector<BookmarkNodeData::Element>& elements,
@@ -439,20 +436,14 @@ bool DoesBookmarkContainWords(const std::u16string& title,
 
 void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(
-      prefs::kShowBookmarkBar,
-      false,
+      prefs::kShowBookmarkBar, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(prefs::kEditBookmarksEnabled, true);
   registry->RegisterBooleanPref(
-      prefs::kShowAppsShortcutInBookmarkBar,
-      true,
+      prefs::kShowAppsShortcutInBookmarkBar, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   registry->RegisterBooleanPref(
-      prefs::kShowReadingListInBookmarkBar, true,
-      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
-  registry->RegisterBooleanPref(
-      prefs::kShowManagedBookmarksInBookmarkBar,
-      true,
+      prefs::kShowManagedBookmarksInBookmarkBar, true,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
   RegisterManagedBookmarksPrefs(registry);
 }
@@ -579,7 +570,7 @@ bool HasDescendantsOf(const std::vector<const BookmarkNode*>& list,
 }
 
 const BookmarkNode* GetParentForNewNodes(BookmarkModel* model) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (!HasUserCreatedBookmarks(model))
     return model->mobile_node();
 #endif

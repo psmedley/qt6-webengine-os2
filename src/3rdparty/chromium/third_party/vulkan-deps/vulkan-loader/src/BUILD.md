@@ -2,16 +2,36 @@
 
 Instructions for building this repository on Linux, Windows, and MacOS.
 
-## Index
+## Table Of Contents
 
-1. [Contributing](#contributing-to-the-repository)
-1. [Repository Content](#repository-content)
-1. [Repository Set-Up](#repository-set-up)
-1. [Windows Build](#building-on-windows)
-1. [Linux Build](#building-on-linux)
-1. [MacOS build](#building-on-macos)
-1. [Fuchsia build](#building-on-fuchsia)
-1. [QNX build](#building-on-qnx)
+- [Contributing to the Repository](#contributing-to-the-repository)
+- [Repository Content](#repository-content)
+  - [Installed Files](#installed-files)
+- [Repository Set-Up](#repository-set-up)
+  - [Display Drivers](#display-drivers)
+  - [Download the Repository](#download-the-repository)
+  - [Repository Dependencies](#repository-dependencies)
+  - [Build and Install Directories](#build-and-install-directories)
+  - [Building Dependent Repositories with Known-Good Revisions](#building-dependent-repositories-with-known-good-revisions)
+  - [Generated source code](#generated-source-code)
+  - [Build Options](#build-options)
+- [Building On Windows](#building-on-windows)
+  - [Windows Development Environment Requirements](#windows-development-environment-requirements)
+  - [Windows Build - Microsoft Visual Studio](#windows-build---microsoft-visual-studio)
+  - [Windows Notes](#windows-notes)
+    - [CMake Visual Studio Generators](#cmake-visual-studio-generators)
+    - [Using The Vulkan Loader Library in this Repository on Windows](#using-the-vulkan-loader-library-in-this-repository-on-windows)
+- [Building On Linux](#building-on-linux)
+  - [Linux Development Environment Requirements](#linux-development-environment-requirements)
+  - [Linux Build](#linux-build)
+- [Building on MacOS](#building-on-macos)
+  - [MacOS Development Environment Requirements](#macos-development-environment-requirements)
+  - [Clone the Repository](#clone-the-repository)
+  - [MacOS build](#macos-build)
+- [Building on Fuchsia](#building-on-fuchsia)
+- [Building on QNX](#building-on-qnx)
+  - [SDK Symbols](#sdk-symbols)
+
 
 ## Contributing to the Repository
 
@@ -73,23 +93,16 @@ contains the Vulkan API definition files (registry) that are required to build
 the loader. You must also take note of the headers install directory and pass
 it on the CMake command line for building this repository, as described below.
 
-#### Google Test
+#### Test Dependencies
 
-The loader tests depend on the [Google Test](https://github.com/google/googletest)
-framework and do not build unless this framework is downloaded into the
-repository's `external` directory.
+The loader tests depend on the [Google Test](https://github.com/google/googletest) library and
+on Windows platforms depends on the [Microsoft Detours](https://github.com/microsoft/Detours) library.
 
-To obtain the framework, change your current directory to the top of your
-Vulkan-Loader repository and run:
-
-    git clone https://github.com/google/googletest.git external/googletest
-    cd external/googletest
-    git checkout tags/release-1.10.0
-
-before configuring your build with CMake.
-
-If you do not need the loader tests, there is no need to download this
-framework.
+To build the tests, pass the `-DUPDATE_DEPS=ON` and `-DBUILD_TESTS=ON` options when generating the project:
+```bash
+cmake ... -DUPDATE_DEPS=ON -DBUILD_TESTS=ON ...
+```
+This will ensure googletest and detours is downloaded and the appropriate version is used.
 
 ### Build and Install Directories
 
@@ -101,22 +114,34 @@ although you can place these directories in any location.
 ### Building Dependent Repositories with Known-Good Revisions
 
 There is a Python utility script, `scripts/update_deps.py`, that you can use
-to gather and build the dependent repositories mentioned above. This program
-also uses information stored in the `scripts/known-good.json` file to checkout
-dependent repository revisions that are known to be compatible with the
-revision of this repository that you currently have checked out.
+to gather and build the dependent repositories mentioned above.
+This program also uses information stored in the `scripts/known-good.json` file
+to checkout dependent repository revisions that are known to be compatible with
+the revision of this repository that you currently have checked out.
 
-Here is a usage example for this repository:
+You can choose to do this manually or automatically.
+The first step to either is cloning the Vulkan-Loader repo and stepping into
+that newly cloned folder:
 
-    git clone git@github.com:KhronosGroup/Vulkan-Loader.git
-    cd Vulkan-Loader
-    mkdir build
-    cd build
-    ../scripts/update_deps.py
-    cmake -C helper.cmake ..
-    cmake --build .
+```
+  git clone git@github.com:KhronosGroup/Vulkan-Loader.git
+  cd Vulkan-Loader
+```
 
-#### Notes
+#### Manually
+
+To manually update the dependencies you now must create the build folder, and
+run the update deps script followed by the necessary CMake build commands:
+
+```
+  mkdir build
+  cd build
+  ../scripts/update_deps.py
+  cmake -C helper.cmake ..
+  cmake --build .
+```
+
+##### Notes About the Manual Option
 
 - You may need to adjust some of the CMake options based on your platform. See
   the platform-specific sections later in this document.
@@ -144,6 +169,27 @@ Here is a usage example for this repository:
 - Please use `update_deps.py --help` to list additional options and read the
   internal documentation in `update_deps.py` for further information.
 
+
+#### Automatically
+
+On the other hand, if you choose to let the CMake scripts do all the
+heavy-lifting, you may just trigger the following CMake commands:
+
+```
+  cmake -S. -Bbuild -DUPDATE_DEPS=On
+  cmake --build build
+```
+
+##### Notes About the Automatic Option
+
+- You may need to adjust some of the CMake options based on your platform. See
+  the platform-specific sections later in this document.
+- The `build` directory is also being used to build this
+  (Vulkan-ValidationLayers) repository. But there shouldn't be any conflicts
+  inside the `build` directory between the dependent repositories and the
+  build files for this repository.
+
+
 ### Generated source code
 
 This repository contains generated source code in the `loader/generated`
@@ -165,30 +211,29 @@ be specified to customize the build. Some of the options are binary on/off
 options, while others take a string as input. The following is a table of all
 on/off options currently supported by this repository:
 
-| Option | Platform | Default | Description |
-| ------ | -------- | ------- | ----------- |
-| BUILD_LOADER | All | `ON` | Controls whether or not the loader is built. Setting this to `OFF` will allow building the tests against a loader that is installed to the system. |
-| BUILD_TESTS | All | `???` | Controls whether or not the loader tests are built. The default is `ON` when the Google Test repository is cloned into the `external` directory.  Otherwise, the default is `OFF`. |
-| BUILD_WSI_XCB_SUPPORT | Linux | `ON` | Build the loader with the XCB entry points enabled. Without this, the XCB headers should not be needed, but the extension `VK_KHR_xcb_surface` won't be available. |
-| BUILD_WSI_XLIB_SUPPORT | Linux | `ON` | Build the loader with the Xlib entry points enabled. Without this, the X11 headers should not be needed, but the extension `VK_KHR_xlib_surface` won't be available. |
-| BUILD_WSI_WAYLAND_SUPPORT | Linux | `ON` | Build the loader with the Wayland entry points enabled. Without this, the Wayland headers should not be needed, but the extension `VK_KHR_wayland_surface` won't be available. |
-| BUILD_WSI_DIRECTFB_SUPPORT | Linux | `OFF` | Build the loader with the DirectFB entry points enabled. Without this, the DirectFB headers should not be needed, but the extension `VK_EXT_directfb_surface` won't be available. |
-| BUILD_WSI_SCREEN_QNX_SUPPORT | QNX | `OFF` | Build the loader with the QNX Screen entry points enabled. Without this the extension `VK_QNX_screen_surface` won't be available. |
-| ENABLE_WIN10_ONECORE | Windows | `OFF` | Link the loader to the [OneCore](https://msdn.microsoft.com/en-us/library/windows/desktop/mt654039.aspx) umbrella library, instead of the standard Win32 ones. |
-| USE_CCACHE | Linux | `OFF` | Enable caching with the CCache program. |
-| USE_MASM | Windows | `ON` | Controls whether to build assembly files with MS assembler, else fallback to C code |
-| BUILD_STATIC_LOADER | macOS | `OFF` | This allows the loader to be built as a static library on macOS. Not tested, use at your own risk. |
-
+| Option                       | Platform | Default | Description                                                                                                                                                                       |
+| ---------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| BUILD_TESTS                  | All      | `OFF`   | Controls whether or not the loader tests are built.                                                                                                                               |
+| BUILD_WSI_XCB_SUPPORT        | Linux    | `ON`    | Build the loader with the XCB entry points enabled. Without this, the XCB headers should not be needed, but the extension `VK_KHR_xcb_surface` won't be available.                |
+| BUILD_WSI_XLIB_SUPPORT       | Linux    | `ON`    | Build the loader with the Xlib entry points enabled. Without this, the X11 headers should not be needed, but the extension `VK_KHR_xlib_surface` won't be available.              |
+| BUILD_WSI_WAYLAND_SUPPORT    | Linux    | `ON`    | Build the loader with the Wayland entry points enabled. Without this, the Wayland headers should not be needed, but the extension `VK_KHR_wayland_surface` won't be available.    |
+| BUILD_WSI_DIRECTFB_SUPPORT   | Linux    | `OFF`   | Build the loader with the DirectFB entry points enabled. Without this, the DirectFB headers should not be needed, but the extension `VK_EXT_directfb_surface` won't be available. |
+| BUILD_WSI_SCREEN_QNX_SUPPORT | QNX      | `OFF`   | Build the loader with the QNX Screen entry points enabled. Without this the extension `VK_QNX_screen_surface` won't be available.                                                 |
+| ENABLE_WIN10_ONECORE         | Windows  | `OFF`   | Link the loader to the [OneCore](https://msdn.microsoft.com/en-us/library/windows/desktop/mt654039.aspx) umbrella library, instead of the standard Win32 ones.                    |
+| USE_CCACHE                   | Linux    | `OFF`   | Enable caching with the CCache program.                                                                                                                                           |
+| USE_GAS                      | Linux    | `ON`    | Controls whether to build assembly files with the GNU assembler, else fallback to C code.                                                                                         |
+| USE_MASM                     | Windows  | `ON`    | Controls whether to build assembly files with MS assembler, else fallback to C code                                                                                               |
+| BUILD_STATIC_LOADER          | macOS    | `OFF`   | This allows the loader to be built as a static library on macOS. Not tested, use at your own risk.                                                                                |
 The following is a table of all string options currently supported by this repository:
 
-| Option | Platform | Default | Description |
-| ------ | -------- | ------- | ----------- |
-| CMAKE_OSX_DEPLOYMENT_TARGET | MacOS | `10.12` | The minimum version of MacOS for loader deployment. |
-| FALLBACK_CONFIG_DIRS | Linux/MacOS | `/etc/xdg` | Configuration path(s) to use instead of `XDG_CONFIG_DIRS` if that environment variable is unavailable. The default setting is freedesktop compliant. |
-| FALLBACK_DATA_DIRS | Linux/MacOS | `/usr/local/share:/usr/share` | Configuration path(s) to use instead of `XDG_DATA_DIRS` if that environment variable is unavailable. The default setting is freedesktop compliant. |
+| Option                      | Platform    | Default                       | Description                                                                                                                                          |
+| --------------------------- | ----------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| CMAKE_OSX_DEPLOYMENT_TARGET | MacOS       | `10.12`                       | The minimum version of MacOS for loader deployment.                                                                                                  |
+| FALLBACK_CONFIG_DIRS        | Linux/MacOS | `/etc/xdg`                    | Configuration path(s) to use instead of `XDG_CONFIG_DIRS` if that environment variable is unavailable. The default setting is freedesktop compliant. |
+| FALLBACK_DATA_DIRS          | Linux/MacOS | `/usr/local/share:/usr/share` | Configuration path(s) to use instead of `XDG_DATA_DIRS` if that environment variable is unavailable. The default setting is freedesktop compliant.   |
+| BUILD_DLL_VERSIONINFO       | Windows     | `""` (empty string)           | Allows setting the Windows specific version information for the Loader DLL. Format is "major.minor.patch.build".                                     |
 
-These variables should be set using the `-D` option when invoking
-CMake to generate the native platform files.
+These variables should be set using the `-D` option when invoking CMake to generate the native platform files.
 
 ## Building On Windows
 
@@ -346,7 +391,7 @@ have installed. Generator strings that correspond to versions of Visual Studio
 include:
 
 | Build Platform               | 64-bit Generator              | 32-bit Generator        |
-|------------------------------|-------------------------------|-------------------------|
+| ---------------------------- | ----------------------------- | ----------------------- |
 | Microsoft Visual Studio 2015 | "Visual Studio 14 2015 Win64" | "Visual Studio 14 2015" |
 | Microsoft Visual Studio 2017 | "Visual Studio 15 2017 Win64" | "Visual Studio 15 2017" |
 | Microsoft Visual Studio 2019 | "Visual Studio 16 2019"       | "Visual Studio 16 2019" |
@@ -675,7 +720,7 @@ Before you run these tests, you will need to clone and build the
 
 You will also need to direct your new loader to the MoltenVK ICD:
 
-    export VK_ICD_FILENAMES=<path to MoltenVK repository>/Package/Latest/MoltenVK/macOS/MoltenVK_icd.json
+    export VK_DRIVER_FILES=<path to MoltenVK repository>/Package/Latest/MoltenVK/macOS/MoltenVK_icd.json
 
 To run the loader test script, change to the `build/tests` directory in your
 Vulkan-Loader repository, and run:

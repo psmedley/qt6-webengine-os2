@@ -35,7 +35,7 @@
 #include "third_party/blink/public/platform/web_common.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-forward.h"
 
 namespace cc {
 class Layer;
@@ -135,7 +135,6 @@ class WebPluginContainer {
                                           bool final_update) = 0;
   virtual void ReportFindInPageSelection(int identifier, int index) = 0;
 
-  virtual float DeviceScaleFactor() = 0;
   virtual float PageScaleFactor() = 0;
   virtual float PageZoomFactor() = 0;
 

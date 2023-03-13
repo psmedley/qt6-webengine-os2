@@ -8,19 +8,22 @@ import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
 import 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.m.js';
 import 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
 import 'chrome://resources/polymer/v3_0/iron-scroll-threshold/iron-scroll-threshold.js';
 
 import {CrDialogElement} from 'chrome://resources/cr_elements/cr_dialog/cr_dialog.m.js';
 import {CrLazyRenderElement} from 'chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.m.js';
 import {CrToastElement} from 'chrome://resources/cr_elements/cr_toast/cr_toast.js';
-import {assert} from 'chrome://resources/js/assert.m.js';
+import {assert} from 'chrome://resources/js/assert_ts.js';
+import {FocusOutlineManager} from 'chrome://resources/js/cr/ui/focus_outline_manager.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
+import {Time} from 'chrome://resources/mojo/mojo/public/mojom/base/time.mojom-webui.js';
+import {IronListElement} from 'chrome://resources/polymer/v3_0/iron-list/iron-list.js';
 import {IronScrollThresholdElement} from 'chrome://resources/polymer/v3_0/iron-scroll-threshold/iron-scroll-threshold.js';
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-import {BrowserProxy} from './browser_proxy.js';
-import {Cluster, PageCallbackRouter, PageHandlerRemote, QueryParams, QueryResult, URLVisit} from './history_clusters.mojom-webui.js';
+import {BrowserProxyImpl} from './browser_proxy.js';
+import {getTemplate} from './clusters.html.js';
+import {Cluster, PageCallbackRouter, PageHandlerRemote, QueryResult, URLVisit} from './history_clusters.mojom-webui.js';
 
 /**
  * @fileoverview This file provides a custom element that requests and shows
@@ -28,13 +31,9 @@ import {Cluster, PageCallbackRouter, PageHandlerRemote, QueryParams, QueryResult
  * infinite scrolling as well as deletion of visits within the clusters.
  */
 
-// Chosen fairly arbitrarily. We want to fill the whole vertical viewport.
-// See `onClustersQueryResult_()` for details.
-const RESULTS_PER_PAGE: number = 10;
-
 declare global {
   interface HTMLElementTagNameMap {
-    'history-clusters': HistoryClustersElement,
+    'history-clusters': HistoryClustersElement;
   }
 
   interface Window {
@@ -45,9 +44,9 @@ declare global {
 
 interface HistoryClustersElement {
   $: {
+    clusters: IronListElement,
     confirmationDialog: CrLazyRenderElement<CrDialogElement>,
     confirmationToast: CrLazyRenderElement<CrToastElement>,
-    container: Element,
     scrollThreshold: IronScrollThresholdElement,
   };
 }
@@ -58,34 +57,40 @@ class HistoryClustersElement extends PolymerElement {
   }
 
   static get template() {
-    return html`{__html_template__}`;
+    return getTemplate();
   }
 
   static get properties() {
     return {
       /**
-       * The current query for which related Clusters are requested and shown.
+       * The current query for which related clusters are requested and shown.
        */
       query: {
         type: String,
         observer: 'onQueryChanged_',
+        value: '',
       },
 
       /**
-       * Contains 1) the Clusters returned by the browser in response to a
-       * request for the freshest Clusters related to a given query until a
-       * given time threshold and 2) the optional continuation query parameters
-       * returned alongside the Clusters to be used in the follow-up request to
-       * load older Clusters.
+       * The placeholder text to show when the results are empty.
+       */
+      placeholderText_: {
+        type: String,
+        computed: `computePlaceholderText_(result_.*)`,
+      },
+
+      /**
+       * The browser response to a request for the freshest clusters related to
+       * a given query until an optional given end time (or the present time).
        */
       result_: Object,
 
       /**
-       * The title to show when the query is non-empty.
+       * Boolean determining if spinner shows instead of load more button.
        */
-      title_: {
-        type: String,
-        computed: `computeTitle_(result_)`,
+      showSpinner_: {
+        type: Boolean,
+        value: false,
       },
 
       /**
@@ -94,7 +99,7 @@ class HistoryClustersElement extends PolymerElement {
        */
       visitsToBeRemoved_: {
         type: Object,
-        value: [],
+        value: () => [],
       },
     };
   }
@@ -103,14 +108,16 @@ class HistoryClustersElement extends PolymerElement {
   // Properties
   //============================================================================
 
-  query: string = '';
+  query: string;
   private callbackRouter_: PageCallbackRouter;
+  private headerText_: string;
   private onClustersQueryResultListenerId_: number|null = null;
   private onVisitsRemovedListenerId_: number|null = null;
   private pageHandler_: PageHandlerRemote;
-  private result_: QueryResult = new QueryResult();
-  private title_: string = '';
-  private visitsToBeRemoved_: Array<URLVisit> = [];
+  private placeholderText_: string;
+  private result_: QueryResult;
+  private showSpinner_: boolean;
+  private visitsToBeRemoved_: Array<URLVisit>;
 
   //============================================================================
   // Overridden methods
@@ -118,12 +125,21 @@ class HistoryClustersElement extends PolymerElement {
 
   constructor() {
     super();
-    this.pageHandler_ = BrowserProxy.getInstance().handler;
-    this.callbackRouter_ = BrowserProxy.getInstance().callbackRouter;
+    this.pageHandler_ = BrowserProxyImpl.getInstance().handler;
+    this.callbackRouter_ = BrowserProxyImpl.getInstance().callbackRouter;
   }
 
-  connectedCallback() {
+  override connectedCallback() {
     super.connectedCallback();
+
+    // Register a per-document singleton focus outline manager. Some of our
+    // child elements depend on the CSS classes set by this singleton.
+    FocusOutlineManager.forDocument(document);
+
+    this.$.clusters.notifyResize();
+    this.$.clusters.scrollTarget = this;
+    this.$.scrollThreshold.scrollTarget = this;
+
     this.onClustersQueryResultListenerId_ =
         this.callbackRouter_.onClustersQueryResult.addListener(
             this.onClustersQueryResult_.bind(this));
@@ -132,13 +148,13 @@ class HistoryClustersElement extends PolymerElement {
             this.onVisitsRemoved_.bind(this));
   }
 
-  disconnectedCallback() {
+  override disconnectedCallback() {
     super.disconnectedCallback();
-    this.callbackRouter_.removeListener(
-        assert(this.onClustersQueryResultListenerId_!));
+    assert(this.onClustersQueryResultListenerId_);
+    this.callbackRouter_.removeListener(this.onClustersQueryResultListenerId_);
     this.onClustersQueryResultListenerId_ = null;
-    this.callbackRouter_.removeListener(
-        assert(this.onVisitsRemovedListenerId_!));
+    assert(this.onVisitsRemovedListenerId_);
+    this.callbackRouter_.removeListener(this.onVisitsRemovedListenerId_);
     this.onVisitsRemovedListenerId_ = null;
   }
 
@@ -151,19 +167,17 @@ class HistoryClustersElement extends PolymerElement {
     this.$.confirmationDialog.get().close();
   }
 
-  private onClusterEmptied_(event: CustomEvent<Cluster>) {
-    // Find and remove the emptied cluster from the list. We don't pass an
-    // index, as then that's one more piece of state to keep consistent.
-    if (this.result_ && this.result_.clusters) {
-      const index = this.result_.clusters.indexOf(event.detail);
-      if (index !== -1) {
-        this.splice('result_.clusters', index, 1);
-      }
-    }
-  }
-
   private onConfirmationDialogCancel_() {
     this.visitsToBeRemoved_ = [];
+  }
+
+  private onLoadMoreButtonClick_() {
+    if (this.result_ && this.result_.canLoadMore) {
+      this.showSpinner_ = true;
+      // Prevent sending further load-more requests until this one finishes.
+      this.set('result_.canLoadMore', false);
+      this.pageHandler_.loadMoreClusters(this.result_.query);
+    }
   }
 
   private onRemoveButtonClick_() {
@@ -177,6 +191,15 @@ class HistoryClustersElement extends PolymerElement {
   }
 
   /**
+   * Called with `event` received from a cluster requesting to be removed from
+   * the list when all its visits have been removed. Contains the cluster index.
+   */
+  private onRemoveCluster_(event: CustomEvent<number>) {
+    const index = event.detail;
+    this.splice('result_.clusters', index, 1);
+  }
+
+  /**
    * Called with `event` received from a visit requesting to be removed. `event`
    * may contain the related visits of the said visit, if applicable.
    */
@@ -187,7 +210,7 @@ class HistoryClustersElement extends PolymerElement {
     }
 
     this.visitsToBeRemoved_ = event.detail;
-    if (assert(this.visitsToBeRemoved_.length) > 1) {
+    if (this.visitsToBeRemoved_.length > 1) {
       this.$.confirmationDialog.get().showModal();
     } else {
       // Bypass the confirmation dialog if removing one visit only.
@@ -211,23 +234,44 @@ class HistoryClustersElement extends PolymerElement {
   private onScrolledToBottom_() {
     this.$.scrollThreshold.clearTriggers();
 
-    if (this.result_ && this.result_.continuationEndTime) {
-      this.queryClusters_({
-        query: this.result_.query,
-        maxCount: RESULTS_PER_PAGE,
-        endTime: this.result_.continuationEndTime,
-      });
+    if (this.shadowRoot!.querySelector(':focus-visible')) {
+      // If some element of ours is keyboard-focused, don't automatically load
+      // more clusters. It loses the user's position and messes up screen
+      // readers. Let the user manually click the "Load More" button, if needed.
+      // We use :focus-visible here, because :focus is triggered by mouse focus
+      // too. And `FocusOutlineManager.visible()` is too primitive. It's true
+      // on page load, and whenever the user is typing in the searchbox.
+      return;
     }
+
+    this.onLoadMoreButtonClick_();
   }
 
   //============================================================================
   // Helper methods
   //============================================================================
 
-  private computeTitle_(): string {
-    return this.result_ ?
-        loadTimeData.getStringF('headerTitle', this.result_.query || '') :
-        '';
+  private computePlaceholderText_(): string {
+    if (!this.result_) {
+      return '';
+    }
+    return this.result_.clusters.length ?
+        '' :
+        loadTimeData.getString(
+            this.result_.query ? 'noSearchResults' : 'noResults');
+  }
+
+  /**
+   * Returns true and hides the button unless we actually have more results to
+   * load. Note we don't actually hide this button based on keyboard-focus
+   * state. This is because if the user is using the mouse, more clusters are
+   * loaded before the user ever gets a chance to see this button.
+   */
+  private getLoadMoreButtonHidden_(
+      _result: QueryResult, _resultClusters: Array<Cluster>,
+      _resultCanLoadMore: Time): boolean {
+    return !this.result_ || this.result_.clusters.length === 0 ||
+        !this.result_.canLoadMore;
   }
 
   /**
@@ -243,17 +287,19 @@ class HistoryClustersElement extends PolymerElement {
 
   private onClustersQueryResult_(result: QueryResult) {
     if (result.isContinuation) {
-      // Do not replace the existing result. `result` contains a partial set of
-      // Clusters that should be appended to the existing ones.
+      // Do not replace the existing result when `result` contains a partial
+      // set of clusters that should be appended to the existing ones.
       this.push('result_.clusters', ...result.clusters);
-      this.result_.continuationEndTime = result.continuationEndTime;
+      this.set('result_.canLoadMore', result.canLoadMore);
     } else {
+      // Scroll to the top when `result` contains a new set of clusters.
+      this.scrollTop = 0;
       this.result_ = result;
     }
 
     // Handle the "tall monitor" edge case: if the returned results are are
-    // shorter than the vertical viewport, the "container" div will not have a
-    // scrollbar, and the user will never be able to trigger the
+    // shorter than the vertical viewport, the <history-clusters> element will
+    // not have a scrollbar, and the user will never be able to trigger the
     // iron-scroll-threshold to request more results. Therefore, immediately
     // request more results if there is no scrollbar to fill the viewport.
     //
@@ -266,23 +312,24 @@ class HistoryClustersElement extends PolymerElement {
     // Do this on browser idle to avoid jank and to give the DOM a chance to be
     // updated with the results we just got.
     this.onBrowserIdle_().then(() => {
-      const container = this.$.container;
-      if (container.scrollHeight <= container.clientHeight) {
-        this.onScrolledToBottom_();
+      if (this.scrollHeight <= this.clientHeight) {
+        this.onLoadMoreButtonClick_();
       }
     });
+    this.showSpinner_ = false;
   }
 
+  /**
+   * Called when the user entered search query changes. Also used to fetch the
+   * initial set of clusters when the page loads.
+   */
   private onQueryChanged_() {
     this.onBrowserIdle_().then(() => {
-      // Request up to `RESULTS_PER_PAGE` of the freshest Clusters until now.
-      this.queryClusters_({
-        query: this.query.trim(),
-        maxCount: RESULTS_PER_PAGE,
-        endTime: undefined,
-      });
-      // Scroll to the top when the results change due to query change.
-      this.$.container.scrollTop = 0;
+      if (this.result_ && this.result_.canLoadMore) {
+        // Prevent sending further load-more requests until this one finishes.
+        this.set('result_.canLoadMore', false);
+      }
+      this.pageHandler_.startQueryClusters(this.query.trim());
     });
   }
 
@@ -292,20 +339,10 @@ class HistoryClustersElement extends PolymerElement {
   private onVisitsRemoved_() {
     // Show the confirmation toast once done removing one visit only; since a
     // confirmation dialog was not shown prior to the action.
-    if (assert(this.visitsToBeRemoved_.length) === 1) {
+    if (this.visitsToBeRemoved_.length === 1) {
       this.$.confirmationToast.get().show();
     }
     this.visitsToBeRemoved_ = [];
-  }
-
-  private queryClusters_(queryParams: QueryParams) {
-    // Invalidate the existing `continuationEndTime`, if any, in order to
-    // prevent sending additional requests while a request is in-flight. A new
-    // `continuationEndTime` will be supplied with the new set of results.
-    if (this.result_) {
-      this.result_.continuationEndTime = undefined;
-    }
-    this.pageHandler_.queryClusters(queryParams);
   }
 }
 

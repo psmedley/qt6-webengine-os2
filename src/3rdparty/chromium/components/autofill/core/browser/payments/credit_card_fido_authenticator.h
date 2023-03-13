@@ -8,6 +8,9 @@
 #include <memory>
 #include <string>
 
+#include "base/gtest_prod_util.h"
+#include "base/memory/raw_ptr.h"
+#include "base/synchronization/waitable_event.h"
 #include "build/build_config.h"
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_driver.h"
@@ -31,6 +34,7 @@ using blink::mojom::PublicKeyCredentialCreationOptions;
 using blink::mojom::PublicKeyCredentialCreationOptionsPtr;
 using blink::mojom::PublicKeyCredentialRequestOptions;
 using blink::mojom::PublicKeyCredentialRequestOptionsPtr;
+using blink::mojom::WebAuthnDOMExceptionDetailsPtr;
 using device::AttestationConveyancePreference;
 using device::AuthenticatorAttachment;
 using device::AuthenticatorSelectionCriteria;
@@ -101,13 +105,21 @@ class CreditCardFIDOAuthenticator
     virtual void OnFidoAuthorizationComplete(bool did_succeed) = 0;
   };
   CreditCardFIDOAuthenticator(AutofillDriver* driver, AutofillClient* client);
+
+  CreditCardFIDOAuthenticator(const CreditCardFIDOAuthenticator&) = delete;
+  CreditCardFIDOAuthenticator& operator=(const CreditCardFIDOAuthenticator&) =
+      delete;
+
   ~CreditCardFIDOAuthenticator() override;
 
   // Invokes Authentication flow. Responds to |accessor_| with full pan.
-  void Authenticate(const CreditCard* card,
-                    base::WeakPtr<Requester> requester,
-                    base::TimeTicks form_parsed_timestamp,
-                    base::Value request_options);
+  // |context_token| is used to share context between different requests. It
+  // will be populated only for virtual card unmasking.
+  virtual void Authenticate(
+      const CreditCard* card,
+      base::WeakPtr<Requester> requester,
+      base::Value request_options,
+      absl::optional<std::string> context_token = absl::nullopt);
 
   // Invokes Registration flow. Sends credentials created from
   // |creation_options| along with the |card_authorization_token| to Payments in
@@ -143,7 +155,7 @@ class CreditCardFIDOAuthenticator
   // and in the FullCardRequest if any.
   void CancelVerification();
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // Invoked when a Webauthn offer dialog is about to be shown.
   void OnWebauthnOfferDialogRequested(std::string card_authorization_token);
 
@@ -190,14 +202,16 @@ class CreditCardFIDOAuthenticator
   // card details.
   void OnDidGetAssertion(
       AuthenticatorStatus status,
-      GetAssertionAuthenticatorResponsePtr assertion_response);
+      GetAssertionAuthenticatorResponsePtr assertion_response,
+      WebAuthnDOMExceptionDetailsPtr dom_exception_details);
 
   // The callback invoked from the WebAuthn prompt including the
   // |attestation_response|, which will be sent to Google Payments to enroll the
   // credential for this user.
   void OnDidMakeCredential(
       AuthenticatorStatus status,
-      MakeCredentialAuthenticatorResponsePtr attestation_response);
+      MakeCredentialAuthenticatorResponsePtr attestation_response,
+      WebAuthnDOMExceptionDetailsPtr dom_exception_details);
 
   // Sets prefstore to enable credit card authentication if rpc was successful.
   void OnDidGetOptChangeResult(
@@ -247,10 +261,10 @@ class CreditCardFIDOAuthenticator
   void UpdateUserPref();
 
   // Gets or creates Authenticator pointer to facilitate WebAuthn.
-  InternalAuthenticator* authenticator();
+  webauthn::InternalAuthenticator* authenticator();
 
   // Card being unmasked.
-  const CreditCard* card_;
+  raw_ptr<const CreditCard> card_;
 
   // The current flow in progress.
   Flow current_flow_ = NONE_FLOW;
@@ -259,20 +273,17 @@ class CreditCardFIDOAuthenticator
   // together in order to support FIDO-only unmasking on future attempts.
   std::string card_authorization_token_;
 
-  // Meant for histograms recorded in FullCardRequest.
-  base::TimeTicks form_parsed_timestamp_;
-
   // The associated autofill driver. Weak reference.
-  AutofillDriver* const autofill_driver_;
+  const raw_ptr<AutofillDriver> autofill_driver_;
 
   // The associated autofill client. Weak reference.
-  AutofillClient* const autofill_client_;
+  const raw_ptr<AutofillClient> autofill_client_;
 
   // Payments client to make requests to Google Payments.
-  payments::PaymentsClient* const payments_client_;
+  const raw_ptr<payments::PaymentsClient> payments_client_;
 
   // Authenticator pointer to facilitate WebAuthn.
-  InternalAuthenticator* authenticator_ = nullptr;
+  raw_ptr<webauthn::InternalAuthenticator> authenticator_ = nullptr;
 
   // Responsible for getting the full card details, including the PAN and the
   // CVC.
@@ -293,9 +304,11 @@ class CreditCardFIDOAuthenticator
   // Signaled when callback for IsUserVerifiable() is invoked.
   base::WaitableEvent user_is_verifiable_callback_received_;
 
-  base::WeakPtrFactory<CreditCardFIDOAuthenticator> weak_ptr_factory_{this};
+  // The context token used for sharing context between different server
+  // requests. Will be populated only for virtual card unmasking.
+  absl::optional<std::string> context_token_;
 
-  DISALLOW_COPY_AND_ASSIGN(CreditCardFIDOAuthenticator);
+  base::WeakPtrFactory<CreditCardFIDOAuthenticator> weak_ptr_factory_{this};
 };
 
 }  // namespace autofill

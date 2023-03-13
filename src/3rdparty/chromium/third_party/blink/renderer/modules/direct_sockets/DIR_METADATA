@@ -1,3 +1,1 @@
-monorail {
-  component: "Blink>Network"
-}
+mixins: "//third_party/blink/renderer/modules/direct_sockets/COMMON_METADATA"

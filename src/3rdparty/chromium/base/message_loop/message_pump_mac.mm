@@ -11,7 +11,6 @@
 
 #include "base/auto_reset.h"
 #include "base/check_op.h"
-#include "base/cxx17_backports.h"
 #include "base/feature_list.h"
 #include "base/mac/call_with_eh_frame.h"
 #include "base/mac/scoped_cftyperef.h"
@@ -21,9 +20,9 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 #import <AppKit/AppKit.h>
-#endif  // !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_IOS)
 
 namespace base {
 
@@ -54,14 +53,14 @@ void NoOp(void* info) {
 constexpr CFTimeInterval kCFTimeIntervalMax =
     std::numeric_limits<CFTimeInterval>::max();
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
 // Set to true if MessagePumpMac::Create() is called before NSApp is
 // initialized.  Only accessed from the main thread.
 bool g_not_using_cr_app = false;
 
 // The MessagePump controlling [NSApp run].
 MessagePumpNSApplication* g_app_pump;
-#endif  // !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_IOS)
 
 }  // namespace
 
@@ -73,13 +72,16 @@ class MessagePumpScopedAutoreleasePool {
   explicit MessagePumpScopedAutoreleasePool(MessagePumpCFRunLoopBase* pump) :
       pool_(pump->CreateAutoreleasePool()) {
   }
-   ~MessagePumpScopedAutoreleasePool() {
-    [pool_ drain];
-  }
+
+  MessagePumpScopedAutoreleasePool(const MessagePumpScopedAutoreleasePool&) =
+      delete;
+  MessagePumpScopedAutoreleasePool& operator=(
+      const MessagePumpScopedAutoreleasePool&) = delete;
+
+  ~MessagePumpScopedAutoreleasePool() { [pool_ drain]; }
 
  private:
   NSAutoreleasePool* pool_;
-  DISALLOW_COPY_AND_ASSIGN(MessagePumpScopedAutoreleasePool);
 };
 
 class MessagePumpCFRunLoopBase::ScopedModeEnabler {
@@ -95,6 +97,9 @@ class MessagePumpCFRunLoopBase::ScopedModeEnabler {
     CFRunLoopAddObserver(loop, owner_->pre_source_observer_, mode());
     CFRunLoopAddObserver(loop, owner_->enter_exit_observer_, mode());
   }
+
+  ScopedModeEnabler(const ScopedModeEnabler&) = delete;
+  ScopedModeEnabler& operator=(const ScopedModeEnabler&) = delete;
 
   ~ScopedModeEnabler() {
     CFRunLoopRef loop = owner_->run_loop_;
@@ -128,7 +133,7 @@ class MessagePumpCFRunLoopBase::ScopedModeEnabler {
         // Process work when AppKit is highlighting an item on the main menubar.
         CFSTR("NSUnhighlightMenuRunLoopMode"),
     };
-    static_assert(base::size(modes) == kNumModes, "mode size mismatch");
+    static_assert(std::size(modes) == kNumModes, "mode size mismatch");
     static_assert((1 << kNumModes) - 1 == kAllModesMask,
                   "kAllModesMask not large enough");
 
@@ -138,8 +143,6 @@ class MessagePumpCFRunLoopBase::ScopedModeEnabler {
  private:
   MessagePumpCFRunLoopBase* const owner_;  // Weak. Owns this.
   const int mode_index_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedModeEnabler);
 };
 
 // Must be called on the run loop thread.
@@ -178,8 +181,10 @@ void MessagePumpCFRunLoopBase::ScheduleWork() {
 
 // Must be called on the run loop thread.
 void MessagePumpCFRunLoopBase::ScheduleDelayedWork(
-    const TimeTicks& delayed_work_time) {
-  ScheduleDelayedWorkImpl(delayed_work_time - TimeTicks::Now());
+    const Delegate::NextWorkInfo& next_work_info) {
+  DCHECK(!next_work_info.is_immediate());
+  if (!next_work_info.delayed_run_time.is_max())
+    ScheduleDelayedWorkImpl(next_work_info.remaining_delay());
 }
 
 MessagePumpCFRunLoopBase::LudicrousSlackSetting
@@ -225,11 +230,11 @@ void MessagePumpCFRunLoopBase::SetTimerSlack(TimerSlack timer_slack) {
   timer_slack_ = timer_slack;
 }
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 void MessagePumpCFRunLoopBase::Attach(Delegate* delegate) {}
 
 void MessagePumpCFRunLoopBase::Detach() {}
-#endif  // OS_IOS
+#endif  // BUILDFLAG(IS_IOS)
 
 // Must be called on the run loop thread.
 MessagePumpCFRunLoopBase::MessagePumpCFRunLoopBase(int initial_mode_mask)
@@ -660,7 +665,7 @@ bool MessagePumpNSRunLoop::DoQuit() {
   return true;
 }
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 MessagePumpUIApplication::MessagePumpUIApplication()
     : MessagePumpCFRunLoopBase(kCommonModeMask), run_loop_(NULL) {}
 
@@ -861,12 +866,12 @@ bool MessagePumpMac::IsHandlingSendEvent() {
   NSObject<CrAppProtocol>* app = static_cast<NSObject<CrAppProtocol>*>(NSApp);
   return [app isHandlingSendEvent];
 }
-#endif  // !defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
 // static
 std::unique_ptr<MessagePump> MessagePumpMac::Create() {
   if ([NSThread isMainThread]) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
     return std::make_unique<MessagePumpUIApplication>();
 #else
     if ([NSApp conformsToProtocol:@protocol(CrAppProtocol)])

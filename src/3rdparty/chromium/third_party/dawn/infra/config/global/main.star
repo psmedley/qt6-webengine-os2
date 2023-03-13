@@ -8,9 +8,12 @@
 main.star: lucicfg configuration for Dawn's standalone builers.
 """
 
-# Enable realms experiment.
-lucicfg.enable_experiment("crbug.com/1085650")
-luci.builder.defaults.experiments.set({"luci.use_realms": 100})
+# Use LUCI Scheduler BBv2 names and add Scheduler realms configs.
+lucicfg.enable_experiment("crbug.com/1182002")
+
+luci.builder.defaults.experiments.set({
+    "luci.recipes.use_python3": 100,
+})
 
 lucicfg.config(fail_on_warnings = True)
 
@@ -45,6 +48,12 @@ luci.project(
             groups = "luci-logdog-chromium-writers",
         ),
     ],
+    bindings = [
+        luci.binding(
+            roles = "role/configs.validator",
+            users = "dawn-try-builder@chops-service-accounts.iam.gserviceaccount.com",
+        ),
+    ],
 )
 
 luci.logdog(gs_bucket = "chromium-luci-logdog")
@@ -64,6 +73,14 @@ luci.bucket(
     ],
 )
 
+# Allow LED users to trigger swarming tasks directly when debugging ci
+# builders.
+luci.binding(
+    realm = "ci",
+    roles = "role/swarming.taskTriggerer",
+    groups = "flex-ci-led-users",
+)
+
 luci.bucket(
     name = "try",
     acls = [
@@ -77,6 +94,14 @@ luci.bucket(
     ],
 )
 
+# Allow LED users to trigger swarming tasks directly when debugging try
+# builders.
+luci.binding(
+    realm = "try",
+    roles = "role/swarming.taskTriggerer",
+    groups = "flex-try-led-users",
+)
+
 os_category = struct(
     LINUX = "Linux",
     MAC = "Mac",
@@ -88,7 +113,7 @@ def os_enum(dimension, category, console_name):
 
 os = struct(
     LINUX = os_enum("Ubuntu-18.04", os_category.LINUX, "linux"),
-    MAC = os_enum("Mac-10.15", os_category.MAC, "mac"),
+    MAC = os_enum("Mac-10.15|Mac-11", os_category.MAC, "mac"),
     WINDOWS = os_enum("Windows-10", os_category.WINDOWS, "win"),
 )
 

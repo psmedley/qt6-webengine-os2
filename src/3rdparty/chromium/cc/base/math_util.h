@@ -18,9 +18,9 @@
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rounded_corners_f.h"
-#include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace base {
 class Value;
@@ -39,6 +39,7 @@ class Transform;
 class Vector2dF;
 class Vector2d;
 class Vector3dF;
+class LinearGradient;
 }  // namespace gfx
 
 namespace cc {
@@ -294,9 +295,6 @@ class CC_BASE_EXPORT MathUtil {
                                const gfx::Vector2dF& v,
                                base::trace_event::TracedValue* res);
   static void AddToTracedValue(const char* name,
-                               const gfx::ScrollOffset& v,
-                               base::trace_event::TracedValue* res);
-  static void AddToTracedValue(const char* name,
                                const gfx::QuadF& q,
                                base::trace_event::TracedValue* res);
   static void AddToTracedValue(const char* name,
@@ -314,6 +312,9 @@ class CC_BASE_EXPORT MathUtil {
   static void AddCornerRadiiToTracedValue(const char* name,
                                           const gfx::RRectF& rect,
                                           base::trace_event::TracedValue* res);
+  static void AddToTracedValue(const char* name,
+                               const gfx::LinearGradient& gradient,
+                               base::trace_event::TracedValue* res);
 
   // Returns a base::Value representation of the floating point value.
   // If the value is inf, returns max double/float representation.

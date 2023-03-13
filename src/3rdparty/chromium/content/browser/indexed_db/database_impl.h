@@ -9,7 +9,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequence_checker.h"
 #include "mojo/public/cpp/bindings/pending_associated_receiver.h"
@@ -38,6 +38,10 @@ class DatabaseImpl : public blink::mojom::IDBDatabase {
                         const blink::StorageKey& storage_key,
                         IndexedDBDispatcherHost* dispatcher_host,
                         scoped_refptr<base::SequencedTaskRunner> idb_runner);
+
+  DatabaseImpl(const DatabaseImpl&) = delete;
+  DatabaseImpl& operator=(const DatabaseImpl&) = delete;
+
   ~DatabaseImpl() override;
 
   // blink::mojom::IDBDatabase implementation
@@ -66,6 +70,13 @@ class DatabaseImpl : public blink::mojom::IDBDatabase {
               bool key_only,
               int64_t max_count,
               blink::mojom::IDBDatabase::GetAllCallback callback) override;
+  void BatchGetAll(
+      int64_t transaction_id,
+      int64_t object_store_id,
+      int64_t index_id,
+      const std::vector<blink::IndexedDBKeyRange>& key_ranges,
+      uint32_t max_count,
+      blink::mojom::IDBDatabase::BatchGetAllCallback callback) override;
   void SetIndexKeys(
       int64_t transaction_id,
       int64_t object_store_id,
@@ -122,15 +133,13 @@ class DatabaseImpl : public blink::mojom::IDBDatabase {
  private:
   // This raw pointer is safe because all DatabaseImpl instances are owned by
   // an IndexedDBDispatcherHost.
-  IndexedDBDispatcherHost* dispatcher_host_;
+  raw_ptr<IndexedDBDispatcherHost> dispatcher_host_;
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
   std::unique_ptr<IndexedDBConnection> connection_;
   const blink::StorageKey storage_key_;
   scoped_refptr<base::SequencedTaskRunner> idb_runner_;
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(DatabaseImpl);
 };
 
 }  // namespace content

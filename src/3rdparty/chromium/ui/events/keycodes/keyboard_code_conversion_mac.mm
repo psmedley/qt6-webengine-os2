@@ -4,12 +4,11 @@
 
 #import "ui/events/keycodes/keyboard_code_conversion_mac.h"
 
-#include <algorithm>
-
 #import <Carbon/Carbon.h>
 
+#include <algorithm>
+
 #include "base/check_op.h"
-#include "base/cxx17_backports.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/memory/scoped_policy.h"
@@ -422,6 +421,10 @@ DomKey DomKeyFromKeyCode(unsigned short keyCode) {
       return DomKey::ARROW_UP;
     case kVK_ContextMenu:
       return DomKey::CONTEXT_MENU;
+    case kVK_JIS_Eisu:
+      return DomKey::EISU;
+    case kVK_JIS_Kana:
+      return DomKey::KANJI_MODE;
     default:
       return DomKey::NONE;
   }
@@ -573,9 +576,9 @@ int MacKeyCodeForWindowsKeyCode(KeyboardCode keycode,
   from.keycode = keycode;
 
   const KeyCodeMap* ptr = std::lower_bound(
-      kKeyCodesMap, kKeyCodesMap + base::size(kKeyCodesMap), from);
+      kKeyCodesMap, kKeyCodesMap + std::size(kKeyCodesMap), from);
 
-  if (ptr >= kKeyCodesMap + base::size(kKeyCodesMap) ||
+  if (ptr >= kKeyCodesMap + std::size(kKeyCodesMap) ||
       ptr->keycode != keycode || ptr->macKeycode == -1)
     return -1;
 
@@ -837,6 +840,12 @@ DomKey DomKeyFromNSEvent(NSEvent* event) {
         [event keyCode], [event modifierFlags], &is_dead_key);
     if (is_dead_key)
       return DomKey::DeadKeyFromCombiningCharacter(dead_dom_key_char);
+
+    // Mac Eisu Kana key events have a space symbol (U+0020) as [event
+    // characters]. However, the symbol is not generated for users and the event
+    // is just used for enabling/disabling an IME.
+    if ([event keyCode] == kVK_JIS_Eisu || [event keyCode] == kVK_JIS_Kana)
+      return DomKeyFromKeyCode([event keyCode]);
 
     // [event characters] will have dead key state applied.
     NSString* characters = [event characters];

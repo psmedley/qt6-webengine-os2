@@ -16,7 +16,9 @@
 #include "media/audio/audio_features.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/limits.h"
-#include "media/webrtc/webrtc_switches.h"
+#include "media/base/media_switches.h"
+#include "media/webrtc/constants.h"
+#include "media/webrtc/webrtc_features.h"
 #include "third_party/blink/public/common/mediastream/media_stream_controls.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
@@ -400,19 +402,8 @@ class EchoCancellationContainer {
       : ec_mode_allowed_values_(EchoCancellationTypeSet({allowed_values})),
         device_parameters_(device_parameters),
         is_device_capture_(is_device_capture) {
-    if (!has_active_source) {
-#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
-      // If force system echo cancellation feature is enabled, only expose that
-      // type if available; otherwise expose no type.
-      if (base::FeatureList::IsEnabled(::features::kForceEnableSystemAec)) {
-        ec_mode_allowed_values_ =
-            ec_mode_allowed_values_.Intersection(EchoCancellationTypeSet(
-                {EchoCancellationType::kEchoCancellationSystem,
-                 EchoCancellationType::kEchoCancellationDisabled}));
-      }
-#endif  // defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
+    if (!has_active_source)
       return;
-    }
 
     // If HW echo cancellation is used, reconfiguration is not supported and
     // only the current values are allowed. Otherwise, allow all possible values
@@ -529,13 +520,6 @@ class EchoCancellationContainer {
 
   static bool ShouldUseExperimentalSystemEchoCanceller(
       const media::AudioParameters& parameters) {
-#if defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
-    if (base::FeatureList::IsEnabled(::features::kForceEnableSystemAec) &&
-        (parameters.effects() &
-         media::AudioParameters::EXPERIMENTAL_ECHO_CANCELLER)) {
-      return true;
-    }
-#endif  // defined(OS_MAC) || BUILDFLAG(IS_CHROMEOS_ASH)
     return false;
   }
 
@@ -702,23 +686,17 @@ Vector<int> GetApmSupportedChannels(
   Vector<int> result;
   // APM always supports mono output;
   result.push_back(1);
-  if (base::FeatureList::IsEnabled(
-          ::features::kWebRtcEnableCaptureMultiChannelApm)) {
-    // The APM outputs two channels when the layout is
-    // CHANNEL_LAYOUT_STEREO_KEYBOARD_MIC.
-    int channels = (device_params.channel_layout() ==
-                    media::CHANNEL_LAYOUT_STEREO_AND_KEYBOARD_MIC)
-                       ? 2
-                       : device_params.channels();
-    if (channels > 1)
-      result.push_back(channels);
-  }
+  const int channels = device_params.channels();
+  if (channels > 1)
+    result.push_back(channels);
   return result;
 }
 
 // This container represents the supported audio settings for a given type of
 // audio source. In practice, there are three types of sources: processed using
-// APM, processed without APM, and unprocessed.
+// APM, processed without APM, and unprocessed. Processing using APM has two
+// flavors: one for the systems where audio processing is done in the renderer,
+// another for the systems where audio processing is done in the audio service.
 class ProcessingBasedContainer {
  public:
   // Creates an instance of ProcessingBasedContainer for the WebRTC processed
@@ -731,6 +709,13 @@ class ProcessingBasedContainer {
       bool is_device_capture,
       const media::AudioParameters& device_parameters,
       bool is_reconfiguration_allowed) {
+    int sample_rate_hz = media::kAudioProcessingSampleRateHz;
+    if (!ProcessedLocalAudioSource::OutputAudioAtProcessingSampleRate()) {
+      // If audio processing runs in the audio service without any mitigations
+      // for unnecessary resmapling, ProcessedLocalAudioSource will output audio
+      // at the device sample rate.
+      sample_rate_hz = device_parameters.sample_rate();
+    }
     return ProcessingBasedContainer(
         ProcessingType::kApmProcessed,
         {EchoCancellationType::kEchoCancellationAec3,
@@ -743,8 +728,7 @@ class ProcessingBasedContainer {
         BoolSet(), /* goog_highpass_filter_set */
         IntRangeSet::FromValue(GetSampleSize()),    /* sample_size_range */
         GetApmSupportedChannels(device_parameters), /* channels_set */
-        IntRangeSet::FromValue(
-            blink::kAudioProcessingSampleRate), /* sample_rate_range */
+        IntRangeSet::FromValue(sample_rate_hz),     /* sample_rate_range */
         source_info, is_device_capture, device_parameters,
         is_reconfiguration_allowed);
   }
@@ -886,11 +870,10 @@ class ProcessingBasedContainer {
     absl::optional<int> requested_buffer_size;
     if (processing_type_ == ProcessingType::kUnprocessed && latency &&
         !constraint_set.latency.IsUnconstrained()) {
-      int min_buffer_size, max_buffer_size;
-      std::tie(min_buffer_size, max_buffer_size) =
+      auto [min_buffer_size, max_buffer_size] =
           GetMinMaxBufferSizesForAudioParameters(parameters);
       requested_buffer_size = media::AudioLatency::GetExactBufferSize(
-          base::TimeDelta::FromSecondsD(*latency), parameters.sample_rate(),
+          base::Seconds(*latency), parameters.sample_rate(),
           parameters.frames_per_buffer(), min_buffer_size, max_buffer_size,
           max_buffer_size);
     }
@@ -1088,8 +1071,7 @@ class ProcessingBasedContainer {
       case ProcessingType::kNoApmProcessed:
         return DoubleRangeSet::FromValue(allowed_latency);
       case ProcessingType::kUnprocessed:
-        double min_latency, max_latency;
-        std::tie(min_latency, max_latency) =
+        auto [min_latency, max_latency] =
             GetMinMaxLatenciesForAudioParameters(device_parameters);
         return DoubleRangeSet(min_latency, max_latency);
     }
@@ -1234,12 +1216,9 @@ class DeviceContainer {
       std::string default_device_id) const {
     DCHECK(!IsEmpty());
     Score score(0.0);
-    double sub_score = 0.0;
 
-    std::string device_id;
-    std::tie(sub_score, device_id) =
-        device_id_container_.SelectSettingsAndScore(constraint_set.device_id,
-                                                    default_device_id);
+    auto [sub_score, device_id] = device_id_container_.SelectSettingsAndScore(
+        constraint_set.device_id, default_device_id);
     score += sub_score;
 
     std::tie(sub_score, std::ignore) =
@@ -1272,12 +1251,8 @@ class DeviceContainer {
       if (container.IsEmpty())
         continue;
 
-      Score container_score(0.0);
-      AudioProcessingProperties container_properties;
-      absl::optional<int> requested_buffer_size;
-      int num_channels;
-      std::tie(container_score, container_properties, requested_buffer_size,
-               num_channels) =
+      auto [container_score, container_properties, requested_buffer_size,
+            num_channels] =
           container.SelectSettingsAndScore(
               constraint_set, should_disable_hardware_noise_suppression,
               device_parameters_);
@@ -1444,9 +1419,7 @@ class CandidatesContainer {
     AudioCaptureSettings best_settings;
     Score best_score(-1.0);
     for (const auto& candidate : devices_) {
-      Score score(0.0);
-      AudioCaptureSettings settings;
-      std::tie(score, settings) = candidate.SelectSettingsAndScore(
+      auto [score, settings] = candidate.SelectSettingsAndScore(
           constraint_set, is_desktop_source,
           should_disable_hardware_noise_suppression, default_device_id_);
 
@@ -1640,20 +1613,19 @@ std::tuple<int, int> GetMinMaxBufferSizesForAudioParameters(
 
 std::tuple<double, double> GetMinMaxLatenciesForAudioParameters(
     const media::AudioParameters& parameters) {
-  int min_buffer_size, max_buffer_size;
-  std::tie(min_buffer_size, max_buffer_size) =
+  auto [min_buffer_size, max_buffer_size] =
       GetMinMaxBufferSizesForAudioParameters(parameters);
 
   // Doing the microseconds conversion to match what is done in
   // AudioParameters::GetBufferDuration() so that values reported to the user
   // are truncated consistently to the microseconds decimal place.
   return std::make_tuple(
-      base::TimeDelta::FromMicroseconds(
+      base::Microseconds(
           static_cast<int64_t>(min_buffer_size *
                                base::Time::kMicrosecondsPerSecond /
                                static_cast<float>(parameters.sample_rate())))
           .InSecondsF(),
-      base::TimeDelta::FromMicroseconds(
+      base::Microseconds(
           static_cast<int64_t>(max_buffer_size *
                                base::Time::kMicrosecondsPerSecond /
                                static_cast<float>(parameters.sample_rate())))

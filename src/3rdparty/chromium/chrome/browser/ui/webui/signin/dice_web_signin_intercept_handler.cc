@@ -5,22 +5,25 @@
 #include "chrome/browser/ui/webui/signin/dice_web_signin_intercept_handler.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/enterprise/browser_management/browser_management_service.h"
+#include "chrome/browser/enterprise/browser_management/management_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_entry.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/signin/signin_features.h"
 #include "chrome/browser/ui/signin/profile_colors_util.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/policy/core/common/management/management_service.h"
-#include "components/policy/core/common/management/platform_management_service.h"
 #include "content/public/browser/web_ui.h"
+#include "third_party/skia/include/core/SkBitmap.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/gfx/color_utils.h"
@@ -32,6 +35,16 @@ namespace {
 // Returns true if the account is managed (aka Enterprise, or Dasher).
 bool IsManaged(const AccountInfo& info) {
   return info.hosted_domain != kNoHostedDomainFound;
+}
+
+SkColor GetProfileHighlightColor(Profile* profile) {
+  ProfileAttributesEntry* entry =
+      g_browser_process->profile_manager()
+          ->GetProfileAttributesStorage()
+          .GetProfileAttributesWithPath(profile->GetPath());
+  DCHECK(entry);
+
+  return entry->GetProfileThemeColors().profile_highlight_color;
 }
 
 }  // namespace
@@ -102,23 +115,25 @@ const AccountInfo& DiceWebSigninInterceptHandler::intercepted_account() {
   return bubble_parameters_.intercepted_account;
 }
 
-void DiceWebSigninInterceptHandler::HandleAccept(const base::ListValue* args) {
+void DiceWebSigninInterceptHandler::HandleAccept(
+    const base::Value::List& args) {
   if (callback_)
     std::move(callback_).Run(SigninInterceptionUserChoice::kAccept);
 }
 
-void DiceWebSigninInterceptHandler::HandleCancel(const base::ListValue* args) {
+void DiceWebSigninInterceptHandler::HandleCancel(
+    const base::Value::List& args) {
   if (callback_)
     std::move(callback_).Run(SigninInterceptionUserChoice::kDecline);
 }
 
-void DiceWebSigninInterceptHandler::HandleGuest(const base::ListValue* args) {
+void DiceWebSigninInterceptHandler::HandleGuest(const base::Value::List& args) {
   if (callback_)
     std::move(callback_).Run(SigninInterceptionUserChoice::kGuest);
 }
 
 void DiceWebSigninInterceptHandler::HandlePageLoaded(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
 
   // Update the account info and the images.
@@ -140,7 +155,8 @@ void DiceWebSigninInterceptHandler::HandlePageLoaded(
   if (primary_account().given_name.empty())
     bubble_parameters_.primary_account.given_name = primary_account().email;
 
-  const base::Value& callback_id = args->GetList()[0];
+  DCHECK(!args.empty());
+  const base::Value& callback_id = args[0];
   ResolveJavascriptCallback(callback_id, GetInterceptionParametersValue());
 }
 
@@ -180,9 +196,18 @@ base::Value DiceWebSigninInterceptHandler::GetInterceptionParametersValue() {
                         bubble_parameters_.show_guest_option);
   parameters.SetKey("interceptedAccount",
                     GetAccountInfoValue(intercepted_account()));
-  parameters.SetStringKey("headerBackgroundColor",
+  parameters.SetKey("primaryAccount", GetAccountInfoValue(primary_account()));
+  parameters.SetStringKey("interceptedProfileColor",
                           color_utils::SkColorToRgbaString(
                               bubble_parameters_.profile_highlight_color));
+  parameters.SetStringKey(
+      "primaryProfileColor",
+      color_utils::SkColorToRgbaString(
+          GetProfileHighlightColor(Profile::FromWebUI(web_ui()))));
+  parameters.SetBoolKey("useV2Design",
+                        !is_switch && base::FeatureList::IsEnabled(
+                                          kSyncPromoAfterSigninIntercept));
+
   parameters.SetStringKey(
       "headerTextColor",
       color_utils::SkColorToRgbaString(GetProfileForegroundTextColor(
@@ -201,12 +226,10 @@ bool DiceWebSigninInterceptHandler::ShouldShowManagedDeviceVersion() {
   // - or anticipating that the user may enable Sync in the new profile and
   //   check the cloud policies attached to the intercepted account (requires
   //   network requests).
-  return policy::PlatformManagementService::GetInstance()
-                 .GetManagementAuthorityTrustworthiness() >
-             policy::ManagementAuthorityTrustworthiness::NONE ||
-         policy::BrowserManagementService(Profile::FromWebUI(web_ui()))
-                 .GetManagementAuthorityTrustworthiness() >
-             policy::ManagementAuthorityTrustworthiness::NONE;
+  return policy::ManagementServiceFactory::GetForProfile(
+             Profile::FromWebUI(web_ui()))
+             ->IsManaged() ||
+         policy::ManagementServiceFactory::GetForPlatform()->IsManaged();
 }
 
 std::string DiceWebSigninInterceptHandler::GetHeaderText() {
@@ -219,6 +242,8 @@ std::string DiceWebSigninInterceptHandler::GetHeaderText() {
     case DiceWebSigninInterceptor::SigninInterceptionType::kProfileSwitch:
       return intercepted_account().given_name;
     case DiceWebSigninInterceptor::SigninInterceptionType::kEnterpriseForced:
+    case DiceWebSigninInterceptor::SigninInterceptionType::
+        kEnterpriseAcceptManagement:
     case DiceWebSigninInterceptor::SigninInterceptionType::kProfileSwitchForced:
       NOTREACHED() << "This interception type is not handled by a bubble";
       return std::string();
@@ -257,6 +282,8 @@ std::string DiceWebSigninInterceptHandler::GetBodyText() {
     case DiceWebSigninInterceptor::SigninInterceptionType::kProfileSwitch:
       return l10n_util::GetStringUTF8(
           IDS_SIGNIN_DICE_WEB_INTERCEPT_SWITCH_BUBBLE_DESC);
+    case DiceWebSigninInterceptor::SigninInterceptionType::
+        kEnterpriseAcceptManagement:
     case DiceWebSigninInterceptor::SigninInterceptionType::kEnterpriseForced:
     case DiceWebSigninInterceptor::SigninInterceptionType::kProfileSwitchForced:
       NOTREACHED() << "This interception type is not handled by a bubble";

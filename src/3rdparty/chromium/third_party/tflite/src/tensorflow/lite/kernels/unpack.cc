@@ -38,7 +38,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_EQ(context, NumInputs(node), 1);
   TF_LITE_ENSURE_EQ(context, NumOutputs(node), data->num);
 
-  const TfLiteTensor* input = GetInput(context, node, kInputTensor);
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kInputTensor, &input));
   TF_LITE_ENSURE(context, NumElements(input) > 0);
   int axis = data->axis;
   if (axis < 0) {
@@ -48,8 +49,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   if (input->type != kTfLiteInt32 && input->type != kTfLiteFloat32 &&
       input->type != kTfLiteUInt8 && input->type != kTfLiteInt8 &&
       input->type != kTfLiteInt16 && input->type != kTfLiteBool) {
-    context->ReportError(context, "Type '%s' is not supported by unpack.",
-                         TfLiteTypeGetName(input->type));
+    TF_LITE_KERNEL_LOG(context, "Type '%s' is not supported by unpack.",
+                       TfLiteTypeGetName(input->type));
     return kTfLiteError;
   }
 
@@ -67,7 +68,8 @@ TfLiteStatus Prepare(TfLiteContext* context, TfLiteNode* node) {
   TF_LITE_ENSURE_EQ(context, data->num, input_shape->data[axis]);
   for (int i = 0; i < data->num; ++i) {
     TfLiteIntArray* copied_output_shape = TfLiteIntArrayCopy(output_shape);
-    TfLiteTensor* output = GetOutput(context, node, i);
+    TfLiteTensor* output;
+    TF_LITE_ENSURE_OK(context, GetOutputSafe(context, node, i, &output));
     TF_LITE_ENSURE_TYPES_EQ(context, output->type, input->type);
     // Guarantee input/output quantization params match as we do not support
     // rescaling of unpacked quantized tensors.
@@ -98,7 +100,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
   const TfLiteUnpackParams* data =
       reinterpret_cast<TfLiteUnpackParams*>(node->builtin_data);
 
-  const TfLiteTensor* input = GetInput(context, node, kInputTensor);
+  const TfLiteTensor* input;
+  TF_LITE_ENSURE_OK(context, GetInputSafe(context, node, kInputTensor, &input));
   switch (input->type) {
     case kTfLiteFloat32: {
       UnpackImpl<float>(context, node, input, data->num, data->axis);
@@ -125,8 +128,8 @@ TfLiteStatus Eval(TfLiteContext* context, TfLiteNode* node) {
       break;
     }
     default: {
-      context->ReportError(context, "Type '%s' is not supported by unpack.",
-                           TfLiteTypeGetName(input->type));
+      TF_LITE_KERNEL_LOG(context, "Type '%s' is not supported by unpack.",
+                         TfLiteTypeGetName(input->type));
       return kTfLiteError;
     }
   }

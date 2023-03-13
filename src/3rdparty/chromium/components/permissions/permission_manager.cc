@@ -9,9 +9,8 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/debug/crash_logging.h"
-#include "base/debug/dump_without_crashing.h"
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -20,7 +19,9 @@
 #include "components/permissions/permission_request_id.h"
 #include "components/permissions/permission_result.h"
 #include "components/permissions/permission_uma_util.h"
+#include "components/permissions/permission_util.h"
 #include "components/permissions/permissions_client.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_type.h"
@@ -33,6 +34,24 @@ using content::PermissionType;
 
 namespace permissions {
 namespace {
+
+// Represents the possible methods of delegating permissions from main frames
+// to child frames.
+enum class PermissionDelegationMode {
+  // Permissions from the main frame are delegated to child frames.
+  // This is the default delegation mode for permissions. If a main frame was
+  // granted a permission that is delegated, its child frames will inherit that
+  // permission if allowed by the permissions policy.
+  kDelegated,
+  // Permissions from the main frame are not delegated to child frames.
+  // An undelegated permission will only be granted to a child frame if the
+  // child frame's origin was previously granted access to the permission when
+  // in a main frame.
+  kUndelegated,
+  // Permission access is a function of both the requesting and embedding
+  // origins.
+  kDoubleKeyed,
+};
 
 // Helper methods to convert ContentSetting to PermissionStatus and vice versa.
 PermissionStatus ContentSettingToPermissionStatus(ContentSetting setting) {
@@ -84,7 +103,7 @@ ContentSettingsType PermissionTypeToContentSettingSafe(
     case PermissionType::GEOLOCATION:
       return ContentSettingsType::GEOLOCATION;
     case PermissionType::PROTECTED_MEDIA_IDENTIFIER:
-#if defined(OS_ANDROID) || defined(OS_CHROMEOS) || defined(OS_WIN)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_WIN)
       return ContentSettingsType::PROTECTED_MEDIA_IDENTIFIER;
 #else
       break;
@@ -129,17 +148,27 @@ ContentSettingsType PermissionTypeToContentSettingSafe(
       return ContentSettingsType::CAMERA_PAN_TILT_ZOOM;
     case PermissionType::WINDOW_PLACEMENT:
       return ContentSettingsType::WINDOW_PLACEMENT;
-    case PermissionType::FONT_ACCESS:
-      return ContentSettingsType::FONT_ACCESS;
+    case PermissionType::LOCAL_FONTS:
+      return ContentSettingsType::LOCAL_FONTS;
     case PermissionType::DISPLAY_CAPTURE:
       return ContentSettingsType::DISPLAY_CAPTURE;
-    case PermissionType::FILE_HANDLING:
-      return ContentSettingsType::FILE_HANDLING;
     case PermissionType::NUM:
       break;
   }
 
   return ContentSettingsType::DEFAULT;
+}
+
+PermissionDelegationMode GetPermissionDelegationMode(
+    ContentSettingsType permission) {
+  // TODO(crbug.com/987654): Generalize this to other "background permissions",
+  // that is, permissions that can be used by a service worker. This includes
+  // durable storage, background sync, etc.
+  if (permission == ContentSettingsType::NOTIFICATIONS)
+    return PermissionDelegationMode::kUndelegated;
+  if (permission == ContentSettingsType::STORAGE_ACCESS)
+    return PermissionDelegationMode::kDoubleKeyed;
+  return PermissionDelegationMode::kDelegated;
 }
 
 void SubscriptionCallbackWrapper(
@@ -173,16 +202,51 @@ void ContentSettingCallbackWrapper(
 }
 
 // TODO(crbug.com/698985): As part of the permission API refactoring, this
-// method should be used in all places where wer check or request permissions.
+// method should be used in all places where we check or request permissions.
 // Currently it is used only in `RequestPermissions` and
 // `GetPermissionStatusForFrame`.
-GURL GetEmbeddingOrigin(content::WebContents* web_contents,
+GURL GetEmbeddingOrigin(content::RenderFrameHost* const render_frame_host,
                         const GURL& requesting_origin) {
+  content::WebContents* const web_contents =
+      content::WebContents::FromRenderFrameHost(render_frame_host);
+  DCHECK(web_contents);
+
   if (PermissionsClient::Get()->DoOriginsMatchNewTabPage(
-          requesting_origin, web_contents->GetLastCommittedURL().GetOrigin())) {
-    return web_contents->GetLastCommittedURL().GetOrigin();
+          requesting_origin,
+          web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL())) {
+    return web_contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
   } else {
-    return PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+    return PermissionUtil::GetLastCommittedOriginAsURL(
+        render_frame_host->GetMainFrame());
+  }
+}
+
+// If an iframed document/worker inherits a different StoragePartition from its
+// embedder than it would use if it were a main frame, we should block
+// undelegated permissions. Because permissions are scoped to BrowserContext
+// instead of StoragePartition, without this check the aforementioned iframe
+// would be given undelegated permissions if the user had granted its origin
+// access when it was loaded as a main frame.
+bool IsPermissionBlockedInPartition(
+    ContentSettingsType permission,
+    const GURL& requesting_origin,
+    content::RenderProcessHost* render_process_host) {
+  DCHECK(render_process_host);
+  switch (GetPermissionDelegationMode(permission)) {
+    case PermissionDelegationMode::kDelegated:
+      return false;
+    case PermissionDelegationMode::kDoubleKeyed:
+      return false;
+    case PermissionDelegationMode::kUndelegated:
+      // TODO(crbug.com/1312218): This will create |requesting_origin|'s home
+      // StoragePartition if it doesn't already exist. Given how
+      // StoragePartitions are used today, this shouldn't actually be a
+      // problem, but ideally we'd compare StoragePartitionConfigs.
+      content::StoragePartition* requesting_home_partition =
+          render_process_host->GetBrowserContext()->GetStoragePartitionForUrl(
+              requesting_origin);
+      return requesting_home_partition !=
+             render_process_host->GetStoragePartition();
   }
 }
 
@@ -247,6 +311,10 @@ class PermissionManager::PermissionResponseCallback {
         permission_id_(permission_id),
         request_answered_(false) {}
 
+  PermissionResponseCallback(const PermissionResponseCallback&) = delete;
+  PermissionResponseCallback& operator=(const PermissionResponseCallback&) =
+      delete;
+
   ~PermissionResponseCallback() {
     if (!request_answered_ &&
         permission_manager_->pending_requests_.Lookup(request_local_id_)) {
@@ -261,12 +329,10 @@ class PermissionManager::PermissionResponseCallback {
   }
 
  private:
-  PermissionManager* permission_manager_;
+  raw_ptr<PermissionManager> permission_manager_;
   PendingRequestLocalId request_local_id_;
   int permission_id_;
   bool request_answered_;
-
-  DISALLOW_COPY_AND_ASSIGN(PermissionResponseCallback);
 };
 
 struct PermissionManager::Subscription {
@@ -329,19 +395,14 @@ GURL PermissionManager::GetCanonicalOrigin(ContentSettingsType permission,
   if (override_origin)
     return override_origin.value();
 
-  // TODO(crbug.com/987654): Generalize this to other "background permissions",
-  // that is, permissions that can be used by a service worker. This includes
-  // durable storage, background sync, etc.
-  if (permission == ContentSettingsType::NOTIFICATIONS)
-    return requesting_origin;
-
-  // Storage access grants from the storage access API are paired between the
-  // origin of the frame making the request and the top level origin so we need
-  // to ensure we return the proper origin here.
-  if (permission == ContentSettingsType::STORAGE_ACCESS)
-    return requesting_origin;
-
-  return embedding_origin;
+  switch (GetPermissionDelegationMode(permission)) {
+    case PermissionDelegationMode::kDelegated:
+      return embedding_origin;
+    case PermissionDelegationMode::kDoubleKeyed:
+      return requesting_origin;
+    case PermissionDelegationMode::kUndelegated:
+      return requesting_origin;
+  }
 }
 
 void PermissionManager::RequestPermission(
@@ -368,9 +429,6 @@ void PermissionManager::RequestPermissions(
     return;
   }
 
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host);
-
   auto request_local_id = request_local_id_generator_.GenerateNextId();
   pending_requests_.AddWithID(
       std::make_unique<PendingRequest>(render_frame_host, permissions,
@@ -378,7 +436,8 @@ void PermissionManager::RequestPermissions(
       request_local_id);
 
   const PermissionRequestID request_id(render_frame_host, request_local_id);
-  GURL embedding_origin = GetEmbeddingOrigin(web_contents, requesting_origin);
+  const GURL embedding_origin =
+      GetEmbeddingOrigin(render_frame_host, requesting_origin);
 
   for (size_t i = 0; i < permissions.size(); ++i) {
     const ContentSettingsType permission = permissions[i];
@@ -387,6 +446,13 @@ void PermissionManager::RequestPermissions(
 
     auto response_callback =
         std::make_unique<PermissionResponseCallback>(this, request_local_id, i);
+    if (IsPermissionBlockedInPartition(permission, requesting_origin,
+                                       render_frame_host->GetProcess())) {
+      response_callback->OnPermissionsRequestResponseStatus(
+          CONTENT_SETTING_BLOCK);
+      continue;
+    }
+
     auto status = GetPermissionOverrideForDevTools(
         url::Origin::Create(canonical_requesting_origin), permission);
     if (status != CONTENT_SETTING_DEFAULT) {
@@ -399,7 +465,8 @@ void PermissionManager::RequestPermissions(
     DCHECK(context);
 
     context->RequestPermission(
-        web_contents, request_id, canonical_requesting_origin, user_gesture,
+        content::WebContents::FromRenderFrameHost(render_frame_host),
+        request_id, canonical_requesting_origin, user_gesture,
         base::BindOnce(
             &PermissionResponseCallback::OnPermissionsRequestResponseStatus,
             std::move(response_callback)));
@@ -438,28 +505,56 @@ PermissionResult PermissionManager::GetPermissionStatus(
   // for an embedded frame.
   DCHECK_EQ(requesting_origin, embedding_origin);
 
-  return GetPermissionStatusHelper(permission, nullptr /* render_frame_host */,
+  return GetPermissionStatusHelper(permission,
+                                   /*render_process_host=*/nullptr,
+                                   /*render_frame_host=*/nullptr,
                                    requesting_origin, embedding_origin);
+}
+
+PermissionResult PermissionManager::GetPermissionStatusForDisplayOnSettingsUI(
+    ContentSettingsType permission,
+    const GURL& origin) {
+  return GetPermissionStatusHelper(permission,
+                                   /*render_process_host=*/nullptr,
+                                   /*render_frame_host=*/nullptr, origin,
+                                   origin);
 }
 
 PermissionResult PermissionManager::GetPermissionStatusForFrame(
     ContentSettingsType permission,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin) {
-  content::WebContents* web_contents =
-      content::WebContents::FromRenderFrameHost(render_frame_host);
-  GURL embedding_origin = GetEmbeddingOrigin(web_contents, requesting_origin);
+  const GURL embedding_origin =
+      GetEmbeddingOrigin(render_frame_host, requesting_origin);
 
-  return GetPermissionStatusHelper(permission, render_frame_host,
-                                   requesting_origin, embedding_origin);
+  return GetPermissionStatusHelper(permission,
+                                   /*render_process_host=*/nullptr,
+                                   render_frame_host, requesting_origin,
+                                   embedding_origin);
 }
 
 PermissionResult PermissionManager::GetPermissionStatusForCurrentDocument(
     ContentSettingsType permission,
     content::RenderFrameHost* render_frame_host) {
-  GURL origin = PermissionUtil::GetLastCommittedOriginAsURL(render_frame_host);
-  return GetPermissionStatusHelper(permission, render_frame_host, origin,
-                                   origin);
+  const GURL requesting_origin =
+      PermissionUtil::GetLastCommittedOriginAsURL(render_frame_host);
+  const GURL embedding_origin =
+      GetEmbeddingOrigin(render_frame_host, requesting_origin);
+
+  return GetPermissionStatusHelper(permission,
+                                   /*render_process_host=*/nullptr,
+                                   render_frame_host, requesting_origin,
+                                   embedding_origin);
+}
+
+PermissionResult PermissionManager::GetPermissionStatusForWorker(
+    ContentSettingsType permission,
+    content::RenderProcessHost* render_process_host,
+    const url::Origin& worker_origin) {
+  GURL worker_url = worker_origin.GetURL();
+  return GetPermissionStatusHelper(permission, render_process_host,
+                                   /*render_frame_host=*/nullptr, worker_url,
+                                   worker_url);
 }
 
 void PermissionManager::RequestPermission(
@@ -525,27 +620,19 @@ void PermissionManager::ResetPermission(PermissionType permission,
     return;
   context->ResetPermission(
       GetCanonicalOrigin(type, requesting_origin, embedding_origin),
-      embedding_origin.GetOrigin());
+      embedding_origin.DeprecatedGetOriginAsURL());
 }
 
 PermissionStatus PermissionManager::GetPermissionStatus(
     PermissionType permission,
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
+  // TODO(benwells): split this into two functions, GetPermissionStatus and
+  // GetPermissionStatusForPermissionsAPI.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   PermissionResult result =
       GetPermissionStatus(PermissionTypeToContentSetting(permission),
                           requesting_origin, embedding_origin);
-  ContentSettingsType type = PermissionTypeToContentSetting(permission);
-  // TODO(benwells): split this into two functions, GetPermissionStatus and
-  // GetPermissionStatusForPermissionsAPI.
-  PermissionContextBase* context = GetPermissionContext(type);
-  if (context) {
-    result = context->UpdatePermissionStatusWithDeviceStatus(
-        result, GetCanonicalOrigin(type, requesting_origin, embedding_origin),
-        embedding_origin);
-  }
-
   return ContentSettingToPermissionStatus(result.content_setting);
 }
 
@@ -553,26 +640,33 @@ PermissionStatus PermissionManager::GetPermissionStatusForFrame(
     PermissionType permission,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin) {
+  // TODO(benwells): split this into two functions, GetPermissionStatus and
+  // GetPermissionStatusForPermissionsAPI.
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   ContentSettingsType type = PermissionTypeToContentSetting(permission);
   PermissionResult result =
       GetPermissionStatusForFrame(type, render_frame_host, requesting_origin);
+  return ContentSettingToPermissionStatus(result.content_setting);
+}
 
-  // TODO(benwells): split this into two functions, GetPermissionStatus and
-  // GetPermissionStatusForPermissionsAPI.
-  PermissionContextBase* context =
-      GetPermissionContext(PermissionTypeToContentSetting(permission));
-  if (context) {
-    content::WebContents* web_contents =
-        content::WebContents::FromRenderFrameHost(render_frame_host);
-    GURL embedding_origin =
-        PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
-    result = context->UpdatePermissionStatusWithDeviceStatus(
-        result, GetCanonicalOrigin(type, requesting_origin, embedding_origin),
-        embedding_origin);
-  }
+PermissionStatus PermissionManager::GetPermissionStatusForWorker(
+    PermissionType permission,
+    content::RenderProcessHost* render_process_host,
+    const GURL& worker_origin) {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  ContentSettingsType type = PermissionTypeToContentSetting(permission);
+  PermissionResult result = GetPermissionStatusForWorker(
+      type, render_process_host, url::Origin::Create(worker_origin));
 
   return ContentSettingToPermissionStatus(result.content_setting);
+}
+
+PermissionStatus PermissionManager::GetPermissionStatusForCurrentDocument(
+    PermissionType permission,
+    content::RenderFrameHost* render_frame_host) {
+  return GetPermissionStatusForFrame(
+      permission, render_frame_host,
+      render_frame_host->GetLastCommittedOrigin().GetURL());
 }
 
 bool PermissionManager::IsPermissionOverridableByDevTools(
@@ -591,10 +685,12 @@ bool PermissionManager::IsPermissionOverridableByDevTools(
 PermissionManager::SubscriptionId
 PermissionManager::SubscribePermissionStatusChange(
     PermissionType permission,
+    content::RenderProcessHost* render_process_host,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     base::RepeatingCallback<void(PermissionStatus)> callback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(!render_frame_host || !render_process_host);
   if (is_shutting_down_)
     return SubscriptionId();
 
@@ -611,10 +707,10 @@ PermissionManager::SubscribePermissionStatusChange(
   // The RFH may be null if the request is for a worker.
   GURL embedding_origin;
   if (render_frame_host) {
-    content::WebContents* web_contents =
-        content::WebContents::FromRenderFrameHost(render_frame_host);
-    embedding_origin =
-        PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+    // Permissions API must be deferred during the prerendering.
+    DCHECK_NE(render_frame_host->GetLifecycleState(),
+              content::RenderFrameHost::LifecycleState::kPrerendering);
+    embedding_origin = GetEmbeddingOrigin(render_frame_host, requesting_origin);
     subscription->render_frame_id = render_frame_host->GetRoutingID();
     subscription->render_process_id = render_frame_host->GetProcess()->GetID();
     subscription->current_value =
@@ -624,9 +720,11 @@ PermissionManager::SubscribePermissionStatusChange(
   } else {
     embedding_origin = requesting_origin;
     subscription->render_frame_id = -1;
-    subscription->render_process_id = -1;
+    subscription->render_process_id =
+        render_process_host ? render_process_host->GetID() : -1;
     subscription->current_value =
-        GetPermissionStatus(content_type, requesting_origin, requesting_origin)
+        GetPermissionStatusForWorker(content_type, render_process_host,
+                                     url::Origin::Create(requesting_origin))
             .content_setting;
   }
 
@@ -651,9 +749,6 @@ void PermissionManager::UnsubscribePermissionStatusChange(
   if (!subscription)
     return;
 
-  if (is_processing_permission_change_)
-    base::debug::DumpWithoutCrashing();
-
   ContentSettingsType type = subscription->permission;
   subscriptions_.Remove(subscription_id);
   auto type_count = subscription_type_counts_.find(type);
@@ -675,17 +770,17 @@ bool PermissionManager::IsPermissionKillSwitchOn(
 void PermissionManager::OnPermissionChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
-    ContentSettingsType content_type) {
+    ContentSettingsTypeSet content_type_set) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  DCHECK(primary_pattern.IsValid());
+  DCHECK(secondary_pattern.IsValid());
+
   std::vector<base::OnceClosure> callbacks;
   callbacks.reserve(subscriptions_.size());
-  base::AutoReset<bool> reset(&is_processing_permission_change_, true);
-  SCOPED_CRASH_KEY_NUMBER("PermissionManager", "content_type",
-                          static_cast<int>(content_type));
   for (SubscriptionsMap::iterator iter(&subscriptions_); !iter.IsAtEnd();
        iter.Advance()) {
     Subscription* subscription = iter.GetCurrentValue();
-    if (subscription->permission != content_type)
+    if (!content_type_set.Contains(subscription->permission))
       continue;
 
     // The RFH may be null if the request is for a worker.
@@ -693,25 +788,29 @@ void PermissionManager::OnPermissionChanged(
         subscription->render_process_id, subscription->render_frame_id);
     GURL embedding_origin;
     if (rfh) {
-      content::WebContents* web_contents =
-          content::WebContents::FromRenderFrameHost(rfh);
       embedding_origin =
-          PermissionUtil::GetLastCommittedOriginAsURL(web_contents);
+          GetEmbeddingOrigin(rfh, subscription->requesting_origin);
     } else {
       embedding_origin = subscription->requesting_origin;
     }
 
-    if (primary_pattern.IsValid() &&
-        !primary_pattern.Matches(subscription->requesting_origin))
+    if (!primary_pattern.Matches(subscription->requesting_origin) ||
+        !secondary_pattern.Matches(embedding_origin)) {
       continue;
-    if (secondary_pattern.IsValid() &&
-        !secondary_pattern.Matches(embedding_origin))
-      continue;
+    }
+
+    content::RenderProcessHost* rph =
+        content::RenderProcessHost::FromID(subscription->render_process_id);
 
     ContentSetting new_value;
     if (rfh) {
       new_value = GetPermissionStatusForFrame(subscription->permission, rfh,
                                               subscription->requesting_origin)
+                      .content_setting;
+    } else if (rph) {
+      new_value = GetPermissionStatusForWorker(
+                      subscription->permission, rph,
+                      url::Origin::Create(subscription->requesting_origin))
                       .content_setting;
     } else {
       new_value = GetPermissionStatus(subscription->permission,
@@ -736,9 +835,21 @@ void PermissionManager::OnPermissionChanged(
 
 PermissionResult PermissionManager::GetPermissionStatusHelper(
     ContentSettingsType permission,
+    content::RenderProcessHost* render_process_host,
     content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
     const GURL& embedding_origin) {
+  DCHECK(!render_process_host || !render_frame_host);
+
+  // TODO(crbug.com/1307044): Move this to PermissionContextBase.
+  content::RenderProcessHost* rph =
+      render_frame_host ? render_frame_host->GetProcess() : render_process_host;
+  if (rph &&
+      IsPermissionBlockedInPartition(permission, requesting_origin, rph)) {
+    return PermissionResult(CONTENT_SETTING_BLOCK,
+                            PermissionStatusSource::UNSPECIFIED);
+  }
+
   GURL canonical_requesting_origin =
       GetCanonicalOrigin(permission, requesting_origin, embedding_origin);
   auto status = GetPermissionOverrideForDevTools(
@@ -747,8 +858,10 @@ PermissionResult PermissionManager::GetPermissionStatusHelper(
     return PermissionResult(status, PermissionStatusSource::UNSPECIFIED);
   PermissionContextBase* context = GetPermissionContext(permission);
   PermissionResult result = context->GetPermissionStatus(
-      render_frame_host, canonical_requesting_origin.GetOrigin(),
-      embedding_origin.GetOrigin());
+      render_frame_host, canonical_requesting_origin.DeprecatedGetOriginAsURL(),
+      embedding_origin.DeprecatedGetOriginAsURL());
+  result = context->UpdatePermissionStatusWithDeviceStatus(
+      result, requesting_origin, embedding_origin);
   DCHECK(result.content_setting == CONTENT_SETTING_ALLOW ||
          result.content_setting == CONTENT_SETTING_ASK ||
          result.content_setting == CONTENT_SETTING_BLOCK);

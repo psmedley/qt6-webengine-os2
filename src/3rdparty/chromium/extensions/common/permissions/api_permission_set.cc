@@ -68,7 +68,7 @@ bool CreateAPIPermission(const std::string& permission_str,
         }
         return false;
       }
-      LOG(WARNING) << "Parse permission failed.";
+      VLOG(1) << "Parse permission failed.";
     } else {
       api_permissions->insert(std::move(permission));
     }
@@ -78,7 +78,7 @@ bool CreateAPIPermission(const std::string& permission_str,
   if (unhandled_permissions)
     unhandled_permissions->push_back(permission_str);
   else
-    LOG(WARNING) << "Unknown permission[" << permission_str << "].";
+    VLOG(1) << "Unknown permission[" << permission_str << "].";
 
   return true;
 }
@@ -96,13 +96,14 @@ bool ParseChildPermissions(const std::string& base_name,
             errors::kInvalidPermission, base_name);
         return false;
       }
-      LOG(WARNING) << "Permission value is not a list.";
+      VLOG(1) << "Permission value is not a list.";
       // Failed to parse, but since error is NULL, failures are not fatal so
       // return true here anyway.
       return true;
     }
 
-    base::Value::ConstListView list_view = permission_value->GetList();
+    base::Value::ConstListView list_view =
+        permission_value->GetListDeprecated();
     for (size_t i = 0; i < list_view.size(); ++i) {
       std::string permission_str;
       if (!list_view[i].is_string()) {
@@ -113,7 +114,7 @@ bool ParseChildPermissions(const std::string& base_name,
               base_name + '.' + base::NumberToString(i));
           return false;
         }
-        LOG(WARNING) << "Permission is not a string.";
+        VLOG(1) << "Permission is not a string.";
         continue;
       }
 
@@ -154,12 +155,12 @@ bool APIPermissionSet::ParseFromJSON(
                                                    "<root>");
       return false;
     }
-    LOG(WARNING) << "Root Permissions value is not a list.";
+    VLOG(1) << "Root Permissions value is not a list.";
     // Failed to parse, but since error is NULL, failures are not fatal so
     // return true here anyway.
     return true;
   }
-  base::Value::ConstListView list_view = permissions->GetList();
+  base::Value::ConstListView list_view = permissions->GetListDeprecated();
   for (size_t i = 0; i < list_view.size(); ++i) {
     std::string permission_str;
     const base::Value* permission_value = nullptr;
@@ -176,7 +177,7 @@ bool APIPermissionSet::ParseFromJSON(
                                                      base::NumberToString(i));
         return false;
       }
-      LOG(WARNING) << "Permission is not a string or single key dict.";
+      VLOG(1) << "Permission is not a string or single key dict.";
       continue;
     }
 

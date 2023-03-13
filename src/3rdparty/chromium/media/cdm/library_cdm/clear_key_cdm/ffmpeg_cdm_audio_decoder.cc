@@ -217,8 +217,7 @@ cdm::Status FFmpegCdmAudioDecoder::DecodeBuffer(
     cdm::AudioFrames* decoded_frames) {
   DVLOG(1) << "DecodeBuffer()";
   const bool is_end_of_stream = !compressed_buffer;
-  base::TimeDelta timestamp =
-      base::TimeDelta::FromMicroseconds(input_timestamp);
+  base::TimeDelta timestamp = base::Microseconds(input_timestamp);
 
   if (!is_end_of_stream && timestamp != kNoTimestamp) {
     if (last_input_timestamp_ != kNoTimestamp &&
@@ -249,7 +248,7 @@ cdm::Status FFmpegCdmAudioDecoder::DecodeBuffer(
       return cdm::kDecodeError;
     case FFmpegDecodingLoop::DecodeStatus::kFrameProcessingFailed:
       NOTREACHED();
-      FALLTHROUGH;
+      [[fallthrough]];
     case FFmpegDecodingLoop::DecodeStatus::kDecodeFrameFailed:
       DLOG(WARNING) << " failed to decode an audio buffer: "
                     << timestamp.InMicroseconds();
@@ -292,12 +291,13 @@ cdm::Status FFmpegCdmAudioDecoder::DecodeBuffer(
   for (auto& frame : audio_frames) {
     int decoded_audio_size = 0;
     if (frame->sample_rate != samples_per_second_ ||
-        frame->channels != channels_ || frame->format != av_sample_format_) {
-      DLOG(ERROR) << "Unsupported midstream configuration change!"
+    frame->channels != channels_ || frame->format != av_sample_format_) {
+        DLOG(ERROR) << "Unsupported midstream configuration change!"
                   << " Sample Rate: " << frame->sample_rate << " vs "
-                  << samples_per_second_ << ", Channels: " << frame->channels
-                  << " vs " << channels_ << ", Sample Format: " << frame->format
-                  << " vs " << av_sample_format_;
+                  << samples_per_second_
+                  << ", Channels: " << frame->ch_layout.nb_channels << " vs "
+                  << channels_ << ", Sample Format: " << frame->format << " vs "
+                  << av_sample_format_;
       return cdm::kDecodeError;
     }
 
@@ -321,9 +321,9 @@ bool FFmpegCdmAudioDecoder::OnNewFrame(
     size_t* total_size,
     std::vector<std::unique_ptr<AVFrame, ScopedPtrAVFreeFrame>>* audio_frames,
     AVFrame* frame) {
-  *total_size += av_samples_get_buffer_size(nullptr, codec_context_->channels,
-                                            frame->nb_samples,
-                                            codec_context_->sample_fmt, 1);
+  *total_size += av_samples_get_buffer_size(
+      nullptr, codec_context_->channels, frame->nb_samples,
+      codec_context_->sample_fmt, 1);
   audio_frames->emplace_back(av_frame_clone(frame));
   return true;
 }

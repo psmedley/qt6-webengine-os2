@@ -28,16 +28,14 @@
 #include <atomic>
 #include <cinttypes>
 #include <memory>
-#include <tuple>
 #include <type_traits>
 
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
-#include "perfetto/ext/base/no_destructor.h"
+#include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/base/utils.h"
 
-#include "src/profiling/common/proc_utils.h"
 #include "src/profiling/memory/client.h"
 #include "src/profiling/memory/client_api_factory.h"
 #include "src/profiling/memory/scoped_spinlock.h"
@@ -306,7 +304,7 @@ __attribute__((visibility("default"))) AHeapInfo* AHeapInfo_create(
     perfetto::profiling::StartHeapprofdIfStatic();
 
   AHeapInfo& info = GetHeap(next_id);
-  strncpy(info.heap_name, heap_name, sizeof(info.heap_name));
+  perfetto::base::StringCopy(info.heap_name, heap_name, sizeof(info.heap_name));
   return &info;
 }
 

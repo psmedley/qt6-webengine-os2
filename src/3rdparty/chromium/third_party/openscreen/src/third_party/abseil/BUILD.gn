@@ -23,6 +23,10 @@ if (build_with_chromium) {
     if (is_mac) {
       cflags += [ "-Wno-range-loop-analysis" ]
     }
+
+    if (target_cpu == "arm" || target_cpu == "arm64") {
+      cflags += [ "-Wno-implicit-int-float-conversion" ]
+    }
   }
 
   # NOTE: StrFormat is specifically excluded from the Abseil source set due
@@ -51,6 +55,8 @@ if (build_with_chromium) {
       "src/absl/hash/internal/city.h",
       "src/absl/hash/internal/hash.cc",
       "src/absl/hash/internal/hash.h",
+      "src/absl/hash/internal/low_level_hash.cc",
+      "src/absl/hash/internal/low_level_hash.h",
       "src/absl/hash/internal/spy_hash_state.h",
       "src/absl/memory/memory.h",
       "src/absl/meta/type_traits.h",

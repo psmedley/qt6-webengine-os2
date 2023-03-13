@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include <memory.h>
 #include "libavcodec/codec2utils.h"
 #include "libavutil/channel_layout.h"
@@ -129,9 +131,8 @@ static int codec2_read_header_common(AVFormatContext *s, AVStream *st)
     st->codecpar->codec_type        = AVMEDIA_TYPE_AUDIO;
     st->codecpar->codec_id          = AV_CODEC_ID_CODEC2;
     st->codecpar->sample_rate       = 8000;
-    st->codecpar->channels          = 1;
     st->codecpar->format            = AV_SAMPLE_FMT_S16;
-    st->codecpar->channel_layout    = AV_CH_LAYOUT_MONO;
+    st->codecpar->ch_layout         = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
     st->codecpar->bit_rate          = codec2_mode_bit_rate(s, mode);
     st->codecpar->frame_size        = codec2_mode_frame_size(s, mode);
     st->codecpar->block_align       = codec2_mode_block_align(s, mode);
@@ -177,7 +178,7 @@ static int codec2_read_header(AVFormatContext *s)
         return AVERROR_PATCHWELCOME;
     }
 
-    s->internal->data_offset = CODEC2_HEADER_SIZE;
+    ffformatcontext(s)->data_offset = CODEC2_HEADER_SIZE;
 
     return codec2_read_header_common(s, st);
 }
@@ -255,7 +256,6 @@ static int codec2raw_read_header(AVFormatContext *s)
         return ret;
     }
 
-    s->internal->data_offset = 0;
     codec2_make_extradata(st->codecpar->extradata, c2->mode);
 
     return codec2_read_header_common(s, st);

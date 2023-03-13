@@ -23,7 +23,6 @@
 #include "libavutil/avassert.h"
 #include "cbs.h"
 #include "cbs_av1.h"
-#include "internal.h"
 #include "parser.h"
 
 typedef struct AV1ParseContext {
@@ -56,9 +55,9 @@ static int av1_parser_parse(AVCodecParserContext *ctx,
 {
     AV1ParseContext *s = ctx->priv_data;
     CodedBitstreamFragment *td = &s->temporal_unit;
-    CodedBitstreamAV1Context *av1 = s->cbc->priv_data;
-    AV1RawSequenceHeader *seq;
-    AV1RawColorConfig *color;
+    const CodedBitstreamAV1Context *av1 = s->cbc->priv_data;
+    const AV1RawSequenceHeader *seq;
+    const AV1RawColorConfig *color;
     int ret;
 
     *out_data = data;
@@ -96,9 +95,9 @@ static int av1_parser_parse(AVCodecParserContext *ctx,
     color = &seq->color_config;
 
     for (int i = 0; i < td->nb_units; i++) {
-        CodedBitstreamUnit *unit = &td->units[i];
-        AV1RawOBU *obu = unit->content;
-        AV1RawFrameHeader *frame;
+        const CodedBitstreamUnit *unit = &td->units[i];
+        const AV1RawOBU *obu = unit->content;
+        const AV1RawFrameHeader *frame;
 
         if (unit->type == AV1_OBU_FRAME)
             frame = &obu->obu.frame.header;

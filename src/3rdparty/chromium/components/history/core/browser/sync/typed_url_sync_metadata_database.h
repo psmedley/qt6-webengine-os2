@@ -8,16 +8,18 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "components/history/core/browser/url_row.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/sync_metadata_store.h"
 
 namespace sql {
 class Database;
 class MetaTable;
 }  // namespace sql
+
+namespace syncer {
+class MetadataBatch;
+}  // namespace syncer
 
 namespace history {
 
@@ -30,6 +32,11 @@ class TypedURLSyncMetadataDatabase : public syncer::SyncMetadataStore {
   // Must call InitVisitTable() before using to make sure the database is
   // initialized.
   TypedURLSyncMetadataDatabase();
+
+  TypedURLSyncMetadataDatabase(const TypedURLSyncMetadataDatabase&) = delete;
+  TypedURLSyncMetadataDatabase& operator=(const TypedURLSyncMetadataDatabase&) =
+      delete;
+
   ~TypedURLSyncMetadataDatabase() override;
 
   // Read all the stored metadata for typed URL and fill `metadata_batch`
@@ -76,8 +83,6 @@ class TypedURLSyncMetadataDatabase : public syncer::SyncMetadataStore {
 
   // Read sync_pb::ModelTypeState for typed URL and fill `state` with it.
   bool GetModelTypeState(sync_pb::ModelTypeState* state);
-
-  DISALLOW_COPY_AND_ASSIGN(TypedURLSyncMetadataDatabase);
 };
 
 }  // namespace history

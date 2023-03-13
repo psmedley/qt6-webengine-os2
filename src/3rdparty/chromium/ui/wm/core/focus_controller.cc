@@ -5,6 +5,7 @@
 #include "ui/wm/core/focus_controller.h"
 
 #include "base/auto_reset.h"
+#include "base/observer_list.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -63,8 +64,14 @@ void FocusController::ActivateWindow(aura::Window* window) {
 }
 
 void FocusController::DeactivateWindow(aura::Window* window) {
-  if (window)
+  if (window) {
+    // FocusController implements deactivation by way of activating another
+    // window. Don't deactivate |window| if it's not active to avoid attempting
+    // to activate another window.
+    if (window != GetActiveWindow())
+      return;
     FocusWindow(rules_->GetNextActivatableWindow(window));
+  }
 }
 
 const aura::Window* FocusController::GetActiveWindow() const {
@@ -241,7 +248,7 @@ void FocusController::FocusAndActivateWindow(
   if (!updating_focus_) {
     aura::Window* const new_active_window = pending_activation_.has_value()
                                                 ? pending_activation_.value()
-                                                : active_window_;
+                                                : active_window_.get();
     const bool activation_changed_focus =
         last_focused_window != focused_window_;
     if (!activation_changed_focus || !focused_window_) {
@@ -270,14 +277,14 @@ void FocusController::SetFocusedWindow(aura::Window* window) {
   if (lost_focus)
     window_tracker.Add(lost_focus);
   if (focused_window_ &&
-      observation_manager_.IsObservingSource(focused_window_) &&
+      observation_manager_.IsObservingSource(focused_window_.get()) &&
       focused_window_ != active_window_) {
-    observation_manager_.RemoveObservation(focused_window_);
+    observation_manager_.RemoveObservation(focused_window_.get());
   }
   focused_window_ = window;
   if (focused_window_ &&
-      !observation_manager_.IsObservingSource(focused_window_))
-    observation_manager_.AddObservation(focused_window_);
+      !observation_manager_.IsObservingSource(focused_window_.get()))
+    observation_manager_.AddObservation(focused_window_.get());
 
   for (auto& observer : focus_observers_) {
     observer.OnWindowFocused(
@@ -350,9 +357,9 @@ bool FocusController::SetActiveWindow(
   }
 
   if (active_window_ &&
-      observation_manager_.IsObservingSource(active_window_) &&
+      observation_manager_.IsObservingSource(active_window_.get()) &&
       focused_window_ != active_window_) {
-    observation_manager_.RemoveObservation(active_window_);
+    observation_manager_.RemoveObservation(active_window_.get());
   }
 
   active_window_ = window;
@@ -380,8 +387,8 @@ bool FocusController::SetActiveWindow(
 
   MAYBE_ACTIVATION_INTERRUPTED();
 
-  for (auto& observer : activation_observers_) {
-    observer.OnWindowActivated(
+  for (auto& activation_observer : activation_observers_) {
+    activation_observer.OnWindowActivated(
         reason, active_window_,
         window_tracker.Contains(lost_activation) ? lost_activation : nullptr);
 
@@ -460,6 +467,13 @@ void FocusController::WindowLostFocusFromDispositionChange(aura::Window* window,
 
 void FocusController::WindowFocusedFromInputEvent(aura::Window* window,
                                                   const ui::Event* event) {
+  // For focus follows cursor: avoid activating when `window` is a child of the
+  // currently active window.
+  if (event->type() == ui::ET_MOUSE_ENTERED && active_window_ &&
+      active_window_->Contains(window)) {
+    return;
+  }
+
   // Only focus |window| if it or any of its parents can be focused. Otherwise
   // FocusWindow() will focus the topmost window, which may not be the
   // currently focused one.

@@ -651,7 +651,20 @@ TEST(WideString, Delete) {
   EXPECT_EQ(L"", empty);
 }
 
-TEST(WideString, Substr) {
+TEST(WideString, OneArgSubstr) {
+  WideString fred(L"FRED");
+  EXPECT_EQ(L"FRED", fred.Substr(0));
+  EXPECT_EQ(L"RED", fred.Substr(1));
+  EXPECT_EQ(L"ED", fred.Substr(2));
+  EXPECT_EQ(L"D", fred.Substr(3));
+  EXPECT_EQ(L"", fred.Substr(4));
+
+  WideString empty;
+  EXPECT_EQ(L"", empty.Substr(0));
+  EXPECT_EQ(L"", empty.Substr(1));
+}
+
+TEST(WideString, TwoArgSubstr) {
   WideString fred(L"FRED");
   EXPECT_EQ(L"", fred.Substr(0, 0));
   EXPECT_EQ(L"", fred.Substr(3, 0));
@@ -714,7 +727,7 @@ TEST(WideString, Find) {
   EXPECT_FALSE(empty_string.Find(L'\0').has_value());
 
   WideString single_string(L"a");
-  Optional<size_t> result = single_string.Find(L'a');
+  absl::optional<size_t> result = single_string.Find(L'a');
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(0u, result.value());
   EXPECT_FALSE(single_string.Find(L'b').has_value());
@@ -761,7 +774,7 @@ TEST(WideString, ReverseFind) {
   EXPECT_FALSE(empty_string.ReverseFind(L'\0').has_value());
 
   WideString single_string(L"a");
-  Optional<size_t> result = single_string.ReverseFind(L'a');
+  absl::optional<size_t> result = single_string.ReverseFind(L'a');
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(0u, result.value());
   EXPECT_FALSE(single_string.ReverseFind(L'b').has_value());
@@ -796,6 +809,17 @@ TEST(WideString, UpperLower) {
   EXPECT_EQ(L"", empty);
   empty.MakeUpper();
   EXPECT_EQ(L"", empty);
+
+  WideString empty_with_buffer(L"x");
+  empty_with_buffer.Delete(0);
+
+  WideString additional_empty_with_buffer_ref = empty_with_buffer;
+  additional_empty_with_buffer_ref.MakeLower();
+  EXPECT_EQ(L"", additional_empty_with_buffer_ref);
+
+  additional_empty_with_buffer_ref = empty_with_buffer;
+  additional_empty_with_buffer_ref.MakeUpper();
+  EXPECT_EQ(L"", additional_empty_with_buffer_ref);
 }
 
 TEST(WideString, Trim) {
@@ -1200,7 +1224,7 @@ TEST(WideString, ToLatin1) {
 
 TEST(WideString, ToDefANSI) {
   EXPECT_EQ("", WideString().ToDefANSI());
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   const char* kResult =
       "x"
       "?"
@@ -1252,7 +1276,7 @@ TEST(WideString, FromLatin1) {
 
 TEST(WideString, FromDefANSI) {
   EXPECT_EQ(L"", WideString::FromDefANSI(ByteStringView()));
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   const wchar_t* kResult =
       L"x"
       L"\u20ac"
@@ -1474,7 +1498,7 @@ TEST(WideStringView, Find) {
   EXPECT_FALSE(empty_string.Find(L'\0').has_value());
 
   WideStringView single_string(L"a");
-  Optional<size_t> result = single_string.Find(L'a');
+  absl::optional<size_t> result = single_string.Find(L'a');
   ASSERT_TRUE(result.has_value());
   EXPECT_EQ(0u, result.value());
   EXPECT_FALSE(single_string.Find(L'b').has_value());
@@ -1667,7 +1691,7 @@ TEST(WideString, FormatString) {
   EXPECT_EQ(L"cla", WideString::Format(L"%.3ls", L"clams"));
   EXPECT_EQ(L"\u043e\u043f", WideString(L"\u043e\u043f"));
 
-#if !defined(OS_APPLE)
+#if !BUILDFLAG(IS_APPLE)
   // See https://bugs.chromium.org/p/pdfium/issues/detail?id=1132
   EXPECT_EQ(L"\u043e\u043f", WideString::Format(L"\u043e\u043f"));
   EXPECT_EQ(L"\u043e\u043f", WideString::Format(L"%ls", L"\u043e\u043f"));

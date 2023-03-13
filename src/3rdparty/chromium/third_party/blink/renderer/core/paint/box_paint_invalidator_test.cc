@@ -13,7 +13,6 @@
 #include "third_party/blink/renderer/core/paint/paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/raster_invalidation_tracking.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
@@ -31,8 +30,8 @@ class BoxPaintInvalidatorTest : public PaintAndRasterInvalidationTest {
       const PhysicalOffset& old_paint_offset) {
     PaintInvalidatorContext context;
     context.old_paint_offset = old_paint_offset;
-    fragment_data_.SetPaintOffset(box.FirstFragment().PaintOffset());
-    context.fragment_data = &fragment_data_;
+    fragment_data_->SetPaintOffset(box.FirstFragment().PaintOffset());
+    context.fragment_data = fragment_data_;
     return BoxPaintInvalidator(box, context).ComputePaintInvalidationReason();
   }
 
@@ -55,13 +54,8 @@ class BoxPaintInvalidatorTest : public PaintAndRasterInvalidationTest {
     target.setAttribute(
         html_names::kStyleAttr,
         target.getAttribute(html_names::kStyleAttr) + "; width: 200px");
-    if (RuntimeEnabledFeatures::CompositeAfterPaintEnabled()) {
-      GetDocument().View()->UpdateLifecycleToLayoutClean(
-          DocumentUpdateReason::kTest);
-    } else {
-      GetDocument().View()->UpdateLifecycleToCompositingInputsClean(
-          DocumentUpdateReason::kTest);
-    }
+    GetDocument().View()->UpdateLifecycleToLayoutClean(
+        DocumentUpdateReason::kTest);
 
     EXPECT_EQ(PaintInvalidationReason::kGeometry,
               ComputePaintInvalidationReason(box, paint_offset));
@@ -94,7 +88,8 @@ class BoxPaintInvalidatorTest : public PaintAndRasterInvalidationTest {
   }
 
  private:
-  FragmentData fragment_data_;
+  Persistent<FragmentData> fragment_data_ =
+      MakeGarbageCollected<FragmentData>();
 };
 
 INSTANTIATE_PAINT_TEST_SUITE_P(BoxPaintInvalidatorTest);
@@ -234,7 +229,7 @@ TEST_P(BoxPaintInvalidatorTest, ComputePaintInvalidationReasonOutline) {
   UpdateAllLifecyclePhasesForTest();
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(RasterInvalidationInfo{
-                  object, object->DebugName(), IntRect(0, 0, 72, 142),
+                  object->Id(), object->DebugName(), gfx::Rect(0, 0, 72, 142),
                   PaintInvalidationReason::kStyle}));
   GetDocument().View()->SetTracksRasterInvalidations(false);
 
@@ -244,7 +239,7 @@ TEST_P(BoxPaintInvalidatorTest, ComputePaintInvalidationReasonOutline) {
   UpdateAllLifecyclePhasesForTest();
   EXPECT_THAT(GetRasterInvalidationTracking()->Invalidations(),
               UnorderedElementsAre(RasterInvalidationInfo{
-                  object, object->DebugName(), IntRect(0, 0, 122, 142),
+                  object->Id(), object->DebugName(), gfx::Rect(0, 0, 122, 142),
                   PaintInvalidationReason::kGeometry}));
   GetDocument().View()->SetTracksRasterInvalidations(false);
 }

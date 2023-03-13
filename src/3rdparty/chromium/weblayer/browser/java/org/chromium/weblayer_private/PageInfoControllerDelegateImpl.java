@@ -9,10 +9,10 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
+import android.view.ViewGroup;
 import android.webkit.ValueCallback;
 
 import androidx.annotation.NonNull;
-import androidx.annotation.Nullable;
 import androidx.fragment.app.FragmentManager;
 
 import org.chromium.base.Callback;
@@ -26,7 +26,6 @@ import org.chromium.components.content_settings.CookieControlsObserver;
 import org.chromium.components.embedder_support.util.UrlConstants;
 import org.chromium.components.page_info.PageInfoControllerDelegate;
 import org.chromium.components.page_info.PageInfoMainController;
-import org.chromium.components.page_info.PageInfoRowView;
 import org.chromium.components.page_info.PageInfoSubpageController;
 import org.chromium.content_public.browser.BrowserContextHandle;
 import org.chromium.content_public.browser.WebContents;
@@ -35,6 +34,9 @@ import org.chromium.url.GURL;
 import org.chromium.weblayer_private.interfaces.ObjectWrapper;
 import org.chromium.weblayer_private.interfaces.SettingsIntentHelper;
 import org.chromium.weblayer_private.settings.WebLayerSiteSettingsDelegate;
+
+import java.util.Collection;
+import java.util.Collections;
 
 /**
  * WebLayer's customization of PageInfoControllerDelegate.
@@ -82,6 +84,14 @@ public class PageInfoControllerDelegateImpl extends PageInfoControllerDelegate {
         launchIntent(intent);
     }
 
+    @Override
+    public void showAdPersonalizationSettings() {
+        // The Privacy Sandbox currently does not exist on Weblayer, so it will never show the
+        // ad personalization section in PageInfo. When we add support for the Privacy Sandbox,
+        // this method should open a settings page for it.
+        assert false;
+    }
+
     private void launchIntent(Intent intent) {
         // Disabling StrictMode to avoid violations (https://crbug.com/819410).
         try (StrictModeContext ignored = StrictModeContext.allowDiskReads()) {
@@ -102,10 +112,10 @@ public class PageInfoControllerDelegateImpl extends PageInfoControllerDelegate {
      * {@inheritDoc}
      */
     @Override
-    @Nullable
-    public PageInfoSubpageController createHistoryController(
-            PageInfoMainController mainController, PageInfoRowView rowView) {
-        return null;
+    @NonNull
+    public Collection<PageInfoSubpageController> createAdditionalRowViews(
+            PageInfoMainController mainController, ViewGroup rowWrapper) {
+        return Collections.emptyList();
     }
 
     /**

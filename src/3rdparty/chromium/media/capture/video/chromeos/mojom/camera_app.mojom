@@ -38,7 +38,6 @@ enum CaptureIntent {
   DEFAULT = 0,
   VIDEO_RECORD = 1,
   STILL_CAPTURE = 2,
-  DOCUMENT = 3,
 };
 
 // Interface to let Chrome Camera App (Remote) get specific CameraAppDevice from
@@ -90,13 +89,13 @@ interface CameraAppDevice {
   // characteristics, orientation, etc.
   GetCameraInfo() => (CameraInfo camera_info);
 
-  // Sets reprocess option to bind with the coming take photo request. When this
-  // method is called, the reprocess option will be queued. All reprocess
+  // Sets reprocess options to bind with the coming take photo request. When
+  // this method is called, the reprocess options will be queued. All reprocess
   // options in the queue will be consumed when ImageCapture::TakePhoto() is
-  // triggered and all the queued reprocess options will be bound
-  // to that take photo request.
-  SetReprocessOption(Effect effect)
-      => (int32 status, media.mojom.Blob? blob);
+  // triggered and all the queued reprocess options will be bound to that take
+  // photo request.
+  SetReprocessOptions(array<Effect> effects,
+                      pending_remote<ReprocessResultListener> listener) => ();
 
   // Sets the fps range for upcoming configured camera stream.
   // The caller sets the |fps_range|.
@@ -159,4 +158,10 @@ interface DocumentCornersObserver {
   // detected, or 4, which are in top-left => bottom-left => bottom-right =>
   // top-right order. The value of the coordinate of a corner will be in [0, 1).
   OnDocumentCornersUpdated(array<gfx.mojom.PointF> corners);
+};
+
+// Interface for the listener of reprocess results.
+interface ReprocessResultListener {
+  // Triggered when reprocess done for target |effect|.
+  OnReprocessDone(Effect effect, int32 status, media.mojom.Blob? blob);
 };

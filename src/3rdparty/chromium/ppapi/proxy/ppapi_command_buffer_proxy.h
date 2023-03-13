@@ -11,7 +11,6 @@
 #include <memory>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "gpu/command_buffer/client/gpu_control.h"
 #include "gpu/command_buffer/common/command_buffer.h"
 #include "gpu/command_buffer/common/command_buffer_id.h"
@@ -38,6 +37,10 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer,
                           const gpu::Capabilities& capabilities,
                           SerializedHandle shared_state,
                           gpu::CommandBufferId command_buffer_id);
+
+  PpapiCommandBufferProxy(const PpapiCommandBufferProxy&) = delete;
+  PpapiCommandBufferProxy& operator=(const PpapiCommandBufferProxy&) = delete;
+
   ~PpapiCommandBufferProxy() override;
 
   // gpu::CommandBuffer implementation:
@@ -107,8 +110,6 @@ class PPAPI_PROXY_EXPORT PpapiCommandBufferProxy : public gpu::CommandBuffer,
   uint64_t pending_fence_sync_release_;
   uint64_t flushed_fence_sync_release_;
   uint64_t validated_fence_sync_release_;
-
-  DISALLOW_COPY_AND_ASSIGN(PpapiCommandBufferProxy);
 };
 
 }  // namespace proxy

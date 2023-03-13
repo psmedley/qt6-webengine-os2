@@ -9,7 +9,7 @@
 
 #include "base/check_op.h"
 #include "base/containers/contains.h"
-#include "base/cxx17_backports.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
@@ -44,6 +44,9 @@ constexpr bool IsSubset(unsigned sub, unsigned super) {
 // Helper class to parse the url filter of a Declarative Net Request API rule.
 class UrlFilterParser {
  public:
+  UrlFilterParser(const UrlFilterParser&) = delete;
+  UrlFilterParser& operator=(const UrlFilterParser&) = delete;
+
   // This sets the |url_pattern_type|, |anchor_left|, |anchor_right| and
   // |url_pattern| fields on the |indexed_rule_|.
   static void Parse(std::unique_ptr<std::string> url_filter,
@@ -124,9 +127,7 @@ class UrlFilterParser {
   const std::string url_filter_;
   const size_t url_filter_len_;
   size_t index_;
-  IndexedRule* indexed_rule_;  // Must outlive this instance.
-
-  DISALLOW_COPY_AND_ASSIGN(UrlFilterParser);
+  raw_ptr<IndexedRule> indexed_rule_;  // Must outlive this instance.
 };
 
 bool IsCaseSensitive(const dnr_api::Rule& parsed_rule) {
@@ -196,6 +197,10 @@ flat_rule::ElementType GetElementType(dnr_api::ResourceType resource_type) {
       return flat_rule::ElementType_MEDIA;
     case dnr_api::RESOURCE_TYPE_WEBSOCKET:
       return flat_rule::ElementType_WEBSOCKET;
+    case dnr_api::RESOURCE_TYPE_WEBTRANSPORT:
+      return flat_rule::ElementType_WEBTRANSPORT;
+    case dnr_api::RESOURCE_TYPE_WEBBUNDLE:
+      return flat_rule::ElementType_WEBBUNDLE;
     case dnr_api::RESOURCE_TYPE_OTHER:
       return flat_rule::ElementType_OTHER;
   }
@@ -209,6 +214,8 @@ flat_rule::RequestMethod GetRequestMethod(
     case dnr_api::REQUEST_METHOD_NONE:
       NOTREACHED();
       return flat_rule::RequestMethod_NONE;
+    case dnr_api::REQUEST_METHOD_CONNECT:
+      return flat_rule::RequestMethod_CONNECT;
     case dnr_api::REQUEST_METHOD_DELETE:
       return flat_rule::RequestMethod_DELETE;
     case dnr_api::REQUEST_METHOD_GET:
@@ -355,7 +362,7 @@ bool IsValidTransformScheme(const std::unique_ptr<std::string>& scheme) {
   if (!scheme)
     return true;
 
-  for (size_t i = 0; i < base::size(kAllowedTransformSchemes); ++i) {
+  for (size_t i = 0; i < std::size(kAllowedTransformSchemes); ++i) {
     if (*scheme == kAllowedTransformSchemes[i])
       return true;
   }
@@ -421,7 +428,8 @@ ParseResult ParseRedirect(dnr_api::Redirect redirect,
     GURL redirect_url = base_url.Resolve(*redirect.extension_path);
 
     // Sanity check that Resolve works as expected.
-    DCHECK_EQ(base_url.GetOrigin(), redirect_url.GetOrigin());
+    DCHECK_EQ(base_url.DeprecatedGetOriginAsURL(),
+              redirect_url.DeprecatedGetOriginAsURL());
 
     if (!redirect_url.is_valid())
       return ParseResult::ERROR_INVALID_EXTENSION_PATH;
@@ -553,6 +561,16 @@ ParseResult IndexedRule::CreateIndexedRule(dnr_api::Rule parsed_rule,
   if (parsed_rule.condition.domains && parsed_rule.condition.domains->empty())
     return ParseResult::ERROR_EMPTY_DOMAINS_LIST;
 
+  if (parsed_rule.condition.initiator_domains &&
+      parsed_rule.condition.initiator_domains->empty()) {
+    return ParseResult::ERROR_EMPTY_INITIATOR_DOMAINS_LIST;
+  }
+
+  if (parsed_rule.condition.request_domains &&
+      parsed_rule.condition.request_domains->empty()) {
+    return ParseResult::ERROR_EMPTY_REQUEST_DOMAINS_LIST;
+  }
+
   if (parsed_rule.condition.resource_types &&
       parsed_rule.condition.resource_types->empty()) {
     return ParseResult::ERROR_EMPTY_RESOURCE_TYPES_LIST;
@@ -642,14 +660,55 @@ ParseResult IndexedRule::CreateIndexedRule(dnr_api::Rule parsed_rule,
       return result;
   }
 
-  if (!CanonicalizeDomains(std::move(parsed_rule.condition.domains),
-                           &indexed_rule->domains)) {
+  if (parsed_rule.condition.domains &&
+      parsed_rule.condition.initiator_domains) {
+    return ParseResult::ERROR_DOMAINS_AND_INITIATOR_DOMAINS_BOTH_SPECIFIED;
+  }
+
+  if (parsed_rule.condition.excluded_domains &&
+      parsed_rule.condition.excluded_initiator_domains) {
+    return ParseResult::
+        ERROR_EXCLUDED_DOMAINS_AND_EXCLUDED_INITIATOR_DOMAINS_BOTH_SPECIFIED;
+  }
+
+  // Note: The `domains` and `excluded_domains` rule conditions are deprecated.
+  //       If they are specified, they are mapped to the `initiator_domains` and
+  //       `excluded_initiator_domains` conditions on the indexed rule.
+
+  if (parsed_rule.condition.domains &&
+      !CanonicalizeDomains(std::move(parsed_rule.condition.domains),
+                           &indexed_rule->initiator_domains)) {
     return ParseResult::ERROR_NON_ASCII_DOMAIN;
   }
 
-  if (!CanonicalizeDomains(std::move(parsed_rule.condition.excluded_domains),
-                           &indexed_rule->excluded_domains)) {
+  if (parsed_rule.condition.initiator_domains &&
+      !CanonicalizeDomains(std::move(parsed_rule.condition.initiator_domains),
+                           &indexed_rule->initiator_domains)) {
+    return ParseResult::ERROR_NON_ASCII_INITIATOR_DOMAIN;
+  }
+
+  if (parsed_rule.condition.excluded_domains &&
+      !CanonicalizeDomains(std::move(parsed_rule.condition.excluded_domains),
+                           &indexed_rule->excluded_initiator_domains)) {
     return ParseResult::ERROR_NON_ASCII_EXCLUDED_DOMAIN;
+  }
+
+  if (parsed_rule.condition.excluded_initiator_domains &&
+      !CanonicalizeDomains(
+          std::move(parsed_rule.condition.excluded_initiator_domains),
+          &indexed_rule->excluded_initiator_domains)) {
+    return ParseResult::ERROR_NON_ASCII_EXCLUDED_INITIATOR_DOMAIN;
+  }
+
+  if (!CanonicalizeDomains(std::move(parsed_rule.condition.request_domains),
+                           &indexed_rule->request_domains)) {
+    return ParseResult::ERROR_NON_ASCII_REQUEST_DOMAIN;
+  }
+
+  if (!CanonicalizeDomains(
+          std::move(parsed_rule.condition.excluded_request_domains),
+          &indexed_rule->excluded_request_domains)) {
+    return ParseResult::ERROR_NON_ASCII_EXCLUDED_REQUEST_DOMAIN;
   }
 
   {

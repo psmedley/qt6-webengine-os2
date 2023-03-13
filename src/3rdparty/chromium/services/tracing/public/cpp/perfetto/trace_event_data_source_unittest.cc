@@ -14,12 +14,13 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/metrics/user_metrics.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
+#include "base/task/common/task_annotator.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread_id_name_manager.h"
@@ -30,6 +31,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_log.h"
 #include "base/tracing/trace_time.h"
+#include "base/values.h"
 #include "build/build_config.h"
 #include "components/tracing/common/tracing_switches.h"
 #include "services/tracing/perfetto/test_utils.h"
@@ -39,6 +41,7 @@
 #include "services/tracing/public/mojom/perfetto_service.mojom.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/perfetto/include/perfetto/tracing/track.h"
 #include "third_party/perfetto/include/perfetto/tracing/track_event_interned_data_index.h"
 #include "third_party/perfetto/protos/perfetto/trace/clock_snapshot.pb.h"
@@ -53,7 +56,7 @@
 #include "third_party/perfetto/protos/perfetto/trace/track_event/thread_descriptor.pb.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/track_descriptor.pb.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
@@ -74,11 +77,17 @@ constexpr uint32_t kClockIdAbsolute = 64;
 constexpr uint32_t kClockIdIncremental = 65;
 #endif
 
-class TraceEventDataSourceTest : public TracingUnitTest {
+class TraceEventDataSourceTest
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+    : public testing::Test
+#else
+    : public TracingUnitTest
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+{
  public:
   void SetUp() override {
-    TracingUnitTest::SetUp();
 #if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+    TracingUnitTest::SetUp();
     TraceEventDataSource::GetInstance()->RegisterStartupHooks();
     // TODO(eseckler): Initialize the entire perfetto client library instead.
     perfetto::internal::TrackRegistry::InitializeInstance();
@@ -128,7 +137,9 @@ class TraceEventDataSourceTest : public TracingUnitTest {
     base::trace_event::TraceLog::GetInstance()->set_process_name(
         old_process_name_);
 
+#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
     TracingUnitTest::TearDown();
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 
     // Destroy after task environment shuts down so that no other threads try to
     // add trace events.
@@ -556,7 +567,7 @@ class TraceEventDataSourceTest : public TracingUnitTest {
 
     if (absolute_timestamp > 0) {
 #if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
-      // TODO(skyostil): Implement delta timestamps.
+      // TODO(eseckler): Support microsecond encoding.
       EXPECT_EQ(packet->timestamp(), absolute_timestamp * 1000);
 #else
       EXPECT_EQ(packet->timestamp_clock_id(), kClockIdAbsolute);
@@ -564,9 +575,18 @@ class TraceEventDataSourceTest : public TracingUnitTest {
 #endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
     } else {
 #if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
-      // TODO(skyostil): Implement delta timestamps.
-      EXPECT_LE(last_timestamp_, packet->timestamp());
-      last_timestamp_ = packet->timestamp();
+      if (packet->has_clock_snapshot()) {
+        for (auto& clock : packet->clock_snapshot().clocks()) {
+          if (clock.is_incremental()) {
+            EXPECT_LE(last_timestamp_, clock.timestamp());
+            last_timestamp_ = clock.timestamp();
+          }
+        }
+      } else if (!packet->has_timestamp_clock_id()) {
+        // Packets that don't have a timestamp_clock_id default to the
+        // incremental clock.
+        last_timestamp_ += packet->timestamp();
+      }
 #else   // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
       // Default to kClockIdIncremental.
       EXPECT_FALSE(packet->has_timestamp_clock_id());
@@ -815,6 +835,7 @@ class TraceEventDataSourceTest : public TracingUnitTest {
 
  protected:
 #if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  base::test::TaskEnvironment task_environment_;
   base::test::TracingEnvironment tracing_environment_;
   std::vector<std::unique_ptr<perfetto::protos::TracePacket>>
       finalized_packets_;
@@ -852,11 +873,11 @@ void HasMetadataValue(const perfetto::protos::ChromeMetadata& entry,
 }
 
 void HasMetadataValue(const perfetto::protos::ChromeMetadata& entry,
-                      const base::DictionaryValue& value) {
+                      const base::Value& value) {
   EXPECT_TRUE(entry.has_json_value());
 
-  std::unique_ptr<base::Value> child_dict =
-      base::JSONReader::ReadDeprecated(entry.json_value());
+  absl::optional<base::Value> child_dict =
+      base::JSONReader::Read(entry.json_value());
   EXPECT_EQ(*child_dict, value);
 }
 
@@ -876,15 +897,15 @@ void MetadataHasNamedValue(const google::protobuf::RepeatedPtrField<
   NOTREACHED();
 }
 
-std::unique_ptr<base::DictionaryValue> AddJsonMetadataGenerator() {
-  auto metadata = std::make_unique<base::DictionaryValue>();
-  metadata->SetInteger("foo_int", 42);
-  metadata->SetString("foo_str", "bar");
-  metadata->SetBoolean("foo_bool", true);
+absl::optional<base::Value> AddJsonMetadataGenerator() {
+  base::Value metadata(base::Value::Type::DICTIONARY);
+  metadata.SetIntKey("foo_int", 42);
+  metadata.SetStringKey("foo_str", "bar");
+  metadata.SetBoolKey("foo_bool", true);
 
-  base::DictionaryValue child_dict;
-  child_dict.SetString("child_str", "child_val");
-  metadata->SetKey("child_dict", std::move(child_dict));
+  base::Value child_dict(base::Value::Type::DICTIONARY);
+  child_dict.SetStringKey("child_str", "child_val");
+  metadata.SetKey("child_dict", std::move(child_dict));
   return metadata;
 }
 
@@ -902,9 +923,9 @@ TEST_F(TraceEventDataSourceTest, MetadataGeneratorBeforeTracing) {
   MetadataHasNamedValue(metadata, "foo_str", "bar");
   MetadataHasNamedValue(metadata, "foo_bool", true);
 
-  auto child_dict = std::make_unique<base::DictionaryValue>();
-  child_dict->SetString("child_str", "child_val");
-  MetadataHasNamedValue(metadata, "child_dict", *child_dict);
+  base::Value child_dict(base::Value::Type::DICTIONARY);
+  child_dict.SetStringKey("child_str", "child_val");
+  MetadataHasNamedValue(metadata, "child_dict", child_dict);
 }
 
 TEST_F(TraceEventDataSourceTest, MetadataGeneratorWhileTracing) {
@@ -921,17 +942,17 @@ TEST_F(TraceEventDataSourceTest, MetadataGeneratorWhileTracing) {
   MetadataHasNamedValue(metadata, "foo_str", "bar");
   MetadataHasNamedValue(metadata, "foo_bool", true);
 
-  auto child_dict = std::make_unique<base::DictionaryValue>();
-  child_dict->SetString("child_str", "child_val");
-  MetadataHasNamedValue(metadata, "child_dict", *child_dict);
+  base::Value child_dict(base::Value::Type::DICTIONARY);
+  child_dict.SetStringKey("child_str", "child_val");
+  MetadataHasNamedValue(metadata, "child_dict", child_dict);
 }
 
 TEST_F(TraceEventDataSourceTest, MultipleMetadataGenerators) {
   auto* metadata_source = TraceEventMetadataSource::GetInstance();
   metadata_source->AddGeneratorFunction(base::BindRepeating([]() {
-    auto metadata = std::make_unique<base::DictionaryValue>();
-    metadata->SetInteger("before_int", 42);
-    return metadata;
+    base::Value metadata(base::Value::Type::DICTIONARY);
+    metadata.SetIntKey("before_int", 42);
+    return absl::optional<base::Value>(std::move(metadata));
   }));
 
   StartMetaDataSource();
@@ -951,15 +972,15 @@ TEST_F(TraceEventDataSourceTest, MultipleMetadataGenerators) {
   MetadataHasNamedValue(metadata, "foo_str", "bar");
   MetadataHasNamedValue(metadata, "foo_bool", true);
 
-  auto child_dict = std::make_unique<base::DictionaryValue>();
-  child_dict->SetString("child_str", "child_val");
-  MetadataHasNamedValue(metadata, "child_dict", *child_dict);
+  base::Value child_dict(base::Value::Type::DICTIONARY);
+  child_dict.SetStringKey("child_str", "child_val");
+  MetadataHasNamedValue(metadata, "child_dict", child_dict);
 
   EXPECT_EQ(1, metadata1.size());
   MetadataHasNamedValue(metadata1, "before_int", 42);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 TEST_F(TraceEventDataSourceTest,
        PackageNameNotRecordedPrivacyFilteringDisabledTraceLogNotSet) {
   StartTraceEventDataSource(/* privacy_filtering_enabled = false */);
@@ -1023,6 +1044,11 @@ TEST_F(TraceEventDataSourceTest, BasicTraceEvent) {
 
   ExpectEventCategories(e_packet, {{1u, kCategoryGroup}});
   ExpectInternedEventNames(e_packet, {{1u, "bar"}});
+
+// producer_client() is null under USE_PERFETTO_CLIENT_LIBRARY.
+#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  EXPECT_EQ(producer_client()->empty_finalized_packets_count(), 0);
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 }
 
 TEST_F(TraceEventDataSourceTest, TimestampedTraceEvent) {
@@ -1030,7 +1056,7 @@ TEST_F(TraceEventDataSourceTest, TimestampedTraceEvent) {
 
   TRACE_EVENT_BEGIN_WITH_ID_TID_AND_TIMESTAMP0(
       kCategoryGroup, "bar", 42, 4242,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(424242));
+      base::TimeTicks() + base::Microseconds(424242));
 
   size_t packet_index = ExpectStandardPreamble();
 
@@ -1071,8 +1097,7 @@ TEST_F(TraceEventDataSourceTest, InstantTraceEventOnOtherThread) {
   INTERNAL_TRACE_EVENT_ADD_WITH_ID_TID_AND_TIMESTAMP(
       TRACE_EVENT_PHASE_INSTANT, kCategoryGroup, "bar",
       static_cast<uint64_t>(trace_event_internal::kNoId),
-      /*thread_id=*/1,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(10),
+      /*thread_id=*/1, base::TimeTicks() + base::Microseconds(10),
       /*/flags=*/TRACE_EVENT_SCOPE_THREAD);
   size_t packet_index = ExpectStandardPreamble();
 
@@ -1128,17 +1153,26 @@ TEST_F(TraceEventDataSourceTest, EventWithCopiedStrings) {
   size_t packet_index = ExpectStandardPreamble();
 
   auto* e_packet = GetFinalizedPacket(packet_index++);
+  const auto& annotations = e_packet->track_event().debug_annotations();
+  EXPECT_EQ(annotations.size(), 2);
+
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  // Perfetto uses interning even for copied strings.
+  ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name_iid=*/1u,
+                   TRACE_EVENT_PHASE_INSTANT,
+                   TRACE_EVENT_SCOPE_THREAD | TRACE_EVENT_FLAG_COPY);
+  EXPECT_EQ(annotations[0].name_iid(), 1u);
+  EXPECT_EQ(annotations[1].name_iid(), 2u);
+#else   // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   ExpectTraceEvent(e_packet, /*category_iid=*/1u, /*name=*/"bar",
                    TRACE_EVENT_PHASE_INSTANT,
                    TRACE_EVENT_SCOPE_THREAD | TRACE_EVENT_FLAG_COPY);
-
   EXPECT_EQ(e_packet->track_event().name(), "bar");
-
-  const auto& annotations = e_packet->track_event().debug_annotations();
-  EXPECT_EQ(annotations.size(), 2);
   EXPECT_EQ(annotations[0].name(), "arg1_name");
-  EXPECT_EQ(annotations[0].string_value(), "arg1_val");
   EXPECT_EQ(annotations[1].name(), "arg2_name");
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+
+  EXPECT_EQ(annotations[0].string_value(), "arg1_val");
   EXPECT_EQ(annotations[1].string_value(), "arg2_val");
 
   ExpectEventCategories(e_packet, {{1u, kCategoryGroup}});
@@ -1257,7 +1291,7 @@ TEST_F(TraceEventDataSourceTest, EventWithConvertableArgs) {
     }
 
    private:
-    int* num_calls_;
+    raw_ptr<int> num_calls_;
     const char* arg_value_;
   };
 
@@ -1282,14 +1316,115 @@ TEST_F(TraceEventDataSourceTest, EventWithConvertableArgs) {
   EXPECT_EQ(annotations[1].legacy_json_value(), kArgValue2);
 }
 
+#if BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+// TODO(crbug.com/1309080): Re-enable after fix.
+#define MAYBE_NestableAsyncTraceEvent DISABLED_NestableAsyncTraceEvent
+#else
+#define MAYBE_NestableAsyncTraceEvent NestableAsyncTraceEvent
+#endif
+TEST_F(TraceEventDataSourceTest, MAYBE_NestableAsyncTraceEvent) {
+  constexpr bool kPrivacyFilteringEnabled = true;
+  StartTraceEventDataSource(kPrivacyFilteringEnabled);
+
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(kCategoryGroup, "foo",
+                                    TRACE_ID_WITH_SCOPE("foo", 1));
+  // "foo" is the first name string interned.
+  constexpr uint32_t kFooNameIID = 1u;
+
+  // Same id, different scope.
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(kCategoryGroup, "bar",
+                                    TRACE_ID_WITH_SCOPE("bar", 1));
+  // "bar" is the first name string interned.
+  constexpr uint32_t kBarNameIID = 2u;
+
+  // Same scope, different id.
+  TRACE_EVENT_NESTABLE_ASYNC_BEGIN0(kCategoryGroup, "bar",
+                                    TRACE_ID_WITH_SCOPE("bar", 2));
+
+  TRACE_EVENT_NESTABLE_ASYNC_END0(kCategoryGroup, "bar",
+                                  TRACE_ID_WITH_SCOPE("bar", 2));
+  TRACE_EVENT_NESTABLE_ASYNC_END0(kCategoryGroup, "bar",
+                                  TRACE_ID_WITH_SCOPE("bar", 1));
+  TRACE_EVENT_NESTABLE_ASYNC_END0(kCategoryGroup, "foo",
+                                  TRACE_ID_WITH_SCOPE("foo", 1));
+
+  size_t packet_index = ExpectStandardPreamble(0, kPrivacyFilteringEnabled);
+
+  // Helper function that puts the unscoped_id of the packet's legacy_event in
+  // `id`. This uses an output parameter instead of a return value so that it
+  // can use ASSERT macros for early return.
+  auto get_legacy_event_id =
+      [](const perfetto::protos::TracePacket* packet, uint64_t* id,
+         base::Location from_here = base::Location::Current()) {
+        SCOPED_TRACE(from_here.ToString());
+        // Output 0 on error.
+        *id = 0;
+        ASSERT_TRUE(packet->has_track_event());
+        ASSERT_TRUE(packet->track_event().has_legacy_event());
+        ASSERT_TRUE(packet->track_event().legacy_event().has_unscoped_id());
+        *id = packet->track_event().legacy_event().unscoped_id();
+      };
+
+  // kCategoryGroup is the first (and only) category string interned.
+  constexpr uint32_t kCategoryIID = 1u;
+
+  // Since privacy filtering is enabled, the event id's can be altered to avoid
+  // conflicts when scope names are filtered out. The important thing is that
+  // each begin event has a different id, because of the different scopes, and
+  // each end event's id matches the corresponding begin event.
+  uint64_t id1;
+  auto* e_packet = GetFinalizedPacket(packet_index++);
+  get_legacy_event_id(e_packet, &id1);
+  ExpectTraceEvent(e_packet, kCategoryIID, kFooNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN,
+                   TRACE_EVENT_FLAG_HAS_ID, id1);
+
+  uint64_t id2;
+  e_packet = GetFinalizedPacket(packet_index++);
+  get_legacy_event_id(e_packet, &id2);
+  EXPECT_NE(id2, id1);
+  ExpectTraceEvent(e_packet, kCategoryIID, kBarNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN,
+                   TRACE_EVENT_FLAG_HAS_ID, id2);
+
+  uint64_t id3;
+  e_packet = GetFinalizedPacket(packet_index++);
+  get_legacy_event_id(e_packet, &id3);
+  EXPECT_NE(id3, id1);
+  EXPECT_NE(id3, id2);
+  ExpectTraceEvent(e_packet, kCategoryIID, kBarNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN,
+                   TRACE_EVENT_FLAG_HAS_ID, id3);
+
+  // End events don't include the names.
+  constexpr uint32_t kMissingNameIID = 0u;
+  e_packet = GetFinalizedPacket(packet_index++);
+  ExpectTraceEvent(e_packet, kCategoryIID, kMissingNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_END,
+                   TRACE_EVENT_FLAG_HAS_ID, id3);
+  e_packet = GetFinalizedPacket(packet_index++);
+  ExpectTraceEvent(e_packet, kCategoryIID, kMissingNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_END,
+                   TRACE_EVENT_FLAG_HAS_ID, id2);
+  e_packet = GetFinalizedPacket(packet_index++);
+  ExpectTraceEvent(e_packet, kCategoryIID, kMissingNameIID,
+                   TRACE_EVENT_PHASE_NESTABLE_ASYNC_END,
+                   TRACE_EVENT_FLAG_HAS_ID, id1);
+}
+
 TEST_F(TraceEventDataSourceTest, TaskExecutionEvent) {
   StartTraceEventDataSource(/*privacy_filtering_enabled=*/false, "toplevel");
 
-  base::PendingTask task;
-  task.posted_from =
-      base::Location("my_func", "my_file", 0, /*program_counter=*/&task);
-  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask1", task); }
-  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask1", task); }
+  base::TaskAnnotator task_annotator;
+  for (int i = 0; i < 2; ++i) {
+    base::PendingTask task;
+    task.task = base::DoNothing();
+    task.posted_from =
+        base::Location("my_func", "my_file", 0, /*program_counter=*/&task);
+    // TaskAnnotator::RunTask is responsible for emitting the task execution
+    // event.
+    task_annotator.RunTask("ThreadControllerImpl::RunTask1", task);
+  }
 
   size_t packet_index = ExpectStandardPreamble();
   size_t category_iid = 1;
@@ -1343,10 +1478,15 @@ TEST_F(TraceEventDataSourceTest, TaskExecutionEvent) {
 TEST_F(TraceEventDataSourceTest, TaskExecutionEventWithoutFunction) {
   StartTraceEventDataSource(/*privacy_filtering_enabled=*/false, "toplevel");
 
+  base::TaskAnnotator task_annotator;
   base::PendingTask task;
+  task.task = base::DoNothing();
   task.posted_from = base::Location(/*function_name=*/nullptr, "my_file", 0,
                                     /*program_counter=*/&task);
-  { TRACE_TASK_EXECUTION("ThreadControllerImpl::RunTask1", task); }
+
+  // TaskAnnotator::RunTask is responsible for emitting the task execution
+  // event.
+  task_annotator.RunTask("ThreadControllerImpl::RunTask1", task);
 
   size_t packet_index = ExpectStandardPreamble();
   size_t category_iid = 1;
@@ -1406,8 +1546,7 @@ TEST_F(TraceEventDataSourceTest, UpdateDurationOfCompleteEvent) {
   auto handle = trace_event_internal::AddTraceEventWithThreadIdAndTimestamp(
       TRACE_EVENT_PHASE_COMPLETE, category_group_enabled, kEventName,
       trace_event_trace_id.scope(), trace_event_trace_id.raw_id(),
-      /*thread_id=*/1,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(10),
+      /*thread_id=*/1, base::TimeTicks() + base::Microseconds(10),
       trace_event_trace_id.id_flags() | TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP,
       trace_event_internal::kNoId);
 
@@ -1416,8 +1555,7 @@ TEST_F(TraceEventDataSourceTest, UpdateDurationOfCompleteEvent) {
   // event names or categories in the proto format.
   base::trace_event::TraceLog::GetInstance()->UpdateTraceEventDurationExplicit(
       category_group_enabled, kEventName, handle, /*thread_id=*/1,
-      /*explicit_timestamps=*/true,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(30),
+      /*explicit_timestamps=*/true, base::TimeTicks() + base::Microseconds(30),
       base::ThreadTicks(), base::trace_event::ThreadInstructionCount());
 
   // Updating the duration of an event that wasn't added before tracing begun
@@ -1425,8 +1563,7 @@ TEST_F(TraceEventDataSourceTest, UpdateDurationOfCompleteEvent) {
   handle.event_index = 0;
   base::trace_event::TraceLog::GetInstance()->UpdateTraceEventDurationExplicit(
       category_group_enabled, "other_event_name", handle, /*thread_id=*/1,
-      /*explicit_timestamps=*/true,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(40),
+      /*explicit_timestamps=*/true, base::TimeTicks() + base::Microseconds(40),
       base::ThreadTicks(), base::trace_event::ThreadInstructionCount());
 
   // Complete event for the current thread emits thread time, too.
@@ -1434,7 +1571,7 @@ TEST_F(TraceEventDataSourceTest, UpdateDurationOfCompleteEvent) {
       TRACE_EVENT_PHASE_COMPLETE, category_group_enabled, kEventName,
       trace_event_trace_id.scope(), trace_event_trace_id.raw_id(),
       base::PlatformThread::CurrentId(),
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(10),
+      base::TimeTicks() + base::Microseconds(10),
       trace_event_trace_id.id_flags() | TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP,
       trace_event_internal::kNoId);
 
@@ -1498,9 +1635,8 @@ TEST_F(TraceEventDataSourceTest, MAYBE_ExplicitThreadTimeForDifferentThread) {
   trace_event_internal::AddTraceEventWithThreadIdAndTimestamps(
       TRACE_EVENT_PHASE_BEGIN, category_group_enabled, kEventName,
       trace_event_trace_id.scope(), trace_event_trace_id.raw_id(),
-      /*thread_id=*/1,
-      base::TimeTicks() + base::TimeDelta::FromMicroseconds(10),
-      base::ThreadTicks() + base::TimeDelta::FromMicroseconds(20),
+      /*thread_id=*/1, base::TimeTicks() + base::Microseconds(10),
+      base::ThreadTicks() + base::Microseconds(20),
       trace_event_trace_id.id_flags() | TRACE_EVENT_FLAG_EXPLICIT_TIMESTAMP);
 
   size_t packet_index = ExpectStandardPreamble();
@@ -1603,8 +1739,7 @@ TEST_F(TraceEventDataSourceTest, TrackSupportOnBeginAndEnd) {
 TEST_F(TraceEventDataSourceTest, TrackSupportWithTimestamp) {
   StartTraceEventDataSource();
 
-  auto timestamp =
-      TRACE_TIME_TICKS_NOW() - base::TimeDelta::FromMicroseconds(100);
+  auto timestamp = TRACE_TIME_TICKS_NOW() - base::Microseconds(100);
   auto track = perfetto::Track(1);
 
   TRACE_EVENT_BEGIN("browser", "bar", track, timestamp);
@@ -1631,8 +1766,7 @@ TEST_F(TraceEventDataSourceTest, TrackSupportWithTimestamp) {
 TEST_F(TraceEventDataSourceTest, TrackSupportWithTimestampAndLambda) {
   StartTraceEventDataSource();
 
-  auto timestamp =
-      TRACE_TIME_TICKS_NOW() - base::TimeDelta::FromMicroseconds(100);
+  auto timestamp = TRACE_TIME_TICKS_NOW() - base::Microseconds(100);
   auto track = perfetto::Track(1);
   bool lambda_called = false;
 
@@ -1864,15 +1998,15 @@ TEST_F(TraceEventDataSourceTest, FilteringEventWithFlagCopy) {
 TEST_F(TraceEventDataSourceTest, FilteringMetadataSource) {
   auto* metadata_source = TraceEventMetadataSource::GetInstance();
   metadata_source->AddGeneratorFunction(base::BindRepeating([]() {
-    auto metadata = std::make_unique<base::DictionaryValue>();
-    metadata->SetInteger("foo_int", 42);
-    metadata->SetString("foo_str", "bar");
-    metadata->SetBoolean("foo_bool", true);
+    base::Value metadata(base::Value::Type::DICTIONARY);
+    metadata.SetIntKey("foo_int", 42);
+    metadata.SetStringKey("foo_str", "bar");
+    metadata.SetBoolKey("foo_bool", true);
 
-    base::DictionaryValue child_dict;
-    child_dict.SetString("child_str", "child_val");
-    metadata->SetKey("child_dict", std::move(child_dict));
-    return metadata;
+    base::Value child_dict(base::Value::Type::DICTIONARY);
+    child_dict.SetStringKey("child_str", "child_val");
+    metadata.SetKey("child_dict", std::move(child_dict));
+    return absl::optional<base::Value>(std::move(metadata));
   }));
 
   StartMetaDataSource(/*privacy_filtering_enabled=*/true);
@@ -1989,8 +2123,6 @@ TEST_F(TraceEventDataSourceNoInterningTest, MAYBE_InterningScopedToPackets) {
 #define MAYBE_StartupTracingTimeout StartupTracingTimeout
 #endif
 TEST_F(TraceEventDataSourceTest, MAYBE_StartupTracingTimeout) {
-  PerfettoTracedProcess::ResetTaskRunnerForTesting(
-      base::SequencedTaskRunnerHandle::Get());
   constexpr char kStartupTestEvent1[] = "startup_registry";
   auto* data_source = TraceEventDataSource::GetInstance();
   PerfettoTracedProcess::Get()->AddDataSource(data_source);
@@ -2066,7 +2198,9 @@ TEST_F(TraceEventDataSourceTest, MAYBE_StartupTracingTimeout) {
 
   // Make sure that the TraceWriter destruction task posted from the ThreadPool
   // task's flush is executed.
+#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   RunUntilIdle();
+#endif
 }
 
 TEST_F(TraceEventDataSourceTest, TypedArgumentsTracingOff) {
@@ -2424,6 +2558,30 @@ TEST_F(TraceEventDataSourceTest, TypedAndUntypedEventsWithDebugAnnotations) {
 
   ExpectInternedEventNames(e_packet2, {{2u, "Event2"}});
   ExpectInternedDebugAnnotationNames(e_packet2, {{2u, "arg2"}});
+}
+
+TEST_F(TraceEventDataSourceTest, EmptyPacket) {
+  StartTraceEventDataSource();
+
+  TRACE_EVENT_INSTANT("browser", "Event");
+  PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
+  // Second empty packet should not be emitted because the prior packet was
+  // already an empty packet.
+  PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
+
+  size_t packet_index = ExpectStandardPreamble();
+  auto* instant_packet = GetFinalizedPacket(packet_index++);
+
+  ExpectEventCategories(instant_packet, {{1u, "browser"}});
+  ExpectInternedEventNames(instant_packet, {{1u, "Event"}});
+
+// The client library employs a real tracing service, which skips empty packets
+// when reading from the trace buffer. The functionality of the
+// PERFETTO_INTERNAL_ADD_EMPTY_EVENT macro is instead tested in Perfetto's API
+// integration tests.
+#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
+  EXPECT_EQ(producer_client()->empty_finalized_packets_count(), 1);
+#endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 }
 
 // TODO(eseckler): Add startup tracing unittests.

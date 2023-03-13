@@ -11,12 +11,12 @@
 #include "ui/base/ime/constants.h"
 #include "ui/base/ime/linux/linux_input_method_context_factory.h"
 #include "ui/base/ime/text_input_client.h"
+#include "ui/base/ime/text_input_flags.h"
 #include "ui/events/event.h"
 
 namespace {
 
-constexpr base::TimeDelta kIgnoreCommitsDuration =
-    base::TimeDelta::FromMilliseconds(100);
+constexpr base::TimeDelta kIgnoreCommitsDuration = base::Milliseconds(100);
 
 bool IsEventFromVK(const ui::KeyEvent& event) {
   if (event.HasNativeEvent())
@@ -358,14 +358,23 @@ void InputMethodAuraLinux::UpdateContextFocusState() {
   // |context_simple_| can be used in any textfield, including password box, and
   // even if the focused text input client's text input type is
   // ui::TEXT_INPUT_TYPE_NONE.
-  if (GetTextInputClient())
+  auto* client = GetTextInputClient();
+  if (client)
     context_simple_->Focus();
   else
     context_simple_->Blur();
+
+  LinuxInputMethodContext* context =
+      text_input_type_ != TEXT_INPUT_TYPE_NONE &&
+              text_input_type_ != TEXT_INPUT_TYPE_PASSWORD
+          ? context_.get()
+          : context_simple_.get();
+  int flags = client ? client->GetTextInputFlags() : TEXT_INPUT_FLAG_NONE;
+  context->SetContentType(text_input_type_, flags,
+                          client && client->ShouldDoLearning());
 }
 
-void InputMethodAuraLinux::OnTextInputTypeChanged(
-    const TextInputClient* client) {
+void InputMethodAuraLinux::OnTextInputTypeChanged(TextInputClient* client) {
   UpdateContextFocusState();
   InputMethodBase::OnTextInputTypeChanged(client);
   // TODO(yoichio): Support inputmode HTML attribute.
@@ -425,6 +434,11 @@ bool InputMethodAuraLinux::IsCandidatePopupOpen() const {
   return false;
 }
 
+VirtualKeyboardController*
+InputMethodAuraLinux::GetVirtualKeyboardController() {
+  return context_->GetVirtualKeyboardController();
+}
+
 // Overriden from ui::LinuxInputMethodContextDelegate
 
 void InputMethodAuraLinux::OnCommit(const std::u16string& text) {
@@ -456,12 +470,11 @@ void InputMethodAuraLinux::OnCommit(const std::u16string& text) {
   }
 }
 
-void InputMethodAuraLinux::OnDeleteSurroundingText(int32_t index,
-                                                   uint32_t length) {
-  if (GetTextInputClient() && composition_.text.empty()) {
-    uint32_t before = index >= 0 ? 0U : static_cast<uint32_t>(-1 * index);
-    GetTextInputClient()->ExtendSelectionAndDelete(before, length - before);
-  }
+void InputMethodAuraLinux::OnDeleteSurroundingText(size_t before,
+                                                   size_t after) {
+  auto* client = GetTextInputClient();
+  if (client && composition_.text.empty())
+    client->ExtendSelectionAndDelete(before, after);
 }
 
 void InputMethodAuraLinux::OnPreeditChanged(
@@ -473,6 +486,15 @@ void InputMethodAuraLinux::OnPreeditEnd() {
   TextInputClient* client = GetTextInputClient();
   OnPreeditUpdate(CompositionText(),
                   !is_sync_mode_ && client && client->HasCompositionText());
+}
+
+void InputMethodAuraLinux::OnSetPreeditRegion(
+    const gfx::Range& range,
+    const std::vector<ImeTextSpan>& spans) {
+  auto* text_input_client = GetTextInputClient();
+  if (!text_input_client)
+    return;
+  text_input_client->SetCompositionFromExistingText(range, spans);
 }
 
 // Overridden from InputMethodBase.

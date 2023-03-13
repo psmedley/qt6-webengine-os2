@@ -48,14 +48,13 @@ jumbo_source_set("common") {
 
   sources = [
     "all_messages.h",
-    "appcache_interfaces.cc",
-    "appcache_interfaces.h",
     "ax_serialization_utils.cc",
     "ax_serialization_utils.h",
     "background_fetch/background_fetch_types.cc",
     "background_fetch/background_fetch_types.h",
     "child_process_host_impl.cc",
     "child_process_host_impl.h",
+    "color_parser.cc",
     "common_param_traits.cc",
     "common_param_traits.h",
     "common_param_traits_macros.h",
@@ -86,6 +85,7 @@ jumbo_source_set("common") {
     "font_list.cc",
     "font_list.h",
     "font_list_fontconfig.cc",
+    "frame_owner_element_type_mojom_traits.cc",
     "gin_java_bridge_messages.h",
     "in_process_child_thread_params.cc",
     "in_process_child_thread_params.h",
@@ -133,8 +133,8 @@ jumbo_source_set("common") {
     "process_type.cc",
     "process_visibility_tracker.cc",
     "process_visibility_tracker.h",
-    "service_worker/service_worker_utils.cc",
-    "service_worker/service_worker_utils.h",
+    "pseudonymization_salt.cc",
+    "pseudonymization_salt.h",
     "set_process_title.cc",
     "set_process_title.h",
     "shared_file_util.cc",
@@ -175,7 +175,7 @@ jumbo_source_set("common") {
     "//third_party/blink/public/common",
     "//ui/accessibility",
     "//ui/accessibility/mojom",
-    "//ui/base/cursor:cursor_base",
+    "//ui/base/cursor",
     "//ui/events/ipc",
   ]
   deps = [
@@ -231,6 +231,7 @@ jumbo_source_set("common") {
     "//third_party/angle:angle_gpu_info_util",
     "//third_party/boringssl",
     "//third_party/icu",
+    "//third_party/re2",
     "//ui/base",
     "//ui/base/cursor/mojom:cursor_type",
     "//ui/base/ime",
@@ -264,6 +265,8 @@ jumbo_source_set("common") {
 
   if (is_android) {
     sources += [
+      "android/cpu_affinity_setter.cc",
+      "android/cpu_affinity_setter.h",
       "android/cpu_time_metrics.cc",
       "android/cpu_time_metrics.h",
       "android/cpu_time_metrics_internal.cc",
@@ -278,7 +281,6 @@ jumbo_source_set("common") {
       "android/surface_wrapper.h",
       "android/sync_compositor_statics.cc",
       "android/sync_compositor_statics.h",
-      "android/use_zoom_for_dsf_policy_android.cc",
       "cursors/webcursor_android.cc",
       "font_list_android.cc",
     ]
@@ -339,19 +341,18 @@ jumbo_source_set("common") {
       "//third_party/webrtc_overrides:webrtc_component",
     ]
   }
-  if (!use_x11 && !use_ozone) {
+  if (!use_ozone) {
     sources -= [ "cursors/webcursor_ozone.cc" ]
   }
 
   if (use_aura) {
-    deps += [ "//ui/base/cursor" ]
+    deps += [ "//ui/aura/cursor" ]
   } else {
     sources -= [ "cursors/webcursor_aura.cc" ]
   }
 
   if (is_linux || is_chromeos) {
     sources += [
-      "sandbox_init_linux.cc",
       "zygote/sandbox_support_linux.cc",
       "zygote/send_zygote_child_ping_linux.cc",
       "zygote/zygote_commands_linux.h",
@@ -495,6 +496,10 @@ mojom("mojo_bindings") {
     {
       types = [
         {
+          mojom = "content.mojom.ChildFrameOwnerElementType"
+          cpp = "::blink::FrameOwnerElementType"
+        },
+        {
           mojom = "content.mojom.ContentSecurityPolicy"
           cpp = "::content::ContentSecurityPolicy"
         },
@@ -550,6 +555,7 @@ mojom("mojo_bindings") {
 
       traits_headers = [
         "//cc/input/touch_action.h",
+        "//content/common/frame_owner_element_type_mojom_traits.h",
         "//content/common/input/input_injector_mojom_traits.h",
         "//content/common/input/synthetic_pinch_gesture_params.h",
         "//content/common/input/synthetic_pointer_action_list_params.h",
@@ -557,14 +563,14 @@ mojom("mojo_bindings") {
         "//content/common/input/synthetic_smooth_scroll_gesture_params.h",
         "//content/common/input/synthetic_tap_gesture_params.h",
         "//content/common/navigation_gesture.h",
-        "//third_party/blink/public/common/widget/visual_properties.h",
-        "//third_party/blink/public/common/web_preferences/web_preferences.h",
         "//net/base/network_change_notifier.h",
         "//third_party/blink/public/common/input/web_coalesced_input_event_mojom_traits.h",
         "//third_party/blink/public/common/input/web_input_event.h",
         "//third_party/blink/public/common/input/web_mouse_wheel_event.h",
         "//third_party/blink/public/common/input/web_pointer_properties.h",
         "//third_party/blink/public/common/input/web_touch_point.h",
+        "//third_party/blink/public/common/web_preferences/web_preferences.h",
+        "//third_party/blink/public/common/widget/visual_properties.h",
         "//ui/events/blink/did_overscroll_params.h",
         "//ui/events/blink/web_input_event_traits.h",
         "//ui/latency/ipc/latency_info_param_traits.h",
@@ -624,6 +630,7 @@ mojom("mojo_bindings") {
     "//cc/mojom",
     "//components/variations:variations_mojom",
     "//content/public/common:interfaces",
+    "//content/services/shared_storage_worklet/public/mojom:mojom",
     "//ipc:mojom",
     "//ipc:mojom_constants",
     "//media/capture/mojom:video_capture",
@@ -642,6 +649,7 @@ mojom("mojo_bindings") {
     "//ui/accessibility/mojom",
     "//ui/base/ime/mojom",
     "//ui/base/mojom",
+    "//ui/color:mojom",
     "//ui/display/mojom",
     "//ui/events/mojom",
     "//ui/gfx/geometry/mojom",

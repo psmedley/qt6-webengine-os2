@@ -29,11 +29,12 @@ namespace safe_browsing {
 class MockThreatDetails : public ThreatDetails {
  public:
   MockThreatDetails() {}
+
+  MockThreatDetails(const MockThreatDetails&) = delete;
+  MockThreatDetails& operator=(const MockThreatDetails&) = delete;
+
   ~MockThreatDetails() override {}
   MOCK_METHOD2(FinishCollection, void(bool did_proceed, int num_visits));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockThreatDetails);
 };
 
 class MockThreatDetailsFactory : public ThreatDetailsFactory {
@@ -46,6 +47,8 @@ class MockThreatDetailsFactory : public ThreatDetailsFactory {
       const security_interstitials::UnsafeResource& unsafe_resource,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       history::HistoryService* history_service,
+      base::RepeatingCallback<ChromeUserPopulation()>
+          get_user_population_callback,
       ReferrerChainProvider* referrer_chain_provider,
       bool trim_to_ad_tags,
       ThreatDetailsDoneCallback done_callback) override {
@@ -62,6 +65,10 @@ class MockTriggerThrottler : public TriggerThrottler {
 class TriggerManagerTest : public ::testing::Test {
  public:
   TriggerManagerTest() : trigger_manager_(nullptr, nullptr) {}
+
+  TriggerManagerTest(const TriggerManagerTest&) = delete;
+  TriggerManagerTest& operator=(const TriggerManagerTest&) = delete;
+
   ~TriggerManagerTest() override {}
 
   void SetUp() override {
@@ -116,7 +123,7 @@ class TriggerManagerTest : public ::testing::Test {
         TriggerManager::GetSBErrorDisplayOptions(pref_service_, web_contents);
     return trigger_manager_.StartCollectingThreatDetails(
         trigger_type, web_contents, security_interstitials::UnsafeResource(),
-        nullptr, nullptr, nullptr, options);
+        nullptr, nullptr, base::NullCallback(), nullptr, options);
   }
 
   bool FinishCollectingThreatDetails(const TriggerType trigger_type,
@@ -155,8 +162,6 @@ class TriggerManagerTest : public ::testing::Test {
   content::TestWebContentsFactory web_contents_factory_;
   TestingPrefServiceSimple pref_service_;
   std::unique_ptr<base::test::ScopedFeatureList> feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(TriggerManagerTest);
 };
 
 TEST_F(TriggerManagerTest, StartAndFinishCollectingThreatDetails) {

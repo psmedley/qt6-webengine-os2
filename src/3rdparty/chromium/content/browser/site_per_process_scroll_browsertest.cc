@@ -55,14 +55,14 @@ class ScrollingIntegrationTest : public SitePerProcessBrowserTest {
 
   double GetScrollTop() {
     FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                              ->GetFrameTree()
-                              ->root();
+                              ->GetPrimaryFrameTree()
+                              .root();
     return EvalJs(root, "window.scrollY").ExtractDouble();
   }
 
   void WaitForVerticalScroll() {
     RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
-    gfx::Vector2dF default_scroll_offset;
+    gfx::PointF default_scroll_offset;
     while (frame_observer.LastRenderFrameMetadata()
                .root_scroll_offset.value_or(default_scroll_offset)
                .y() <= 0) {
@@ -72,8 +72,8 @@ class ScrollingIntegrationTest : public SitePerProcessBrowserTest {
 
   RenderWidgetHostImpl* GetRenderWidgetHostImpl() {
     FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                              ->GetFrameTree()
-                              ->root();
+                              ->GetPrimaryFrameTree()
+                              .root();
     return root->current_frame_host()->GetRenderWidgetHost();
   }
 };
@@ -104,8 +104,7 @@ IN_PROC_BROWSER_TEST_P(ScrollingIntegrationTest,
     // https://crbug.com/897520
     base::RunLoop run_loop;
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, run_loop.QuitClosure(),
-        base::TimeDelta::FromMilliseconds(3000));
+        FROM_HERE, run_loop.QuitClosure(), base::Milliseconds(3000));
     run_loop.Run();
   }
 
@@ -113,7 +112,7 @@ IN_PROC_BROWSER_TEST_P(ScrollingIntegrationTest,
 
 // TODO(bokan): Mac doesn't support touch events and for an unknown reason,
 // Android doesn't like mouse wheel here. https://crbug.com/897520.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   source = content::mojom::GestureSourceType::kTouchInput;
 #else
   source = content::mojom::GestureSourceType::kTouchpadInput;
@@ -142,7 +141,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessScrollAnchorTest,
       "a.com", "/page_with_samesite_iframe.html"));
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   FrameTreeNode* child = root->child_at(0);
 
   GURL frame_url(embedded_test_server()->GetURL("b.com", "/title1.html"));
@@ -207,11 +206,12 @@ class SitePerProcessProgrammaticScrollTest : public SitePerProcessBrowserTest {
 
   // Helper function to retrieve the bounding client rect of the element
   // identified by |sel| inside |rfh|.
-  gfx::Rect GetBoundingClientRect(FrameTreeNode* node, const std::string& sel) {
+  gfx::Rect GetBoundingClientRect(RenderFrameHostImpl* rfh,
+                                  const std::string& sel) {
     return GetRectFromString(
-        EvalJs(node, JsReplace("rectAsString(document.querySelector($1)."
-                               "getBoundingClientRect());",
-                               sel))
+        EvalJs(rfh, JsReplace("rectAsString(document.querySelector($1)."
+                              "getBoundingClientRect());",
+                              sel))
             .ExtractString());
   }
 
@@ -274,17 +274,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   // to its maximum and then navigate the <iframe> to |url_a|. The page will be
   // structured as a(a(a(a(a(a(a)))))) where the inner-most <iframe> is empty.
   ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* node = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* node = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(node);
   std::vector<gfx::Rect> reference_page_bounds_before_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
+      GetBoundingClientRect(node->current_frame_host(), kIframeSelector)};
   node = node->child_at(0);
   for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
     EXPECT_TRUE(NavigateToURLFromRenderer(node, url_a));
     WaitForOnLoad(node);
     // Store |document.querySelector('iframe').getBoundingClientRect()|.
     reference_page_bounds_before_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
+        GetBoundingClientRect(node->current_frame_host(), kIframeSelector));
     node = node->child_at(0);
   }
   // Sanity-check: If the page is setup properly then all the <iframe>s should
@@ -296,30 +296,30 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   ASSERT_TRUE(ExecJs(node, kScrollIntoViewScript));
   // Store current client bounds origins to later compare against those from the
   // page which contains OOPIFs.
-  node = web_contents()->GetFrameTree()->root();
+  node = web_contents()->GetPrimaryFrameTree().root();
   std::vector<gfx::Rect> reference_page_bounds_after_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
+      GetBoundingClientRect(node->current_frame_host(), kIframeSelector)};
   node = node->child_at(0);
   for (size_t index = 0; index < kNonEmptyIframesCount; ++index) {
     reference_page_bounds_after_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
+        GetBoundingClientRect(node->current_frame_host(), kIframeSelector));
     node = node->child_at(0);
   }
 
   // Repeat the same process for the page containing OOPIFs. The page is
   // structured as b(b(a(c(a(a(a)))))) where the inner-most <iframe> is empty.
   ASSERT_TRUE(NavigateToURL(shell(), url_b));
-  node = web_contents()->GetFrameTree()->root();
+  node = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(node);
   std::vector<gfx::Rect> test_page_bounds_before_scroll = {
-      GetBoundingClientRect(node, kIframeSelector)};
+      GetBoundingClientRect(node->current_frame_host(), kIframeSelector)};
   const GURL iframe_urls[] = {url_b, url_a, url_c, url_a, url_a};
   node = node->child_at(0);
   for (const auto& iframe_url : iframe_urls) {
     EXPECT_TRUE(NavigateToURLFromRenderer(node, iframe_url));
     WaitForOnLoad(node);
     test_page_bounds_before_scroll.push_back(
-        GetBoundingClientRect(node, kIframeSelector));
+        GetBoundingClientRect(node->current_frame_host(), kIframeSelector));
     node = node->child_at(0);
   }
   // Sanity-check: The bounds should match those from non-OOPIF page.
@@ -336,7 +336,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   RenderFrameHostImpl* current_rfh = node->current_frame_host()->GetParent();
   while (current_rfh) {
     gfx::Rect current_bounds =
-        GetBoundingClientRect(current_rfh->frame_tree_node(), kIframeSelector);
+        GetBoundingClientRect(current_rfh, kIframeSelector);
     gfx::Rect reference_bounds = reference_page_bounds_after_scroll[index];
     if (current_bounds.ApproximatelyEqual(reference_bounds,
                                           kRectDimensionErrorTolerance)) {
@@ -356,7 +356,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
 // resultant page scale factor is the same for OOPIF and non-OOPIF cases. This
 // also verifies that in response to the scroll command, the root-layer scrolls
 // correctly and the <input> is visible in visual viewport.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // crbug.com/793616
 #define MAYBE_ScrollFocusedEditableElementIntoView \
   DISABLED_ScrollFocusedEditableElementIntoView
@@ -369,7 +369,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   GURL url_a(embedded_test_server()->GetURL("a.com", kIframeOutOfViewHTML));
   GURL url_b(embedded_test_server()->GetURL("b.com", kIframeOutOfViewHTML));
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // The reason for Android specific code is that
   // AutoZoomFocusedNodeToLegibleScale is in blink's WebSettings and difficult
   // to access from here. It so happens that the setting is on for Android.
@@ -383,11 +383,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
 #endif
 
   ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(root);
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), url_a));
   WaitForOnLoad(root->child_at(0));
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   float scale_before_scroll_nonoopif = GetVisualViewportScale(root);
 #endif
   AddFocusedInputField(root->child_at(0));
@@ -395,14 +395,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   // that the <iframe> is out of view again.
   SetWindowScroll(root, 0, 0);
   ASSERT_FALSE(GetVisualViewport(root).Intersects(
-      GetBoundingClientRect(root, kIframeSelector)));
+      GetBoundingClientRect(root->current_frame_host(), kIframeSelector)));
   root->child_at(0)
       ->current_frame_host()
       ->GetRenderWidgetHost()
       ->GetFrameWidgetInputHandler()
       ->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
   WaitForElementVisible(root, kIframeSelector);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   float scale_after_scroll_nonoopif = GetVisualViewportScale(root);
   // Increased scale means zoom triggered correctly.
   EXPECT_GT(scale_after_scroll_nonoopif - scale_before_scroll_nonoopif,
@@ -414,10 +414,10 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   Shell* new_shell = CreateBrowser();
   ASSERT_TRUE(NavigateToURL(new_shell, url_b));
   root = static_cast<WebContentsImpl*>(new_shell->web_contents())
-             ->GetFrameTree()
-             ->root();
+             ->GetPrimaryFrameTree()
+             .root();
   WaitForOnLoad(root);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   float scale_before_scroll_oopif = GetVisualViewportScale(root);
   // Sanity-check:
   ASSERT_NEAR(scale_before_scroll_oopif, scale_before_scroll_nonoopif,
@@ -428,14 +428,14 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   AddFocusedInputField(root->child_at(0));
   SetWindowScroll(root, 0, 0);
   ASSERT_FALSE(GetVisualViewport(root).Intersects(
-      GetBoundingClientRect(root, kIframeSelector)));
+      GetBoundingClientRect(root->current_frame_host(), kIframeSelector)));
   root->child_at(0)
       ->current_frame_host()
       ->GetRenderWidgetHost()
       ->GetFrameWidgetInputHandler()
       ->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
   WaitForElementVisible(root, kIframeSelector);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   float scale_after_scroll_oopif = GetVisualViewportScale(root);
   EXPECT_GT(scale_after_scroll_oopif - scale_before_scroll_oopif, kEpsilon);
   EXPECT_GT(scale_after_scroll_oopif, kLowerBoundOnScaleAfterScroll);
@@ -446,17 +446,18 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   // Make sure the <input> is at least partly visible in the |visualViewport|.
   gfx::Rect final_visual_viewport_oopif = GetVisualViewport(root);
   gfx::Rect iframe_bounds_after_scroll_oopif =
-      GetBoundingClientRect(root, kIframeSelector);
-  gfx::Rect input_bounds_after_scroll_oopif =
-      GetBoundingClientRect(root->child_at(0), kInputSelector);
+      GetBoundingClientRect(root->current_frame_host(), kIframeSelector);
+  gfx::Rect input_bounds_after_scroll_oopif = GetBoundingClientRect(
+      root->child_at(0)->current_frame_host(), kInputSelector);
   input_bounds_after_scroll_oopif +=
       iframe_bounds_after_scroll_oopif.OffsetFromOrigin();
   ASSERT_TRUE(
       final_visual_viewport_oopif.Intersects(input_bounds_after_scroll_oopif));
 }
 
+// Failing on Android, see crbug.com/1246843
 // Flaky on Mac, see crbug.com/1156657
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_MAC)
 #define MAYBE_ScrollClippedFocusedEditableElementIntoView \
   DISABLED_ScrollClippedFocusedEditableElementIntoView
 #else
@@ -469,7 +470,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   GURL child_url_b(embedded_test_server()->GetURL("b.com", kInputBoxHTML));
 
   ASSERT_TRUE(NavigateToURL(shell(), url_a));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(root);
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
   WaitForOnLoad(root->child_at(0));
@@ -494,13 +495,17 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
 
   // These rects are in the coordinate space of the root frame.
   gfx::Rect visual_viewport_rect = GetVisualViewport(root);
-  gfx::Rect window_rect = GetBoundingClientRect(root, ":root");
-  gfx::Rect iframe_rect = GetBoundingClientRect(root, "iframe");
-  gfx::Rect clip_rect = GetBoundingClientRect(root, "#clip");
+  gfx::Rect window_rect =
+      GetBoundingClientRect(root->current_frame_host(), ":root");
+  gfx::Rect iframe_rect =
+      GetBoundingClientRect(root->current_frame_host(), "iframe");
+  gfx::Rect clip_rect =
+      GetBoundingClientRect(root->current_frame_host(), "#clip");
 
   // This is in the coordinate space of the iframe, we'll add the iframe offset
   // after to put it into the root frame's coordinate space.
-  gfx::Rect input_rect = GetBoundingClientRect(root->child_at(0), "input");
+  gfx::Rect input_rect =
+      GetBoundingClientRect(root->child_at(0)->current_frame_host(), "input");
 
   // Make sure the input rect is visible in the iframe.
   EXPECT_TRUE(gfx::Rect(iframe_rect.size()).Intersects(input_rect))
@@ -526,7 +531,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
 
 // Make sure we still zoom in on the input box on platforms that zoom into the
 // focused editable.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   EXPECT_GT(scale_after, scale_before);
 #else
   EXPECT_FLOAT_EQ(scale_after, scale_before);
@@ -542,7 +547,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
 
   // This will set up the page frame tree as A(B()).
   ASSERT_TRUE(NavigateToURL(shell(), main_frame));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(root);
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
   WaitForOnLoad(root->child_at(0));
@@ -581,7 +586,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessProgrammaticScrollTest,
   // here is that the inner frame A1 is recursively scrolling (smoothly) an
   // element inside its document into view (A2's origin is irrelevant here).
   ASSERT_TRUE(NavigateToURL(shell(), main_frame));
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   WaitForOnLoad(root);
   EXPECT_TRUE(NavigateToURLFromRenderer(root->child_at(0), child_url_b));
   WaitForOnLoad(root->child_at(0));
@@ -643,7 +648,7 @@ class ScrollObserver : public RenderWidgetHost::InputEventObserver {
 
 // Android: crbug.com/825629
 // NDEBUG: crbug.com/1063045
-#if defined(OS_ANDROID) || defined(NDEBUG)
+#if BUILDFLAG(IS_ANDROID) || defined(NDEBUG)
 #define MAYBE_ScrollBubblingFromNestedOOPIFTest \
   DISABLED_ScrollBubblingFromNestedOOPIFTest
 #else
@@ -660,7 +665,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   ASSERT_EQ(1U, root->child_count());
 
   FrameTreeNode* parent_iframe_node = root->child_at(0);
@@ -729,6 +734,11 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
   scroll_event.phase = blink::WebMouseWheelEvent::kPhaseEnded;
   rwhv_nested->ProcessMouseWheelEvent(scroll_event, ui::LatencyInfo());
   scroll_observer->Wait();
+
+  // Remove scroller_observer because it is only available in this
+  // scope.
+  root->current_frame_host()->GetRenderWidgetHost()->RemoveInputEventObserver(
+      scroll_observer.get());
 }
 
 // Tests that scrolling bubbles from an oopif if its source body has
@@ -739,7 +749,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
       "a.com", "/scrollable_page_with_iframe.html"));
   EXPECT_TRUE(NavigateToURL(shell(), url_domain_a));
   RenderFrameSubmissionObserver frame_observer(shell()->web_contents());
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
 
   FrameTreeNode* iframe_node = root->child_at(0);
   GURL url_domain_b(
@@ -847,8 +857,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
   ASSERT_EQ(1U, root->child_count());
 
   FrameTreeNode* parent_iframe_node = root->child_at(0);
@@ -1078,8 +1088,8 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest,
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
   FrameTreeNode* root = static_cast<WebContentsImpl*>(shell()->web_contents())
-                            ->GetFrameTree()
-                            ->root();
+                            ->GetPrimaryFrameTree()
+                            .root();
   ASSERT_EQ(1U, root->child_count());
 
   FrameTreeNode* iframe_node = root->child_at(0);
@@ -1150,7 +1160,7 @@ IN_PROC_BROWSER_TEST_P(SitePerProcessBrowserTest, ScrollLocalSubframeInOOPIF) {
   EXPECT_TRUE(NavigateToURL(shell(), main_url));
 
   // It is safe to obtain the root frame tree node here, as it doesn't change.
-  FrameTreeNode* root = web_contents()->GetFrameTree()->root();
+  FrameTreeNode* root = web_contents()->GetPrimaryFrameTree().root();
   ASSERT_EQ(1U, root->child_count());
 
   FrameTreeNode* parent_iframe_node = root->child_at(0);

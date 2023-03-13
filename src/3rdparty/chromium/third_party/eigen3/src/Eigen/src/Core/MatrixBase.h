@@ -11,6 +11,8 @@
 #ifndef EIGEN_MATRIXBASE_H
 #define EIGEN_MATRIXBASE_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 /** \class MatrixBase
@@ -92,8 +94,8 @@ template<typename Derived> class MatrixBase
 
 #ifndef EIGEN_PARSED_BY_DOXYGEN
     /** type of the equivalent square matrix */
-    typedef Matrix<Scalar,EIGEN_SIZE_MAX(RowsAtCompileTime,ColsAtCompileTime),
-                          EIGEN_SIZE_MAX(RowsAtCompileTime,ColsAtCompileTime)> SquareMatrixType;
+    typedef Matrix<Scalar, internal::max_size_prefer_dynamic(RowsAtCompileTime, ColsAtCompileTime),
+                           internal::max_size_prefer_dynamic(RowsAtCompileTime, ColsAtCompileTime)> SquareMatrixType;
 #endif // not EIGEN_PARSED_BY_DOXYGEN
 
     /** \returns the size of the main diagonal, which is min(rows(),cols()).
@@ -368,8 +370,17 @@ template<typename Derived> class MatrixBase
 
 /////////// SVD module ///////////
 
-    inline JacobiSVD<PlainObject> jacobiSvd(unsigned int computationOptions = 0) const;
-    inline BDCSVD<PlainObject>    bdcSvd(unsigned int computationOptions = 0) const;
+    template<int Options = 0>
+    inline JacobiSVD<PlainObject, Options> jacobiSvd() const;
+    template<int Options = 0>
+    EIGEN_DEPRECATED
+    inline JacobiSVD<PlainObject, Options> jacobiSvd(unsigned int computationOptions) const;
+
+    template<int Options = 0>
+    inline BDCSVD<PlainObject, Options> bdcSvd() const;
+    template<int Options = 0>
+    EIGEN_DEPRECATED
+    inline BDCSVD<PlainObject, Options> bdcSvd(unsigned int computationOptions) const;
 
 /////////// Geometry module ///////////
 

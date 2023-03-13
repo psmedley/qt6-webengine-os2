@@ -27,13 +27,13 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/map_coordinates_flags.h"
 #include "third_party/blink/renderer/core/pointer_type_names.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
-#include "third_party/blink/renderer/platform/geometry/int_point.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/widget/frame_widget.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_f.h"
 
 namespace blink {
 
@@ -60,22 +60,20 @@ void PopulateMouseEventInitCoordinates(
         center, nullptr, MapCoordinatesMode::kTraverseDocumentBoundaries);
     PhysicalOffset frame_center =
         dom_window->GetFrame()->View()->ConvertFromRootFrame(root_frame_center);
-    IntPoint frame_center_point = RoundedIntPoint(frame_center);
+    gfx::Point frame_center_point = ToRoundedPoint(frame_center);
     // We are only interested in the top left corner.
-    IntRect center_rect(frame_center_point.X(), frame_center_point.Y(), 1, 1);
-    IntPoint screen_center = dom_window->GetFrame()
-                                 ->View()
-                                 ->FrameToScreen(center_rect)
-                                 .MinXMinYCorner();
+    gfx::Rect center_rect(frame_center_point.x(), frame_center_point.y(), 1, 1);
+    gfx::Point screen_center =
+        dom_window->GetFrame()->View()->FrameToScreen(center_rect).origin();
 
     initializer->setScreenX(
-        AdjustForAbsoluteZoom::AdjustInt(screen_center.X(), layout_object));
+        AdjustForAbsoluteZoom::AdjustInt(screen_center.x(), layout_object));
     initializer->setScreenY(
-        AdjustForAbsoluteZoom::AdjustInt(screen_center.Y(), layout_object));
+        AdjustForAbsoluteZoom::AdjustInt(screen_center.y(), layout_object));
     initializer->setClientX(AdjustForAbsoluteZoom::AdjustInt(
-        frame_center_point.X(), layout_object));
+        frame_center_point.x(), layout_object));
     initializer->setClientY(AdjustForAbsoluteZoom::AdjustInt(
-        frame_center_point.Y(), layout_object));
+        frame_center_point.y(), layout_object));
   }
 }
 
@@ -94,8 +92,8 @@ void PopulateSimulatedMouseEventInit(
   PopulateMouseEventInitCoordinates(node, initializer, creation_scope);
   LocalDOMWindow* dom_window = node.GetDocument().domWindow();
   if (const auto* mouse_event = DynamicTo<MouseEvent>(underlying_event)) {
-    initializer->setScreenX(mouse_event->screen_location_.X());
-    initializer->setScreenY(mouse_event->screen_location_.Y());
+    initializer->setScreenX(mouse_event->screenX());
+    initializer->setScreenY(mouse_event->screenY());
     initializer->setSourceCapabilities(
         dom_window
             ? dom_window->GetInputDeviceCapabilities()->FiresTouchEvents(false)
@@ -173,8 +171,8 @@ MouseEvent* CreateMouseOrPointerEvent(
   created_event->SetUnderlyingEvent(underlying_event);
   if (synthetic_type == MouseEvent::kRealOrIndistinguishable) {
     auto* mouse_event = To<MouseEvent>(created_event->UnderlyingEvent());
-    created_event->InitCoordinates(mouse_event->client_location_.X(),
-                                   mouse_event->client_location_.Y());
+    created_event->InitCoordinates(mouse_event->clientX(),
+                                   mouse_event->clientY());
   }
 
   return created_event;

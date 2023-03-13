@@ -114,8 +114,9 @@ int HRTFPanner::CalculateDesiredAzimuthIndexAndBlend(double azimuth,
                                                      double& azimuth_blend) {
   // Convert the azimuth angle from the range -180 -> +180 into the range 0 ->
   // 360.  The azimuth index may then be calculated from this positive value.
-  if (azimuth < 0)
+  if (azimuth < 0) {
     azimuth += 360.0;
+  }
 
   int number_of_azimuths = HRTFDatabase::NumberOfAzimuths();
   const double angle_between_azimuths = 360.0 / number_of_azimuths;
@@ -130,7 +131,7 @@ int HRTFPanner::CalculateDesiredAzimuthIndexAndBlend(double azimuth,
   // this index from the last index we rendered at.  This minimizes the clicks
   // and graininess for moving sources which occur otherwise.
   desired_azimuth_index =
-      clampTo(desired_azimuth_index, 0, number_of_azimuths - 1);
+      ClampTo(desired_azimuth_index, 0, number_of_azimuths - 1);
   return desired_azimuth_index;
 }
 

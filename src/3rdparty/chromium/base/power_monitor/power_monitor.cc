@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/power_monitor/power_monitor_source.h"
 #include "base/trace_event/base_tracing.h"
 #include "build/build_config.h"
@@ -25,6 +26,9 @@ void PowerMonitor::Initialize(std::unique_ptr<PowerMonitorSource> source) {
 
   PowerMonitor::PowerMonitor::NotifyThermalStateChange(
       PowerMonitor::Source()->GetCurrentThermalState());
+
+  PowerMonitor::PowerMonitor::NotifySpeedLimitChange(
+      PowerMonitor::Source()->GetInitialSpeedLimit());
 }
 
 bool PowerMonitor::IsInitialized() {
@@ -133,12 +137,12 @@ void PowerMonitor::SetCurrentThermalState(
   GetInstance()->source_->SetCurrentThermalState(state);
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 int PowerMonitor::GetRemainingBatteryCapacity() {
   DCHECK(IsInitialized());
   return PowerMonitor::Source()->GetRemainingBatteryCapacity();
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 void PowerMonitor::NotifyPowerStateChange(bool on_battery_power) {
   DCHECK(IsInitialized());
@@ -196,6 +200,19 @@ void PowerMonitor::NotifyThermalStateChange(
     power_monitor->power_thermal_state_ = new_state;
     GetInstance()->thermal_state_observers_->Notify(
         FROM_HERE, &PowerThermalObserver::OnThermalStateChange, new_state);
+  }
+}
+
+void PowerMonitor::NotifySpeedLimitChange(int speed_limit) {
+  DCHECK(IsInitialized());
+  DVLOG(1) << "SpeedLimitChange: " << speed_limit;
+
+  PowerMonitor* power_monitor = GetInstance();
+  AutoLock auto_lock(power_monitor->power_thermal_state_lock_);
+  if (power_monitor->speed_limit_ != speed_limit) {
+    power_monitor->speed_limit_ = speed_limit;
+    GetInstance()->thermal_state_observers_->Notify(
+        FROM_HERE, &PowerThermalObserver::OnSpeedLimitChange, speed_limit);
   }
 }
 

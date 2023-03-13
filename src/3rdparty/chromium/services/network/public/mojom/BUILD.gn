@@ -153,6 +153,102 @@ mojom("mojom_network_isolation_key") {
   ]
 }
 
+# As with |mojom_ip_address|, this is a separate target to avoid a circular
+# dependency, which comes from the fact that proxy_resolver_win uses this
+# interface, and the network service uses the proxy_resolver_win service. This
+# is separate from other targets because only this needs to be included in
+# proxy_resolver_win builds.
+mojom("mojom_proxy_config") {
+  generate_java = true
+  sources = [
+    "mutable_network_traffic_annotation_tag.mojom",
+    "mutable_partial_network_traffic_annotation_tag.mojom",
+    "proxy_config.mojom",
+    "proxy_config_with_annotation.mojom",
+  ]
+
+  public_deps = [ "//mojo/public/mojom/base" ]
+
+  shared_cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "network.mojom.MutableNetworkTrafficAnnotationTag"
+          cpp = "::net::MutableNetworkTrafficAnnotationTag"
+        },
+      ]
+      traits_headers = [ "//services/network/public/cpp/mutable_network_traffic_annotation_tag_mojom_traits.h" ]
+      traits_public_deps = [
+        "//net/traffic_annotation",
+        "//services/network/public/cpp:proxy_config_mojom_support",
+      ]
+    },
+  ]
+
+  cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "network.mojom.MutablePartialNetworkTrafficAnnotationTag"
+          cpp = "::net::MutablePartialNetworkTrafficAnnotationTag"
+        },
+      ]
+      traits_headers = [ "//services/network/public/cpp/mutable_partial_network_traffic_annotation_tag_mojom_traits.h" ]
+      traits_public_deps = [
+        "//net/traffic_annotation",
+        "//services/network/public/cpp:proxy_config_mojom_support",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "network.mojom.ProxyBypassRules"
+          cpp = "::net::ProxyBypassRules"
+        },
+        {
+          mojom = "network.mojom.ProxyList"
+          cpp = "::net::ProxyList"
+        },
+        {
+          mojom = "network.mojom.ProxyRulesType"
+          cpp = "::net::ProxyConfig::ProxyRules::Type"
+        },
+        {
+          mojom = "network.mojom.ProxyRules"
+          cpp = "::net::ProxyConfig::ProxyRules"
+        },
+        {
+          mojom = "network.mojom.ProxyConfig"
+          cpp = "::net::ProxyConfig"
+        },
+      ]
+      traits_headers =
+          [ "//services/network/public/cpp/proxy_config_mojom_traits.h" ]
+      traits_public_deps = [
+        "//net",
+        "//services/network/public/cpp:proxy_config_mojom_support",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "network.mojom.ProxyConfigWithAnnotation"
+          cpp = "::net::ProxyConfigWithAnnotation"
+        },
+      ]
+      traits_headers = [ "//services/network/public/cpp/proxy_config_with_annotation_mojom_traits.h" ]
+      traits_public_deps = [
+        "//net",
+        "//services/network/public/cpp:proxy_config_mojom_support",
+      ]
+    },
+  ]
+
+  cpp_typemaps += shared_cpp_typemaps
+
+  blink_cpp_typemaps = shared_cpp_typemaps
+}
+
 # These .mojom files are put in their own target to avoid a circular dependency,
 # which comes from the fact that the typemap for url_loader.mojom
 # (ResourceRequest) depends on them.
@@ -177,15 +273,11 @@ mojom("url_loader_base") {
     "isolation_info.mojom",
     "link_header.mojom",
     "load_timing_info.mojom",
-    "mutable_network_traffic_annotation_tag.mojom",
-    "mutable_partial_network_traffic_annotation_tag.mojom",
     "network_change_manager.mojom",
     "network_interface.mojom",
     "network_types.mojom",
     "origin_policy_manager.mojom",
     "parsed_headers.mojom",
-    "proxy_config.mojom",
-    "proxy_config_with_annotation.mojom",
     "referrer_policy.mojom",
     "request_priority.mojom",
     "source_location.mojom",
@@ -207,12 +299,17 @@ mojom("url_loader_base") {
     ":cookies_mojom",
     ":mojom_ip_address",
     ":mojom_network_param",
+    ":mojom_proxy_config",
     ":mojom_schemeful_site",
     "//mojo/public/mojom/base",
     "//services/proxy_resolver/public/mojom",
     "//url/mojom:url_mojom_gurl",
     "//url/mojom:url_mojom_origin",
   ]
+
+  if (is_win) {
+    public_deps += [ "//services/proxy_resolver_win/public/mojom" ]
+  }
 
   enabled_features = []
   if (is_android || is_chromeos_ash) {
@@ -256,12 +353,11 @@ mojom("url_loader_base") {
     {
       types = [
         {
-          mojom = "network.mojom.MutableNetworkTrafficAnnotationTag"
-          cpp = "::net::MutableNetworkTrafficAnnotationTag"
+          mojom = "network.mojom.URLLoaderCompletionStatus"
+          cpp = "::network::URLLoaderCompletionStatus"
         },
       ]
-      traits_headers = [ "//services/network/public/cpp/mutable_network_traffic_annotation_tag_mojom_traits.h" ]
-      traits_public_deps = [ "//net/traffic_annotation" ]
+      traits_headers = [ "//services/network/public/cpp/url_loader_completion_status_mojom_traits.h" ]
     },
     {
       types = [
@@ -281,6 +377,10 @@ mojom("url_loader_base") {
         {
           mojom = "network.mojom.WebBundleTokenParams"
           cpp = "::network::ResourceRequest::WebBundleTokenParams"
+        },
+        {
+          mojom = "network.mojom.NetLogSource"
+          cpp = "::net::NetLogSource"
         },
         {
           mojom = "network.mojom.URLRequest"
@@ -371,48 +471,55 @@ mojom("url_loader_base") {
           [ "//services/network/public/cpp/network_interface_mojom_traits.h" ]
       traits_public_deps = [ "//net" ]
     },
-    {
-      types = [
-        {
-          mojom = "network.mojom.P2PPacketInfo"
-          cpp = "::network::P2PPacketInfo"
-        },
-        {
-          mojom = "network.mojom.P2PSendPacketMetrics"
-          cpp = "::network::P2PSendPacketMetrics"
-        },
-        {
-          mojom = "network.mojom.P2PPortRange"
-          cpp = "::network::P2PPortRange"
-        },
-        {
-          mojom = "network.mojom.P2PHostAndIPEndPoint"
-          cpp = "::network::P2PHostAndIPEndPoint"
-        },
-        {
-          mojom = "network.mojom.P2PSocketOption"
-          cpp = "::network::P2PSocketOption"
-        },
-        {
-          mojom = "network.mojom.P2PSocketType"
-          cpp = "::network::P2PSocketType"
-        },
-      ]
-      traits_headers = [ "//services/network/public/cpp/p2p_param_traits.h" ]
-      traits_public_deps = [ "//third_party/webrtc_overrides:webrtc_component" ]
-    },
   ]
+
+  if (is_p2p_enabled) {
+    shared_typemaps += [
+      {
+        types = [
+          {
+            mojom = "network.mojom.P2PPacketInfo"
+            cpp = "::network::P2PPacketInfo"
+          },
+          {
+            mojom = "network.mojom.P2PSendPacketMetrics"
+            cpp = "::network::P2PSendPacketMetrics"
+          },
+          {
+            mojom = "network.mojom.P2PPortRange"
+            cpp = "::network::P2PPortRange"
+          },
+          {
+            mojom = "network.mojom.P2PHostAndIPEndPoint"
+            cpp = "::network::P2PHostAndIPEndPoint"
+          },
+          {
+            mojom = "network.mojom.P2PSocketOption"
+            cpp = "::network::P2PSocketOption"
+          },
+          {
+            mojom = "network.mojom.P2PSocketType"
+            cpp = "::network::P2PSocketType"
+          },
+        ]
+        traits_headers = [ "//services/network/public/cpp/p2p_param_traits.h" ]
+        traits_public_deps =
+            [ "//third_party/webrtc_overrides:webrtc_component" ]
+      },
+    ]
+  }
 
   cpp_typemaps = [
     {
       types = [
         {
-          mojom = "network.mojom.MutablePartialNetworkTrafficAnnotationTag"
-          cpp = "::net::MutablePartialNetworkTrafficAnnotationTag"
+          mojom = "network.mojom.CorsErrorStatus"
+          cpp = "::network::CorsErrorStatus"
         },
       ]
-      traits_headers = [ "//services/network/public/cpp/mutable_partial_network_traffic_annotation_tag_mojom_traits.h" ]
-      traits_public_deps = [ "//net/traffic_annotation" ]
+      traits_headers =
+          [ "//services/network/public/cpp/cors/cors_mojom_traits.h" ]
+      traits_public_deps = [ "//base" ]
     },
     {
       types = [
@@ -421,20 +528,12 @@ mojom("url_loader_base") {
           cpp = "::net::ct::CTPolicyCompliance"
         },
         {
-          mojom = "network.mojom.CorsErrorStatus"
-          cpp = "::network::CorsErrorStatus"
-        },
-        {
           mojom = "network.mojom.EffectiveConnectionType"
           cpp = "::net::EffectiveConnectionType"
         },
         {
           mojom = "network.mojom.OriginPolicy"
           cpp = "::network::OriginPolicy"
-        },
-        {
-          mojom = "network.mojom.URLLoaderCompletionStatus"
-          cpp = "::network::URLLoaderCompletionStatus"
         },
         {
           mojom = "network.mojom.URLRequestRedirectInfo"
@@ -458,43 +557,6 @@ mojom("url_loader_base") {
       ]
       traits_headers =
           [ "//services/network/public/cpp/load_timing_info_mojom_traits.h" ]
-      traits_public_deps = [ "//net" ]
-    },
-    {
-      types = [
-        {
-          mojom = "network.mojom.ProxyBypassRules"
-          cpp = "::net::ProxyBypassRules"
-        },
-        {
-          mojom = "network.mojom.ProxyList"
-          cpp = "::net::ProxyList"
-        },
-        {
-          mojom = "network.mojom.ProxyRulesType"
-          cpp = "::net::ProxyConfig::ProxyRules::Type"
-        },
-        {
-          mojom = "network.mojom.ProxyRules"
-          cpp = "::net::ProxyConfig::ProxyRules"
-        },
-        {
-          mojom = "network.mojom.ProxyConfig"
-          cpp = "::net::ProxyConfig"
-        },
-      ]
-      traits_headers =
-          [ "//services/network/public/cpp/proxy_config_mojom_traits.h" ]
-      traits_public_deps = [ "//net" ]
-    },
-    {
-      types = [
-        {
-          mojom = "network.mojom.ProxyConfigWithAnnotation"
-          cpp = "::net::ProxyConfigWithAnnotation"
-        },
-      ]
-      traits_headers = [ "//services/network/public/cpp/proxy_config_with_annotation_mojom_traits.h" ]
       traits_public_deps = [ "//net" ]
     },
   ]
@@ -530,6 +592,27 @@ mojom("mojom_schemeful_site") {
       traits_public_deps = [ "//net" ]
     },
   ]
+  blink_cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "network.mojom.SchemefulSite"
+          cpp = "::blink::BlinkSchemefulSite"
+        },
+      ]
+      traits_headers = [ "//third_party/blink/renderer/platform/network/blink_schemeful_site_mojom_traits.h" ]
+      traits_sources = [ "//third_party/blink/renderer/platform/network/blink_schemeful_site_mojom_traits.cc" ]
+
+      # The dependency on //url is a bit of a hack to ultimately depend upon
+      # blink/platform. We're doing this because directly depending on platform
+      # results in a difficult to solve circular dependency. Also, we do
+      # actually depend upon url so it's not that unreasonable.
+      traits_public_deps = [
+        "//net",
+        "//url",
+      ]
+    },
+  ]
 }
 
 mojom("mojom_network_param") {
@@ -538,7 +621,7 @@ mojom("mojom_network_param") {
 
   public_deps = [
     "//mojo/public/mojom/base",
-    "//url/mojom:url_mojom_origin",
+    "//url/mojom:url_mojom_scheme_host_port",
   ]
 
   if (!is_ios) {
@@ -590,6 +673,14 @@ mojom("mojom_network_param") {
         {
           mojom = "network.mojom.HttpVersion"
           cpp = "::net::HttpVersion"
+        },
+        {
+          mojom = "network.mojom.ProxyServer"
+          cpp = "::net::ProxyServer"
+        },
+        {
+          mojom = "network.mojom.ResolveErrorInfo"
+          cpp = "::net::ResolveErrorInfo"
         },
         {
           mojom = "network.mojom.SSLCertRequestInfo"
@@ -645,6 +736,7 @@ mojom("cookies_mojom") {
   sources = [
     "cookie_access_observer.mojom",
     "cookie_manager.mojom",
+    "cookie_partition_key.mojom",
     "restricted_cookie_manager.mojom",
     "site_for_cookies.mojom",
   ]
@@ -671,9 +763,15 @@ mojom("cookies_mojom") {
           mojom = "network.mojom.SiteForCookies"
           cpp = "::net::SiteForCookies"
         },
+        {
+          mojom = "network.mojom.CookieInclusionStatus"
+          cpp = "::net::CookieInclusionStatus"
+          move_only = true
+        },
       ]
-      traits_headers =
-          [ "//services/network/public/cpp/site_for_cookies_mojom_traits.h" ]
+      traits_headers = [
+        "//services/network/public/cpp/cookie_manager_shared_mojom_traits.h",
+      ]
       traits_public_deps = [
         "//net",
         "//services/network/public/cpp:cookies_mojom_support",
@@ -702,6 +800,10 @@ mojom("cookies_mojom") {
           cpp = "::net::CookieOptions::SameSiteCookieContext::ContextMetadata::ContextDowngradeType"
         },
         {
+          mojom = "network.mojom.ContextRedirectTypeBug1221316"
+          cpp = "::net::CookieOptions::SameSiteCookieContext::ContextMetadata::ContextRedirectTypeBug1221316"
+        },
+        {
           mojom = "network.mojom.CookieSameSiteContextMetadata"
           cpp = "::net::CookieOptions::SameSiteCookieContext::ContextMetadata"
         },
@@ -718,17 +820,20 @@ mojom("cookies_mojom") {
           cpp = "::net::CookieOptions"
         },
         {
+          mojom = "network.mojom.CookiePartitionKey"
+          cpp = "::net::CookiePartitionKey"
+        },
+        {
+          mojom = "network.mojom.CookiePartitionKeyCollection"
+          cpp = "::net::CookiePartitionKeyCollection"
+        },
+        {
+          mojom = "network.mojom.CookiePartitionKeyCollection"
+          cpp = "::net::CookiePartitionKeyCollection"
+        },
+        {
           mojom = "network.mojom.CanonicalCookie"
           cpp = "::net::CanonicalCookie"
-        },
-        {
-          mojom = "network.mojom.CookieInclusionStatusWarningReason"
-          cpp = "::net::CookieInclusionStatus::WarningReason"
-        },
-        {
-          mojom = "network.mojom.CookieInclusionStatus"
-          cpp = "::net::CookieInclusionStatus"
-          move_only = true
         },
         {
           mojom = "network.mojom.CookieAccessResult"
@@ -789,20 +894,22 @@ mojom("mojom") {
     "dhcp_wpad_url_client.mojom",
     "digitally_signed.mojom",
     "host_resolver.mojom",
+    "http_cache_backend_file_operations.mojom",
+    "key_pinning.mojom",
     "mdns_responder.mojom",
     "net_log.mojom",
     "network_context.mojom",
     "network_quality_estimator_manager.mojom",
     "network_service.mojom",
     "network_service_test.mojom",
-    "p2p.mojom",
-    "p2p_trusted.mojom",
     "proxy_lookup_client.mojom",
     "proxy_resolving_socket.mojom",
+    "reporting_service.mojom",
     "ssl_config.mojom",
     "supports_loading_mode.mojom",
     "tcp_socket.mojom",
     "tls_socket.mojom",
+    "transferable_directory.mojom",
     "udp_socket.mojom",
     "url_loader_factory.mojom",
   ]
@@ -812,14 +919,20 @@ mojom("mojom") {
     ":mojom_ip_address",
     ":mojom_network_isolation_key",
     ":mojom_network_param",
+    ":mojom_proxy_config",
     ":mojom_schemeful_site",
     ":url_loader_base",
     ":websocket_mojom",
     "//mojo/public/mojom/base",
+    "//sandbox/policy/mojom",
     "//services/proxy_resolver/public/mojom",
     "//url/mojom:url_mojom_gurl",
     "//url/mojom:url_mojom_origin",
   ]
+
+  if (is_win) {
+    public_deps += [ "//services/proxy_resolver_win/public/mojom" ]
+  }
 
   enabled_features = []
 
@@ -832,6 +945,14 @@ mojom("mojom") {
     sources += [ "ct_log_info.mojom" ]
   }
 
+  if (is_p2p_enabled) {
+    enabled_features += [ "is_p2p_enabled" ]
+    sources += [
+      "p2p.mojom",
+      "p2p_trusted.mojom",
+    ]
+  }
+
   has_dchecks = is_debug || dcheck_always_on
   if (has_dchecks && is_win) {
     enabled_features += [ "win_permissions_validation" ]
@@ -841,12 +962,9 @@ mojom("mojom") {
     export_class_attribute_blink = "BLINK_PLATFORM_EXPORT"
     export_define_blink = "BLINK_PLATFORM_IMPLEMENTATION=1"
     export_header_blink = "third_party/blink/public/platform/web_common.h"
-  }
-
-  # This is only needed on desktop linux, but the defines make this difficult
-  # because IS_CHROMECAST is not available in build/build_config.h.
-  if (is_linux || is_chromeos_lacros) {
-    enabled_features += [ "needs_crypt_config" ]
+    if (enable_reporting) {
+      enabled_features += [ "enable_reporting" ]
+    }
   }
 
   # Typemaps which apply to both Blink and non-Blink bindings.
@@ -861,12 +979,12 @@ mojom("mojom") {
           cpp = "::net::DnsConfigOverrides"
         },
         {
-          mojom = "network.mojom.DnsQueryType"
-          cpp = "::net::DnsQueryType"
+          mojom = "network.mojom.DnsOverHttpsConfig"
+          cpp = "::net::DnsOverHttpsConfig"
         },
         {
-          mojom = "network.mojom.ResolveErrorInfo"
-          cpp = "::net::ResolveErrorInfo"
+          mojom = "network.mojom.DnsQueryType"
+          cpp = "::net::DnsQueryType"
         },
         {
           mojom = "network.mojom.ResolveHostParameters.Source"
@@ -960,7 +1078,78 @@ mojom("mojom") {
           [ "//services/network/public/cpp/net_log_mojom_traits.cc" ]
       traits_public_deps = [ "//net" ]
     },
+    {
+      types = [
+        {
+          mojom = "network.mojom.TransferableDirectory"
+          cpp = "::network::TransferableDirectory"
+          move_only = true
+        },
+      ]
+      traits_headers = [
+        "//services/network/public/cpp/transferable_directory_mojom_traits.h",
+      ]
+      traits_sources = [
+        "//services/network/public/cpp/transferable_directory_mojom_traits.cc",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "network.mojom.FileEnumerationEntry"
+          cpp = "::disk_cache::BackendFileOperations::FileEnumerationEntry"
+        },
+      ]
+      traits_headers = [
+        "//services/network/public/cpp/file_enumeration_entry_mojom_traits.h",
+      ]
+      traits_sources = [
+        "//services/network/public/cpp/file_enumeration_entry_mojom_traits.cc",
+      ]
+      traits_public_deps = [
+        "//net",
+        "//services/network/public/cpp:cpp_base",
+      ]
+    },
   ]
+
+  if (enable_reporting) {
+    cpp_typemaps += [
+      {
+        types = [
+          {
+            mojom = "network::mojom::ReportingApiReportStatus"
+            cpp = "::net::ReportingReport::Status"
+          },
+          {
+            mojom = "network.mojom.ReportingApiReport"
+            cpp = "::net::ReportingReport"
+          },
+        ]
+        traits_headers = [
+          "//services/network/public/cpp/reporting_api_report_mojom_traits.h",
+        ]
+        traits_sources = [
+          "//services/network/public/cpp/reporting_api_report_mojom_traits.cc",
+        ]
+        traits_public_deps = [ "//net" ]
+      },
+      {
+        types = [
+          {
+            mojom = "network.mojom.ReportingApiEndpoint"
+            cpp = "::net::ReportingEndpoint"
+          },
+        ]
+        traits_headers = [
+          "//services/network/public/cpp/reporting_api_endpoint_mojom_traits.h",
+        ]
+        traits_sources = [ "//services/network/public/cpp/reporting_api_endpoint_mojom_traits.cc" ]
+        traits_public_deps = [ "//net" ]
+      },
+    ]
+  }
+
   cpp_typemaps += shared_cpp_typemaps
   blink_cpp_typemaps = shared_cpp_typemaps
 }

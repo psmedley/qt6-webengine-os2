@@ -2,6 +2,7 @@
 #ifndef TextStyle_DEFINED
 #define TextStyle_DEFINED
 
+#include <optional>
 #include <vector>
 #include "include/core/SkColor.h"
 #include "include/core/SkFont.h"
@@ -10,6 +11,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkScalar.h"
 #include "modules/skparagraph/include/DartTypes.h"
+#include "modules/skparagraph/include/FontArguments.h"
 #include "modules/skparagraph/include/TextShadow.h"
 
 // TODO: Make it external so the other platforms (Android) could use it
@@ -148,7 +150,10 @@ struct PlaceholderStyle {
 class TextStyle {
 public:
     TextStyle() = default;
-    TextStyle(const TextStyle& other, bool placeholder);
+    TextStyle(const TextStyle& other) = default;
+    TextStyle& operator=(const TextStyle& other) = default;
+
+    TextStyle cloneForPlaceholder();
 
     bool equals(const TextStyle& other) const;
     bool equalsByFonts(const TextStyle& that) const;
@@ -207,6 +212,12 @@ public:
         { fFontFeatures.emplace_back(fontFeature, value); }
     void resetFontFeatures() { fFontFeatures.clear(); }
 
+    // Font arguments
+    const std::optional<FontArguments>& getFontArguments() const { return fFontArguments; }
+    // The contents of the SkFontArguments will be copied into the TextStyle,
+    // and the SkFontArguments can be safely deleted after setFontArguments returns.
+    void setFontArguments(const std::optional<SkFontArguments>& args);
+
     SkScalar getFontSize() const { return fFontSize; }
     void setFontSize(SkScalar size) { fFontSize = size; }
 
@@ -214,6 +225,9 @@ public:
     void setFontFamilies(std::vector<SkString> families) {
         fFontFamilies = std::move(families);
     }
+
+    SkScalar getBaselineShift() const { return fBaselineShift; }
+    void setBaselineShift(SkScalar baselineShift) { fBaselineShift = baselineShift; }
 
     void setHeight(SkScalar height) { fHeight = height; }
     SkScalar getHeight() const { return fHeightOverride ? fHeight : 0; }
@@ -265,6 +279,7 @@ private:
     SkScalar fFontSize = 14.0;
     SkScalar fHeight = 1.0;
     bool fHeightOverride = false;
+    SkScalar fBaselineShift = 0.0f;
     // true: half leading.
     // false: scale ascent/descent with fHeight.
     bool fHalfLeading = false;
@@ -286,6 +301,8 @@ private:
     bool fIsPlaceholder = false;
 
     std::vector<FontFeature> fFontFeatures;
+
+    std::optional<FontArguments> fFontArguments;
 };
 
 typedef size_t TextIndex;

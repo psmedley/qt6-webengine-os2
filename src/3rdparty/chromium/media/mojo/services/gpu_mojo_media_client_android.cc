@@ -40,7 +40,7 @@ std::unique_ptr<VideoDecoder> CreatePlatformVideoDecoder(
   // CodecBufferWaitCoordinator expects this ref counted lock to be held by the
   // classes which are accessing them (SharedImageVideo, MRE, FrameInfoHelper
   // etc.)
-  if (features::IsDrDcEnabled()) {
+  if (features::NeedThreadSafeAndroidMedia()) {
     ref_counted_lock = base::MakeRefCounted<gpu::RefCountedLock>();
   }
 
@@ -84,6 +84,7 @@ absl::optional<SupportedVideoDecoderConfigs>
 GetPlatformSupportedVideoDecoderConfigs(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
     gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info,
     base::OnceCallback<SupportedVideoDecoderConfigs()> get_vda_configs) {
   return MediaCodecVideoDecoder::GetSupportedConfigs();
 }
@@ -102,7 +103,8 @@ std::unique_ptr<CdmFactory> CreatePlatformCdmFactory(
 
 VideoDecoderType GetPlatformDecoderImplementationType(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
-    gpu::GpuPreferences gpu_preferences) {
+    gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info) {
   return VideoDecoderType::kMediaCodec;
 }
 

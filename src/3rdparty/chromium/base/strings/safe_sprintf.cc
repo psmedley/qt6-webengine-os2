@@ -10,7 +10,7 @@
 #include <algorithm>
 #include <limits>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 
 #if !defined(NDEBUG)
@@ -117,7 +117,7 @@ class Buffer {
 // MSVS2013's standard library doesn't mark max() as constexpr yet. cl.exe
 // supports static_cast but doesn't really implement constexpr yet so it doesn't
 // complain, but clang does.
-#if __cplusplus >= 201103 && !(defined(__clang__) && defined(OS_WIN))
+#if __cplusplus >= 201103 && !(defined(__clang__) && BUILDFLAG(IS_WIN))
     static_assert(kSSizeMaxConst ==
                       static_cast<size_t>(std::numeric_limits<ssize_t>::max()),
                   "kSSizeMaxConst should be the max value of an ssize_t");
@@ -125,6 +125,9 @@ class Buffer {
     DEBUG_CHECK(size > 0);
     DEBUG_CHECK(size <= kSSizeMax);
   }
+
+  Buffer(const Buffer&) = delete;
+  Buffer& operator=(const Buffer&) = delete;
 
   ~Buffer() {
     // The code calling the constructor guaranteed that there was enough space
@@ -260,7 +263,7 @@ class Buffer {
   }
 
   // User-provided buffer that will receive the fully formatted output string.
-  char* buffer_;
+  raw_ptr<char> buffer_;
 
   // Number of bytes that are available in the buffer excluding the trailing
   // NUL byte that will be added by the destructor.
@@ -270,8 +273,6 @@ class Buffer {
   // was sufficiently big. This number always excludes the trailing NUL byte
   // and it is guaranteed to never grow bigger than kSSizeMax-1.
   size_t count_;
-
-  DISALLOW_COPY_AND_ASSIGN(Buffer);
 };
 
 

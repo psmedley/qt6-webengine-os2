@@ -14,10 +14,11 @@
 #include "base/bind.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "dbus/bus.h"
 #include "dbus/object_path.h"
 #include "dbus/object_proxy.h"
@@ -411,7 +412,7 @@ TEST_F(ObjectManagerTest, DISABLED_PropertiesChangedAsObjectsReceived) {
       FROM_HERE,
       base::BindOnce(&ObjectManagerTest::PropertiesChangedTestTimeout,
                      base::Unretained(this)),
-      base::TimeDelta::FromSeconds(2));
+      base::Seconds(2));
 
   while (last_name_value_ != "ChangedTestServiceName" && !timeout_expired_) {
     run_loop_ = std::make_unique<base::RunLoop>();

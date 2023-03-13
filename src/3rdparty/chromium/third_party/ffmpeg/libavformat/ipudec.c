@@ -25,7 +25,6 @@
 #include "rawdec.h"
 
 #include "libavutil/intreadwrite.h"
-#include "libavcodec/internal.h"
 
 static int ipu_read_probe(const AVProbeData *p)
 {
@@ -62,7 +61,7 @@ static int ipu_read_header(AVFormatContext *s)
     st->start_time         = 0;
     st->duration           =
     st->nb_frames          = avio_rl32(pb);
-    st->internal->need_parsing       = AVSTREAM_PARSE_FULL_RAW;
+    ffstream(st)->need_parsing = AVSTREAM_PARSE_FULL_RAW;
     avpriv_set_pts_info(st, 64, 1, 25);
 
     return 0;

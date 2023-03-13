@@ -8,12 +8,17 @@
 #include <string>
 
 #include "base/callback.h"
-#include "third_party/abseil-cpp/absl/types/optional.h"
-#include "ui/gfx/geometry/rect.h"
+#include "base/memory/raw_ptr.h"
 
 namespace captions {
 
 class CaptionBubble;
+class CaptionBubbleContext;
+
+enum CaptionBubbleErrorType { GENERIC, MEDIA_FOUNDATION_RENDERER_UNSUPPORTED };
+using OnErrorClickedCallback = base::RepeatingCallback<void()>;
+using OnDoNotShowAgainClickedCallback =
+    base::RepeatingCallback<void(CaptionBubbleErrorType, bool)>;
 
 ///////////////////////////////////////////////////////////////////////////////
 // Caption Bubble Model
@@ -39,8 +44,7 @@ class CaptionBubble;
 //
 class CaptionBubbleModel {
  public:
-  CaptionBubbleModel(const absl::optional<gfx::Rect>& context_bounds_in_screen,
-                     base::RepeatingClosure activate_context_callback);
+  explicit CaptionBubbleModel(CaptionBubbleContext* context);
   ~CaptionBubbleModel();
   CaptionBubbleModel(const CaptionBubbleModel&) = delete;
   CaptionBubbleModel& operator=(const CaptionBubbleModel&) = delete;
@@ -55,7 +59,9 @@ class CaptionBubbleModel {
   void CommitPartialText();
 
   // Set that the bubble has an error and alert the observer.
-  void OnError();
+  void OnError(CaptionBubbleErrorType error_type,
+               OnErrorClickedCallback error_clicked_callback,
+               OnDoNotShowAgainClickedCallback error_silenced_callback);
 
   // Mark the bubble as closed, clear the partial and final text, and alert the
   // observer.
@@ -67,18 +73,11 @@ class CaptionBubbleModel {
   // Clears the partial and final text and alerts the observer.
   void ClearText();
 
-  // Calls the activate context callback.
-  void ActivateContext();
-
-  // Returns whether there is an activate context callback available.
-  bool IsContextActivatable();
-
   bool IsClosed() const { return is_closed_; }
   bool HasError() const { return has_error_; }
+  CaptionBubbleErrorType ErrorType() const { return error_type_; }
   std::string GetFullText() const { return final_text_ + partial_text_; }
-  const absl::optional<gfx::Rect>& GetContextBoundsInScreen() const {
-    return context_bounds_in_screen_;
-  }
+  CaptionBubbleContext* GetContext() { return context_; }
 
  private:
   // Alert the observer that a change has occurred to the model text.
@@ -90,22 +89,16 @@ class CaptionBubbleModel {
   // Whether the bubble has been closed by the user.
   bool is_closed_ = false;
 
-  // Whether an error should be displayed one the bubble.
+  // Whether an error should be displayed in the bubble.
   bool has_error_ = false;
 
-  // The bounds of the context widget. On Chrome browser, this is the bounds in
-  // screen of the top level widget of the browser window. When Live Caption is
-  // implemented in ash, this will be bounds of the top level widget of the ash
-  // window.
-  const absl::optional<gfx::Rect> context_bounds_in_screen_;
-
-  // A callback which activates the context for this CaptionBubbleModel. In
-  // Live Caption on browser, this activates the browser window and tab of the
-  // web contents to which this CaptionBubbleModel belongs.
-  const base::RepeatingClosure activate_context_callback_;
+  // The most recent error type encountered.
+  CaptionBubbleErrorType error_type_ = CaptionBubbleErrorType::GENERIC;
 
   // The CaptionBubble observing changes to this model.
-  CaptionBubble* observer_ = nullptr;
+  raw_ptr<CaptionBubble> observer_ = nullptr;
+
+  const raw_ptr<CaptionBubbleContext> context_;
 };
 
 }  // namespace captions

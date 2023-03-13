@@ -3,9 +3,12 @@
 // found in the LICENSE file.
 
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as Platform from '../../core/platform/platform.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
 import {EditFileSystemView} from './EditFileSystemView.js';
+import workspaceSettingsTabStyles from './workspaceSettingsTab.css.js';
+
 import type {FileSystem} from './FileSystemWorkspaceBinding.js';
 import {IsolatedFileSystem} from './IsolatedFileSystem.js';
 import {Events, IsolatedFileSystemManager} from './IsolatedFileSystemManager.js';
@@ -42,12 +45,12 @@ let workspaceSettingsTabInstance: WorkspaceSettingsTab;
 export class WorkspaceSettingsTab extends UI.Widget.VBox {
   containerElement: HTMLElement;
   private readonly fileSystemsListContainer: HTMLElement;
-  private readonly elementByPath: Map<string, Element>;
-  private readonly mappingViewByPath: Map<string, EditFileSystemView>;
+  private readonly elementByPath: Map<Platform.DevToolsPath.UrlString, Element>;
+  private readonly mappingViewByPath: Map<Platform.DevToolsPath.UrlString, EditFileSystemView>;
   private constructor() {
     super();
-    this.registerRequiredCSS('models/persistence/workspaceSettingsTab.css');
 
+    this.element.classList.add('workspace-settings-tab');
     const header = this.element.createChild('header');
     UI.UIUtils.createTextChild(header.createChild('h1'), i18nString(UIStrings.workspace));
 
@@ -92,6 +95,11 @@ export class WorkspaceSettingsTab extends UI.Widget.VBox {
     return workspaceSettingsTabInstance;
   }
 
+  wasShown(): void {
+    super.wasShown();
+    this.registerCSSFiles([workspaceSettingsTabStyles]);
+  }
+
   private createFolderExcludePatternInput(): Element {
     const p = document.createElement('p');
     const labelElement = p.createChild('label');
@@ -99,7 +107,6 @@ export class WorkspaceSettingsTab extends UI.Widget.VBox {
     const inputElement = UI.UIUtils.createInput('', 'text');
     UI.ARIAUtils.bindLabelToControl(labelElement, inputElement);
     p.appendChild(inputElement);
-    inputElement.style.width = '270px';
     const folderExcludeSetting = IsolatedFileSystemManager.instance().workspaceFolderExcludePatternSetting();
     const setValue =
         UI.UIUtils.bindInput(inputElement, folderExcludeSetting.set.bind(folderExcludeSetting), regexValidator, false);
@@ -170,7 +177,7 @@ export class WorkspaceSettingsTab extends UI.Widget.VBox {
   }
 
   private addFileSystemClicked(): void {
-    IsolatedFileSystemManager.instance().addFileSystem();
+    void IsolatedFileSystemManager.instance().addFileSystem();
   }
 
   private fileSystemAdded(fileSystem: PlatformFileSystem): void {

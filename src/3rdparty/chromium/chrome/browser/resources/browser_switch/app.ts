@@ -7,9 +7,9 @@ import 'chrome://resources/cr_elements/shared_vars_css.m.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
 import './strings.m.js';
 
-import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
+import {I18nMixin} from 'chrome://resources/js/i18n_mixin.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {html, mixinBehaviors, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {BrowserSwitchProxy, BrowserSwitchProxyImpl} from './browser_switch_proxy.js';
 
@@ -20,9 +20,7 @@ enum LaunchError {
   PROTOCOL_ERROR = 'protocolError',
 }
 
-const BrowserSwitchAppElementBase =
-    mixinBehaviors([I18nBehavior], PolymerElement) as
-    {new (): PolymerElement & I18nBehavior};
+const BrowserSwitchAppElementBase = I18nMixin(PolymerElement);
 
 class BrowserSwitchAppElement extends BrowserSwitchAppElementBase {
   static get is() {
@@ -68,8 +66,7 @@ class BrowserSwitchAppElement extends BrowserSwitchAppElementBase {
   private error_: string;
   private secondCounter_: number;
 
-  /** @override */
-  connectedCallback() {
+  override connectedCallback() {
     super.connectedCallback();
 
     // If '?done=...' is specified in the URL, this tab was-reopened, or the
@@ -116,28 +113,29 @@ class BrowserSwitchAppElement extends BrowserSwitchAppElementBase {
 
   private computeTitle_(): string {
     if (this.error_) {
-      return this.i18n('errorTitle', getBrowserName());
+      return this.i18n('errorTitle', getAltBrowserName());
     }
     if (this.secondCounter_ > 0) {
-      return this.i18n('countdownTitle', this.secondCounter_, getBrowserName());
+      return this.i18n(
+          'countdownTitle', this.secondCounter_, getAltBrowserName());
     }
-    return this.i18n('openingTitle', getBrowserName());
+    return this.i18n('openingTitle', getAltBrowserName());
   }
 
   private computeDescription_(): string {
     if (this.error_) {
       return this.i18n(
-          this.error_, getUrlHostname(this.url_), getBrowserName());
+          this.error_, getUrlHostname(this.url_), getAltBrowserName());
     }
     return this.i18n(
-        'description', getUrlHostname(this.url_), getBrowserName());
+        'description', getUrlHostname(this.url_), getAltBrowserName());
   }
 }
 
 customElements.define(BrowserSwitchAppElement.is, BrowserSwitchAppElement);
 
-function getBrowserName(): string {
-  return loadTimeData.getString('browserName');
+function getAltBrowserName(): string {
+  return loadTimeData.getString('altBrowserName');
 }
 
 function getUrlHostname(url: string): string {

@@ -14,6 +14,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/cdm_config.h"
 #include "media/base/key_system_names.h"
 #include "media/base/key_systems.h"
@@ -210,9 +211,9 @@ bool IsSupportedMediaType(const std::string& container_mime_type,
 }  // namespace
 
 bool KeySystemConfigSelector::WebLocalFrameDelegate::
-    IsCrossOriginToMainFrame() {
+    IsCrossOriginToOutermostMainFrame() {
   DCHECK(web_frame_);
-  return web_frame_->IsCrossOriginToMainFrame();
+  return web_frame_->IsCrossOriginToOutermostMainFrame();
 }
 
 bool KeySystemConfigSelector::WebLocalFrameDelegate::AllowStorageAccessSync(
@@ -668,18 +669,22 @@ KeySystemConfigSelector::GetSupportedConfiguration(
   // permission has already been denied. This would happen anyway later.
   EmeFeatureSupport distinctive_identifier_support =
       key_systems_->GetDistinctiveIdentifierSupport(key_system);
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // NOTE: This is an additional action we are taking here that is not in the
   // spec currently.  Specifically, we are not allowing a distinctive identifier
   // for cross-origin frames. We do not do this on Android because there is no
   // CDM selection available to Chrome that doesn't require a distinct
   // identifier.
-  if (web_frame_delegate_->IsCrossOriginToMainFrame()) {
+  // TODO(crbug.com/1318055): With MPArch there may be multiple main frames
+  // so we should use IsCrossOriginToOutermostMainFrame when we intend to check
+  // if any embedded frame (eg, iframe or fenced frame) is cross-origin with
+  // respect to the outermost main frame. Follow up to confirm correctness.
+  if (web_frame_delegate_->IsCrossOriginToOutermostMainFrame()) {
     if (distinctive_identifier_support == EmeFeatureSupport::ALWAYS_ENABLED)
       return CONFIGURATION_NOT_SUPPORTED;
     distinctive_identifier_support = EmeFeatureSupport::NOT_SUPPORTED;
   }
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
   EmeConfigRule di_rule = GetDistinctiveIdentifierConfigRule(
       distinctive_identifier_support, distinctive_identifier);
   if (!config_state->IsRuleSupported(di_rule)) {
@@ -1002,8 +1007,6 @@ void KeySystemConfigSelector::SelectConfig(
     return;
   }
 
-  key_systems_->UpdateIfNeeded();
-
   std::string key_system_ascii = key_system.Ascii();
   if (!key_systems_->IsSupportedKeySystem(key_system_ascii)) {
     std::move(cb).Run(Status::kUnsupportedKeySystem, nullptr, nullptr);
@@ -1081,6 +1084,11 @@ void KeySystemConfigSelector::SelectConfigInternal(
                            weak_factory_.GetWeakPtr(), std::move(request)));
         return;
       case CONFIGURATION_SUPPORTED:
+        std::string key_system = request->key_system;
+        if (key_systems_->ShouldUseBaseKeySystemName(key_system))
+          key_system = key_systems_->GetBaseKeySystemName(key_system);
+        cdm_config.key_system = key_system;
+
         cdm_config.allow_distinctive_identifier =
             (accumulated_configuration.distinctive_identifier ==
              EmeFeatureRequirement::kRequired);
@@ -1089,6 +1097,7 @@ void KeySystemConfigSelector::SelectConfigInternal(
              EmeFeatureRequirement::kRequired);
         cdm_config.use_hw_secure_codecs =
             config_state.AreHwSecureCodecsRequired();
+
         std::move(request->cb)
             .Run(Status::kSupported, &accumulated_configuration, &cdm_config);
         return;

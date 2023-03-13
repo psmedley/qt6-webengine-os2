@@ -9,7 +9,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/sys_byteorder.h"
 #include "net/base/io_buffer.h"
 #include "net/dns/public/dns_query_type.h"
@@ -339,9 +338,9 @@ const std::string SOCKSClientSocket::BuildHandshakeWriteBuffer() const {
   request.nw_port = base::HostToNet16(destination_.port());
 
   DCHECK(resolve_host_request_->GetAddressResults() &&
-         !resolve_host_request_->GetAddressResults().value().empty());
+         !resolve_host_request_->GetAddressResults()->empty());
   const IPEndPoint& endpoint =
-      resolve_host_request_->GetAddressResults().value().front();
+      resolve_host_request_->GetAddressResults()->front();
 
   // We disabled IPv6 results when resolving the hostname, so none of the
   // results in the list will be IPv6.
@@ -357,7 +356,7 @@ const std::string SOCKSClientSocket::BuildHandshakeWriteBuffer() const {
 
   std::string handshake_data(reinterpret_cast<char*>(&request),
                              sizeof(request));
-  handshake_data.append(kEmptyUserId, base::size(kEmptyUserId));
+  handshake_data.append(kEmptyUserId, std::size(kEmptyUserId));
 
   return handshake_data;
 }

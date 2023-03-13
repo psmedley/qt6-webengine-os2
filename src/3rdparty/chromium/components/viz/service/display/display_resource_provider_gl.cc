@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/dcheck_is_on.h"
+#include "base/memory/raw_ptr.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "components/viz/common/gpu/context_provider.h"
@@ -42,7 +43,7 @@ class ScopedSetActiveTexture {
   }
 
  private:
-  GLES2Interface* gl_;
+  raw_ptr<GLES2Interface> gl_;
   GLenum unit_;
 };
 
@@ -170,9 +171,10 @@ void DisplayResourceProviderGL::UnlockForRead(ResourceId id,
       if (!resource->release_fence.is_null()) {
         auto fence = gfx::GpuFence(resource->release_fence.Clone());
         if (gl::GLFence::IsGpuFenceSupported()) {
-          auto id = gl->CreateClientGpuFenceCHROMIUM(fence.AsClientGpuFence());
-          gl->WaitGpuFenceCHROMIUM(id);
-          gl->DestroyGpuFenceCHROMIUM(id);
+          auto fence_id =
+              gl->CreateClientGpuFenceCHROMIUM(fence.AsClientGpuFence());
+          gl->WaitGpuFenceCHROMIUM(fence_id);
+          gl->DestroyGpuFenceCHROMIUM(fence_id);
         } else {
           fence.Wait();
         }
@@ -329,7 +331,7 @@ void DisplayResourceProviderGL::WaitSyncTokenInternal(ChildResource* resource) {
 DisplayResourceProviderGL::ScopedReadLockGL::ScopedReadLockGL(
     DisplayResourceProviderGL* resource_provider,
     ResourceId resource_id)
-    : resource_provider_(resource_provider), resource_id_(resource_id), target_(GL_TEXTURE_2D) {
+    : resource_provider_(resource_provider), resource_id_(resource_id) {
   const ChildResource* resource =
       resource_provider->LockForRead(resource_id, false /* overlay_only */);
   // TODO(ericrk): We should never fail LockForRead, but we appear to be

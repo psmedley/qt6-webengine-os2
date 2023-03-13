@@ -22,8 +22,8 @@
 #include "include/core/SkTypeface.h"
 #include "include/gpu/GrContextOptions.h"
 #include "include/gpu/GrDirectContext.h"
-#include "include/private/GrTypesPriv.h"
-#include "src/gpu/GrDirectContextPriv.h"
+#include "include/private/gpu/ganesh/GrTypesPriv.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "tools/ToolUtils.h"
 
 static SkScalar draw_string(SkCanvas* canvas, const SkString& text, SkScalar x,
@@ -124,14 +124,12 @@ private:
         } while (true);
     }
 
-    static constexpr SkScalar kSize = 1280;
+    inline static constexpr SkScalar kSize = 1280;
 
     GrContextOptions::Enable fAllowMultipleTextures;
     sk_sp<SkTypeface> fTypefaces[6];
     using INHERITED = GM;
 };
-
-constexpr SkScalar FontCacheGM::kSize;
 
 //////////////////////////////////////////////////////////////////////////////
 

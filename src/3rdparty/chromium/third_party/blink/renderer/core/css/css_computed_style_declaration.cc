@@ -24,12 +24,11 @@
 
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 
-#include "base/cxx17_backports.h"
+#include "base/memory/values_equivalent.h"
 #include "third_party/blink/renderer/core/css/computed_style_css_value_mapping.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value_mappings.h"
-#include "third_party/blink/renderer/core/css/css_property_id_templates.h"
 #include "third_party/blink/renderer/core/css/css_property_names.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/css_variable_data.h"
@@ -47,7 +46,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -83,7 +82,7 @@ CSSComputedStyleDeclaration::ComputableProperties(
   if (properties.IsEmpty()) {
     CSSProperty::FilterWebExposedCSSPropertiesIntoVector(
         execution_context, kCSSComputableProperties,
-        base::size(kCSSComputableProperties), properties);
+        std::size(kCSSComputableProperties), properties);
   }
   return properties;
 }
@@ -211,7 +210,7 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
 }
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
-    AtomicString custom_property_name) const {
+    const AtomicString& custom_property_name) const {
   return GetPropertyCSSValue(CSSPropertyName(custom_property_name));
 }
 
@@ -264,8 +263,8 @@ void CSSComputedStyleDeclaration::UpdateStyleAndLayoutIfNeeded(
     return;
 
   bool is_for_layout_dependent_property =
-      property &&
-      property->IsLayoutDependent(ComputeComputedStyle(), StyledLayoutObject());
+      property && property->IsLayoutDependent(styled_node->GetComputedStyle(),
+                                              StyledLayoutObject());
 
   if (is_for_layout_dependent_property) {
     styled_node->GetDocument().UpdateStyleAndLayoutForNode(
@@ -362,7 +361,7 @@ bool CSSComputedStyleDeclaration::CssPropertyMatches(
     }
   }
   const CSSValue* value = GetPropertyCSSValue(property_id);
-  return DataEquivalent(value, &property_value);
+  return base::ValuesEquivalent(value, &property_value);
 }
 
 MutableCSSPropertyValueSet* CSSComputedStyleDeclaration::CopyProperties()
@@ -446,7 +445,7 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValueInternal(
 }
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValueInternal(
-    AtomicString custom_property_name) {
+    const AtomicString& custom_property_name) {
   DCHECK_EQ(CSSPropertyID::kVariable,
             CssPropertyID(GetExecutionContext(), custom_property_name));
   return GetPropertyCSSValue(custom_property_name);

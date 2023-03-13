@@ -30,8 +30,8 @@ std::unique_ptr<AudioDeviceIdCalculator> CreateIdCalculator(
   return std::make_unique<AudioDeviceIdCalculator>(context);
 }
 
-// Checks if an extension is whitelisted to use deprecated version of audio API.
-// TODO(tbarzic): Retire this whitelist and remove the deprecated API methods,
+// Checks if an extension is allowlisted to use deprecated version of audio API.
+// TODO(tbarzic): Retire this allowlist and remove the deprecated API methods,
 //     properties and events. This is currently targeted for M-60
 //     (http://crbug.com/697279).
 bool CanUseDeprecatedAudioApi(const Extension* extension) {
@@ -48,11 +48,13 @@ bool CanUseDeprecatedAudioApi(const Extension* extension) {
       .is_available();
 }
 
-bool CanReceiveDeprecatedAudioEvent(content::BrowserContext* browser_context,
-                                    Feature::Context target_context,
-                                    const Extension* extension,
-                                    Event* event,
-                                    const base::DictionaryValue* filter) {
+bool CanReceiveDeprecatedAudioEvent(
+    content::BrowserContext* browser_context,
+    Feature::Context target_context,
+    const Extension* extension,
+    const base::DictionaryValue* filter,
+    std::unique_ptr<base::Value::List>* event_args,
+    mojom::EventFilteringInfoPtr* event_filtering_info_out) {
   return CanUseDeprecatedAudioApi(extension);
 }
 
@@ -168,7 +170,7 @@ ExtensionFunction::ResponseAction AudioGetInfoFunction::Run() {
 
 ExtensionFunction::ResponseAction AudioGetDevicesFunction::Run() {
   std::unique_ptr<audio::GetDevices::Params> params(
-      audio::GetDevices::Params::Create(*args_));
+      audio::GetDevices::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   AudioService* service =
@@ -188,7 +190,7 @@ ExtensionFunction::ResponseAction AudioGetDevicesFunction::Run() {
 
 ExtensionFunction::ResponseAction AudioSetActiveDevicesFunction::Run() {
   std::unique_ptr<audio::SetActiveDevices::Params> params(
-      audio::SetActiveDevices::Params::Create(*args_));
+      audio::SetActiveDevices::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   AudioService* service =
@@ -215,7 +217,7 @@ ExtensionFunction::ResponseAction AudioSetActiveDevicesFunction::Run() {
 
 ExtensionFunction::ResponseAction AudioSetPropertiesFunction::Run() {
   std::unique_ptr<audio::SetProperties::Params> params(
-      audio::SetProperties::Params::Create(*args_));
+      audio::SetProperties::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   AudioService* service =
@@ -264,7 +266,7 @@ ExtensionFunction::ResponseAction AudioSetPropertiesFunction::Run() {
 
 ExtensionFunction::ResponseAction AudioSetMuteFunction::Run() {
   std::unique_ptr<audio::SetMute::Params> params(
-      audio::SetMute::Params::Create(*args_));
+      audio::SetMute::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   AudioService* service =
@@ -282,7 +284,7 @@ ExtensionFunction::ResponseAction AudioSetMuteFunction::Run() {
 
 ExtensionFunction::ResponseAction AudioGetMuteFunction::Run() {
   std::unique_ptr<audio::GetMute::Params> params(
-      audio::GetMute::Params::Create(*args_));
+      audio::GetMute::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   AudioService* service =

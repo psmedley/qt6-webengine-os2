@@ -9,14 +9,13 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
+#include "build/build_config.h"
 #include "net/dns/dns_config_service.h"
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #endif
 
@@ -65,11 +64,10 @@ NetworkChangeNotifierMac::NetworkChangeCalculatorParamsMac() {
   NetworkChangeCalculatorParams params;
   // Delay values arrived at by simple experimentation and adjusted so as to
   // produce a single signal when switching between network connections.
-  params.ip_address_offline_delay_ = base::TimeDelta::FromMilliseconds(500);
-  params.ip_address_online_delay_ = base::TimeDelta::FromMilliseconds(500);
-  params.connection_type_offline_delay_ =
-      base::TimeDelta::FromMilliseconds(1000);
-  params.connection_type_online_delay_ = base::TimeDelta::FromMilliseconds(500);
+  params.ip_address_offline_delay_ = base::Milliseconds(500);
+  params.ip_address_online_delay_ = base::Milliseconds(500);
+  params.connection_type_offline_delay_ = base::Milliseconds(1000);
+  params.connection_type_online_delay_ = base::Milliseconds(500);
   return params;
 }
 
@@ -82,9 +80,6 @@ NetworkChangeNotifierMac::GetCurrentConnectionType() const {
   if (connection_type_initialized_)
     return connection_type_;
 
-  SCOPED_UMA_HISTOGRAM_TIMER(
-      "Net.NetworkChangeNotifierMac.GetCurrentConnectionTypeWaitTime");
-
   // Wait up to a limited amount of time for the connection type to be
   // determined, to avoid blocking the main thread indefinitely. Since
   // ConditionVariables are susceptible to spurious wake-ups, each call to
@@ -93,9 +88,9 @@ NetworkChangeNotifierMac::GetCurrentConnectionType() const {
   // called repeatedly until either the timeout is reached or the connection
   // type has been determined.
   base::TimeDelta remaining_time =
-      base::TimeDelta::FromSecondsD(kMaxWaitForConnectionTypeInSeconds);
+      base::Seconds(kMaxWaitForConnectionTypeInSeconds);
   base::TimeTicks end_time = base::TimeTicks::Now() + remaining_time;
-  while (remaining_time > base::TimeDelta()) {
+  while (remaining_time.is_positive()) {
     initial_connection_type_cv_.TimedWait(remaining_time);
     if (connection_type_initialized_)
       return connection_type_;
@@ -118,7 +113,7 @@ NetworkChangeNotifierMac::CalculateConnectionType(
   if (!reachable)
     return CONNECTION_NONE;
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   if (!(flags & kSCNetworkReachabilityFlagsIsWWAN)) {
     return CONNECTION_WIFI;
   }
@@ -266,7 +261,7 @@ void NetworkChangeNotifierMac::StartReachabilityNotifications() {
 
 void NetworkChangeNotifierMac::SetDynamicStoreNotificationKeys(
     SCDynamicStoreRef store) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // SCDynamicStore API does not exist on iOS.
   NOTREACHED();
 #else
@@ -288,11 +283,11 @@ void NetworkChangeNotifierMac::SetDynamicStoreNotificationKeys(
       SCDynamicStoreSetNotificationKeys(store, notification_keys.get(), NULL);
   // TODO(willchan): Figure out a proper way to handle this rather than crash.
   CHECK(ret);
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 }
 
 void NetworkChangeNotifierMac::OnNetworkConfigChange(CFArrayRef changed_keys) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // SCDynamicStore API does not exist on iOS.
   NOTREACHED();
 #else
@@ -313,7 +308,7 @@ void NetworkChangeNotifierMac::OnNetworkConfigChange(CFArrayRef changed_keys) {
       NOTREACHED();
     }
   }
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 }
 
 // static
@@ -341,11 +336,11 @@ void NetworkChangeNotifierMac::ReachabilityCallback(
     NotifyObserversOfMaxBandwidthChange(max_bandwidth_mbps, new_type);
   }
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // On iOS, the SCDynamicStore API does not exist, and we use the reachability
   // API to detect IP address changes instead.
   NotifyObserversOfIPAddressChange();
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 }
 
 }  // namespace net

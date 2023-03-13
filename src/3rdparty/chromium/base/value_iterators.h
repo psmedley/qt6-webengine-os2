@@ -62,6 +62,14 @@ class BASE_EXPORT dict_iterator {
   BASE_EXPORT friend bool operator!=(const dict_iterator& lhs,
                                      const dict_iterator& rhs);
 
+  // Currently, there is no easy way to friend Value::Dict. Once dictionary
+  // storage is updated to not require a proxy iterator, the implementation can
+  // be folded into //base/values.h and a standard friend declaration can be
+  // used instead.
+  const DictStorage::iterator& GetUnderlyingIteratorDoNotUse() {
+    return dict_iter_;
+  }
+
  private:
   DictStorage::iterator dict_iter_;
 };
@@ -108,6 +116,14 @@ class BASE_EXPORT const_dict_iterator {
   BASE_EXPORT friend bool operator!=(const const_dict_iterator& lhs,
                                      const const_dict_iterator& rhs);
 
+  // Currently, there is no easy way to friend Value::Dict. Once dictionary
+  // storage is updated to not require a proxy iterator, the implementation can
+  // be folded into //base/values.h and a standard friend declaration can be
+  // used instead.
+  const DictStorage::const_iterator& GetUnderlyingIteratorDoNotUse() {
+    return dict_iter_;
+  }
+
  private:
   DictStorage::const_iterator dict_iter_;
 };
@@ -132,6 +148,8 @@ class BASE_EXPORT dict_iterator_proxy {
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
   explicit dict_iterator_proxy(DictStorage* storage);
+
+  size_type size() const;
 
   iterator begin();
   const_iterator begin() const;
@@ -171,6 +189,8 @@ class BASE_EXPORT const_dict_iterator_proxy {
   using const_reverse_iterator = std::reverse_iterator<const_iterator>;
 
   explicit const_dict_iterator_proxy(const DictStorage* storage);
+
+  size_type size() const;
 
   const_iterator begin() const;
   const_iterator end() const;

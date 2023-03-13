@@ -36,13 +36,6 @@ int GetSyncTransportOptInBitFieldForAccount(const PrefService* prefs,
 
 }  // namespace
 
-// Integer that is set to the last choice user made when prompted for saving a
-// credit card. The prompt is for user's consent in saving the card in the
-// server for signed in users and saving the card locally for non signed-in
-// users.
-const char kAutofillAcceptSaveCreditCardPromptState[] =
-    "autofill.accept_save_credit_card_prompt_state";
-
 // Boolean that is true if Autofill is enabled and allowed to save credit card
 // data.
 const char kAutofillCreditCardEnabled[] = "autofill.credit_card_enabled";
@@ -51,7 +44,7 @@ const char kAutofillCreditCardEnabled[] = "autofill.credit_card_enabled";
 const char kAutofillCreditCardFidoAuthEnabled[] =
     "autofill.credit_card_fido_auth_enabled";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // Boolean that is true if FIDO Authentication is enabled for card unmasking.
 const char kAutofillCreditCardFidoAuthOfferCheckboxState[] =
     "autofill.credit_card_fido_auth_offer_checkbox_state";
@@ -163,7 +156,7 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // Non-synced prefs. Used for per-device choices, e.g., signin promo.
   registry->RegisterBooleanPref(prefs::kAutofillCreditCardFidoAuthEnabled,
                                 false);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   registry->RegisterBooleanPref(
       prefs::kAutofillCreditCardFidoAuthOfferCheckboxState, true);
 #endif
@@ -172,9 +165,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(prefs::kAutofillWalletImportEnabled, true);
   registry->RegisterBooleanPref(
       prefs::kAutofillWalletImportStorageCheckboxState, true);
-  registry->RegisterIntegerPref(
-      prefs::kAutofillAcceptSaveCreditCardPromptState,
-      prefs::PREVIOUS_SAVE_CREDIT_CARD_PROMPT_USER_DECISION_NONE);
   registry->RegisterIntegerPref(
       prefs::kAutofillLastVersionDisusedCreditCardsDeleted, 0);
   registry->RegisterIntegerPref(prefs::kAutocompleteLastVersionRetentionPolicy,
@@ -189,8 +179,6 @@ void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
   // Deprecated prefs registered for migration.
   registry->RegisterBooleanPref(kAutofillJapanCityFieldMigratedDeprecated,
                                 false);
-  // Deprecated in profile prefs.
-  registry->RegisterStringPref(prefs::kAutofillStatesDataDir, "");
 }
 
 void MigrateDeprecatedAutofillPrefs(PrefService* prefs) {
@@ -224,11 +212,6 @@ void MigrateDeprecatedAutofillPrefs(PrefService* prefs) {
 
   // Added 10/2019.
   prefs->ClearPref(kAutofillJapanCityFieldMigratedDeprecated);
-
-  // Added 11/2020
-  // TODO(crbug.com/1147852): Remove deprecated kAutofillStatesDataDir from
-  // autofill profile prefs.
-  prefs->ClearPref(kAutofillStatesDataDir);
 }
 
 bool IsAutocompleteEnabled(const PrefService* prefs) {
@@ -318,7 +301,7 @@ void SetUserOptedInWalletSyncTransport(PrefService* prefs,
 
 bool IsUserOptedInWalletSyncTransport(const PrefService* prefs,
                                       const CoreAccountId& account_id) {
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   // On mobile, no specific opt-in is required.
   return true;
 #else
@@ -330,12 +313,12 @@ bool IsUserOptedInWalletSyncTransport(const PrefService* prefs,
   // Return whether the wallet opt-in bit is set.
   return GetSyncTransportOptInBitFieldForAccount(prefs, account_hash) &
          sync_transport_opt_in::kWallet;
-#endif  // OS_ANDROID || defined(OS_IOS)
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
 }
 
 void ClearSyncTransportOptIns(PrefService* prefs) {
   DictionaryPrefUpdate update(prefs, prefs::kAutofillSyncTransportOptIn);
-  update->Clear();
+  update->DictClear();
 }
 
 }  // namespace prefs

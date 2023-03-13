@@ -12,6 +12,7 @@
 #include <float.h>
 
 #include "av1/encoder/encodeframe_utils.h"
+#include "av1/encoder/thirdpass.h"
 #include "config/aom_dsp_rtcd.h"
 
 #include "av1/common/enums.h"
@@ -115,6 +116,7 @@ static void write_features_to_file(const char *const path,
   snprintf(filename, sizeof(filename), "%s/%s", path,
            get_feature_file_name(id));
   FILE *pfile = fopen(filename, "a");
+  if (pfile == NULL) return;
   if (!is_test_mode) {
     fprintf(pfile, "%d,%d,%d,%d,%d\n", id, bsize, mi_row, mi_col, feature_size);
   }
@@ -330,6 +332,29 @@ void av1_intra_mode_cnn_partition(const AV1_COMMON *const cm, MACROBLOCK *x,
   }
 }
 
+static INLINE int get_simple_motion_search_prune_agg(int qindex,
+                                                     int prune_level,
+                                                     int is_rect_part) {
+  assert(prune_level < TOTAL_AGG_LVLS);
+  if (prune_level == NO_PRUNING) {
+    return -1;
+  }
+
+  // Aggressiveness value for SIMPLE_MOTION_SEARCH_PRUNE_LEVEL except
+  // QIDX_BASED_AGG_LVL
+  const int sms_prune_agg_levels[TOTAL_SIMPLE_AGG_LVLS] = { 0, 1, 2, 3 };
+  if (prune_level < TOTAL_SIMPLE_AGG_LVLS) {
+    return sms_prune_agg_levels[prune_level];
+  }
+
+  // Map the QIDX_BASED_AGG_LVL to corresponding aggressiveness value.
+  // Aggressive pruning for lower quantizers in non-boosted frames to prune
+  // rectangular partitions.
+  const int qband = is_rect_part ? (qindex <= 90 ? 1 : 0) : 0;
+  const int sms_prune_agg_qindex_based[2] = { 1, 2 };
+  return sms_prune_agg_qindex_based[qband];
+}
+
 void av1_simple_motion_search_based_split(AV1_COMP *const cpi, MACROBLOCK *x,
                                           SIMPLE_MOTION_DATA_TREE *sms_tree,
                                           PartitionSearchState *part_state) {
@@ -351,8 +376,9 @@ void av1_simple_motion_search_based_split(AV1_COMP *const cpi, MACROBLOCK *x,
   const float *ml_std = av1_simple_motion_search_split_std[bsize_idx];
   const NN_CONFIG *nn_config =
       av1_simple_motion_search_split_nn_config[bsize_idx];
-  const int agg = cpi->sf.part_sf.simple_motion_search_prune_agg;
 
+  const int agg = get_simple_motion_search_prune_agg(
+      x->qindex, cpi->sf.part_sf.simple_motion_search_prune_agg, 0);
   if (agg < 0) {
     return;
   }
@@ -626,8 +652,8 @@ void av1_simple_motion_search_prune_rect(AV1_COMP *const cpi, MACROBLOCK *x,
   const float *ml_mean = av1_simple_motion_search_prune_rect_mean[bsize_idx],
               *ml_std = av1_simple_motion_search_prune_rect_std[bsize_idx];
 
-  const int agg = cpi->sf.part_sf.simple_motion_search_prune_agg;
-
+  const int agg = get_simple_motion_search_prune_agg(
+      x->qindex, cpi->sf.part_sf.simple_motion_search_prune_agg, 1);
   if (agg < 0) {
     return;
   }
@@ -1534,6 +1560,76 @@ void av1_prune_partitions_before_search(AV1_COMP *const cpi,
   const PartitionBlkParams *blk_params = &part_state->part_blk_params;
   const BLOCK_SIZE bsize = blk_params->bsize;
 
+  if (cpi->third_pass_ctx) {
+    int mi_row = blk_params->mi_row;
+    int mi_col = blk_params->mi_col;
+    double ratio_h, ratio_w;
+    av1_get_third_pass_ratio(cpi->third_pass_ctx, 0, cm->height, cm->width,
+                             &ratio_h, &ratio_w);
+    THIRD_PASS_MI_INFO *this_mi = av1_get_third_pass_mi(
+        cpi->third_pass_ctx, 0, mi_row, mi_col, ratio_h, ratio_w);
+    BLOCK_SIZE third_pass_bsize =
+        av1_get_third_pass_adjusted_blk_size(this_mi, ratio_h, ratio_w);
+    // check the actual partition of this block in the second pass
+    PARTITION_TYPE third_pass_part =
+        av1_third_pass_get_sb_part_type(cpi->third_pass_ctx, this_mi);
+
+    int is_edge = (mi_row + mi_size_high[bsize] >= cm->mi_params.mi_rows) ||
+                  (mi_col + mi_size_wide[bsize] >= cm->mi_params.mi_cols);
+
+    if (!is_edge && block_size_wide[bsize] >= 16) {
+      // If in second pass we used rectangular partition, then do not search for
+      // rectangular partition in the different direction.
+      if (third_pass_part != PARTITION_NONE) {
+        if (third_pass_part == PARTITION_HORZ ||
+            third_pass_part == PARTITION_HORZ_4 ||
+            third_pass_part == PARTITION_HORZ_A ||
+            third_pass_part == PARTITION_HORZ_B) {
+          part_state->partition_rect_allowed[VERT] = 0;
+        } else if (third_pass_part == PARTITION_VERT ||
+                   third_pass_part == PARTITION_VERT_4 ||
+                   third_pass_part == PARTITION_VERT_A ||
+                   third_pass_part == PARTITION_VERT_B) {
+          part_state->partition_rect_allowed[HORZ] = 0;
+        }
+      }
+
+      int minSize = AOMMIN(block_size_wide[third_pass_bsize],
+                           block_size_high[third_pass_bsize]);
+      int maxSize = AOMMAX(block_size_wide[third_pass_bsize],
+                           block_size_high[third_pass_bsize]);
+      if (block_size_wide[bsize] < minSize / 4) {
+        // Current partition is too small, just terminate
+        part_state->terminate_partition_search = 1;
+        return;
+      } else if (block_size_wide[bsize] < minSize / 2) {
+        if (third_pass_part != PARTITION_NONE) {
+          // Current partition is very small, and in second pass we used
+          // rectangular partition. Terminate the search here then.
+          part_state->terminate_partition_search = 1;
+          return;
+        } else {
+          // Partition is small, but we still check this partition, only disable
+          // further splits.
+          // TODO(any): check why this is not covered by the termination for <
+          // minSize/4.
+          av1_disable_square_split_partition(part_state);
+          av1_disable_rect_partitions(part_state);
+          return;
+        }
+      } else if (block_size_wide[bsize] > maxSize) {
+        // Partition is larger than in the second pass. Only allow split.
+        av1_set_square_split_only(part_state);
+        return;
+      } else if (block_size_wide[bsize] >= minSize &&
+                 block_size_wide[bsize] <= maxSize) {
+        // Partition is within a range where it is very likely to find a good
+        // choice, so do not prune anything.
+        return;
+      }
+    }
+  }
+
   // Prune rectangular partitions for larger blocks.
   if (bsize > cpi->sf.part_sf.rect_partition_eval_thresh) {
     part_state->do_rectangular_split = 0;
@@ -1542,7 +1638,11 @@ void av1_prune_partitions_before_search(AV1_COMP *const cpi,
   }
 
   // Prune rectangular, AB and 4-way partition based on q index and block size
-  if (cpi->sf.part_sf.prune_rectangular_split_based_on_qidx) {
+  if (cpi->sf.part_sf.prune_rectangular_split_based_on_qidx == 1) {
+    if (bsize == BLOCK_8X8 && x->qindex < 35)
+      av1_disable_rect_partitions(part_state);
+
+  } else if (cpi->sf.part_sf.prune_rectangular_split_based_on_qidx == 2) {
     // Enumeration difference between two square partitions
     const int sqr_bsize_step = BLOCK_32X32 - BLOCK_16X16;
     int max_bsize =
@@ -1946,7 +2046,7 @@ static bool ext_ml_model_decision_before_none(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_BEFORE_PART_NONE;
+  features.id = AOM_EXT_PART_FEATURE_BEFORE_NONE;
   for (int i = 0; i < FEATURE_SIZE_SMS_SPLIT; ++i) {
     features.before_part_none.f[i] = features_from_motion[i];
   }
@@ -1983,7 +2083,7 @@ static bool ext_ml_model_decision_before_none_part2(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_BEFORE_PART_NONE_PART2;
+  features.id = AOM_EXT_PART_FEATURE_BEFORE_NONE_PART2;
   for (int i = 0; i < FEATURE_SIZE_SMS_PRUNE_PART; ++i) {
     features.before_part_none.f_part2[i] = features_from_motion[i];
   }
@@ -2016,7 +2116,7 @@ bool ext_ml_model_decision_after_none(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_AFTER_PART_NONE;
+  features.id = AOM_EXT_PART_FEATURE_AFTER_NONE;
   for (int i = 0; i < 4; ++i) {
     features.after_part_none.f[i] = features_after_none[i];
   }
@@ -2049,7 +2149,7 @@ bool ext_ml_model_decision_after_none_part2(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_AFTER_PART_NONE_PART2;
+  features.id = AOM_EXT_PART_FEATURE_AFTER_NONE_PART2;
   for (int i = 0; i < FEATURE_SIZE_SMS_TERM_NONE; ++i) {
     features.after_part_none.f_terminate[i] = features_terminate[i];
   }
@@ -2083,7 +2183,7 @@ bool ext_ml_model_decision_after_split(AV1_COMP *const cpi,
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_AFTER_PART_SPLIT;
+  features.id = AOM_EXT_PART_FEATURE_AFTER_SPLIT;
   for (int i = 0; i < 31; ++i) {
     features.after_part_split.f_terminate[i] = features_terminate[i];
   }
@@ -2117,7 +2217,7 @@ bool ext_ml_model_decision_after_split_part2(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_AFTER_PART_SPLIT_PART2;
+  features.id = AOM_EXT_PART_FEATURE_AFTER_SPLIT_PART2;
   for (int i = 0; i < 9; ++i) {
     features.after_part_split.f_prune_rect[i] = features_prune[i];
   }
@@ -2153,7 +2253,7 @@ static bool ext_ml_model_decision_after_rect(
 
   // Setup features.
   aom_partition_features_t features;
-  features.id = FEATURE_AFTER_PART_RECT;
+  features.id = AOM_EXT_PART_FEATURE_AFTER_RECT;
   for (int i = 0; i < 10; ++i) {
     features.after_part_rect.f[i] = features_after_rect[i];
   }
@@ -2192,7 +2292,7 @@ static bool ext_ml_model_decision_after_part_ab(
   if (!frame_is_intra_only(cm) && ext_part_controller->ready) {
     // Setup features.
     aom_partition_features_t features;
-    features.id = FEATURE_AFTER_PART_AB;
+    features.id = AOM_EXT_PART_FEATURE_AFTER_AB;
     prepare_features_after_part_ab(cpi, x, bsize, part_ctx, best_rd,
                                    rect_part_rd, split_rd, pb_source_variance,
                                    mi_row, mi_col, &features);
@@ -2218,8 +2318,8 @@ static bool ext_ml_model_decision_after_part_ab(
 
 // This function resembles "av1_setup_sms_tree()" in context_tree.c
 // with function signature change.
-SIMPLE_MOTION_DATA_TREE *setup_sms_tree(AV1_COMP *const cpi,
-                                        SIMPLE_MOTION_DATA_TREE *sms_tree) {
+static SIMPLE_MOTION_DATA_TREE *setup_sms_tree(
+    AV1_COMP *const cpi, SIMPLE_MOTION_DATA_TREE *sms_tree) {
   AV1_COMMON *const cm = &cpi->common;
   const int stat_generation_stage = is_stat_generation_stage(cpi);
   const int is_sb_size_128 = cm->seq_params->sb_size == BLOCK_128X128;
@@ -2229,9 +2329,6 @@ SIMPLE_MOTION_DATA_TREE *setup_sms_tree(AV1_COMP *const cpi,
   SIMPLE_MOTION_DATA_TREE *this_sms;
   int square_index = 1;
   int nodes;
-
-  aom_free(sms_tree);
-  CHECK_MEM_ERROR(cm, sms_tree, aom_calloc(tree_nodes, sizeof(*sms_tree)));
   this_sms = &sms_tree[0];
 
   if (!stat_generation_stage) {
@@ -2292,16 +2389,26 @@ static void write_motion_feature_to_file(
 }
 
 void av1_collect_motion_search_features_sb(AV1_COMP *const cpi, ThreadData *td,
+                                           TileDataEnc *tile_data,
                                            const int mi_row, const int mi_col,
                                            const BLOCK_SIZE bsize,
                                            aom_partition_features_t *features) {
   const AV1_COMMON *const cm = &cpi->common;
+  if (frame_is_intra_only(cm)) return;
+
   MACROBLOCK *const x = &td->mb;
   const BLOCK_SIZE fixed_block_size = BLOCK_16X16;
   const int col_step = mi_size_wide[fixed_block_size];
   const int row_step = mi_size_high[fixed_block_size];
   SIMPLE_MOTION_DATA_TREE *sms_tree = NULL;
+  const int stat_generation_stage = is_stat_generation_stage(cpi);
+  const int is_sb_size_128 = cm->seq_params->sb_size == BLOCK_128X128;
+  const int tree_nodes =
+      av1_get_pc_tree_nodes(is_sb_size_128, stat_generation_stage);
+  CHECK_MEM_ERROR(cm, sms_tree, aom_calloc(tree_nodes, sizeof(*sms_tree)));
   SIMPLE_MOTION_DATA_TREE *sms_root = setup_sms_tree(cpi, sms_tree);
+  TileInfo *const tile_info = &tile_data->tile_info;
+  av1_set_offsets_without_segment_id(cpi, tile_info, x, mi_row, mi_col, bsize);
   av1_init_simple_motion_search_mvs_for_sb(cpi, NULL, x, sms_root, mi_row,
                                            mi_col);
   av1_reset_simple_motion_tree_partition(sms_root, bsize);
@@ -2348,12 +2455,75 @@ void av1_collect_motion_search_features_sb(AV1_COMP *const cpi, ThreadData *td,
   aom_free(block_sse);
   aom_free(block_var);
   aom_free(sms_tree);
-  if (sms_tree != NULL) {
-    aom_free(sms_tree);
-    sms_tree = NULL;
-  }
 }
 
+void av1_prepare_motion_search_features_block(
+    AV1_COMP *const cpi, ThreadData *td, TileDataEnc *tile_data,
+    const int mi_row, const int mi_col, const BLOCK_SIZE bsize,
+    const int valid_partition_types, unsigned int *block_sse,
+    unsigned int *block_var, unsigned int sub_block_sse[4],
+    unsigned int sub_block_var[4], unsigned int horz_block_sse[2],
+    unsigned int horz_block_var[2], unsigned int vert_block_sse[2],
+    unsigned int vert_block_var[2]) {
+  const AV1_COMMON *const cm = &cpi->common;
+  if (frame_is_intra_only(cm)) return;
+  MACROBLOCK *const x = &td->mb;
+  SIMPLE_MOTION_DATA_TREE *sms_tree = NULL;
+  const int stat_generation_stage = is_stat_generation_stage(cpi);
+  const int is_sb_size_128 = cm->seq_params->sb_size == BLOCK_128X128;
+  const int tree_nodes =
+      av1_get_pc_tree_nodes(is_sb_size_128, stat_generation_stage);
+  CHECK_MEM_ERROR(cm, sms_tree, aom_calloc(tree_nodes, sizeof(*sms_tree)));
+  SIMPLE_MOTION_DATA_TREE *sms_root = setup_sms_tree(cpi, sms_tree);
+  TileInfo *const tile_info = &tile_data->tile_info;
+  av1_set_offsets_without_segment_id(cpi, tile_info, x, mi_row, mi_col, bsize);
+  av1_reset_simple_motion_tree_partition(sms_root, bsize);
+  const int ref_list[] = { cpi->rc.is_src_frame_alt_ref ? ALTREF_FRAME
+                                                        : LAST_FRAME };
+  const int sub_mi_width = mi_size_wide[bsize] / 2;
+  const int sub_mi_height = sub_mi_width;
+  simple_motion_search_get_best_ref(
+      cpi, x, sms_root, mi_row, mi_col, bsize, ref_list, /*num_refs=*/1,
+      /*use_subpixel=*/1, /*save_mv=*/1, block_sse, block_var);
+  // Split to 4 sub blocks.
+  if (valid_partition_types & (1 << PARTITION_SPLIT)) {
+    const BLOCK_SIZE subsize = get_partition_subsize(bsize, PARTITION_SPLIT);
+    for (int i = 0; i < 4; ++i) {
+      const int row = mi_row + (i >> 1) * sub_mi_height;
+      const int col = mi_col + (i & 1) * sub_mi_width;
+      simple_motion_search_get_best_ref(cpi, x, sms_root, row, col, subsize,
+                                        ref_list, /*num_refs=*/1,
+                                        /*use_subpixel=*/1, /*save_mv=*/1,
+                                        &sub_block_sse[i], &sub_block_var[i]);
+    }
+  }
+  // Horizontal split
+  if (valid_partition_types & (1 << PARTITION_HORZ)) {
+    const BLOCK_SIZE subsize = get_partition_subsize(bsize, PARTITION_HORZ);
+    for (int i = 0; i < 2; ++i) {
+      const int row = mi_row + (i & 1) * sub_mi_height;
+      const int col = mi_col;
+      simple_motion_search_get_best_ref(cpi, x, sms_root, row, col, subsize,
+                                        ref_list, /*num_refs=*/1,
+                                        /*use_subpixel=*/1, /*save_mv=*/1,
+                                        &horz_block_sse[i], &horz_block_var[i]);
+    }
+  }
+  // Vertical split
+  if (valid_partition_types & (1 << PARTITION_VERT)) {
+    const BLOCK_SIZE subsize = get_partition_subsize(bsize, PARTITION_VERT);
+    for (int i = 0; i < 2; ++i) {
+      const int row = mi_row;
+      const int col = mi_col + (i & 1) * sub_mi_width;
+      simple_motion_search_get_best_ref(cpi, x, sms_root, row, col, subsize,
+                                        ref_list, /*num_refs=*/1,
+                                        /*use_subpixel=*/1, /*save_mv=*/1,
+                                        &vert_block_sse[i], &vert_block_var[i]);
+    }
+  }
+
+  aom_free(sms_tree);
+}
 #endif  // !CONFIG_REALTIME_ONLY
 
 static INLINE void init_simple_motion_search_mvs(

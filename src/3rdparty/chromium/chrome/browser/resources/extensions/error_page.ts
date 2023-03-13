@@ -15,24 +15,17 @@ import './code_section.js';
 import './shared_style.js';
 
 import {CrContainerShadowMixin} from 'chrome://resources/cr_elements/cr_container_shadow_mixin.js';
-import {assert, assertNotReached} from 'chrome://resources/js/assert.m.js';
+import {assert, assertNotReached} from 'chrome://resources/js/assert_ts.js';
 import {FocusOutlineManager} from 'chrome://resources/js/cr/ui/focus_outline_manager.m.js';
 import {focusWithoutInk} from 'chrome://resources/js/cr/ui/focus_without_ink.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
-import {afterNextRender, html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {afterNextRender, DomRepeatEvent, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {getTemplate} from './error_page.html.js';
 
 import {navigation, Page} from './navigation_helper.js';
 
 type ManifestError = chrome.developerPrivate.ManifestError;
 type RuntimeError = chrome.developerPrivate.RuntimeError;
-
-/** Event interface for dom-repeat. */
-interface RepeaterEvent<T> extends CustomEvent {
-  model: {
-    item: T,
-    index: number,
-  };
-}
 
 export interface ErrorPageDelegate {
   deleteErrors(
@@ -68,25 +61,29 @@ function getErrorSeverityText_(
         return warn;
       case chrome.developerPrivate.ErrorLevel.ERROR:
         return error;
+      default:
+        assertNotReached();
     }
-    assertNotReached();
   }
   assert(item.type === chrome.developerPrivate.ErrorType.MANIFEST);
   return warn;
 }
 
-interface ExtensionsErrorPageElement {
+export interface ExtensionsErrorPageElement {
   $: {
     closeButton: HTMLElement,
   };
 }
 
-const ExtensionsErrorPageElementBase =
-    CrContainerShadowMixin(PolymerElement) as {new (): PolymerElement};
+const ExtensionsErrorPageElementBase = CrContainerShadowMixin(PolymerElement);
 
-class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
+export class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
   static get is() {
     return 'extensions-error-page';
+  }
+
+  static get template() {
+    return getTemplate();
   }
 
   static get properties() {
@@ -134,7 +131,7 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
   private selectedEntry_: number;
   private selectedStackFrame_: chrome.developerPrivate.StackFrame|null;
 
-  ready() {
+  override ready() {
     super.ready();
     this.addEventListener('view-enter-start', this.onViewEnterStart_);
     FocusOutlineManager.forDocument(document);
@@ -192,7 +189,7 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
         loadTimeData.getString('errorLevel'));
   }
 
-  private onDeleteErrorAction_(e: RepeaterEvent<ManifestError|RuntimeError>) {
+  private onDeleteErrorAction_(e: DomRepeatEvent<ManifestError|RuntimeError>) {
     this.delegate.deleteErrors(this.data.id, [e.model.item.id]);
     e.stopPropagation();
   }
@@ -290,7 +287,7 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
   }
 
   private updateSelected_(frame: chrome.developerPrivate.StackFrame) {
-    this.selectedStackFrame_ = assert(frame);
+    this.selectedStackFrame_ = frame;
 
     const selectedError = this.getSelectedError();
     this.delegate
@@ -304,7 +301,7 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
   }
 
   private onStackFrameTap_(
-      e: RepeaterEvent<chrome.developerPrivate.StackFrame>) {
+      e: DomRepeatEvent<chrome.developerPrivate.StackFrame>) {
     const frame = e.model.item;
     this.updateSelected_(frame);
   }
@@ -327,7 +324,7 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
 
     for (let i = 0; i < list.length; ++i) {
       if (list[i].classList.contains('selected')) {
-        const repeaterEvent = e as unknown as RepeaterEvent<RuntimeError>;
+        const repeaterEvent = e as unknown as DomRepeatEvent<RuntimeError>;
         const frame = repeaterEvent.model.item.stackTrace[i + direction];
         if (frame) {
           this.updateSelected_(frame);
@@ -375,14 +372,16 @@ class ExtensionsErrorPageElement extends ExtensionsErrorPageElementBase {
     // is pressed.
     e.preventDefault();
     const repeaterEvent =
-        e as unknown as RepeaterEvent<ManifestError|RuntimeError>;
+        e as unknown as DomRepeatEvent<ManifestError|RuntimeError>;
     this.selectedEntry_ = this.selectedEntry_ === repeaterEvent.model.index ?
         -1 :
         repeaterEvent.model.index;
   }
+}
 
-  static get template() {
-    return html`{__html_template__}`;
+declare global {
+  interface HTMLElementTagNameMap {
+    'extensions-error-page': ExtensionsErrorPageElement;
   }
 }
 

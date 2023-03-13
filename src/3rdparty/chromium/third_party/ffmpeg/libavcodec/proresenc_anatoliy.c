@@ -30,6 +30,7 @@
 #include "libavutil/mem_internal.h"
 #include "libavutil/opt.h"
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "dct.h"
 #include "encode.h"
 #include "internal.h"
@@ -795,7 +796,6 @@ static int prores_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     }
 
     AV_WB32(pkt->data, compress_frame_size);/* update frame size */
-    pkt->flags |= AV_PKT_FLAG_KEY;
     pkt->size = compress_frame_size;
     *got_packet = 1;
 
@@ -853,9 +853,6 @@ static av_cold int prores_encode_init(AVCodecContext *avctx)
             avctx->profile = FF_PROFILE_PRORES_4444;
             av_log(avctx, AV_LOG_INFO,
                    "encoding with ProRes 4444+ (ap4h) profile\n");
-        } else {
-            av_log(avctx, AV_LOG_ERROR, "Unknown pixel format\n");
-            return AVERROR(EINVAL);
         }
     } else if (avctx->profile < FF_PROFILE_PRORES_PROXY
             || avctx->profile > FF_PROFILE_PRORES_XQ) {
@@ -943,34 +940,34 @@ static const enum AVPixelFormat pix_fmts[] = {
     AV_PIX_FMT_YUVA444P10, AV_PIX_FMT_NONE
 };
 
-const AVCodec ff_prores_aw_encoder = {
-    .name           = "prores_aw",
-    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_PRORES,
-    .pix_fmts       = pix_fmts,
+const FFCodec ff_prores_aw_encoder = {
+    .p.name         = "prores_aw",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Apple ProRes"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_PRORES,
+    .p.pix_fmts     = pix_fmts,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,
     .close          = prores_encode_close,
     .encode2        = prores_encode_frame,
-    .capabilities   = AV_CODEC_CAP_FRAME_THREADS,
-    .priv_class     = &prores_enc_class,
-    .profiles       = NULL_IF_CONFIG_SMALL(ff_prores_profiles),
+    .p.capabilities = AV_CODEC_CAP_FRAME_THREADS,
+    .p.priv_class   = &prores_enc_class,
+    .p.profiles     = NULL_IF_CONFIG_SMALL(ff_prores_profiles),
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };
 
-const AVCodec ff_prores_encoder = {
-    .name           = "prores",
-    .long_name      = NULL_IF_CONFIG_SMALL("Apple ProRes"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_PRORES,
-    .pix_fmts       = pix_fmts,
+const FFCodec ff_prores_encoder = {
+    .p.name         = "prores",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Apple ProRes"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_PRORES,
+    .p.pix_fmts     = pix_fmts,
     .priv_data_size = sizeof(ProresContext),
     .init           = prores_encode_init,
     .close          = prores_encode_close,
     .encode2        = prores_encode_frame,
-    .capabilities   = AV_CODEC_CAP_FRAME_THREADS,
-    .priv_class     = &prores_enc_class,
-    .profiles       = NULL_IF_CONFIG_SMALL(ff_prores_profiles),
+    .p.capabilities = AV_CODEC_CAP_FRAME_THREADS,
+    .p.priv_class   = &prores_enc_class,
+    .p.profiles     = NULL_IF_CONFIG_SMALL(ff_prores_profiles),
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

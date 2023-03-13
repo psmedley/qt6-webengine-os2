@@ -10,7 +10,6 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/test/test_mock_time_task_runner.h"
@@ -66,17 +65,18 @@ class GeoLanguageProviderTest : public testing::Test {
 
   void SetUpCachedLanguages(const std::vector<std::string>& languages) {
     base::ListValue cache_list;
-    for (size_t i = 0; i < languages.size(); ++i) {
-      cache_list.Set(i, std::make_unique<base::Value>(languages[i]));
+    for (const std::string& language : languages) {
+      cache_list.Append(language);
     }
     local_state_.Set(GeoLanguageProvider::kCachedGeoLanguagesPref, cache_list);
   }
 
   const std::vector<std::string> GetCachedLanguages() {
     std::vector<std::string> languages;
-    const base::ListValue* const cached_languages_list =
+    const base::Value* const cached_languages_list =
         local_state_.GetList(GeoLanguageProvider::kCachedGeoLanguagesPref);
-    for (const auto& language_value : cached_languages_list->GetList()) {
+    for (const auto& language_value :
+         cached_languages_list->GetListDeprecated()) {
       languages.push_back(language_value.GetString());
     }
     return languages;
@@ -124,7 +124,7 @@ TEST_F(GeoLanguageProviderTest, NoFrequentCalls) {
   std::vector<std::string> expected_langs = {"hi", "en"};
   EXPECT_EQ(expected_langs, result);
 
-  task_environment_.FastForwardBy(base::TimeDelta::FromHours(12));
+  task_environment_.FastForwardBy(base::Hours(12));
   EXPECT_EQ(1, GetQueryNextPositionCalledTimes());
   EXPECT_EQ(expected_langs, GetCachedLanguages());
 }
@@ -142,7 +142,7 @@ TEST_F(GeoLanguageProviderTest, ButDoCallInTheNextDay) {
 
   // Move to another random place in Karnataka, India.
   MoveToLocation(23.0, 85.7);
-  task_environment_.FastForwardBy(base::TimeDelta::FromHours(25));
+  task_environment_.FastForwardBy(base::Hours(25));
   EXPECT_EQ(2, GetQueryNextPositionCalledTimes());
 
   result = GetCurrentGeoLanguages();

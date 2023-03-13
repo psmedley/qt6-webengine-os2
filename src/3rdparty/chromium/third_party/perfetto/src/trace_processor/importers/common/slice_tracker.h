@@ -19,6 +19,7 @@
 
 #include <stdint.h>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 
@@ -41,7 +42,7 @@ class SliceTracker {
       int64_t timestamp,
       TrackId track_id,
       StringId category,
-      StringId name,
+      StringId raw_name,
       SetArgsCallback args_callback = SetArgsCallback());
 
   // Unnestable slices are slices which do not have any concept of nesting so
@@ -69,7 +70,7 @@ class SliceTracker {
       int64_t timestamp,
       TrackId track_id,
       StringId category,
-      StringId name,
+      StringId raw_name,
       int64_t duration,
       SetArgsCallback args_callback = SetArgsCallback());
 
@@ -88,7 +89,7 @@ class SliceTracker {
       int64_t timestamp,
       TrackId track_id,
       StringId opt_category = {},
-      StringId opt_name = {},
+      StringId opt_raw_name = {},
       SetArgsCallback args_callback = SetArgsCallback());
 
   // Usually args should be added in the Begin or End args_callback but this
@@ -124,7 +125,7 @@ class SliceTracker {
     uint32_t legacy_unnestable_begin_count = 0;
     int64_t legacy_unnestable_last_begin_ts = 0;
   };
-  using StackMap = std::unordered_map<TrackId, TrackInfo>;
+  using StackMap = base::FlatHashMap<TrackId, TrackInfo>;
 
   // virtual for testing.
   virtual base::Optional<SliceId> StartSlice(int64_t timestamp,

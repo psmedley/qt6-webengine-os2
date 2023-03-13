@@ -51,6 +51,8 @@
     } \
   };
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen
 {
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(real,scalar_real_op,real part,\sa ArrayBase::real)
@@ -81,7 +83,8 @@ namespace Eigen
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(expm1,scalar_expm1_op,exponential of a value minus 1,\sa ArrayBase::expm1)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log,scalar_log_op,natural logarithm,\sa Eigen::log10 DOXCOMMA ArrayBase::log)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log1p,scalar_log1p_op,natural logarithm of 1 plus the value,\sa ArrayBase::log1p)
-  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log10,scalar_log10_op,base 10 logarithm,\sa Eigen::log DOXCOMMA ArrayBase::log)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log10,scalar_log10_op,base 10 logarithm,\sa Eigen::log DOXCOMMA ArrayBase::log10)
+  EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(log2,scalar_log2_op,base 2 logarithm,\sa Eigen::log DOXCOMMA ArrayBase::log2)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(abs,scalar_abs_op,absolute value,\sa ArrayBase::abs DOXCOMMA MatrixBase::cwiseAbs)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(abs2,scalar_abs2_op,squared absolute value,\sa ArrayBase::abs2 DOXCOMMA MatrixBase::cwiseAbs2)
   EIGEN_ARRAY_DECLARE_GLOBAL_UNARY(arg,scalar_arg_op,complex argument,\sa ArrayBase::arg DOXCOMMA MatrixBase::cwiseArg)
@@ -113,10 +116,9 @@ namespace Eigen
 #else
   template <typename Derived,typename ScalarExponent>
   EIGEN_DEVICE_FUNC inline
-  EIGEN_MSVC10_WORKAROUND_BINARYOP_RETURN_TYPE(
     const EIGEN_EXPR_BINARYOP_SCALAR_RETURN_TYPE(Derived,typename internal::promote_scalar_arg<typename Derived::Scalar
                                                  EIGEN_COMMA ScalarExponent EIGEN_COMMA
-                                                 EIGEN_SCALAR_BINARY_SUPPORTED(pow,typename Derived::Scalar,ScalarExponent)>::type,pow))
+                                                 EIGEN_SCALAR_BINARY_SUPPORTED(pow,typename Derived::Scalar,ScalarExponent)>::type,pow)
   pow(const Eigen::ArrayBase<Derived>& x, const ScalarExponent& exponent)
   {
     typedef typename internal::promote_scalar_arg<typename Derived::Scalar,ScalarExponent,
@@ -167,10 +169,9 @@ namespace Eigen
 #else
   template <typename Scalar, typename Derived>
   EIGEN_DEVICE_FUNC inline
-  EIGEN_MSVC10_WORKAROUND_BINARYOP_RETURN_TYPE(
     const EIGEN_SCALAR_BINARYOP_EXPR_RETURN_TYPE(typename internal::promote_scalar_arg<typename Derived::Scalar
                                                  EIGEN_COMMA Scalar EIGEN_COMMA
-                                                 EIGEN_SCALAR_BINARY_SUPPORTED(pow,Scalar,typename Derived::Scalar)>::type,Derived,pow))
+                                                 EIGEN_SCALAR_BINARY_SUPPORTED(pow,Scalar,typename Derived::Scalar)>::type,Derived,pow)
   pow(const Scalar& x, const Eigen::ArrayBase<Derived>& exponents) {
     typedef typename internal::promote_scalar_arg<typename Derived::Scalar,Scalar,
                                                   EIGEN_SCALAR_BINARY_SUPPORTED(pow,Scalar,typename Derived::Scalar)>::type PromotedScalar;

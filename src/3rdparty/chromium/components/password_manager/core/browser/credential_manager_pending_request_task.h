@@ -11,10 +11,11 @@
 #include <vector>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "components/password_manager/core/browser/http_password_store_migrator.h"
-#include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
+#include "components/password_manager/core/browser/password_store_interface.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -65,6 +66,10 @@ class CredentialManagerPendingRequestTask
       bool include_passwords,
       const std::vector<GURL>& request_federations,
       StoresToQuery stores_to_query);
+  CredentialManagerPendingRequestTask(
+      const CredentialManagerPendingRequestTask&) = delete;
+  CredentialManagerPendingRequestTask& operator=(
+      const CredentialManagerPendingRequestTask&) = delete;
   ~CredentialManagerPendingRequestTask() override;
 
   const url::Origin& origin() const { return origin_; }
@@ -75,6 +80,7 @@ class CredentialManagerPendingRequestTask
   void OnGetPasswordStoreResultsFrom(
       PasswordStoreInterface* store,
       std::vector<std::unique_ptr<PasswordForm>> results) override;
+  base::WeakPtr<PasswordStoreConsumer> GetWeakPtr();
 
  private:
   // HttpPasswordStoreMigrator::Consumer:
@@ -86,7 +92,7 @@ class CredentialManagerPendingRequestTask
 
   void ProcessForms(std::vector<std::unique_ptr<PasswordForm>> results);
 
-  CredentialManagerPendingRequestTaskDelegate* delegate_;  // Weak;
+  raw_ptr<CredentialManagerPendingRequestTaskDelegate> delegate_;  // Weak;
   SendCredentialCallback send_callback_;
   const CredentialMediationRequirement mediation_;
   const url::Origin origin_;
@@ -102,7 +108,8 @@ class CredentialManagerPendingRequestTask
                  std::unique_ptr<HttpPasswordStoreMigrator>>
       http_migrators_;
 
-  DISALLOW_COPY_AND_ASSIGN(CredentialManagerPendingRequestTask);
+  base::WeakPtrFactory<CredentialManagerPendingRequestTask> weak_ptr_factory_{
+      this};
 };
 
 }  // namespace password_manager

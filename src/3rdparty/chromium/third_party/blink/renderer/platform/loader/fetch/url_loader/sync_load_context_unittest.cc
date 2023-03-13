@@ -7,6 +7,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/system/data_pipe_utils.h"
@@ -110,7 +111,7 @@ class SyncLoadContextTest : public testing::Test {
             WebVector<std::unique_ptr<URLLoaderThrottle>>(), out_response,
             context_for_redirect, redirect_or_response_event,
             nullptr /* terminate_sync_load_event */,
-            base::TimeDelta::FromSeconds(60) /* timeout */,
+            base::Seconds(60) /* timeout */,
             mojo::NullRemote() /* download_to_blob_registry */,
             WebVector<WebString>() /* cors_exempt_header_list */,
             std::make_unique<ResourceLoadInfoNotifierWrapper>(
@@ -130,7 +131,7 @@ class SyncLoadContextTest : public testing::Test {
         request, std::make_unique<MockPendingSharedURLLoaderFactory>(),
         response, context_for_redirect, redirect_or_response_event,
         nullptr /* terminate_sync_load_event */,
-        base::TimeDelta::FromSeconds(60) /* timeout */,
+        base::Seconds(60) /* timeout */,
         mojo::NullRemote() /* download_to_blob_registry */, task_runner);
 
     auto mock_resource_request_sender =

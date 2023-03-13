@@ -62,27 +62,13 @@
 .console-pin-name,
 .console-pin-preview {
   width: 100%;
-  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   min-height: 13px;
 }
 
-.console-delete-pin {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  opacity: 70%;
-  cursor: pointer;
-}
-
-.console-delete-pin:hover,
-.console-delete-pin:focus-visible {
-  opacity: 100%;
-}
-
-:host-context(.-theme-with-dark-background) .console-delete-pin {
-  filter: brightness(2);
+.console-pin-preview {
+  overflow: hidden;
 }
 
 .console-pin-name:focus-within {

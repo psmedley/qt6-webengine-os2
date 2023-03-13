@@ -101,7 +101,6 @@ int32_t VideoEncoderWrapper::InitEncodeInternal(JNIEnv* jni) {
 
 void VideoEncoderWrapper::UpdateEncoderInfo(JNIEnv* jni) {
   encoder_info_.supports_native_handle = true;
-  encoder_info_.has_internal_source = false;
 
   encoder_info_.implementation_name = JavaToStdString(
       jni, Java_VideoEncoder_getImplementationName(jni, encoder_));
@@ -113,6 +112,12 @@ void VideoEncoderWrapper::UpdateEncoderInfo(JNIEnv* jni) {
 
   encoder_info_.resolution_bitrate_limits = JavaToNativeResolutionBitrateLimits(
       jni, Java_VideoEncoder_getResolutionBitrateLimits(jni, encoder_));
+
+  EncoderInfo info = GetEncoderInfoInternal(jni);
+  encoder_info_.requested_resolution_alignment =
+      info.requested_resolution_alignment;
+  encoder_info_.apply_alignment_to_all_simulcast_layers =
+      info.apply_alignment_to_all_simulcast_layers;
 }
 
 int32_t VideoEncoderWrapper::RegisterEncodeCompleteCallback(
@@ -167,15 +172,14 @@ int32_t VideoEncoderWrapper::Encode(
   return HandleReturnCode(jni, ret, "encode");
 }
 
-void VideoEncoderWrapper::SetRates(const RateControlParameters& parameters) {
+void VideoEncoderWrapper::SetRates(const RateControlParameters& rc_parameters) {
   JNIEnv* jni = AttachCurrentThreadIfNeeded();
 
-  ScopedJavaLocalRef<jobject> j_bitrate_allocation =
-      ToJavaBitrateAllocation(jni, parameters.bitrate);
-  ScopedJavaLocalRef<jobject> ret = Java_VideoEncoder_setRateAllocation(
-      jni, encoder_, j_bitrate_allocation,
-      (jint)(parameters.framerate_fps + 0.5));
-  HandleReturnCode(jni, ret, "setRateAllocation");
+  ScopedJavaLocalRef<jobject> j_rc_parameters =
+      ToJavaRateControlParameters(jni, rc_parameters);
+  ScopedJavaLocalRef<jobject> ret =
+      Java_VideoEncoder_setRates(jni, encoder_, j_rc_parameters);
+  HandleReturnCode(jni, ret, "setRates");
 }
 
 VideoEncoder::EncoderInfo VideoEncoderWrapper::GetEncoderInfo() const {
@@ -229,6 +233,26 @@ VideoEncoderWrapper::GetScalingSettingsInternal(JNIEnv* jni) const {
     default:
       return ScalingSettings::kOff;
   }
+}
+
+VideoEncoder::EncoderInfo VideoEncoderWrapper::GetEncoderInfoInternal(
+    JNIEnv* jni) const {
+  ScopedJavaLocalRef<jobject> j_encoder_info =
+      Java_VideoEncoder_getEncoderInfo(jni, encoder_);
+
+  jint requested_resolution_alignment =
+      Java_EncoderInfo_getRequestedResolutionAlignment(jni, j_encoder_info);
+
+  jboolean apply_alignment_to_all_simulcast_layers =
+      Java_EncoderInfo_getApplyAlignmentToAllSimulcastLayers(jni,
+                                                             j_encoder_info);
+
+  VideoEncoder::EncoderInfo info;
+  info.requested_resolution_alignment = requested_resolution_alignment;
+  info.apply_alignment_to_all_simulcast_layers =
+      apply_alignment_to_all_simulcast_layers;
+
+  return info;
 }
 
 void VideoEncoderWrapper::OnEncodedFrame(
@@ -408,6 +432,16 @@ ScopedJavaLocalRef<jobject> VideoEncoderWrapper::ToJavaBitrateAllocation(
                                j_array_spatial_layer.obj());
   }
   return Java_BitrateAllocation_Constructor(jni, j_allocation_array);
+}
+
+ScopedJavaLocalRef<jobject> VideoEncoderWrapper::ToJavaRateControlParameters(
+    JNIEnv* jni,
+    const VideoEncoder::RateControlParameters& rc_parameters) {
+  ScopedJavaLocalRef<jobject> j_bitrate_allocation =
+      ToJavaBitrateAllocation(jni, rc_parameters.bitrate);
+
+  return Java_RateControlParameters_Constructor(jni, j_bitrate_allocation,
+                                                rc_parameters.framerate_fps);
 }
 
 std::unique_ptr<VideoEncoder> JavaToNativeVideoEncoder(

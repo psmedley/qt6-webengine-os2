@@ -16,6 +16,7 @@
 
 #include "src/profiling/memory/client_api_factory.h"
 
+#include "perfetto/base/logging.h"
 #include "perfetto/ext/base/scoped_file.h"
 #include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/base/unix_task_runner.h"
@@ -45,26 +46,32 @@
 //   service. This happens in CreateClient.
 
 namespace perfetto {
-void EnableStacktraceOnCrashForDebug();
-
 namespace profiling {
 namespace {
 
 base::UnixSocketRaw* g_client_sock;
 
+bool MonitorFdOnce() {
+  char buf[1];
+  ssize_t r = g_client_sock->Receive(buf, sizeof(buf));
+  if (r == 0) {
+    PERFETTO_ELOG("Server disconneced.");
+    return false;
+  }
+  if (r < 0) {
+    PERFETTO_PLOG("Receive failed.");
+    return true;
+  }
+  AHeapProfile_initSession(malloc, free);
+  return true;
+}
+
 void MonitorFd() {
   g_client_sock->DcheckIsBlocking(true);
   for (;;) {
-    char buf[1];
-    ssize_t r = g_client_sock->Receive(buf, sizeof(buf));
-    if (r >= 1) {
-      AHeapProfile_initSession(malloc, free);
-    } else if (r == 0) {
-      PERFETTO_ELOG("Server disconneced.");
+    bool cont = MonitorFdOnce();
+    if (!cont)
       break;
-    } else {
-      PERFETTO_PLOG("Receive failed.");
-    }
   }
 }
 
@@ -102,6 +109,13 @@ void StartHeapprofdIfStatic() {
       PERFETTO_PLOG("waitpid");
 
     *g_client_sock = std::move(cli_sock);
+
+    const char* w = getenv("PERFETTO_HEAPPROFD_BLOCKING_INIT");
+    if (w && w[0] == '1') {
+      g_client_sock->DcheckIsBlocking(true);
+      MonitorFdOnce();
+    }
+
     std::thread th(MonitorFd);
     th.detach();
     return;
@@ -111,7 +125,7 @@ void StartHeapprofdIfStatic() {
 
   // On debug builds, we want to turn on crash reporting for heapprofd.
 #if PERFETTO_BUILDFLAG(PERFETTO_STDERR_CRASH_DUMP)
-  EnableStacktraceOnCrashForDebug();
+  base::EnableStacktraceOnCrashForDebug();
 #endif
 
   cli_sock.ReleaseFd();

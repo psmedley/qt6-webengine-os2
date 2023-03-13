@@ -53,17 +53,16 @@ int g_dismissal_embargo_days = kDefaultEmbargoDays;
 // permission due to repeated ignores.
 int g_ignore_embargo_days = kDefaultEmbargoDays;
 
-std::unique_ptr<base::DictionaryValue> GetOriginAutoBlockerData(
+std::unique_ptr<base::Value> GetOriginAutoBlockerData(
     HostContentSettingsMap* settings,
     const GURL& origin_url) {
-  std::unique_ptr<base::DictionaryValue> dict =
-      base::DictionaryValue::From(settings->GetWebsiteSetting(
-          origin_url, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
-          nullptr));
-  if (!dict)
-    return std::make_unique<base::DictionaryValue>();
+  base::Value website_setting = settings->GetWebsiteSetting(
+      origin_url, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
+      nullptr);
+  if (!website_setting.is_dict())
+    return std::make_unique<base::Value>(base::Value::Type::DICTIONARY);
 
-  return dict;
+  return base::Value::ToUniquePtrValue(std::move(website_setting));
 }
 
 base::Value* GetOrCreatePermissionDict(base::Value* origin_dict,
@@ -80,7 +79,7 @@ int RecordActionInWebsiteSettings(const GURL& url,
                                   ContentSettingsType permission,
                                   const char* key,
                                   HostContentSettingsMap* settings_map) {
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map, url);
 
   base::Value* permission_dict = GetOrCreatePermissionDict(
@@ -93,7 +92,7 @@ int RecordActionInWebsiteSettings(const GURL& url,
 
   settings_map->SetWebsiteSettingDefaultScope(
       url, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
-      std::move(dict));
+      base::Value::FromUniquePtrValue(std::move(dict)));
 
   return current_count;
 }
@@ -102,7 +101,7 @@ int GetActionCount(const GURL& url,
                    ContentSettingsType permission,
                    const char* key,
                    HostContentSettingsMap* settings_map) {
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map, url);
   base::Value* permission_dict = GetOrCreatePermissionDict(
       dict.get(), PermissionUtil::GetPermissionString(permission));
@@ -119,7 +118,7 @@ base::Time GetEmbargoStartTime(base::Value* permission_dict,
       permission_dict->FindKeyOfType(key, base::Value::Type::DOUBLE);
   if (found && base::FeatureList::IsEnabled(feature)) {
     return base::Time::FromDeltaSinceWindowsEpoch(
-        base::TimeDelta::FromMicroseconds(found->GetDouble()));
+        base::Microseconds(found->GetDouble()));
   }
   return base::Time();
 }
@@ -185,21 +184,21 @@ PermissionResult PermissionDecisionAutoBlocker::GetEmbargoResult(
   DCHECK(settings_map);
   DCHECK(PermissionUtil::IsPermission(permission));
 
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map, request_origin);
   base::Value* permission_dict = GetOrCreatePermissionDict(
       dict.get(), PermissionUtil::GetPermissionString(permission));
 
   if (IsUnderEmbargo(permission_dict, features::kBlockPromptsIfDismissedOften,
                      kPermissionDismissalEmbargoKey, current_time,
-                     base::TimeDelta::FromDays(g_dismissal_embargo_days))) {
+                     base::Days(g_dismissal_embargo_days))) {
     return PermissionResult(CONTENT_SETTING_BLOCK,
                             PermissionStatusSource::MULTIPLE_DISMISSALS);
   }
 
   if (IsUnderEmbargo(permission_dict, features::kBlockPromptsIfIgnoredOften,
                      kPermissionIgnoreEmbargoKey, current_time,
-                     base::TimeDelta::FromDays(g_ignore_embargo_days))) {
+                     base::Days(g_ignore_embargo_days))) {
     return PermissionResult(CONTENT_SETTING_BLOCK,
                             PermissionStatusSource::MULTIPLE_IGNORES);
   }
@@ -261,7 +260,7 @@ base::Time PermissionDecisionAutoBlocker::GetEmbargoStartTime(
     const GURL& request_origin,
     ContentSettingsType permission) {
   DCHECK(settings_map_);
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map_, request_origin);
   base::Value* permission_dict = GetOrCreatePermissionDict(
       dict.get(), PermissionUtil::GetPermissionString(permission));
@@ -397,14 +396,14 @@ void PermissionDecisionAutoBlocker::RemoveEmbargoAndResetCounts(
   if (!PermissionUtil::IsPermission(permission))
     return;
 
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map_, url);
 
   dict->RemoveKey(PermissionUtil::GetPermissionString(permission));
 
   settings_map_->SetWebsiteSettingDefaultScope(
       url, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
-      std::move(dict));
+      base::Value::FromUniquePtrValue(std::move(dict)));
 }
 
 void PermissionDecisionAutoBlocker::RemoveEmbargoAndResetCounts(
@@ -420,7 +419,7 @@ void PermissionDecisionAutoBlocker::RemoveEmbargoAndResetCounts(
     if (origin.is_valid() && filter.Run(origin)) {
       settings_map_->SetWebsiteSettingDefaultScope(
           origin, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
-          nullptr);
+          base::Value());
     }
   }
 }
@@ -441,7 +440,7 @@ void PermissionDecisionAutoBlocker::PlaceUnderEmbargo(
     const GURL& request_origin,
     ContentSettingsType permission,
     const char* key) {
-  std::unique_ptr<base::DictionaryValue> dict =
+  std::unique_ptr<base::Value> dict =
       GetOriginAutoBlockerData(settings_map_, request_origin);
   base::Value* permission_dict = GetOrCreatePermissionDict(
       dict.get(), PermissionUtil::GetPermissionString(permission));
@@ -449,7 +448,7 @@ void PermissionDecisionAutoBlocker::PlaceUnderEmbargo(
       key, base::Value(static_cast<double>(clock_->Now().ToInternalValue())));
   settings_map_->SetWebsiteSettingDefaultScope(
       request_origin, GURL(), ContentSettingsType::PERMISSION_AUTOBLOCKER_DATA,
-      std::move(dict));
+      base::Value::FromUniquePtrValue(std::move(dict)));
 }
 
 void PermissionDecisionAutoBlocker::SetClockForTesting(base::Clock* clock) {

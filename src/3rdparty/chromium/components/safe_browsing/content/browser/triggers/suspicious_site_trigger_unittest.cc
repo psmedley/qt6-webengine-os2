@@ -55,8 +55,8 @@ class SuspiciousSiteTriggerTest : public content::RenderViewHostTestHarness {
 
   void CreateTrigger(bool monitor_mode) {
     safe_browsing::SuspiciousSiteTrigger::CreateForWebContents(
-        web_contents(), &trigger_manager_, &prefs_, nullptr, nullptr, nullptr,
-        monitor_mode);
+        web_contents(), &trigger_manager_, &prefs_, nullptr, nullptr,
+        base::NullCallback(), nullptr, monitor_mode);
     safe_browsing::SuspiciousSiteTrigger* trigger =
         safe_browsing::SuspiciousSiteTrigger::FromWebContents(web_contents());
     // Give the trigger a test task runner that we can synchronize on.
@@ -137,7 +137,7 @@ class SuspiciousSiteTriggerTest : public content::RenderViewHostTestHarness {
       const SuspiciousSiteTrigger::TriggerState state,
       int count) {
     histograms_.ExpectBucketCount(
-        kSuspiciousSiteTriggerReportDelayStateMetricName,
+        kSuspiciousSiteTriggerReportDelayStateTestMetricName,
         static_cast<int>(state), count);
   }
 
@@ -146,7 +146,7 @@ class SuspiciousSiteTriggerTest : public content::RenderViewHostTestHarness {
   void ExpectReportRejectionHistogramCount(const TriggerManagerReason reason,
                                            int count) {
     histograms_.ExpectBucketCount(
-        kSuspiciousSiteTriggerReportRejectionMetricName,
+        kSuspiciousSiteTriggerReportRejectionTestMetricName,
         static_cast<int>(reason), count);
   }
 
@@ -154,7 +154,7 @@ class SuspiciousSiteTriggerTest : public content::RenderViewHostTestHarness {
   // indicating no errors occurred.
   void ExpectNoReportRejection() {
     histograms_.ExpectTotalCount(
-        kSuspiciousSiteTriggerReportRejectionMetricName, 0);
+        kSuspiciousSiteTriggerReportRejectionTestMetricName, 0);
   }
 
   MockTriggerManager* get_trigger_manager() { return &trigger_manager_; }
@@ -172,7 +172,7 @@ TEST_F(SuspiciousSiteTriggerTest, RegularPageNonSuspicious) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -193,7 +193,7 @@ TEST_F(SuspiciousSiteTriggerTest, RegularPageNonSuspicious) {
 }
 
 // crbug.com/1010037: fails on win.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_SuspiciousHitDuringLoad DISABLED_SuspiciousHitDuringLoad
 #else
 #define MAYBE_SuspiciousHitDuringLoad SuspiciousHitDuringLoad
@@ -204,7 +204,7 @@ TEST_F(SuspiciousSiteTriggerTest, MAYBE_SuspiciousHitDuringLoad) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(1)
       .WillOnce(Return(true));
   EXPECT_CALL(*get_trigger_manager(),
@@ -242,7 +242,7 @@ TEST_F(SuspiciousSiteTriggerTest, SuspiciousHitAfterLoad) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(1)
       .WillOnce(Return(true));
   EXPECT_CALL(*get_trigger_manager(),
@@ -279,10 +279,10 @@ TEST_F(SuspiciousSiteTriggerTest, DISABLED_ReportRejectedByTriggerManager) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(1)
       .WillOnce(
-          DoAll(SetArgPointee<7>(TriggerManagerReason::DAILY_QUOTA_EXCEEDED),
+          DoAll(SetArgPointee<8>(TriggerManagerReason::DAILY_QUOTA_EXCEEDED),
                 Return(false)));
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -321,7 +321,7 @@ TEST_F(SuspiciousSiteTriggerTest, NewNavigationMidLoad_NotSuspicious) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -353,7 +353,7 @@ TEST_F(SuspiciousSiteTriggerTest, DISABLED_NewNavigationMidLoad_Suspicious) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -391,7 +391,7 @@ TEST_F(SuspiciousSiteTriggerTest, MonitorMode_NotSuspicious) {
   CreateTrigger(/*monitor_mode=*/true);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -418,7 +418,7 @@ TEST_F(SuspiciousSiteTriggerTest, MonitorMode_SuspiciousHitDuringLoad) {
   CreateTrigger(/*monitor_mode=*/true);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -454,7 +454,7 @@ TEST_F(SuspiciousSiteTriggerTest, VisibleURLChangeMidLoad_NotSuspicious) {
   CreateTrigger(/*monitor_mode=*/false);
 
   EXPECT_CALL(*get_trigger_manager(),
-              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _))
+              StartCollectingThreatDetailsWithReason(_, _, _, _, _, _, _, _, _))
       .Times(0);
   EXPECT_CALL(*get_trigger_manager(),
               FinishCollectingThreatDetails(_, _, _, _, _, _))
@@ -491,7 +491,7 @@ TEST_F(SuspiciousSiteTriggerTest, VisibleURLChangeMidLoad_Suspicious) {
   GURL suspicious_url(kSuspiciousUrl);
   EXPECT_CALL(*get_trigger_manager(),
               StartCollectingThreatDetailsWithReason(
-                  _, _, ResourceHasUrl(suspicious_url), _, _, _, _, _))
+                  _, _, ResourceHasUrl(suspicious_url), _, _, _, _, _, _))
       .Times(1)
       .WillOnce(Return(true));
   EXPECT_CALL(*get_trigger_manager(),

@@ -67,8 +67,11 @@ crosapi::mojom::KeystoreService* GetKeystoreService(
 // extension. |context| is the browser context in which the extension is hosted.
 std::string ValidateCrosapi(int min_version, content::BrowserContext* context) {
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
-  int version = chromeos::LacrosService::Get()->GetInterfaceVersion(
-      KeystoreService::Uuid_);
+  chromeos::LacrosService* service = chromeos::LacrosService::Get();
+  if (!service || !service->IsAvailable<crosapi::mojom::KeystoreService>())
+    return kUnsupportedByAsh;
+
+  int version = service->GetInterfaceVersion(KeystoreService::Uuid_);
   if (version < min_version)
     return kUnsupportedByAsh;
 
@@ -129,12 +132,13 @@ bool IsExtensionAllowed(Profile* profile, const Extension* extension) {
     // allowed in chrome/common/extensions/api/_permission_features.json
     return true;
   }
-  const base::ListValue* list =
+  const base::Value* list =
       profile->GetPrefs()->GetList(prefs::kAttestationExtensionAllowlist);
   DCHECK_NE(list, nullptr);
   base::Value value(extension->id());
-  return std::find(list->GetList().begin(), list->GetList().end(), value) !=
-         list->GetList().end();
+  return std::find(list->GetListDeprecated().begin(),
+                   list->GetListDeprecated().end(),
+                   value) != list->GetListDeprecated().end();
 }
 
 }  // namespace platform_keys
@@ -146,15 +150,15 @@ EnterprisePlatformKeysInternalGenerateKeyFunction::
 
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysInternalGenerateKeyFunction::Run() {
+  std::unique_ptr<api_epki::GenerateKey::Params> params(
+      api_epki::GenerateKey::Params::Create(args()));
+
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   // TODO(b/191958380): Lift the restriction when *.platformKeys.* APIs are
   // implemented for secondary profiles in Lacros.
   if (!Profile::FromBrowserContext(browser_context())->IsMainProfile())
     return RespondNow(Error(kUnsupportedProfile));
 #endif  // BUILDFLAG(IS_CHROMEOS_LACROS)
-
-  std::unique_ptr<api_epki::GenerateKey::Params> params(
-      api_epki::GenerateKey::Params::Create(*args_));
 
   EXTENSION_FUNCTION_VALIDATE(params);
   absl::optional<chromeos::platform_keys::TokenId> platform_keys_token_id =
@@ -173,7 +177,7 @@ EnterprisePlatformKeysInternalGenerateKeyFunction::Run() {
                                 *(params->algorithm.modulus_length) >= 0);
     service->GenerateRSAKey(
         platform_keys_token_id.value(), *(params->algorithm.modulus_length),
-        extension_id(),
+        params->software_backed, extension_id(),
         base::BindOnce(
             &EnterprisePlatformKeysInternalGenerateKeyFunction::OnGeneratedKey,
             this));
@@ -210,7 +214,7 @@ void EnterprisePlatformKeysInternalGenerateKeyFunction::OnGeneratedKey(
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysGetCertificatesFunction::Run() {
   std::unique_ptr<api_epk::GetCertificates::Params> params(
-      api_epk::GetCertificates::Params::Create(*args_));
+      api_epk::GetCertificates::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   std::string error =
@@ -241,13 +245,13 @@ void EnterprisePlatformKeysGetCertificatesFunction::OnGetCertificates(
   }
   DCHECK(result->is_certificates());
 
-  auto client_certs = std::make_unique<base::ListValue>();
+  base::Value::List client_certs;
   for (std::vector<uint8_t>& cert : result->get_certificates()) {
-    client_certs->Append(std::make_unique<base::Value>(std::move(cert)));
+    client_certs.Append(base::Value(std::move(cert)));
   }
 
   auto results = std::make_unique<base::ListValue>();
-  results->Append(std::move(client_certs));
+  results->Append(base::Value(std::move(client_certs)));
   Respond(ArgumentList(std::move(results)));
 }
 
@@ -256,7 +260,7 @@ void EnterprisePlatformKeysGetCertificatesFunction::OnGetCertificates(
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysImportCertificateFunction::Run() {
   std::unique_ptr<api_epk::ImportCertificate::Params> params(
-      api_epk::ImportCertificate::Params::Create(*args_));
+      api_epk::ImportCertificate::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   std::string error = ValidateCrosapi(
@@ -290,7 +294,7 @@ void EnterprisePlatformKeysImportCertificateFunction::OnAddCertificate(
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysRemoveCertificateFunction::Run() {
   std::unique_ptr<api_epk::RemoveCertificate::Params> params(
-      api_epk::RemoveCertificate::Params::Create(*args_));
+      api_epk::RemoveCertificate::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   std::string error =
@@ -326,7 +330,7 @@ void EnterprisePlatformKeysRemoveCertificateFunction::OnRemoveCertificate(
 
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysInternalGetTokensFunction::Run() {
-  EXTENSION_FUNCTION_VALIDATE(args_->GetList().empty());
+  EXTENSION_FUNCTION_VALIDATE(args().empty());
 
   std::string error = ValidateCrosapi(
       KeystoreService::kDEPRECATED_GetKeyStoresMinVersion, browser_context());
@@ -372,7 +376,7 @@ void EnterprisePlatformKeysInternalGetTokensFunction::OnGetKeyStores(
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysChallengeMachineKeyFunction::Run() {
   std::unique_ptr<api_epk::ChallengeMachineKey::Params> params(
-      api_epk::ChallengeMachineKey::Params::Create(*args_));
+      api_epk::ChallengeMachineKey::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const std::string error = ValidateCrosapi(
@@ -416,7 +420,7 @@ void EnterprisePlatformKeysChallengeMachineKeyFunction::
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysChallengeUserKeyFunction::Run() {
   std::unique_ptr<api_epk::ChallengeUserKey::Params> params(
-      api_epk::ChallengeUserKey::Params::Create(*args_));
+      api_epk::ChallengeUserKey::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   const std::string error = ValidateCrosapi(

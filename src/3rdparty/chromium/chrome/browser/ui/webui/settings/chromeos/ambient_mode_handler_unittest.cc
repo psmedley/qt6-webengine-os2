@@ -6,10 +6,11 @@
 
 #include <memory>
 
+#include "ash/ambient/test/ambient_ash_test_helper.h"
+#include "ash/constants/ash_features.h"
 #include "ash/public/cpp/ambient/ambient_prefs.h"
 #include "ash/public/cpp/ambient/common/ambient_settings.h"
 #include "ash/public/cpp/ambient/fake_ambient_backend_controller_impl.h"
-#include "ash/public/cpp/test/test_image_downloader.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/prefs/pref_registry_simple.h"
@@ -58,10 +59,14 @@ class AmbientModeHandlerTest : public testing::Test {
     handler_->AllowJavascript();
     fake_backend_controller_ =
         std::make_unique<ash::FakeAmbientBackendControllerImpl>();
-    image_downloader_ = std::make_unique<ash::TestImageDownloader>();
+    ambient_ash_test_helper_ = std::make_unique<ash::AmbientAshTestHelper>();
+    ambient_ash_test_helper_->ambient_client().SetAutomaticalyIssueToken(true);
   }
 
-  void TearDown() override { handler_->DisallowJavascript(); }
+  void TearDown() override {
+    handler_->DisallowJavascript();
+    testing::Test::TearDown();
+  }
 
   content::TestWebUI* web_ui() { return web_ui_.get(); }
 
@@ -93,21 +98,20 @@ class AmbientModeHandlerTest : public testing::Test {
   }
 
   void RequestSettings() {
-    base::ListValue args;
-    handler_->HandleRequestSettings(&args);
+    handler_->HandleRequestSettings(base::Value::List());
   }
 
   void RequestAlbums(ash::AmbientModeTopicSource topic_source) {
-    base::ListValue args;
+    base::Value args(base::Value::Type::LIST);
     args.Append(static_cast<int>(topic_source));
-    handler_->HandleRequestAlbums(&args);
+    handler_->HandleRequestAlbums(args.GetList());
   }
 
-  void HandleSetSelectedTemperatureUnit(const base::ListValue* args) {
+  void HandleSetSelectedTemperatureUnit(const base::Value::List& args) {
     handler_->HandleSetSelectedTemperatureUnit(args);
   }
 
-  void HandleSetSelectedAlbums(const base::ListValue* args) {
+  void HandleSetSelectedAlbums(const base::Value::List& args) {
     handler_->HandleSetSelectedAlbums(args);
   }
 
@@ -195,8 +199,9 @@ class AmbientModeHandlerTest : public testing::Test {
 
   void VerifyAlbumsSent(ash::AmbientModeTopicSource topic_source) {
     // Art gallery has an extra call to update the topic source to Art gallery.
-    std::vector<std::unique_ptr<content::TestWebUI::CallData>>::size_type call_size =
-        topic_source == ash::AmbientModeTopicSource::kGooglePhotos ? 1U : 2U;
+    // And receive the image update.
+    std::size_t call_size =
+        topic_source == ash::AmbientModeTopicSource::kGooglePhotos ? 3U : 5U;
     EXPECT_EQ(call_size, web_ui_->call_data().size());
 
     if (topic_source == ash::AmbientModeTopicSource::kArtGallery) {
@@ -224,14 +229,14 @@ class AmbientModeHandlerTest : public testing::Test {
     EXPECT_EQ(static_cast<int>(topic_source), topic_source_value->GetInt());
 
     const base::Value* albums = dictionary->FindKey("albums");
-    EXPECT_EQ(2U, albums->GetList().size());
+    EXPECT_EQ(2U, albums->GetListDeprecated().size());
 
     const base::DictionaryValue* album0;
-    albums->GetList()[0].GetAsDictionary(&album0);
+    albums->GetListDeprecated()[0].GetAsDictionary(&album0);
     EXPECT_EQ("0", album0->FindKey("albumId")->GetString());
 
     const base::DictionaryValue* album1;
-    albums->GetList()[1].GetAsDictionary(&album1);
+    albums->GetListDeprecated()[1].GetAsDictionary(&album1);
     EXPECT_EQ("1", album1->FindKey("albumId")->GetString());
 
     if (topic_source == ash::AmbientModeTopicSource::kGooglePhotos) {
@@ -252,10 +257,11 @@ class AmbientModeHandlerTest : public testing::Test {
  private:
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
+  base::test::ScopedFeatureList scoped_feature_list_;
   std::unique_ptr<content::TestWebUI> web_ui_;
+  std::unique_ptr<ash::AmbientAshTestHelper> ambient_ash_test_helper_;
   std::unique_ptr<ash::FakeAmbientBackendControllerImpl>
       fake_backend_controller_;
-  std::unique_ptr<ash::TestImageDownloader> image_downloader_;
   std::unique_ptr<TestAmbientModeHandler> handler_;
   base::HistogramTester histogram_tester_;
   std::unique_ptr<TestingPrefServiceSimple> test_pref_service_;
@@ -763,7 +769,7 @@ TEST_F(AmbientModeHandlerTest, TestAlbumNumbersAreRecorded) {
   dictionary.SetKey("albums", std::move(albums));
 
   args.Append(std::move(dictionary));
-  HandleSetSelectedAlbums(&args);
+  HandleSetSelectedAlbums(args.GetList());
 
   histogram_tester().ExpectTotalCount("Ash.AmbientMode.TotalNumberOfAlbums",
                                       /*count=*/1);
@@ -777,10 +783,10 @@ TEST_F(AmbientModeHandlerTest, TestTemperatureUnitChangeUpdatesSettings) {
   EXPECT_FALSE(IsUpdateSettingsPendingAtHandler());
   EXPECT_FALSE(IsUpdateSettingsPendingAtBackend());
 
-  base::ListValue args;
+  base::Value args(base::Value::Type::LIST);
   args.Append("fahrenheit");
 
-  HandleSetSelectedTemperatureUnit(&args);
+  HandleSetSelectedTemperatureUnit(args.GetList());
 
   EXPECT_TRUE(IsUpdateSettingsPendingAtHandler());
   EXPECT_TRUE(IsUpdateSettingsPendingAtBackend());
@@ -797,10 +803,10 @@ TEST_F(AmbientModeHandlerTest, TestSameTemperatureUnitSkipsUpdate) {
   EXPECT_FALSE(IsUpdateSettingsPendingAtHandler());
   EXPECT_FALSE(IsUpdateSettingsPendingAtBackend());
 
-  base::ListValue args;
+  base::Value args(base::Value::Type::LIST);
   args.Append("celsius");
 
-  HandleSetSelectedTemperatureUnit(&args);
+  HandleSetSelectedTemperatureUnit(args.GetList());
 
   EXPECT_FALSE(IsUpdateSettingsPendingAtHandler());
   EXPECT_FALSE(IsUpdateSettingsPendingAtBackend());

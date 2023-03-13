@@ -73,13 +73,13 @@ void GuestOsHandler::OnJavascriptDisallowed() {
 }
 
 void GuestOsHandler::HandleGetGuestOsSharedPathsDisplayText(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
-  CHECK_EQ(2U, args->GetSize());
-  std::string callback_id = args->GetList()[0].GetString();
+  CHECK_EQ(2U, args.size());
+  std::string callback_id = args[0].GetString();
 
   base::Value texts(base::Value::Type::LIST);
-  for (const auto& path : args->GetList()[1].GetList()) {
+  for (const auto& path : args[1].GetListDeprecated()) {
     texts.Append(file_manager::util::GetPathDisplayTextForSettings(
         profile_, path.GetString()));
   }
@@ -87,11 +87,11 @@ void GuestOsHandler::HandleGetGuestOsSharedPathsDisplayText(
 }
 
 void GuestOsHandler::HandleRemoveGuestOsSharedPath(
-    const base::ListValue* args) {
-  CHECK_EQ(3U, args->GetList().size());
-  std::string callback_id = args->GetList()[0].GetString();
-  std::string vm_name = args->GetList()[1].GetString();
-  std::string path = args->GetList()[2].GetString();
+    const base::Value::List& args) {
+  CHECK_EQ(3U, args.size());
+  std::string callback_id = args[0].GetString();
+  std::string vm_name = args[1].GetString();
+  std::string path = args[2].GetString();
 
   guest_os::GuestOsSharePath::GetForProfile(profile_)->UnsharePath(
       vm_name, base::FilePath(path),
@@ -112,18 +112,17 @@ void GuestOsHandler::OnGuestOsSharedPathRemoved(
 }
 
 void GuestOsHandler::HandleNotifyGuestOsSharedUsbDevicesPageReady(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   OnUsbDevicesChanged();
 }
 
 void GuestOsHandler::HandleSetGuestOsUsbDeviceShared(
-    const base::ListValue* args) {
-  CHECK_EQ(3U, args->GetList().size());
-  const auto& args_list = args->GetList();
-  const std::string& vm_name = args_list[0].GetString();
-  const std::string& guid = args_list[1].GetString();
-  bool shared = args_list[2].GetBool();
+    const base::Value::List& args) {
+  CHECK_EQ(3U, args.size());
+  const std::string& vm_name = args[0].GetString();
+  const std::string& guid = args[1].GetString();
+  bool shared = args[2].GetBool();
 
   chromeos::CrosUsbDetector* detector = chromeos::CrosUsbDetector::Get();
   if (!detector)

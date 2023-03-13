@@ -5,6 +5,8 @@
 #include "components/safe_browsing/core/browser/realtime/url_lookup_service.h"
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
+#include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_feature_list.h"
@@ -46,13 +48,17 @@ constexpr char kTestSubframeReferrerUrl[] = "http://iframe.example.referrer/";
 class TestSafeBrowsingTokenFetcher : public SafeBrowsingTokenFetcher {
  public:
   TestSafeBrowsingTokenFetcher() = default;
-  ~TestSafeBrowsingTokenFetcher() override = default;
+  ~TestSafeBrowsingTokenFetcher() override {
+    // Like SafeBrowsingTokenFetchTracer, trigger the callback when destroyed.
+    RunAccessTokenCallback("");
+  }
 
   // SafeBrowsingTokenFetcher:
   void Start(Callback callback) override { callback_ = std::move(callback); }
 
   void RunAccessTokenCallback(std::string token) {
-    std::move(callback_).Run(token);
+    if (callback_)
+      std::move(callback_).Run(token);
   }
 
   MOCK_METHOD1(OnInvalidAccessToken, void(const std::string&));
@@ -64,13 +70,15 @@ class TestSafeBrowsingTokenFetcher : public SafeBrowsingTokenFetcher {
 class MockReferrerChainProvider : public ReferrerChainProvider {
  public:
   virtual ~MockReferrerChainProvider() = default;
-  MOCK_METHOD3(IdentifyReferrerChainByWebContents,
-               AttributionResult(content::WebContents* web_contents,
+  MOCK_METHOD3(IdentifyReferrerChainByRenderFrameHost,
+               AttributionResult(content::RenderFrameHost* rfh,
                                  int user_gesture_count_limit,
                                  ReferrerChain* out_referrer_chain));
-  MOCK_METHOD4(IdentifyReferrerChainByEventURL,
+  MOCK_METHOD5(IdentifyReferrerChainByEventURL,
                AttributionResult(const GURL& event_url,
                                  SessionID event_tab_id,
+                                 const content::GlobalRenderFrameHostId&
+                                     event_outermost_main_frame_id,
                                  int user_gesture_count_limit,
                                  ReferrerChain* out_referrer_chain));
   MOCK_METHOD3(IdentifyReferrerChainByPendingEventURL,
@@ -96,7 +104,9 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
         &test_pref_service_, false /* is_off_the_record */,
         false /* store_last_modified */, false /* restore_session */);
     cache_manager_ = std::make_unique<VerdictCacheManager>(
-        nullptr, content_setting_map_.get());
+        /*history_service=*/nullptr, content_setting_map_.get(),
+        &test_pref_service_,
+        /*sync_observer=*/nullptr);
     referrer_chain_provider_ = std::make_unique<MockReferrerChainProvider>();
 
     auto token_fetcher = std::make_unique<TestSafeBrowsingTokenFetcher>();
@@ -130,7 +140,9 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
 
   void TearDown() override {
     cache_manager_.reset();
-    content_setting_map_->ShutdownOnUIThread();
+    if (content_setting_map_) {
+      content_setting_map_->ShutdownOnUIThread();
+    }
     rt_service_->Shutdown();
   }
 
@@ -140,8 +152,16 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
   void HandleLookupError() { rt_service_->HandleLookupError(); }
   void HandleLookupSuccess() { rt_service_->HandleLookupSuccess(); }
   bool IsInBackoffMode() { return rt_service_->IsInBackoffMode(); }
-  std::unique_ptr<RTLookupRequest> FillRequestProto(const GURL& url) {
-    return rt_service_->FillRequestProto(url);
+  bool CanSendRTSampleRequest() {
+    return rt_service_->CanSendRTSampleRequest();
+  }
+  std::unique_ptr<RTLookupRequest> FillRequestProto(
+      const GURL& url,
+      const GURL& last_committed_url,
+      bool is_mainframe,
+      bool is_sampled_report) {
+    return rt_service_->FillRequestProto(url, last_committed_url, is_mainframe,
+                                         is_sampled_report);
   }
   std::unique_ptr<RTLookupResponse> GetCachedRealTimeUrlVerdict(
       const GURL& url) {
@@ -203,6 +223,14 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
         std::make_unique<base::Value>(true));
   }
 
+  void EnableExtendedReporting() {
+    EnableMbb();
+    test_pref_service_.SetUserPref(prefs::kSafeBrowsingEnabled,
+                                   std::make_unique<base::Value>(true));
+    test_pref_service_.SetUserPref(prefs::kSafeBrowsingScoutReportingEnabled,
+                                   std::make_unique<base::Value>(true));
+  }
+
   void EnableRealTimeUrlLookup(
       const std::vector<base::Feature>& enabled_features,
       const std::vector<base::Feature>& disabled_features) {
@@ -257,18 +285,30 @@ class RealTimeUrlLookupServiceTest : public PlatformTest {
     return referrer_chain_entry;
   }
 
+  ChromeUserPopulation::PageLoadToken CreatePageLoadToken(
+      std::string token_value) {
+    ChromeUserPopulation::PageLoadToken token;
+    token.set_token_source(
+        ChromeUserPopulation::PageLoadToken::CLIENT_GENERATION);
+    token.set_token_time_msec(base::Time::Now().ToJavaTime());
+    token.set_token_value(token_value);
+    return token;
+  }
+
   network::TestURLLoaderFactory test_url_loader_factory_;
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   std::unique_ptr<RealTimeUrlLookupService> rt_service_;
   std::unique_ptr<VerdictCacheManager> cache_manager_;
   scoped_refptr<HostContentSettingsMap> content_setting_map_;
   bool token_fetches_configured_in_client_ = false;
-  TestSafeBrowsingTokenFetcher* raw_token_fetcher_ = nullptr;
+  raw_ptr<TestSafeBrowsingTokenFetcher> raw_token_fetcher_ = nullptr;
   base::test::TaskEnvironment task_environment_{
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   sync_preferences::TestingPrefServiceSyncable test_pref_service_;
   base::test::ScopedFeatureList feature_list_;
   std::unique_ptr<MockReferrerChainProvider> referrer_chain_provider_;
+  GURL last_committed_url_ = GURL("http://lastcommitted.test");
+  bool is_mainframe_ = true;
 };
 
 TEST_F(RealTimeUrlLookupServiceTest, TestFillRequestProto) {
@@ -280,13 +320,20 @@ TEST_F(RealTimeUrlLookupServiceTest, TestFillRequestProto) {
       {"http://user:pass@example.com/", "http://example.com/"},
       {"http://%123:bar@example.com/", "http://example.com/"},
       {"http://example.com/abc#123", "http://example.com/abc#123"}};
-  for (size_t i = 0; i < base::size(sanitize_url_cases); i++) {
+  for (size_t i = 0; i < std::size(sanitize_url_cases); i++) {
     GURL url(sanitize_url_cases[i].url);
-    auto result = FillRequestProto(url);
+    auto result = FillRequestProto(url, last_committed_url_, is_mainframe_,
+                                   /*is_sampled_report=*/i % 2 == 0);
+    if (i % 2 == 0) {
+      EXPECT_EQ(/* sampled report */ 2, result->report_type());
+    } else {
+      EXPECT_EQ(/* full report */ 1, result->report_type());
+    }
     EXPECT_EQ(sanitize_url_cases[i].expected_url, result->url());
     EXPECT_EQ(RTLookupRequest::NAVIGATION, result->lookup_type());
     EXPECT_EQ(ChromeUserPopulation::SAFE_BROWSING,
               result->population().user_population());
+    EXPECT_EQ(1, result->frame_type());
 
     // The value of is_history_sync_enabled() should reflect that of the
     // callback passed in by the client, which in this case is true.
@@ -296,6 +343,62 @@ TEST_F(RealTimeUrlLookupServiceTest, TestFillRequestProto) {
 #if BUILDFLAG(FULL_SAFE_BROWSING)
     EXPECT_TRUE(result->population().is_under_advanced_protection());
 #endif
+  }
+}
+
+TEST_F(RealTimeUrlLookupServiceTest, TestFillPageLoadToken_FeatureDisabled) {
+  feature_list_.InitAndDisableFeature(kSafeBrowsingPageLoadToken);
+  auto request = FillRequestProto(GURL(kTestUrl), GURL(), /*is_mainframe=*/true,
+                                  /*is_sampled_report=*/false);
+  // Page load tokens should not be attached because the feature flag is
+  // disabled.
+  ASSERT_EQ(0, request->population().page_load_tokens_size());
+}
+
+TEST_F(RealTimeUrlLookupServiceTest, TestFillPageLoadToken_FeatureEnabled) {
+  GURL url(kTestUrl);
+  GURL subframe_url(kTestSubframeUrl);
+  feature_list_.InitAndEnableFeature(kSafeBrowsingPageLoadToken);
+
+  // mainframe URL
+  {
+    cache_manager_->SetPageLoadTokenForTesting(
+        url, CreatePageLoadToken("url_page_load_token"));
+    auto request = FillRequestProto(url, GURL(), /*is_mainframe=*/true,
+                                    /*is_sampled_report=*/false);
+    ASSERT_EQ(1, request->population().page_load_tokens_size());
+    // The token should be re-generated for the mainframe URL.
+    EXPECT_NE("url_page_load_token",
+              request->population().page_load_tokens(0).token_value());
+    EXPECT_EQ(ChromeUserPopulation::PageLoadToken::CLIENT_GENERATION,
+              request->population().page_load_tokens(0).token_source());
+  }
+
+  // subframe URL, token for the mainframe URL not found.
+  {
+    ChromeUserPopulation::PageLoadToken empty_token;
+    cache_manager_->SetPageLoadTokenForTesting(url, empty_token);
+    auto request = FillRequestProto(subframe_url, url, /*is_mainframe=*/false,
+                                    /*is_sampled_report=*/false);
+    ASSERT_EQ(1, request->population().page_load_tokens_size());
+    // The token should be generated for the mainframe URL.
+    std::string token_value =
+        request->population().page_load_tokens(0).token_value();
+    EXPECT_EQ(token_value, cache_manager_->GetPageLoadToken(url).token_value());
+    EXPECT_FALSE(
+        cache_manager_->GetPageLoadToken(subframe_url).has_token_value());
+  }
+
+  // subframe URL, token for the mainframe URL found.
+  {
+    cache_manager_->SetPageLoadTokenForTesting(
+        url, CreatePageLoadToken("url_page_load_token"));
+    auto request = FillRequestProto(subframe_url, url, /*is_mainframe=*/false,
+                                    /*is_sampled_report=*/false);
+    ASSERT_EQ(1, request->population().page_load_tokens_size());
+    // The token for the mainframe URL should be reused.
+    EXPECT_EQ("url_page_load_token",
+              request->population().page_load_tokens(0).token_value());
   }
 }
 
@@ -316,15 +419,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestBackoffAndTimerReset) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 299 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(298));
+  task_environment_.FastForwardBy(base::Seconds(298));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 300 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 }
 
@@ -390,15 +493,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoff) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 299 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(298));
+  task_environment_.FastForwardBy(base::Seconds(298));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 300 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   /////////////////////////////////////
@@ -413,15 +516,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoff) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 599 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(598));
+  task_environment_.FastForwardBy(base::Seconds(598));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 600 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   //////////////////////////////////////
@@ -436,15 +539,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoff) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1199 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1198));
+  task_environment_.FastForwardBy(base::Seconds(1198));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 1200 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   ///////////////////////////////////////////////////
@@ -459,15 +562,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoff) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1799 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1798));
+  task_environment_.FastForwardBy(base::Seconds(1798));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 1800 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   ///////////////////////////////////////////////////
@@ -482,15 +585,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoff) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1799 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1798));
+  task_environment_.FastForwardBy(base::Seconds(1798));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 1800 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 }
 
@@ -515,15 +618,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoffWithResetOnSuccess) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 299 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(298));
+  task_environment_.FastForwardBy(base::Seconds(298));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 300 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   /////////////////////////////////////
@@ -538,15 +641,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoffWithResetOnSuccess) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 599 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(598));
+  task_environment_.FastForwardBy(base::Seconds(598));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 600 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 
   // The next lookup is a success. This should reset the backoff duration to
@@ -566,15 +669,15 @@ TEST_F(RealTimeUrlLookupServiceTest, TestExponentialBackoffWithResetOnSuccess) {
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 1 second.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff not reset after 299 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(298));
+  task_environment_.FastForwardBy(base::Seconds(298));
   EXPECT_TRUE(IsInBackoffMode());
 
   // Backoff should have been reset after 300 seconds.
-  task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(1));
+  task_environment_.FastForwardBy(base::Seconds(1));
   EXPECT_FALSE(IsInBackoffMode());
 }
 
@@ -601,7 +704,7 @@ TEST_F(RealTimeUrlLookupServiceTest, TestCanCheckUrl) {
       {"ftp://example.test/path", false}, {"http://localhost/path", false},
       {"http://127.0.0.1/path", false},   {"http://127.0.0.1:2222/path", false},
       {"http://192.168.1.1/path", false}, {"http://172.16.2.2/path", false},
-      {"http://10.1.1.9/path", false},    {"http://10.1.1.09/path", true},
+      {"http://10.1.1.9/path", false},    {"http://10.1.1.0xG/path", true},
       {"http://example.test/path", true}, {"http://nodothost/path", false},
       {"http://x.x/shorthost", false}};
   for (auto& can_check_url_case : can_check_url_cases) {
@@ -644,8 +747,8 @@ TEST_F(RealTimeUrlLookupServiceTest, TestStartLookup_ResponseIsAlreadyCached) {
 
   base::MockCallback<RTLookupRequestCallback> request_callback;
   base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(url, request_callback.Get(),
-                            response_callback.Get(),
+  rt_service()->StartLookup(url, last_committed_url_, is_mainframe_,
+                            request_callback.Get(), response_callback.Get(),
                             base::SequencedTaskRunnerHandle::Get());
 
   // |request_callback| should not be called.
@@ -665,7 +768,7 @@ TEST_F(RealTimeUrlLookupServiceTest, TestStartLookup_ResponseIsAlreadyCached) {
 TEST_F(RealTimeUrlLookupServiceTest,
        TestStartLookup_AttachTokenWhenWithTokenIsEnabled) {
   base::HistogramTester histograms;
-  EnableMbb();
+  EnableRealTimeUrlLookup({kSafeBrowsingRemoveCookiesInAuthRequests}, {});
   EnableTokenFetchesInClient();
   GURL url(kTestUrl);
   SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
@@ -675,7 +778,7 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupResponseCallback> response_callback;
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce(
           [](std::unique_ptr<RTLookupRequest> request, std::string token) {
             EXPECT_FALSE(request->has_dm_token());
@@ -686,6 +789,13 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
                                      /* is_cached_response */ false, _));
+
+  test_url_loader_factory_.SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        // Cookies should be removed when token is set.
+        EXPECT_EQ(request.credentials_mode,
+                  network::mojom::CredentialsMode::kOmit);
+      }));
 
   FulfillAccessTokenRequest("access_token_string");
   EXPECT_CALL(*raw_token_fetcher(), OnInvalidAccessToken(_)).Times(0);
@@ -712,7 +822,7 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupResponseCallback> response_callback;
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce(
           [](std::unique_ptr<RTLookupRequest> request, std::string token) {
             // Check the token field is empty as the passed-in client callback
@@ -723,6 +833,13 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
                                      /* is_cached_response */ false, _));
+
+  test_url_loader_factory_.SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        // Cookies should be attached when token is empty.
+        EXPECT_EQ(request.credentials_mode,
+                  network::mojom::CredentialsMode::kInclude);
+      }));
 
   task_environment_.RunUntilIdle();
 
@@ -741,8 +858,8 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupRequestCallback> request_callback;
   base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(url, request_callback.Get(),
-                            response_callback.Get(),
+  rt_service()->StartLookup(url, last_committed_url_, is_mainframe_,
+                            request_callback.Get(), response_callback.Get(),
                             base::SequencedTaskRunnerHandle::Get());
 
   EXPECT_CALL(request_callback, Run(_, _)).Times(1);
@@ -765,8 +882,8 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupRequestCallback> request_callback;
   base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(url, request_callback.Get(),
-                            response_callback.Get(),
+  rt_service()->StartLookup(url, last_committed_url_, is_mainframe_,
+                            request_callback.Get(), response_callback.Get(),
                             base::SequencedTaskRunnerHandle::Get());
 
   EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ false,
@@ -778,7 +895,7 @@ TEST_F(RealTimeUrlLookupServiceTest,
 }
 
 TEST_F(RealTimeUrlLookupServiceTest, TestReferrerChain_ReferrerChainAttached) {
-  EnableRealTimeUrlLookup({kRealTimeUrlLookupReferrerChain}, {});
+  EnableMbb();
   GURL url(kTestUrl);
   SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
                         RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
@@ -806,10 +923,10 @@ TEST_F(RealTimeUrlLookupServiceTest, TestReferrerChain_ReferrerChainAttached) {
   EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
                                      /* is_cached_response */ false, _));
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce(
           [](std::unique_ptr<RTLookupRequest> request, std::string token) {
-            EXPECT_EQ(2, request->version());
+            EXPECT_EQ(3, request->version());
             // Check referrer chain is attached.
             EXPECT_EQ(2, request->referrer_chain().size());
             EXPECT_EQ(kTestUrl, request->referrer_chain().Get(0).url());
@@ -821,44 +938,8 @@ TEST_F(RealTimeUrlLookupServiceTest, TestReferrerChain_ReferrerChainAttached) {
 }
 
 TEST_F(RealTimeUrlLookupServiceTest,
-       TestReferrerChain_ReferrerChainNotAttachedWhenFeatureFlagDisabled) {
-  EnableRealTimeUrlLookup({}, {kRealTimeUrlLookupReferrerChain});
-  GURL url(kTestUrl);
-  SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
-                        RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
-                        "example.test/",
-                        RTLookupResponse::ThreatInfo::COVERING_MATCH);
-  ReferrerChain returned_referrer_chain;
-  returned_referrer_chain.Add()->Swap(
-      CreateReferrerChainEntry(kTestUrl, /*main_frame_url=*/"",
-                               /*referrer_url=*/"",
-                               /*referrer_main_frame_url=*/"",
-                               base::Time::Now().ToDoubleT())
-          .get());
-  EXPECT_CALL(*referrer_chain_provider_,
-              IdentifyReferrerChainByPendingEventURL(_, _, _))
-      .Times(0);
-
-  base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(
-      url,
-      base::BindOnce(
-          [](std::unique_ptr<RTLookupRequest> request, std::string token) {
-            EXPECT_EQ(2, request->version());
-            // Check referrer chain is attached.
-            EXPECT_EQ(0, request->referrer_chain().size());
-          }),
-      response_callback.Get(), base::SequencedTaskRunnerHandle::Get());
-
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
-                                     /* is_cached_response */ false, _));
-
-  task_environment_.RunUntilIdle();
-}
-
-TEST_F(RealTimeUrlLookupServiceTest,
        TestReferrerChain_SanitizedIfSubresourceNotAllowed) {
-  EnableRealTimeUrlLookup({kRealTimeUrlLookupReferrerChain}, {});
+  EnableMbb();
   GURL url(kTestUrl);
   SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
                         RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
@@ -884,10 +965,10 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupResponseCallback> response_callback;
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce([](std::unique_ptr<RTLookupRequest> request,
                         std::string token) {
-        EXPECT_EQ(2, request->version());
+        EXPECT_EQ(3, request->version());
         EXPECT_EQ(2, request->referrer_chain().size());
         // The first entry is sanitized because it is triggered in a
         // subframe.
@@ -920,9 +1001,12 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
 TEST_F(RealTimeUrlLookupServiceTest,
        TestReferrerChain_NotSanitizedIfSubresourceAllowed) {
-  EnableRealTimeUrlLookup({kRealTimeUrlLookupReferrerChain}, {});
+  EnableMbb();
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(kEnhancedProtection);
   // Subresource is allowed when enhanced protection is enabled.
-  SetSafeBrowsingState(&test_pref_service_, ENHANCED_PROTECTION);
+  SetSafeBrowsingState(&test_pref_service_,
+                       SafeBrowsingState::ENHANCED_PROTECTION);
   GURL url(kTestUrl);
   SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
                         RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
@@ -948,10 +1032,10 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupResponseCallback> response_callback;
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce([](std::unique_ptr<RTLookupRequest> request,
                         std::string token) {
-        EXPECT_EQ(2, request->version());
+        EXPECT_EQ(3, request->version());
         EXPECT_EQ(2, request->referrer_chain().size());
         // Check referrer chain is not sanitized.
         EXPECT_EQ(kTestSubframeUrl, request->referrer_chain().Get(0).url());
@@ -990,8 +1074,8 @@ TEST_F(RealTimeUrlLookupServiceTest,
                                base::Time::Now().ToDoubleT())
           .get());
 
-  task_environment_.FastForwardBy(base::TimeDelta::FromMinutes(1));
-  EnableRealTimeUrlLookup({kRealTimeUrlLookupReferrerChain}, {});
+  task_environment_.FastForwardBy(base::Minutes(1));
+  EnableMbb();
   GURL url(kTestUrl);
   SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
                         RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
@@ -1011,10 +1095,10 @@ TEST_F(RealTimeUrlLookupServiceTest,
 
   base::MockCallback<RTLookupResponseCallback> response_callback;
   rt_service()->StartLookup(
-      url,
+      url, last_committed_url_, is_mainframe_,
       base::BindOnce([](std::unique_ptr<RTLookupRequest> request,
                         std::string token) {
-        EXPECT_EQ(2, request->version());
+        EXPECT_EQ(3, request->version());
         EXPECT_EQ(2, request->referrer_chain().size());
         // Check the first referrer chain is sanitized because it's logged
         // before real time URL lookup is enabled.
@@ -1046,57 +1130,14 @@ TEST_F(RealTimeUrlLookupServiceTest,
   task_environment_.RunUntilIdle();
 }
 
-TEST_F(RealTimeUrlLookupServiceTest,
-       TestReferrerChain_UserGestureLimitIsConfigurable) {
-  EnableRealTimeUrlLookupWithParameters(
-      {{kRealTimeUrlLookupReferrerChain,
-        {{"SafeBrowsingRealTimeUrlLookupReferrerLengthParam",
-          base::NumberToString(1)}}}},
-      {});
-  GURL url(kTestUrl);
-  SetUpRTLookupResponse(RTLookupResponse::ThreatInfo::DANGEROUS,
-                        RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING, 60,
-                        "example.test/",
-                        RTLookupResponse::ThreatInfo::COVERING_MATCH);
-  ReferrerChain returned_referrer_chain;
-  returned_referrer_chain.Add()->Swap(
-      CreateReferrerChainEntry(kTestUrl, /*main_frame_url=*/"",
-                               /*referrer_url=*/"",
-                               /*referrer_main_frame_url=*/"",
-                               base::Time::Now().ToDoubleT())
-          .get());
-  // The user gesture count limit should be set to 1.
-  EXPECT_CALL(*referrer_chain_provider_,
-              IdentifyReferrerChainByPendingEventURL(
-                  url, /*user_gesture_count_limit=*/1, _))
-      .WillOnce(DoAll(SetArgPointee<2>(returned_referrer_chain),
-                      Return(ReferrerChainProvider::SUCCESS)));
-
-  base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(
-      url,
-      base::BindOnce(
-          [](std::unique_ptr<RTLookupRequest> request, std::string token) {
-            EXPECT_EQ(2, request->version());
-            EXPECT_EQ(1, request->referrer_chain().size());
-            EXPECT_EQ(kTestUrl, request->referrer_chain().Get(0).url());
-          }),
-      response_callback.Get(), base::SequencedTaskRunnerHandle::Get());
-
-  EXPECT_CALL(response_callback, Run(/* is_rt_lookup_successful */ true,
-                                     /* is_cached_response */ false, _));
-
-  task_environment_.RunUntilIdle();
-}
-
 TEST_F(RealTimeUrlLookupServiceTest, TestShutdown_CallbackNotPostedOnShutdown) {
   EnableMbb();
   GURL url(kTestUrl);
 
   base::MockCallback<RTLookupRequestCallback> request_callback;
   base::MockCallback<RTLookupResponseCallback> response_callback;
-  rt_service()->StartLookup(url, request_callback.Get(),
-                            response_callback.Get(),
+  rt_service()->StartLookup(url, last_committed_url_, is_mainframe_,
+                            request_callback.Get(), response_callback.Get(),
                             base::SequencedTaskRunnerHandle::Get());
 
   EXPECT_CALL(request_callback, Run(_, _)).Times(1);
@@ -1104,6 +1145,93 @@ TEST_F(RealTimeUrlLookupServiceTest, TestShutdown_CallbackNotPostedOnShutdown) {
   rt_service()->Shutdown();
 
   task_environment_.RunUntilIdle();
+}
+
+TEST_F(RealTimeUrlLookupServiceTest, TestShutdown_CacheManagerReset) {
+  GURL url("https://a.example.test/path1/path2");
+  // Post a task to cache_manager_ to cache the verdict.
+  MayBeCacheRealTimeUrlVerdict(url, RTLookupResponse::ThreatInfo::DANGEROUS,
+                               RTLookupResponse::ThreatInfo::SOCIAL_ENGINEERING,
+                               60, "a.example.test/path1/path2",
+                               RTLookupResponse::ThreatInfo::COVERING_MATCH);
+
+  // Shutdown and delete depending objects.
+  rt_service()->Shutdown();
+  cache_manager_.reset();
+  content_setting_map_->ShutdownOnUIThread();
+  content_setting_map_.reset();
+
+  // The task to cache_manager_ should be cancelled and not cause crash.
+  task_environment_.RunUntilIdle();
+}
+
+TEST_F(RealTimeUrlLookupServiceTest,
+       TestShutdown_SendRequestNotCalledOnShutdown) {
+  // Never send the request if shutdown is triggered before OnGetAccessToken().
+  EnableMbb();
+  EnableTokenFetchesInClient();
+  GURL url(kTestUrl);
+
+  testing::StrictMock<base::MockCallback<RTLookupRequestCallback>>
+      request_callback;
+  testing::StrictMock<base::MockCallback<RTLookupResponseCallback>>
+      response_callback;
+  rt_service()->StartLookup(url, last_committed_url_, is_mainframe_,
+                            request_callback.Get(), response_callback.Get(),
+                            base::SequencedTaskRunnerHandle::Get());
+
+  EXPECT_CALL(request_callback, Run(_, _)).Times(0);
+  EXPECT_CALL(response_callback, Run(_, _, _)).Times(0);
+  rt_service()->Shutdown();
+
+  task_environment_.RunUntilIdle();
+}
+
+TEST_F(RealTimeUrlLookupServiceTest, TestSendSampledRequest) {
+  EnableMbb();
+  // Enabling access token does not affect sending sampled ping.
+  EnableTokenFetchesInClient();
+  GURL url(kTestUrl);
+
+  rt_service()->SendSampledRequest(
+      url, last_committed_url_, is_mainframe_,
+      base::BindOnce(
+          [](std::unique_ptr<RTLookupRequest> request, std::string token) {
+            EXPECT_EQ(3, request->version());
+            EXPECT_EQ(2, request->report_type());
+            EXPECT_EQ(1, request->frame_type());
+          }),
+      base::SequencedTaskRunnerHandle::Get());
+  rt_service()->Shutdown();
+
+  task_environment_.RunUntilIdle();
+}
+
+TEST_F(RealTimeUrlLookupServiceTest,
+       TestCanSendRTSampleRequest_FeatureEnabled) {
+  // When extended reporting is not enabled,
+  // sample request will not be sent.
+  EXPECT_FALSE(CanSendRTSampleRequest());
+  // Enable extended reporting.
+  EnableExtendedReporting();
+  rt_service()->set_bypass_probability_for_tests(true);
+  feature_list_.InitAndEnableFeature(
+      safe_browsing::kSendSampledPingsForProtegoAllowlistDomains);
+  // After enabling the feature, a sampled ping should be sent.
+  EXPECT_TRUE(CanSendRTSampleRequest());
+}
+
+TEST_F(RealTimeUrlLookupServiceTest,
+       TestCanSendRTSampleRequest_FeatureDisabled) {
+  // Enable extended reporting.
+  EnableExtendedReporting();
+  rt_service()->set_bypass_probability_for_tests(true);
+  // When feature is not enabled, a sampled ping should not be sent.
+  EXPECT_FALSE(CanSendRTSampleRequest());
+  feature_list_.InitAndDisableFeature(
+      safe_browsing::kSendSampledPingsForProtegoAllowlistDomains);
+  // After enabling the feature, a sampled ping should be sent.
+  EXPECT_FALSE(CanSendRTSampleRequest());
 }
 
 }  // namespace safe_browsing

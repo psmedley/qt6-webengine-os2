@@ -8,9 +8,7 @@
 
 #include <utility>
 
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "storage/common/file_system/file_system_types.h"
 #include "storage/common/file_system/file_system_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -112,8 +110,8 @@ TEST(FileSystemURLTest, CompareURLs) {
       GURL("filesystem:https://chromium.org/temporary/dir a/file a")};
 
   FileSystemURL::Comparator compare;
-  for (size_t i = 0; i < base::size(urls); ++i) {
-    for (size_t j = 0; j < base::size(urls); ++j) {
+  for (size_t i = 0; i < std::size(urls); ++i) {
+    for (size_t j = 0; j < std::size(urls); ++j) {
       SCOPED_TRACE(testing::Message() << i << " < " << j);
       EXPECT_EQ(urls[i] < urls[j],
                 compare(FileSystemURL::CreateForTest(urls[i]),
@@ -188,9 +186,16 @@ TEST(FileSystemURLTest, DebugString) {
   const FileSystemURL kURL1 = FileSystemURL::CreateForTest(
       blink::StorageKey::CreateFromStringForTesting("http://example.com"),
       kFileSystemTypeTemporary, kPath);
-  EXPECT_EQ(
-      "filesystem:http://example.com/temporary/" + NormalizedUTF8Path(kPath),
-      kURL1.DebugString());
+  EXPECT_EQ("{ uri: filesystem:http://example.com/temporary/" +
+                NormalizedUTF8Path(kPath) +
+                ", storage key: " + kURL1.storage_key().GetDebugString() + " }",
+            kURL1.DebugString());
+  const FileSystemURL kURL2 = FileSystemURL::CreateForTest(
+      blink::StorageKey::CreateFromStringForTesting("http://example.com"),
+      kFileSystemTypeLocal, kPath);
+  EXPECT_EQ("{ path: " + NormalizedUTF8Path(kPath) +
+                ", storage key: " + kURL1.storage_key().GetDebugString() + " }",
+            kURL2.DebugString());
 }
 
 TEST(FileSystemURLTest, IsInSameFileSystem) {

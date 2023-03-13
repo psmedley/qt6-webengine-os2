@@ -10,8 +10,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/files/file_util.h"
-#include "base/macros.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
@@ -38,8 +36,9 @@ namespace content {
 IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
     : WebUIController(web_ui) {
   web_ui->AddMessageHandler(std::make_unique<IndexedDBInternalsHandler>());
-  WebUIDataSource* source =
-      WebUIDataSource::Create(kChromeUIIndexedDBInternalsHost);
+  WebUIDataSource* source = WebUIDataSource::CreateAndAdd(
+      web_ui->GetWebContents()->GetBrowserContext(),
+      kChromeUIIndexedDBInternalsHost);
   source->OverrideContentSecurityPolicy(
       network::mojom::CSPDirectiveName::ScriptSrc,
       "script-src chrome://resources 'self' 'unsafe-eval';");
@@ -52,10 +51,6 @@ IndexedDBInternalsUI::IndexedDBInternalsUI(WebUI* web_ui)
   source->AddResourcePath("indexeddb_internals.css",
                           IDR_INDEXED_DB_INTERNALS_CSS);
   source->SetDefaultResource(IDR_INDEXED_DB_INTERNALS_HTML);
-
-  BrowserContext* browser_context =
-      web_ui->GetWebContents()->GetBrowserContext();
-  WebUIDataSource::Add(browser_context, source);
 }
 
 IndexedDBInternalsUI::~IndexedDBInternalsUI() = default;
@@ -87,7 +82,8 @@ void IndexedDBInternalsHandler::OnJavascriptDisallowed() {
   weak_factory_.InvalidateWeakPtrs();
 }
 
-void IndexedDBInternalsHandler::GetAllStorageKeys(const base::ListValue* args) {
+void IndexedDBInternalsHandler::GetAllStorageKeys(
+    const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   AllowJavascript();
@@ -104,12 +100,13 @@ void IndexedDBInternalsHandler::GetAllStorageKeys(const base::ListValue* args) {
             control.GetAllStorageKeysDetails(base::BindOnce(
                 [](base::WeakPtr<IndexedDBInternalsHandler> handler,
                    base::FilePath partition_path, bool incognito,
-                   base::Value info_list) {
+                   base::Value::List info_list) {
                   if (!handler)
                     return;
 
                   handler->OnStorageKeysReady(
-                      info_list, incognito ? base::FilePath() : partition_path);
+                      base::Value(std::move(info_list)),
+                      incognito ? base::FilePath() : partition_path);
                 },
                 handler, partition->GetPath()));
           },
@@ -137,27 +134,18 @@ static void FindControl(const base::FilePath& partition_path,
 }
 
 bool IndexedDBInternalsHandler::GetStorageKeyData(
-    const base::ListValue* args,
+    const base::Value::List& args,
     std::string* callback_id,
     base::FilePath* partition_path,
     blink::StorageKey* storage_key,
     storage::mojom::IndexedDBControl** control) {
-  std::string callback_string;
-  if (!args->GetString(0, &callback_string)) {
-    return false;
-  }
-  *callback_id = callback_string;
-
-  std::string path_string;
-  if (!args->GetString(1, &path_string))
-    return false;
-  *partition_path = base::FilePath::FromUTF8Unsafe(path_string);
-
-  std::string url_string;
-  if (!args->GetString(2, &url_string))
+  if (args.size() < 3)
     return false;
 
-  *storage_key = blink::StorageKey(url::Origin::Create(GURL(url_string)));
+  *callback_id = args[0].GetString();
+  *partition_path = base::FilePath::FromUTF8Unsafe(args[1].GetString());
+  *storage_key =
+      blink::StorageKey(url::Origin::Create(GURL(args[2].GetString())));
 
   return GetStorageKeyControl(*partition_path, *storage_key, control);
 }
@@ -182,7 +170,7 @@ bool IndexedDBInternalsHandler::GetStorageKeyControl(
 }
 
 void IndexedDBInternalsHandler::DownloadStorageKeyData(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::string callback_id;
@@ -227,7 +215,7 @@ void IndexedDBInternalsHandler::DownloadStorageKeyData(
 }
 
 void IndexedDBInternalsHandler::ForceCloseStorageKey(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   std::string callback_id;
@@ -322,6 +310,10 @@ void IndexedDBInternalsHandler::OnDownloadDataReady(
 class FileDeleter : public download::DownloadItem::Observer {
  public:
   explicit FileDeleter(const base::FilePath& temp_dir) : temp_dir_(temp_dir) {}
+
+  FileDeleter(const FileDeleter&) = delete;
+  FileDeleter& operator=(const FileDeleter&) = delete;
+
   ~FileDeleter() override;
 
   void OnDownloadUpdated(download::DownloadItem* download) override;
@@ -331,8 +323,6 @@ class FileDeleter : public download::DownloadItem::Observer {
 
  private:
   const base::FilePath temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileDeleter);
 };
 
 void FileDeleter::OnDownloadUpdated(download::DownloadItem* item) {

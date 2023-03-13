@@ -21,6 +21,7 @@
 #include "core/fpdfapi/render/cpdf_imagerenderer.h"
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderstatus.h"
+#include "core/fxcrt/stl_util.h"
 #include "core/fxge/cfx_defaultrenderdevice.h"
 #include "fpdfsdk/cpdfsdk_customaccess.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
@@ -194,15 +195,13 @@ FPDFImageObj_GetBitmap(FPDF_PAGEOBJECT image_object) {
   if (!pSource)
     return nullptr;
 
-  RetainPtr<CFX_DIBitmap> pBitmap;
   // If the source image has a representation of 1 bit per pixel, then convert
   // it to a grayscale bitmap having 1 byte per pixel, since bitmaps have no
   // concept of bits. Otherwise, convert the source image to a bitmap directly,
   // retaining its color representation.
-  if (pSource->GetBPP() == 1)
-    pBitmap = pSource->CloneConvert(FXDIB_Format::k8bppRgb);
-  else
-    pBitmap = pSource->Clone(nullptr);
+  RetainPtr<CFX_DIBitmap> pBitmap =
+      pSource->GetBPP() == 1 ? pSource->ConvertTo(FXDIB_Format::k8bppRgb)
+                             : pSource->Realize();
 
   return FPDFBitmapFromCFXDIBitmap(pBitmap.Leak());
 }
@@ -314,7 +313,8 @@ FPDFImageObj_GetImageFilterCount(FPDF_PAGEOBJECT image_object) {
     return 0;
 
   if (pFilter->IsArray())
-    return pFilter->AsArray()->size();
+    return fxcrt::CollectionSize<int>(*pFilter->AsArray());
+
   if (pFilter->IsName())
     return 1;
 
@@ -376,11 +376,11 @@ FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
   if (!pPage || !pPage->GetDocument() || !pImg->GetStream())
     return true;
 
-  auto pSource = pdfium::MakeRetain<CPDF_DIB>();
-  CPDF_DIB::LoadState ret =
-      pSource->StartLoadDIBBase(pPage->GetDocument(), pImg->GetStream(), false,
-                                nullptr, pPage->GetPageResources(), false,
-                                CPDF_ColorSpace::Family::kUnknown, false);
+  auto pSource =
+      pdfium::MakeRetain<CPDF_DIB>(pPage->GetDocument(), pImg->GetStream());
+  CPDF_DIB::LoadState ret = pSource->StartLoadDIBBase(
+      false, nullptr, pPage->GetPageResources(), false,
+      CPDF_ColorSpace::Family::kUnknown, false);
   if (ret == CPDF_DIB::LoadState::kFail)
     return true;
 

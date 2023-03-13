@@ -6,12 +6,14 @@
 #define BASE_CONTAINERS_FLAT_TREE_H_
 
 #include <algorithm>
+#include <array>
+#include <initializer_list>
 #include <iterator>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 #include "base/as_const.h"
+#include "base/check.h"
 #include "base/compiler_specific.h"
 #include "base/functional/not_fn.h"
 #include "base/ranges/algorithm.h"
@@ -70,6 +72,16 @@ constexpr std::array<U, N> ToArrayImpl(const T (&data)[N],
 template <typename U, typename T, size_t N>
 constexpr std::array<U, N> ToArray(const T (&data)[N]) {
   return ToArrayImpl<U>(data, std::make_index_sequence<N>());
+}
+
+// Helper that calls `container.reserve(std::size(source))`.
+template <typename T, typename U>
+constexpr void ReserveIfSupported(const T&, const U&) {}
+
+template <typename T, typename U>
+auto ReserveIfSupported(T& container, const U& source)
+    -> decltype(container.reserve(std::size(source)), void()) {
+  container.reserve(std::size(source));
 }
 
 // std::pair's operator= is not constexpr prior to C++20. Thus we need this
@@ -1091,4 +1103,3 @@ size_t EraseIf(
 }  // namespace base
 
 #endif  // BASE_CONTAINERS_FLAT_TREE_H_
-

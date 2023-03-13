@@ -16,7 +16,6 @@
 #include "base/run_loop.h"
 #include "cc/test/animation_test_common.h"
 #include "cc/test/fake_output_surface_client.h"
-#include "cc/test/geometry_test_utils.h"
 #include "cc/test/pixel_test_utils.h"
 #include "cc/test/render_pass_test_utils.h"
 #include "cc/test/resource_provider_test_utils.h"
@@ -38,7 +37,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/utils/SkNWayCanvas.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 
 namespace viz {
 namespace {
@@ -259,7 +258,7 @@ TEST_F(SoftwareRendererTest, TileQuadVisibleRect) {
   gfx::Rect tile_rect(tile_size);
   gfx::Rect visible_rect = tile_rect;
   bool needs_blending = false;
-  visible_rect.Inset(1, 2, 3, 4);
+  visible_rect.Inset(gfx::Insets::TLBR(2, 1, 4, 3));
   InitializeRenderer(std::make_unique<SoftwareOutputDevice>());
 
   SkBitmap cyan_tile;  // The lowest five rows are yellow.

@@ -86,15 +86,17 @@ static AOM_INLINE void enc_free_mi(CommonModeInfoParams *mi_params) {
 }
 
 static AOM_INLINE void enc_set_mb_mi(CommonModeInfoParams *mi_params, int width,
-                                     int height) {
-  const int is_4k_or_larger = AOMMIN(width, height) >= 2160;
-  mi_params->mi_alloc_bsize = is_4k_or_larger ? BLOCK_8X8 : BLOCK_4X4;
+                                     int height,
+                                     BLOCK_SIZE min_partition_size) {
+  mi_params->mi_alloc_bsize = min_partition_size;
 
   set_mb_mi(mi_params, width, height);
 }
 
 static AOM_INLINE void stat_stage_set_mb_mi(CommonModeInfoParams *mi_params,
-                                            int width, int height) {
+                                            int width, int height,
+                                            BLOCK_SIZE min_partition_size) {
+  (void)min_partition_size;
   mi_params->mi_alloc_bsize = BLOCK_16X16;
 
   set_mb_mi(mi_params, width, height);
@@ -619,26 +621,26 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER_8(4, 16)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 8);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 8);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 8)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 8)
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 8);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 8);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 8);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 8);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 8);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 8)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 8)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 8)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 8)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 8)
 #endif
         break;
 
@@ -719,27 +721,27 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER(4, 16, 10)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 10);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 10);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 10)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 10)
 
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 10);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 10);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 10);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 10);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 10);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 10)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 10)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 10)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 10)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 10)
 #endif
         break;
 
@@ -820,27 +822,27 @@ static AOM_INLINE void highbd_set_var_fns(AV1_PRIMARY *const ppi) {
         HIGHBD_OBFP_WRAPPER(4, 16, 12)
 #endif
 
-        HIGHBD_SDSFP_WRAPPER(128, 128, 12);
-        HIGHBD_SDSFP_WRAPPER(128, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 128, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(64, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(4, 8, 12);
+        HIGHBD_SDSFP_WRAPPER(128, 128, 12)
+        HIGHBD_SDSFP_WRAPPER(128, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 128, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(64, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(4, 8, 12)
 
 #if !CONFIG_REALTIME_ONLY
-        HIGHBD_SDSFP_WRAPPER(64, 16, 12);
-        HIGHBD_SDSFP_WRAPPER(32, 8, 12);
-        HIGHBD_SDSFP_WRAPPER(16, 64, 12);
-        HIGHBD_SDSFP_WRAPPER(8, 32, 12);
-        HIGHBD_SDSFP_WRAPPER(4, 16, 12);
+        HIGHBD_SDSFP_WRAPPER(64, 16, 12)
+        HIGHBD_SDSFP_WRAPPER(32, 8, 12)
+        HIGHBD_SDSFP_WRAPPER(16, 64, 12)
+        HIGHBD_SDSFP_WRAPPER(8, 32, 12)
+        HIGHBD_SDSFP_WRAPPER(4, 16, 12)
 #endif
         break;
 
@@ -869,6 +871,44 @@ static AOM_INLINE void copy_frame_prob_info(AV1_COMP *cpi) {
     av1_copy(frame_probs->switchable_interp_probs,
              default_switchable_interp_probs);
   }
+
+#if CONFIG_FRAME_PARALLEL_ENCODE && CONFIG_FPMT_TEST
+  if (cpi->ppi->fpmt_unit_test_cfg == PARALLEL_SIMULATION_ENCODE) {
+    FrameProbInfo *const temp_frame_probs = &cpi->ppi->temp_frame_probs;
+    if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
+      av1_copy(temp_frame_probs->tx_type_probs, default_tx_type_probs);
+    }
+    if (cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
+        cpi->sf.inter_sf.prune_obmc_prob_thresh < INT_MAX) {
+      av1_copy(temp_frame_probs->obmc_probs, default_obmc_probs);
+    }
+    if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
+      av1_copy(temp_frame_probs->warped_probs, default_warped_probs);
+    }
+    if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2) {
+      av1_copy(temp_frame_probs->switchable_interp_probs,
+               default_switchable_interp_probs);
+    }
+
+    FrameProbInfo *const temp_frame_probs_simulation =
+        &cpi->ppi->temp_frame_probs_simulation;
+    if (cpi->sf.tx_sf.tx_type_search.prune_tx_type_using_stats) {
+      av1_copy(temp_frame_probs_simulation->tx_type_probs,
+               default_tx_type_probs);
+    }
+    if (cpi->sf.inter_sf.prune_obmc_prob_thresh > 0 &&
+        cpi->sf.inter_sf.prune_obmc_prob_thresh < INT_MAX) {
+      av1_copy(temp_frame_probs_simulation->obmc_probs, default_obmc_probs);
+    }
+    if (cpi->sf.inter_sf.prune_warped_prob_thresh > 0) {
+      av1_copy(temp_frame_probs_simulation->warped_probs, default_warped_probs);
+    }
+    if (cpi->sf.interp_sf.adaptive_interp_filter_search == 2) {
+      av1_copy(temp_frame_probs_simulation->switchable_interp_probs,
+               default_switchable_interp_probs);
+    }
+  }
+#endif
 }
 
 static AOM_INLINE void restore_cdef_coding_context(CdefInfo *const dst,

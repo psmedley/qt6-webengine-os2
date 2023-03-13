@@ -11,7 +11,8 @@
 #include "third_party/blink/renderer/core/highlight/highlight.h"
 #include "third_party/blink/renderer/core/highlight/highlight_registry_map_entry.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 
@@ -25,7 +26,8 @@ namespace blink {
 using HighlightRegistryMap =
     HeapLinkedHashSet<Member<HighlightRegistryMapEntry>,
                       HashTraits<Member<HighlightRegistryMapEntry>>>;
-using HighlightRegistryMapIterable = Maplike<AtomicString, Member<Highlight>>;
+using HighlightRegistryMapIterable =
+    Maplike<AtomicString, IDLString, Member<Highlight>, Highlight>;
 class LocalFrame;
 
 class CORE_EXPORT HighlightRegistry : public ScriptWrappable,
@@ -42,6 +44,7 @@ class CORE_EXPORT HighlightRegistry : public ScriptWrappable,
 
   void Trace(blink::Visitor*) const override;
 
+  void SetForTesting(AtomicString, Highlight*);
   HighlightRegistry* setForBinding(ScriptState*,
                                    AtomicString,
                                    Member<Highlight>,
@@ -52,7 +55,7 @@ class CORE_EXPORT HighlightRegistry : public ScriptWrappable,
 
   const HighlightRegistryMap& GetHighlights() const { return highlights_; }
   void ValidateHighlightMarkers();
-  void ScheduleRepaint() const;
+  void ScheduleRepaint();
 
   enum OverlayStackingPosition {
     kOverlayStackingPositionBelow = -1,
@@ -85,6 +88,9 @@ class CORE_EXPORT HighlightRegistry : public ScriptWrappable,
  private:
   HighlightRegistryMap highlights_;
   Member<LocalFrame> frame_;
+  uint64_t dom_tree_version_for_validate_highlight_markers_ = 0;
+  uint64_t style_version_for_validate_highlight_markers_ = 0;
+  bool force_markers_validation_ = true;
 
   HighlightRegistryMap::iterator GetMapIterator(const AtomicString& key) {
     return highlights_.find(

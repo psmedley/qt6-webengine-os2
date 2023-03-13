@@ -8,8 +8,8 @@
 #include <map>
 #include <string>
 
-#include "base/macros.h"
 #include "base/sequence_checker.h"
+#include "base/time/time.h"
 #include "net/base/net_export.h"
 #include "net/base/network_change_notifier.h"
 #include "net/nqe/effective_connection_type.h"
@@ -35,6 +35,10 @@ class NET_EXPORT NetworkQualityEstimatorParams {
   // NetworkQualityEstimator field trial.
   explicit NetworkQualityEstimatorParams(
       const std::map<std::string, std::string>& params);
+
+  NetworkQualityEstimatorParams(const NetworkQualityEstimatorParams&) = delete;
+  NetworkQualityEstimatorParams& operator=(
+      const NetworkQualityEstimatorParams&) = delete;
 
   ~NetworkQualityEstimatorParams();
 
@@ -303,8 +307,6 @@ class NET_EXPORT NetworkQualityEstimatorParams {
       [EffectiveConnectionType::EFFECTIVE_CONNECTION_TYPE_LAST];
 
   SEQUENCE_CHECKER(sequence_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkQualityEstimatorParams);
 };
 
 }  // namespace net

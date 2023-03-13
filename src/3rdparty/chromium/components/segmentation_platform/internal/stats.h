@@ -9,12 +9,12 @@
 #include "components/segmentation_platform/internal/database/metadata_utils.h"
 #include "components/segmentation_platform/internal/execution/model_execution_status.h"
 #include "components/segmentation_platform/internal/proto/types.pb.h"
+#include "components/segmentation_platform/public/segment_selection_result.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 using optimization_guide::proto::OptimizationTarget;
 
-namespace segmentation_platform {
-namespace stats {
+namespace segmentation_platform::stats {
 
 // Keep in sync with AdaptiveToolbarSegmentSwitch in enums.xml.
 // Visible for testing.
@@ -35,12 +35,22 @@ enum class AdaptiveToolbarSegmentSwitch {
   kMaxValue = kVoiceToShare,
 };
 
+// Keep in sync with SegmentationBooleanSegmentSwitch in enums.xml.
+// Visible for testing.
+enum class BooleanSegmentSwitch {
+  kUnknown = 0,
+  kNoneToEnabled = 1,
+  kEnabledToNone = 2,
+  kMaxValue = kEnabledToNone,
+};
+
 // Records the score computed for a given segment.
 void RecordModelScore(OptimizationTarget segment_id, float score);
 
 // Records the result of segment selection whenever segment selection is
 // computed.
 void RecordSegmentSelectionComputed(
+    const std::string& segmentation_key,
     OptimizationTarget new_selection,
     absl::optional<OptimizationTarget> previous_selection);
 
@@ -108,6 +118,7 @@ void RecordModelExecutionSaveResult(OptimizationTarget segment_id,
                                     bool success);
 // Records the final execution status for any ML model execution.
 void RecordModelExecutionStatus(OptimizationTarget segment_id,
+                                bool default_provider,
                                 ModelExecutionStatus status);
 // Records the percent of features in a tensor that are equal to 0 when the
 // segmentation model is executed.
@@ -133,7 +144,67 @@ void RecordSignalsListeningCount(
     const std::set<uint64_t>& user_actions,
     const std::set<std::pair<std::string, proto::SignalType>>& histograms);
 
-}  // namespace stats
-}  // namespace segmentation_platform
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused. Please keep in sync with
+// "SegmentationSelectionFailureReason" in
+// //tools/metrics/histograms/enums.xml.
+enum class SegmentationSelectionFailureReason {
+  kPlatformDisabled = 0,
+  kSelectionAvailableInPrefs = 1,
+  kAtLeastOneSegmentNotReady = 2,
+  kAtLeastOneSegmentSignalsNotCollected = 3,
+  kSelectionTtlNotExpired = 4,
+  kAtLeastOneModelFailedExecution = 5,
+  kAtLeastOneModelNeedsMoreSignals = 6,
+  kAtLeastOneModelWithInvalidMetadata = 7,
+  kFailedToSaveModelResult = 8,
+  kInvalidSelectionResultInPrefs = 9,
+  kDBInitFailure = 10,
+  kAtLeastOneSegmentNotAvailable = 11,
+  kAtLeastOneSegmentDefaultSignalNotCollected = 12,
+  kAtLeastOneSegmentDefaultExecFailed = 13,
+  kAtLeastOneSegmentDefaultMissingMetadata = 14,
+  kMaxValue = kAtLeastOneSegmentDefaultMissingMetadata
+};
+
+// Records the reason for failure or success to compute a segment selection.
+void RecordSegmentSelectionFailure(const std::string& segmentation_key,
+                                   SegmentationSelectionFailureReason reason);
+
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused. Please keep in sync with
+// "SegmentationModelAvailability" in //tools/metrics/histograms/enums.xml.
+enum class SegmentationModelAvailability {
+  kModelHandlerCreated = 0,
+  kModelAvailable = 1,
+  kMetadataInvalid = 2,
+  kMaxValue = kMetadataInvalid
+};
+// Records the availability of segmentation models for each target needed.
+void RecordModelAvailability(OptimizationTarget segment_id,
+                             SegmentationModelAvailability availability);
+
+// Records the number of input tensor that's causing a failure to upload
+// structured metrics.
+void RecordTooManyInputTensors(int tensor_size);
+
+// Analytics events for training data collection. Sync with
+// SegmentationPlatformTrainingDataCollectionEvent in enums.xml.
+enum class TrainingDataCollectionEvent {
+  kImmediateCollectionStart = 0,
+  kImmediateCollectionSuccess = 1,
+  kModelInfoMissing = 2,
+  kMetadataValidationFailed = 3,
+  kGetInputTensorsFailed = 4,
+  kNotEnoughCollectionTime = 5,
+  kUkmReportingFailed = 6,
+  kMaxValue = kUkmReportingFailed,
+};
+
+// Records analytics for training data collection.
+void RecordTrainingDataCollectionEvent(OptimizationTarget segment_id,
+                                       TrainingDataCollectionEvent event);
+
+}  // namespace segmentation_platform::stats
 
 #endif  // COMPONENTS_SEGMENTATION_PLATFORM_INTERNAL_STATS_H_

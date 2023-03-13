@@ -46,12 +46,13 @@ class MockHost(MockSystemHost):
                  git=None,
                  os_name=None,
                  os_version=None,
+                 machine=None,
                  time_return_val=123):
-        super(MockHost, self).__init__(
-            log_executive=log_executive,
-            os_name=os_name,
-            os_version=os_version,
-            time_return_val=time_return_val)
+        super(MockHost, self).__init__(log_executive=log_executive,
+                                       os_name=os_name,
+                                       os_version=os_version,
+                                       machine=None,
+                                       time_return_val=time_return_val)
 
         add_unit_tests_to_mock_filesystem(self.filesystem)
         self._add_base_manifest_to_mock_filesystem(self.filesystem)
@@ -124,4 +125,4 @@ class MockHost(MockSystemHost):
         filesystem.maybe_make_directory(filesystem.join(external_dir, 'wpt'))
 
         manifest_base_path = filesystem.join(external_dir, BASE_MANIFEST_NAME)
-        filesystem.files[manifest_base_path] = '{"manifest": "base"}'
+        filesystem.files[manifest_base_path] = b'{"manifest": "base"}'

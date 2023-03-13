@@ -42,6 +42,22 @@ void SendCandidate(const GURL& url,
   remote.FlushForTesting();
 }
 
+PrerenderAttributes GeneratePrerenderAttributes(
+    const GURL& url,
+    PrerenderTriggerType trigger_type,
+    const std::string& embedder_histogram_suffix,
+    RenderFrameHostImpl* rfh) {
+  return PrerenderAttributes(
+      url, trigger_type, embedder_histogram_suffix, Referrer(),
+      rfh->GetLastCommittedOrigin(), rfh->GetLastCommittedURL(),
+      rfh->GetProcess()->GetID(), rfh->GetFrameToken(),
+      trigger_type == PrerenderTriggerType::kSpeculationRule
+          ? rfh->GetPageUkmSourceId()
+          : ukm::kInvalidSourceId,
+      ui::PAGE_TRANSITION_LINK,
+      /*url_match_predicate=*/absl::nullopt);
+}
+
 // This definition is needed because this constant is odr-used in gtest macros.
 // https://en.cppreference.com/w/cpp/language/static#Constant_static_members
 const int kNoFrameTreeNodeId = RenderFrameHost::kNoFrameTreeNodeId;
@@ -131,7 +147,9 @@ class PrerenderWebContentsDelegate : public WebContentsDelegate {
  public:
   PrerenderWebContentsDelegate() = default;
 
-  bool IsPrerender2Supported() override { return true; }
+  bool IsPrerender2Supported(WebContents& web_contents) override {
+    return true;
+  }
 };
 
 class PrerenderHostRegistryTest : public RenderViewHostImplTestHarness {
@@ -171,9 +189,8 @@ class PrerenderHostRegistryTest : public RenderViewHostImplTestHarness {
   // params match the potential activation navigation params. Use setup_callback
   // to set the parameters. Returns true if the host was selected as a
   // potential candidate for activation, and false otherwise.
-  bool CheckIsActivatedForParams(
-      base::OnceCallback<void(NavigationSimulatorImpl*)> setup_callback)
-      WARN_UNUSED_RESULT {
+  [[nodiscard]] bool CheckIsActivatedForParams(
+      base::OnceCallback<void(NavigationSimulatorImpl*)> setup_callback) {
     const GURL kOriginalUrl("https://example.com/");
 
     std::unique_ptr<TestWebContents> web_contents =
@@ -181,11 +198,13 @@ class PrerenderHostRegistryTest : public RenderViewHostImplTestHarness {
     RenderFrameHostImpl* render_frame_host = web_contents->GetMainFrame();
 
     const GURL kPrerenderingUrl("https://example.com/next");
-    auto attributes = blink::mojom::PrerenderAttributes::New();
-    attributes->url = kPrerenderingUrl;
 
     PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-    registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+    registry->CreateAndStartHost(
+        GeneratePrerenderAttributes(kPrerenderingUrl,
+                                    PrerenderTriggerType::kSpeculationRule, "",
+                                    render_frame_host),
+        *web_contents);
     PrerenderHost* prerender_host =
         registry->FindHostByUrlForTesting(kPrerenderingUrl);
     CommitPrerenderNavigation(*prerender_host);
@@ -229,12 +248,13 @@ class PrerenderHostRegistryTest : public RenderViewHostImplTestHarness {
     ASSERT_TRUE(render_frame_host);
 
     const GURL kPrerenderingUrl("https://example.com/next");
-    auto attributes = blink::mojom::PrerenderAttributes::New();
-    attributes->url = kPrerenderingUrl;
 
     PrerenderHostRegistry* registry = wc->GetPrerenderHostRegistry();
-    const int prerender_frame_tree_node_id =
-        registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+    const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+        GeneratePrerenderAttributes(kPrerenderingUrl,
+                                    PrerenderTriggerType::kSpeculationRule, "",
+                                    render_frame_host),
+        *wc);
     ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
     PrerenderHost* prerender_host =
         registry->FindNonReservedHostById(prerender_frame_tree_node_id);
@@ -252,12 +272,27 @@ class PrerenderHostRegistryTest : public RenderViewHostImplTestHarness {
     ActivatePrerenderedPage(kPrerenderingUrl, *wc);
   }
 
+  void ExpectUniqueSampleOfFinalStatus(PrerenderHost::FinalStatus status) {
+    histogram_tester_.ExpectUniqueSample(
+        "Prerender.Experimental.PrerenderHostFinalStatus.SpeculationRule",
+        status, 1);
+  }
+
+  void ExpectBucketCountOfFinalStatus(PrerenderHost::FinalStatus status) {
+    histogram_tester_.ExpectBucketCount(
+        "Prerender.Experimental.PrerenderHostFinalStatus.SpeculationRule",
+        status, 1);
+  }
+
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
   PrerenderWebContentsDelegate web_contents_delegate_;
+  base::HistogramTester histogram_tester_;
 };
 
-TEST_F(PrerenderHostRegistryTest, CreateAndStartHost) {
+TEST_F(PrerenderHostRegistryTest, CreateAndStartHost_SpeculationRule) {
+  base::HistogramTester histogram_tester;
+
   const GURL kOriginalUrl("https://example.com/");
   std::unique_ptr<TestWebContents> web_contents =
       CreateWebContents(kOriginalUrl);
@@ -265,18 +300,54 @@ TEST_F(PrerenderHostRegistryTest, CreateAndStartHost) {
   ASSERT_TRUE(render_frame_host);
 
   const GURL kPrerenderingUrl("https://example.com/next");
-  auto attributes = blink::mojom::PrerenderAttributes::New();
-  attributes->url = kPrerenderingUrl;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int prerender_frame_tree_node_id =
-      registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
   PrerenderHost* prerender_host =
       registry->FindHostByUrlForTesting(kPrerenderingUrl);
   CommitPrerenderNavigation(*prerender_host);
 
   ActivatePrerenderedPage(kPrerenderingUrl, *web_contents);
+
+  // "Navigation.TimeToActivatePrerender.SpeculationRule" histogram should be
+  // recorded on every prerender activation.
+  histogram_tester.ExpectTotalCount(
+      "Navigation.TimeToActivatePrerender.SpeculationRule", 1u);
+}
+
+TEST_F(PrerenderHostRegistryTest, CreateAndStartHost_Embedder_DirectURLInput) {
+  base::HistogramTester histogram_tester;
+
+  const GURL kOriginalUrl("https://example.com/");
+  std::unique_ptr<TestWebContents> web_contents =
+      CreateWebContents(kOriginalUrl);
+  RenderFrameHostImpl* render_frame_host = web_contents->GetMainFrame();
+  ASSERT_TRUE(render_frame_host);
+
+  const GURL kPrerenderingUrl("https://example.com/next");
+
+  PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kEmbedder,
+                                  "DirectURLInput", render_frame_host),
+      *web_contents);
+  ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
+  PrerenderHost* prerender_host =
+      registry->FindHostByUrlForTesting(kPrerenderingUrl);
+  CommitPrerenderNavigation(*prerender_host);
+
+  ActivatePrerenderedPage(kPrerenderingUrl, *web_contents);
+
+  // "Navigation.TimeToActivatePrerender.Embedder_DirectURLInput" histogram
+  // should be recorded on every prerender activation.
+  histogram_tester.ExpectTotalCount(
+      "Navigation.TimeToActivatePrerender.Embedder_DirectURLInput", 1u);
 }
 
 TEST_F(PrerenderHostRegistryTest, CreateAndStartHostForSameURL) {
@@ -288,23 +359,24 @@ TEST_F(PrerenderHostRegistryTest, CreateAndStartHostForSameURL) {
 
   const GURL kPrerenderingUrl("https://example.com/next");
 
-  auto attributes1 = blink::mojom::PrerenderAttributes::New();
-  attributes1->url = kPrerenderingUrl;
-
-  auto attributes2 = blink::mojom::PrerenderAttributes::New();
-  attributes2->url = kPrerenderingUrl;
-
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int frame_tree_node_id1 =
-      registry->CreateAndStartHost(std::move(attributes1), *render_frame_host);
+  const int frame_tree_node_id1 = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
+  EXPECT_NE(frame_tree_node_id1, RenderFrameHost::kNoFrameTreeNodeId);
   PrerenderHost* prerender_host1 =
       registry->FindHostByUrlForTesting(kPrerenderingUrl);
 
   // Start the prerender host for the same URL. This second host should be
   // ignored, and the first host should still be findable.
-  const int frame_tree_node_id2 =
-      registry->CreateAndStartHost(std::move(attributes2), *render_frame_host);
-  EXPECT_EQ(frame_tree_node_id1, frame_tree_node_id2);
+  const int frame_tree_node_id2 = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
+  EXPECT_EQ(frame_tree_node_id2, RenderFrameHost::kNoFrameTreeNodeId);
   EXPECT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl),
             prerender_host1);
   CommitPrerenderNavigation(*prerender_host1);
@@ -315,7 +387,6 @@ TEST_F(PrerenderHostRegistryTest, CreateAndStartHostForSameURL) {
 // Tests that PrerenderHostRegistry limits the number of started prerenders
 // to 1.
 TEST_F(PrerenderHostRegistryTest, NumberLimit_Activation) {
-  base::HistogramTester histogram_tester;
   const GURL kOriginalUrl("https://example.com/");
   std::unique_ptr<TestWebContents> web_contents =
       CreateWebContents(kOriginalUrl);
@@ -325,21 +396,21 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_Activation) {
   // After the first prerender page was activated, PrerenderHostRegistry can
   // start prerendering a new one.
   const GURL kPrerenderingUrl1("https://example.com/next1");
-  auto attributes1 = blink::mojom::PrerenderAttributes::New();
-  attributes1->url = kPrerenderingUrl1;
-
   const GURL kPrerenderingUrl2("https://example.com/next2");
-  auto attributes2 = blink::mojom::PrerenderAttributes::New();
-  attributes2->url = kPrerenderingUrl2;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  int frame_tree_node_id1 =
-      registry->CreateAndStartHost(std::move(attributes1), *render_frame_host);
-  int frame_tree_node_id2 =
-      registry->CreateAndStartHost(std::move(attributes2), *render_frame_host);
-  histogram_tester.ExpectUniqueSample(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  int frame_tree_node_id1 = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl1,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
+  int frame_tree_node_id2 = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl2,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
+  ExpectUniqueSampleOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 
   // PrerenderHostRegistry should only start prerendering for kPrerenderingUrl1.
   EXPECT_NE(frame_tree_node_id1, kNoFrameTreeNodeId);
@@ -353,21 +424,20 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_Activation) {
 
   // After the first prerender page was activated, PrerenderHostRegistry can
   // start prerendering a new one.
-  attributes2 = blink::mojom::PrerenderAttributes::New();
-  attributes2->url = kPrerenderingUrl2;
-  frame_tree_node_id2 =
-      registry->CreateAndStartHost(std::move(attributes2), *render_frame_host);
+  frame_tree_node_id2 = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl2,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   EXPECT_NE(frame_tree_node_id2, kNoFrameTreeNodeId);
-  histogram_tester.ExpectBucketCount(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  ExpectBucketCountOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 }
 
 // Tests that PrerenderHostRegistry limits the number of started prerenders
 // to 1, and new candidates can be processed after the initiator page navigates
 // to a new same-origin page.
 TEST_F(PrerenderHostRegistryTest, NumberLimit_SameOriginNavigateAway) {
-  base::HistogramTester histogram_tester;
   const GURL kOriginalUrl("https://example.com/");
   std::unique_ptr<TestWebContents> web_contents =
       CreateWebContents(kOriginalUrl);
@@ -387,9 +457,8 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_SameOriginNavigateAway) {
   // PrerenderHostRegistry should only start prerendering for kPrerenderingUrl1.
   ASSERT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl1), nullptr);
   ASSERT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl2), nullptr);
-  histogram_tester.ExpectUniqueSample(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  ExpectUniqueSampleOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 
   // The initiator document navigates away.
   render_frame_host = NavigatePrimaryPage(
@@ -404,16 +473,14 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_SameOriginNavigateAway) {
   SendCandidate(kPrerenderingUrl2, remote2);
 
   EXPECT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl2), nullptr);
-  histogram_tester.ExpectBucketCount(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  ExpectBucketCountOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 }
 
 // Tests that PrerenderHostRegistry limits the number of started prerenders
 // to 1, and new candidates can be processed after the initiator page navigates
 // to a new cross-origin page.
 TEST_F(PrerenderHostRegistryTest, NumberLimit_CrossOriginNavigateAway) {
-  base::HistogramTester histogram_tester;
   const GURL kOriginalUrl("https://example.com/");
 
   std::unique_ptr<TestWebContents> web_contents =
@@ -434,9 +501,8 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_CrossOriginNavigateAway) {
   // PrerenderHostRegistry should only start prerendering for kPrerenderingUrl1.
   ASSERT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl1), nullptr);
   ASSERT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl2), nullptr);
-  histogram_tester.ExpectUniqueSample(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  ExpectUniqueSampleOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 
   // The initiator document navigates away to a cross-origin page.
   render_frame_host =
@@ -451,9 +517,8 @@ TEST_F(PrerenderHostRegistryTest, NumberLimit_CrossOriginNavigateAway) {
   const GURL kPrerenderingUrl3("https://example.org/next1");
   SendCandidate(kPrerenderingUrl3, remote2);
   EXPECT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl3), nullptr);
-  histogram_tester.ExpectBucketCount(
-      "Prerender.Experimental.PrerenderHostFinalStatus",
-      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded, 1);
+  ExpectBucketCountOfFinalStatus(
+      PrerenderHost::FinalStatus::kMaxNumOfRunningPrerendersExceeded);
 }
 
 TEST_F(PrerenderHostRegistryTest,
@@ -465,12 +530,13 @@ TEST_F(PrerenderHostRegistryTest,
   ASSERT_TRUE(render_frame_host);
 
   const GURL kPrerenderingUrl("https://example.com/next");
-  auto attributes = blink::mojom::PrerenderAttributes::New();
-  attributes->url = kPrerenderingUrl;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int prerender_frame_tree_node_id =
-      registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
   PrerenderHost* prerender_host =
       registry->FindHostByUrlForTesting(kPrerenderingUrl);
@@ -523,12 +589,14 @@ TEST_F(PrerenderHostRegistryTest, CancelHost) {
   ASSERT_TRUE(render_frame_host);
 
   const GURL kPrerenderingUrl("https://example.com/next");
-  auto attributes = blink::mojom::PrerenderAttributes::New();
-  attributes->url = kPrerenderingUrl;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int prerender_frame_tree_node_id =
-      registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   EXPECT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
 
   registry->CancelHost(prerender_frame_tree_node_id,
@@ -548,12 +616,14 @@ TEST_F(PrerenderHostRegistryTest,
 
   // Start prerendering.
   const GURL kPrerenderingUrl("https://example.com/next");
-  auto attributes = blink::mojom::PrerenderAttributes::New();
-  attributes->url = kPrerenderingUrl;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int prerender_frame_tree_node_id =
-      registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
   PrerenderHost* prerender_host =
       registry->FindHostByUrlForTesting(kPrerenderingUrl);
@@ -566,36 +636,39 @@ TEST_F(PrerenderHostRegistryTest,
   // the prerender. Use a CommitDeferringCondition to pause activation
   // before it completes.
   std::unique_ptr<NavigationSimulatorImpl> navigation;
-  MockCommitDeferringConditionWrapper condition(/*is_ready_to_commit=*/false);
-  {
-    MockCommitDeferringConditionInstaller installer(condition.PassToDelegate());
 
+  {
+    MockCommitDeferringConditionInstaller installer(
+        kPrerenderingUrl,
+        /*is_ready_to_commit=*/false);
     // Start trying to activate the prerendered page.
     navigation = CreateActivation(kPrerenderingUrl, *web_contents);
     navigation->Start();
 
     // Wait for the condition to pause the activation.
-    condition.WaitUntilInvoked();
+    installer.WaitUntilInstalled();
+    installer.condition().WaitUntilInvoked();
+
+    // The request should be deferred by the condition.
+    NavigationRequest* navigation_request =
+        static_cast<NavigationRequest*>(navigation->GetNavigationHandle());
+    EXPECT_TRUE(
+        navigation_request->IsCommitDeferringConditionDeferredForTesting());
+
+    // The primary page should still be the original page.
+    EXPECT_EQ(web_contents->GetLastCommittedURL(), kOriginalUrl);
+
+    // Cancel the prerender while the CommitDeferringCondition is running.
+    registry->CancelHost(prerender_frame_tree_node_id,
+                         PrerenderHost::FinalStatus::kDestroyed);
+    activation_observer.WaitUntilHostDestroyed();
+    EXPECT_FALSE(activation_observer.was_activated());
+    EXPECT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
+
+    // Resume the activation. This should fall back to a regular navigation.
+    installer.condition().CallResumeClosure();
   }
 
-  // The request should be deferred by the condition.
-  NavigationRequest* navigation_request =
-      static_cast<NavigationRequest*>(navigation->GetNavigationHandle());
-  EXPECT_TRUE(
-      navigation_request->IsCommitDeferringConditionDeferredForTesting());
-
-  // The primary page should still be the original page.
-  EXPECT_EQ(web_contents->GetLastCommittedURL(), kOriginalUrl);
-
-  // Cancel the prerender while the CommitDeferringCondition is running.
-  registry->CancelHost(prerender_frame_tree_node_id,
-                       PrerenderHost::FinalStatus::kDestroyed);
-  activation_observer.WaitUntilHostDestroyed();
-  EXPECT_FALSE(activation_observer.was_activated());
-  EXPECT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
-
-  // Resume the activation. This should fall back to a regular navigation.
-  condition.CallResumeClosure();
   navigation->Commit();
   EXPECT_EQ(web_contents->GetMainFrame()->GetLastCommittedURL(),
             kPrerenderingUrl);
@@ -613,12 +686,14 @@ TEST_F(PrerenderHostRegistryTest,
   ASSERT_TRUE(render_frame_host);
 
   const GURL kPrerenderingUrl("https://example.com/next");
-  auto attributes = blink::mojom::PrerenderAttributes::New();
-  attributes->url = kPrerenderingUrl;
 
   PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
-  const int prerender_frame_tree_node_id =
-      registry->CreateAndStartHost(std::move(attributes), *render_frame_host);
+
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  render_frame_host),
+      *web_contents);
   ASSERT_NE(prerender_frame_tree_node_id, kNoFrameTreeNodeId);
   PrerenderHost* prerender_host =
       registry->FindHostByUrlForTesting(kPrerenderingUrl);
@@ -631,56 +706,85 @@ TEST_F(PrerenderHostRegistryTest,
   // the prerender. Use a CommitDeferringCondition to pause activation
   // before it completes.
   std::unique_ptr<NavigationSimulatorImpl> navigation;
-  MockCommitDeferringConditionWrapper condition(/*is_ready_to_commit=*/false);
-  {
-    MockCommitDeferringConditionInstaller installer(condition.PassToDelegate());
+  base::OnceClosure resume_navigation;
 
+  {
+    MockCommitDeferringConditionInstaller installer(
+        kPrerenderingUrl,
+        /*is_ready_to_commit=*/false);
     // Start trying to activate the prerendered page.
     navigation = CreateActivation(kPrerenderingUrl, *web_contents);
     navigation->Start();
 
     // Wait for the condition to pause the activation.
-    condition.WaitUntilInvoked();
+    installer.WaitUntilInstalled();
+    installer.condition().WaitUntilInvoked();
+    resume_navigation = installer.condition().TakeResumeClosure();
+
+    // The request should be deferred by the condition.
+    NavigationRequest* navigation_request =
+        static_cast<NavigationRequest*>(navigation->GetNavigationHandle());
+    EXPECT_TRUE(
+        navigation_request->IsCommitDeferringConditionDeferredForTesting());
+
+    // The primary page should still be the original page.
+    EXPECT_EQ(web_contents->GetLastCommittedURL(), kOriginalUrl);
+
+    // Cancel the prerender while the CommitDeferringCondition is running.
+    registry->CancelHost(prerender_frame_tree_node_id,
+                         PrerenderHost::FinalStatus::kDestroyed);
+    activation_observer.WaitUntilHostDestroyed();
+    EXPECT_FALSE(activation_observer.was_activated());
+    EXPECT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
   }
 
-  // The request should be deferred by the condition.
-  NavigationRequest* navigation_request =
-      static_cast<NavigationRequest*>(navigation->GetNavigationHandle());
-  EXPECT_TRUE(
-      navigation_request->IsCommitDeferringConditionDeferredForTesting());
+  {
+    // Start the second prerender for the same URL.
+    const int prerender_frame_tree_node_id2 = registry->CreateAndStartHost(
+        GeneratePrerenderAttributes(kPrerenderingUrl,
+                                    PrerenderTriggerType::kSpeculationRule, "",
+                                    render_frame_host),
+        *web_contents);
+    ASSERT_NE(prerender_frame_tree_node_id2, kNoFrameTreeNodeId);
+    PrerenderHost* prerender_host2 =
+        registry->FindHostByUrlForTesting(kPrerenderingUrl);
+    CommitPrerenderNavigation(*prerender_host2);
 
-  // The primary page should still be the original page.
-  EXPECT_EQ(web_contents->GetLastCommittedURL(), kOriginalUrl);
+    EXPECT_NE(prerender_frame_tree_node_id, prerender_frame_tree_node_id2);
+  }
 
-  // Cancel the prerender while the CommitDeferringCondition is running.
-  registry->CancelHost(prerender_frame_tree_node_id,
-                       PrerenderHost::FinalStatus::kDestroyed);
-  activation_observer.WaitUntilHostDestroyed();
-  EXPECT_FALSE(activation_observer.was_activated());
-  EXPECT_EQ(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
-
-  // Start the second prerender for the same URL.
-  auto attributes2 = blink::mojom::PrerenderAttributes::New();
-  attributes2->url = kPrerenderingUrl;
-
-  const int prerender_frame_tree_node_id2 =
-      registry->CreateAndStartHost(std::move(attributes2), *render_frame_host);
-  ASSERT_NE(prerender_frame_tree_node_id2, kNoFrameTreeNodeId);
-  PrerenderHost* prerender_host2 =
-      registry->FindHostByUrlForTesting(kPrerenderingUrl);
-  CommitPrerenderNavigation(*prerender_host2);
-
-  EXPECT_NE(prerender_frame_tree_node_id, prerender_frame_tree_node_id2);
-
-  // Resume the activation. This should not reserve the second prerender and
-  // should fall back to a regular navigation.
-  condition.CallResumeClosure();
+  // Resume the initial activation. This should not reserve the second
+  // prerender and should fall back to a regular navigation.
+  std::move(resume_navigation).Run();
   navigation->Commit();
   EXPECT_EQ(web_contents->GetMainFrame()->GetLastCommittedURL(),
             kPrerenderingUrl);
 
   // The second prerender should still exist.
   EXPECT_NE(registry->FindHostByUrlForTesting(kPrerenderingUrl), nullptr);
+}
+
+TEST_F(PrerenderHostRegistryTest,
+       DontStartPrerenderWhenTriggerIsAlreadyHidden) {
+  std::unique_ptr<TestWebContents> web_contents =
+      CreateWebContents(GURL("https://example.com/"));
+  // The visibility state to be HIDDEN will cause prerendering not started.
+  web_contents->WasHidden();
+
+  const GURL kPrerenderingUrl = GURL("https://example.com/empty.html");
+  RenderFrameHostImpl* initiator_rfh = web_contents->GetMainFrame();
+  PrerenderHostRegistry* registry = web_contents->GetPrerenderHostRegistry();
+  const int prerender_frame_tree_node_id = registry->CreateAndStartHost(
+      GeneratePrerenderAttributes(kPrerenderingUrl,
+                                  PrerenderTriggerType::kSpeculationRule, "",
+                                  initiator_rfh),
+      *web_contents);
+  EXPECT_EQ(prerender_frame_tree_node_id, RenderFrameHost::kNoFrameTreeNodeId);
+  PrerenderHost* prerender_host =
+      registry->FindNonReservedHostById(prerender_frame_tree_node_id);
+  EXPECT_EQ(prerender_host, nullptr);
+  ExpectUniqueSampleOfFinalStatus(
+      PrerenderHost::FinalStatus::kTriggerBackgrounded);
 }
 
 // -------------------------------------------------
@@ -711,18 +815,15 @@ TEST_F(PrerenderHostRegistryTest,
        CompareInitialAndActivationBeginParams_Headers) {
   EXPECT_FALSE(CheckIsActivatedForParams(
       base::BindLambdaForTesting([](NavigationSimulatorImpl* navigation) {
-        navigation->set_request_headers("X-Foo: Test");
+        navigation->set_request_headers("User-Agent: Test");
       })));
 }
 
-// Tests that the User-Agent header is ignored when comparing request headers.
-//
-// TODO(https://crbug.com/1213299): Check the User-Agent header in a way that
-// works with the DevTools override.
-TEST_F(PrerenderHostRegistryTest, UserAgentIsIgnoredForParamMatching) {
+// Tests that the Purpose header is ignored when comparing request headers.
+TEST_F(PrerenderHostRegistryTest, PurposeHeaderIsIgnoredForParamMatching) {
   EXPECT_TRUE(CheckIsActivatedForParams(
       base::BindLambdaForTesting([](NavigationSimulatorImpl* navigation) {
-        navigation->set_request_headers("User-Agent: MyBrowser");
+        navigation->set_request_headers("Purpose: Test");
       })));
 }
 
@@ -805,15 +906,6 @@ TEST_F(PrerenderHostRegistryTest,
       base::BindLambdaForTesting([](NavigationSimulatorImpl* navigation) {
         navigation->set_should_check_main_world_csp(
             network::mojom::CSPDisposition::DO_NOT_CHECK);
-      })));
-}
-
-TEST_F(PrerenderHostRegistryTest,
-       CompareInitialAndActivationCommonParams_HistoryURLForDataURL) {
-  EXPECT_FALSE(CheckIsActivatedForParams(
-      base::BindLambdaForTesting([](NavigationSimulatorImpl* navigation) {
-        const GURL kOriginalUrl("https://example.com/");
-        navigation->set_history_url_for_data_url(kOriginalUrl);
       })));
 }
 

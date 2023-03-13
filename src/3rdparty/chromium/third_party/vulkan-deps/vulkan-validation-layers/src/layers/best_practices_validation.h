@@ -1,6 +1,7 @@
-/* Copyright (c) 2015-2021 The Khronos Group Inc.
- * Copyright (c) 2015-2021 Valve Corporation
- * Copyright (c) 2015-2021 LunarG, Inc.
+/* Copyright (c) 2015-2022 The Khronos Group Inc.
+ * Copyright (c) 2015-2022 Valve Corporation
+ * Copyright (c) 2015-2022 LunarG, Inc.
+ * Modifications Copyright (C) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +16,7 @@
  * limitations under the License.
  *
  * Author: Camden Stocker <camden@lunarg.com>
+ * Author: Nadav Geva <nadav.geva@amd.com>
  */
 
 #pragma once
@@ -22,6 +24,7 @@
 #include "chassis.h"
 #include "state_tracker.h"
 #include "image_state.h"
+#include "cmd_buffer_state.h"
 #include <string>
 
 static const uint32_t kMemoryObjectWarningLimit = 250;
@@ -38,6 +41,65 @@ static const VkDeviceSize kMinDeviceAllocationSize = 256 * 1024;
 // very large allocation.
 static const VkDeviceSize kMinDedicatedAllocationSize = 1024 * 1024;
 
+// AMD best practices
+// Note: These are initial ball park numbers for good performance
+// We expect to adjust them as we get more data on layer usage
+// Avoid small command buffers
+static const uint32_t kMinRecommendedCommandBufferSizeAMD = 10;
+// Avoid small secondary command buffers
+static const uint32_t kMinRecommendedDrawsInSecondaryCommandBufferSizeAMD = 10;
+// Idealy, only 1 fence per frame, so 3 for triple buffering
+static const uint32_t kMaxRecommendedFenceObjectsSizeAMD = 3;
+// Avoid excessive sempahores
+static const uint32_t kMaxRecommendedSemaphoreObjectsSizeAMD = 10;
+// Avoid excessive barriers
+static const uint32_t kMaxRecommendedBarriersSizeAMD = 500;
+// Avoid excessive pipelines
+static const uint32_t kMaxRecommendedNumberOfPSOAMD = 5000;
+// Unlikely that the user needs all the dynamic states enabled at the same time, and they encur a cost
+static const uint32_t kDynamicStatesWarningLimitAMD = 7;
+// Too many dynamic descriptor sets can cause a large pipeline layout
+static const uint32_t kPipelineLayoutSizeWarningLimitAMD = 13;
+// Check that the user is submitting excessivly to a queue
+static const uint32_t kNumberOfSubmissionWarningLimitAMD = 20;
+// Check that there is enough work per vertex stream change
+static const float kVertexStreamToDrawRatioWarningLimitAMD = 0.8f;
+// Check that there is enough work per pipeline change
+static const float kDrawsPerPipelineRatioWarningLimitAMD = 5.f;
+// Check that command buffers are used with an appropriatly sized pool
+static const float kCmdBufferToCmdPoolRatioWarningLimitAMD = 0.1f;
+
+// How many small indexed drawcalls in a command buffer before a warning is thrown
+static const uint32_t kMaxSmallIndexedDrawcalls = 10;
+
+// How many indices make a small indexed drawcall
+static const int kSmallIndexedDrawcallIndices = 10;
+
+// Minimum number of vertices/indices to take into account when doing depth pre-pass checks for Arm Mali GPUs
+static const int kDepthPrePassMinDrawCountArm = 500;
+
+// Minimum, number of draw calls in order to trigger depth pre-pass warnings for Arm Mali GPUs
+static const int kDepthPrePassNumDrawCallsArm = 20;
+
+// Maximum sample count for full throughput on Mali GPUs
+static const VkSampleCountFlagBits kMaxEfficientSamplesArm = VK_SAMPLE_COUNT_4_BIT;
+
+// On Arm Mali architectures, it's generally best to align work group dimensions to 4.
+static const uint32_t kThreadGroupDispatchCountAlignmentArm = 4;
+
+// Maximum number of threads which can efficiently be part of a compute workgroup when using thread group barriers.
+static const uint32_t kMaxEfficientWorkGroupThreadCountArm = 64;
+
+// Minimum number of vertices/indices a draw needs to have before considering it in depth prepass warnings on PowerVR
+static const int kDepthPrePassMinDrawCountIMG = 300;
+
+// Minimum, number of draw calls matching the above criteria before triggerring a depth prepass warning on PowerVR
+static const int kDepthPrePassNumDrawCallsIMG = 10;
+
+// Maximum sample count on PowerVR before showing a warning
+static const VkSampleCountFlagBits kMaxEfficientSamplesImg = VK_SAMPLE_COUNT_4_BIT;
+
+
 enum ExtDeprecationReason {
     kExtPromoted,
     kExtObsoleted,
@@ -49,8 +111,7 @@ struct DeprecationData {
     std::string target;
 };
 
-struct SpecialUseVUIDs
-{
+struct SpecialUseVUIDs {
     const char* cadsupport;
     const char* d3demulation;
     const char* devtools;
@@ -60,6 +121,8 @@ struct SpecialUseVUIDs
 
 typedef enum {
     kBPVendorArm = 0x00000001,
+    kBPVendorAMD = 0x00000002,
+    kBPVendorIMG = 0x00000004,
 } BPVendorFlagBits;
 typedef VkFlags BPVendorFlags;
 
@@ -85,16 +148,47 @@ enum IMAGE_SUBRESOURCE_USAGE_BP {
     COPY_WRITE
 };
 
-struct IMAGE_STATE_BP {
+class BestPractices;
+
+namespace bp_state {
+class Image : public IMAGE_STATE {
+  public:
+    Image(const ValidationStateTracker* dev_data, VkImage img, const VkImageCreateInfo* pCreateInfo,
+          VkFormatFeatureFlags2KHR features)
+        : IMAGE_STATE(dev_data, img, pCreateInfo, features) {
+        SetupUsages();
+    }
+
+    Image(const ValidationStateTracker* dev_data, VkImage img, const VkImageCreateInfo* pCreateInfo, VkSwapchainKHR swapchain,
+          uint32_t swapchain_index, VkFormatFeatureFlags2KHR features)
+        : IMAGE_STATE(dev_data, img, pCreateInfo, swapchain, swapchain_index, features) {
+        SetupUsages();
+    }
+
+    IMAGE_SUBRESOURCE_USAGE_BP UpdateUsage(uint32_t array_layer, uint32_t mip_level, IMAGE_SUBRESOURCE_USAGE_BP usage) {
+        auto last_usage = usages_[array_layer][mip_level];
+        usages_[array_layer][mip_level] = usage;
+        return last_usage;
+    }
+
+  private:
+    void SetupUsages() {
+        usages_.resize(createInfo.arrayLayers);
+        for (auto& mip_vec : usages_) {
+            mip_vec.resize(createInfo.mipLevels, IMAGE_SUBRESOURCE_USAGE_BP::UNDEFINED);
+        }
+    }
     // A 2d vector for all the array layers and mip levels.
     // This does not split usages per aspect.
     // Aspects are generally read and written together,
     // and tracking them independently could be misleading.
-    std::vector<std::vector<IMAGE_SUBRESOURCE_USAGE_BP>> usages;
-    IMAGE_STATE* image{nullptr};
+    std::vector<std::vector<IMAGE_SUBRESOURCE_USAGE_BP>> usages_;
 };
 
-struct PHYSICAL_DEVICE_STATE_BP {
+class PhysicalDevice : public PHYSICAL_DEVICE_STATE {
+  public:
+    PhysicalDevice(VkPhysicalDevice phys_dev) : PHYSICAL_DEVICE_STATE(phys_dev) {}
+
     // Track the call state and array sizes for various query functions
     CALL_STATE vkGetPhysicalDeviceQueueFamilyPropertiesState = UNCALLED;
     CALL_STATE vkGetPhysicalDeviceQueueFamilyProperties2State = UNCALLED;
@@ -105,42 +199,86 @@ struct PHYSICAL_DEVICE_STATE_BP {
     CALL_STATE vkGetPhysicalDeviceSurfaceCapabilitiesKHRState = UNCALLED;
     CALL_STATE vkGetPhysicalDeviceSurfacePresentModesKHRState = UNCALLED;
     CALL_STATE vkGetPhysicalDeviceSurfaceFormatsKHRState = UNCALLED;
+    uint32_t surface_formats_count = 0;
     CALL_STATE vkGetPhysicalDeviceDisplayPlanePropertiesKHRState = UNCALLED;
 };
 
-class SWAPCHAIN_STATE_BP : public SWAPCHAIN_NODE {
+class Swapchain : public SWAPCHAIN_NODE {
   public:
-    SWAPCHAIN_STATE_BP(ValidationStateTracker* dev_data, const VkSwapchainCreateInfoKHR* pCreateInfo, VkSwapchainKHR swapchain)
+    Swapchain(ValidationStateTracker* dev_data, const VkSwapchainCreateInfoKHR* pCreateInfo, VkSwapchainKHR swapchain)
         : SWAPCHAIN_NODE(dev_data, pCreateInfo, swapchain) {}
+
     CALL_STATE vkGetSwapchainImagesKHRState = UNCALLED;
 };
 
-// How many small indexed drawcalls in a command buffer before a warning is thrown
-static const uint32_t kMaxSmallIndexedDrawcalls = 10;
+struct AttachmentInfo {
+    uint32_t framebufferAttachment;
+    VkImageAspectFlags aspects;
+};
 
-// How many indices make a small indexed drawcall
-static const int kSmallIndexedDrawcallIndices = 10;
+// used to track state regarding render pass heuristic checks
+struct RenderPassState {
+    bool depthAttachment = false;
+    bool colorAttachment = false;
+    bool depthOnly = false;
+    bool depthEqualComparison = false;
+    uint32_t numDrawCallsDepthOnly = 0;
+    uint32_t numDrawCallsDepthEqualCompare = 0;
 
-// Minimum number of vertices/indices to take into account when doing depth pre-pass checks for Arm Mali GPUs
-static const int kDepthPrePassMinDrawCountArm = 500;
+    // For secondaries, we need to keep this around for execute commands.
+    struct ClearInfo {
+        uint32_t framebufferAttachment;
+        uint32_t colorAttachment;
+        VkImageAspectFlags aspects;
+        std::vector<VkClearRect> rects;
+    };
 
-// Minimum, number of draw calls in order to trigger depth pre-pass warnings for Arm Mali GPUs
-static const int kDepthPrePassNumDrawCallsArm = 20;
+    std::vector<ClearInfo> earlyClearAttachments;
+    std::vector<AttachmentInfo> touchesAttachments;
+    std::vector<AttachmentInfo> nextDrawTouchesAttachments;
+    bool drawTouchAttachments = false;
+};
 
-// Maximum sample count for full throughput on Mali GPUs
-static const VkSampleCountFlagBits kMaxEfficientSamplesArm = VK_SAMPLE_COUNT_4_BIT;
+class CommandBuffer : public CMD_BUFFER_STATE {
+  public:
+    CommandBuffer(BestPractices* bp, VkCommandBuffer cb, const VkCommandBufferAllocateInfo* pCreateInfo,
+                  const COMMAND_POOL_STATE* pool);
 
-// On Arm Mali architectures, it's generally best to align work group dimensions to 4.
-static const uint32_t kThreadGroupDispatchCountAlignmentArm = 4;
+    RenderPassState render_pass_state;
+};
 
-// Maximum number of threads which can efficiently be part of a compute workgroup when using thread group barriers.
-static const uint32_t kMaxEfficientWorkGroupThreadCountArm = 64;
+class DescriptorPool : public DESCRIPTOR_POOL_STATE {
+  public:
+    DescriptorPool(ValidationStateTracker* dev, const VkDescriptorPool pool, const VkDescriptorPoolCreateInfo* pCreateInfo)
+        : DESCRIPTOR_POOL_STATE(dev, pool, pCreateInfo) {}
+
+    uint32_t freed_count{0};
+};
+
+class Pipeline : public PIPELINE_STATE {
+  public:
+    Pipeline(const ValidationStateTracker* state_data, const VkGraphicsPipelineCreateInfo* pCreateInfo,
+             std::shared_ptr<const RENDER_PASS_STATE>&& rpstate, std::shared_ptr<const PIPELINE_LAYOUT_STATE>&& layout);
+
+    const std::vector<AttachmentInfo> access_framebuffer_attachments;
+};
+}  // namespace bp_state
+
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkPhysicalDevice, bp_state::PhysicalDevice, PHYSICAL_DEVICE_STATE);
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkCommandBuffer, bp_state::CommandBuffer, CMD_BUFFER_STATE);
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkSwapchainKHR, bp_state::Swapchain, SWAPCHAIN_NODE);
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkImage, bp_state::Image, IMAGE_STATE);
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkDescriptorPool, bp_state::DescriptorPool, DESCRIPTOR_POOL_STATE);
+VALSTATETRACK_DERIVED_STATE_OBJECT(VkPipeline, bp_state::Pipeline, PIPELINE_STATE);
 
 class BestPractices : public ValidationStateTracker {
   public:
     using StateTracker = ValidationStateTracker;
 
     BestPractices() { container_type = LayerObjectTypeBestPractices; }
+
+    ReadLockGuard ReadLock() override;
+    WriteLockGuard WriteLock() override;
 
     std::string GetAPIVersionName(uint32_t version) const;
 
@@ -150,7 +288,8 @@ class BestPractices : public ValidationStateTracker {
 
     bool ValidateDeprecatedExtensions(const char* api_name, const char* extension_name, uint32_t version, const char* vuid) const;
 
-    bool ValidateSpecialUseExtensions(const char* api_name, const char* extension_name, const SpecialUseVUIDs& special_use_vuids) const;
+    bool ValidateSpecialUseExtensions(const char* api_name, const char* extension_name,
+                                      const SpecialUseVUIDs& special_use_vuids) const;
 
     bool PreCallValidateCmdDrawIndexedIndirectCount(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset,
                                                     VkBuffer countBuffer, VkDeviceSize countBufferOffset, uint32_t maxDrawCount,
@@ -162,16 +301,12 @@ class BestPractices : public ValidationStateTracker {
 
     bool PreCallValidateCreateInstance(const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator,
                                        VkInstance* pInstance) const override;
-    void PreCallRecordCreateInstance(const VkInstanceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator,
-                                     VkInstance* pInstance) override;
     bool PreCallValidateCreateDevice(VkPhysicalDevice physicalDevice, const VkDeviceCreateInfo* pCreateInfo,
                                      const VkAllocationCallbacks* pAllocator, VkDevice* pDevice) const override;
     bool PreCallValidateCreateBuffer(VkDevice device, const VkBufferCreateInfo* pCreateInfo,
                                      const VkAllocationCallbacks* pAllocator, VkBuffer* pBuffer) const override;
     bool PreCallValidateCreateImage(VkDevice device, const VkImageCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator,
                                     VkImage* pImage) const override;
-    void PreCallRecordDestroyImage(VkDevice device, VkImage image, const VkAllocationCallbacks *pAllocator) override;
-    void PreCallRecordDestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks *pAllocator) override;
     bool PreCallValidateCreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* pCreateInfo,
                                            const VkAllocationCallbacks* pAllocator, VkSwapchainKHR* pSwapchain) const override;
     bool PreCallValidateCreateSharedSwapchainsKHR(VkDevice device, uint32_t swapchainCount,
@@ -193,7 +328,6 @@ class BestPractices : public ValidationStateTracker {
                                        const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory) const override;
     void ManualPostCallRecordAllocateMemory(VkDevice device, const VkMemoryAllocateInfo* pAllocateInfo,
                                             const VkAllocationCallbacks* pAllocator, VkDeviceMemory* pMemory, VkResult result);
-    void PreCallRecordFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator) override;
     bool ValidateBindBufferMemory(VkBuffer buffer, VkDeviceMemory memory, const char* api_name) const;
     bool PreCallValidateBindBufferMemory(VkDevice device, VkBuffer buffer, VkDeviceMemory memory,
                                          VkDeviceSize memoryOffset) const override;
@@ -212,6 +346,7 @@ class BestPractices : public ValidationStateTracker {
                                           const VkAllocationCallbacks* pAllocator, VkCommandPool* pCommandPool) const override;
     bool PreCallValidateFreeMemory(VkDevice device, VkDeviceMemory memory, const VkAllocationCallbacks* pAllocator) const override;
     bool ValidateMultisampledBlendingArm(uint32_t createInfoCount, const VkGraphicsPipelineCreateInfo* pCreateInfos) const;
+
     bool PreCallValidateCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
                                                 const VkGraphicsPipelineCreateInfo* pCreateInfos,
                                                 const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines,
@@ -221,7 +356,6 @@ class BestPractices : public ValidationStateTracker {
                                                const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines,
                                                void* pipe_state) const override;
     bool ValidateCreateComputePipelineArm(const VkComputePipelineCreateInfo& createInfo) const;
-    void PreCallRecordDestroyPipeline(VkDevice device, VkPipeline pipeline, const VkAllocationCallbacks *pAllocator) override;
 
     bool CheckPipelineStageFlags(const std::string& api_name, VkPipelineStageFlags flags) const;
     bool CheckPipelineStageFlags(const std::string& api_name, VkPipelineStageFlags2KHR flags) const;
@@ -230,14 +364,20 @@ class BestPractices : public ValidationStateTracker {
                                     VkFence fence) const override;
     bool PreCallValidateQueueSubmit2KHR(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2KHR* pSubmits,
                                         VkFence fence) const override;
+    bool PreCallValidateQueueSubmit2(VkQueue queue, uint32_t submitCount, const VkSubmitInfo2* pSubmits,
+                                     VkFence fence) const override;
     bool PreCallValidateBeginCommandBuffer(VkCommandBuffer commandBuffer,
                                            const VkCommandBufferBeginInfo* pBeginInfo) const override;
     bool PreCallValidateCmdSetEvent(VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags stageMask) const override;
     bool PreCallValidateCmdSetEvent2KHR(VkCommandBuffer commandBuffer, VkEvent event,
                                         const VkDependencyInfoKHR* pDependencyInfo) const override;
+    bool PreCallValidateCmdSetEvent2(VkCommandBuffer commandBuffer, VkEvent event,
+                                     const VkDependencyInfo* pDependencyInfo) const override;
     bool PreCallValidateCmdResetEvent(VkCommandBuffer commandBuffer, VkEvent event, VkPipelineStageFlags stageMask) const override;
     bool PreCallValidateCmdResetEvent2KHR(VkCommandBuffer commandBuffer, VkEvent event,
                                           VkPipelineStageFlags2KHR stageMask) const override;
+    bool PreCallValidateCmdResetEvent2(VkCommandBuffer commandBuffer, VkEvent event,
+                                       VkPipelineStageFlags2 stageMask) const override;
     bool PreCallValidateCmdWaitEvents(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent* pEvents,
                                       VkPipelineStageFlags srcStageMask, VkPipelineStageFlags dstStageMask,
                                       uint32_t memoryBarrierCount, const VkMemoryBarrier* pMemoryBarriers,
@@ -246,6 +386,8 @@ class BestPractices : public ValidationStateTracker {
                                       const VkImageMemoryBarrier* pImageMemoryBarriers) const override;
     bool PreCallValidateCmdWaitEvents2KHR(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent* pEvents,
                                           const VkDependencyInfoKHR* pDependencyInfos) const override;
+    bool PreCallValidateCmdWaitEvents2(VkCommandBuffer commandBuffer, uint32_t eventCount, const VkEvent* pEvents,
+                                       const VkDependencyInfo* pDependencyInfos) const override;
     bool PreCallValidateCmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags srcStageMask,
                                            VkPipelineStageFlags dstStageMask, VkDependencyFlags dependencyFlags,
                                            uint32_t memoryBarrierCount, const VkMemoryBarrier* pMemoryBarriers,
@@ -254,10 +396,13 @@ class BestPractices : public ValidationStateTracker {
                                            const VkImageMemoryBarrier* pImageMemoryBarriers) const override;
     bool PreCallValidateCmdPipelineBarrier2KHR(VkCommandBuffer commandBuffer,
                                                const VkDependencyInfoKHR* pDependencyInfo) const override;
+    bool PreCallValidateCmdPipelineBarrier2(VkCommandBuffer commandBuffer, const VkDependencyInfo* pDependencyInfo) const override;
     bool PreCallValidateCmdWriteTimestamp(VkCommandBuffer commandBuffer, VkPipelineStageFlagBits pipelineStage,
                                           VkQueryPool queryPool, uint32_t query) const override;
     bool PreCallValidateCmdWriteTimestamp2KHR(VkCommandBuffer commandBuffer, VkPipelineStageFlags2KHR pipelineStage,
                                               VkQueryPool queryPool, uint32_t query) const override;
+    bool PreCallValidateCmdWriteTimestamp2(VkCommandBuffer commandBuffer, VkPipelineStageFlags2 pipelineStage,
+                                           VkQueryPool queryPool, uint32_t query) const override;
     void PostCallRecordCmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint,
                                        VkPipeline pipeline) override;
     bool ValidateCmdBeginRenderPass(VkCommandBuffer commandBuffer, RenderPassCreateVersion rp_version,
@@ -266,19 +411,19 @@ class BestPractices : public ValidationStateTracker {
     void PreCallRecordCmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
                                          VkSubpassContents contents) override;
     void PreCallRecordCmdBeginRenderPass2(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
-                                          const VkSubpassBeginInfo *pSubpassBeginInfo) override;
+                                          const VkSubpassBeginInfo* pSubpassBeginInfo) override;
     void PreCallRecordCmdBeginRenderPass2KHR(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
-                                             const VkSubpassBeginInfo *pSubpassBeginInfo) override;
+                                             const VkSubpassBeginInfo* pSubpassBeginInfo) override;
     void PreCallRecordCmdEndRenderPass(VkCommandBuffer commandBuffer) override;
-    void PreCallRecordCmdEndRenderPass2(VkCommandBuffer commandBuffer, const VkSubpassEndInfo *pSubpassEndInfo) override;
-    void PreCallRecordCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer, const VkSubpassEndInfoKHR *pSubpassEndInfo) override;
+    void PreCallRecordCmdEndRenderPass2(VkCommandBuffer commandBuffer, const VkSubpassEndInfo* pSubpassEndInfo) override;
+    void PreCallRecordCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer, const VkSubpassEndInfoKHR* pSubpassEndInfo) override;
     bool PreCallValidateCmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
                                            VkSubpassContents contents) const override;
     bool PreCallValidateCmdBeginRenderPass2KHR(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
                                                const VkSubpassBeginInfo* pSubpassBeginInfo) const override;
     bool PreCallValidateCmdBeginRenderPass2(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
                                             const VkSubpassBeginInfo* pSubpassBeginInfo) const override;
-    void ValidateBoundDescriptorSets(VkCommandBuffer commandBuffer, const char* function_name);
+    void ValidateBoundDescriptorSets(bp_state::CommandBuffer& commandBuffer, const char* function_name);
     void RecordCmdBeginRenderPass(VkCommandBuffer commandBuffer, RenderPassCreateVersion rp_version,
                                   const VkRenderPassBeginInfo* pRenderPassBegin);
     void PostCallRecordCmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin,
@@ -293,8 +438,8 @@ class BestPractices : public ValidationStateTracker {
                                uint32_t firstInstance) override;
     bool PreCallValidateCmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                                        uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) const override;
-    bool ValidateIndexBufferArm(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex,
-                                int32_t vertexOffset, uint32_t firstInstance) const;
+    bool ValidateIndexBufferArm(const bp_state::CommandBuffer& cb_state, uint32_t indexCount, uint32_t instanceCount,
+                                uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) const;
     void PreCallRecordCmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
                                      uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) override;
     void PostCallRecordCmdDrawIndexed(VkCommandBuffer commandBuffer, uint32_t indexCount, uint32_t instanceCount,
@@ -310,8 +455,8 @@ class BestPractices : public ValidationStateTracker {
     bool PreCallValidateCmdDispatch(VkCommandBuffer commandBuffer, uint32_t groupCountX, uint32_t groupCountY,
                                     uint32_t groupCountZ) const override;
     bool PreCallValidateCmdEndRenderPass(VkCommandBuffer commandBuffer) const override;
-    bool PreCallValidateCmdEndRenderPass2(VkCommandBuffer commandBuffer, const VkSubpassEndInfo *pSubpassEndInfo) const override;
-    bool PreCallValidateCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer, const VkSubpassEndInfo *pSubpassEndInfo) const override;
+    bool PreCallValidateCmdEndRenderPass2(VkCommandBuffer commandBuffer, const VkSubpassEndInfo* pSubpassEndInfo) const override;
+    bool PreCallValidateCmdEndRenderPass2KHR(VkCommandBuffer commandBuffer, const VkSubpassEndInfo* pSubpassEndInfo) const override;
     void PreCallRecordCmdDraw(VkCommandBuffer commandBuffer, uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex,
                               uint32_t firstInstance) override;
     void PreCallRecordCmdDrawIndirect(VkCommandBuffer commandBuffer, VkBuffer buffer, VkDeviceSize offset, uint32_t drawCount,
@@ -360,33 +505,29 @@ class BestPractices : public ValidationStateTracker {
                                         const VkImageResolve* pRegions) const override;
     bool PreCallValidateCmdResolveImage2KHR(VkCommandBuffer commandBuffer,
                                             const VkResolveImageInfo2KHR* pResolveImageInfo) const override;
+    bool PreCallValidateCmdResolveImage2(VkCommandBuffer commandBuffer,
+                                         const VkResolveImageInfo2* pResolveImageInfo) const override;
 
-    using QueueCallbacks = std::vector<std::function<bool (const ValidationStateTracker*, const QUEUE_STATE*)>>;
+    using QueueCallbacks = std::vector<CMD_BUFFER_STATE::QueueCallback>;
 
     void QueueValidateImageView(QueueCallbacks &func, const char* function_name,
                                 IMAGE_VIEW_STATE* view, IMAGE_SUBRESOURCE_USAGE_BP usage);
-    void QueueValidateImage(QueueCallbacks &func, const char* function_name,
-                            IMAGE_STATE_BP* state, IMAGE_SUBRESOURCE_USAGE_BP usage,
-                            const VkImageSubresourceRange& subresource_range);
-    void QueueValidateImage(QueueCallbacks &func, const char* function_name,
-                            IMAGE_STATE_BP* state, IMAGE_SUBRESOURCE_USAGE_BP usage,
-                            const VkImageSubresourceLayers& range);
-    void QueueValidateImage(QueueCallbacks &func, const char* function_name,
-                            IMAGE_STATE_BP* state, IMAGE_SUBRESOURCE_USAGE_BP usage,
-                            uint32_t array_layer, uint32_t mip_level);
-    void ValidateImageInQueue(const char *function_name,
-                              IMAGE_STATE_BP* state, IMAGE_SUBRESOURCE_USAGE_BP usage,
+    void QueueValidateImage(QueueCallbacks& func, const char* function_name, std::shared_ptr<bp_state::Image>& state,
+                            IMAGE_SUBRESOURCE_USAGE_BP usage, const VkImageSubresourceRange& subresource_range);
+    void QueueValidateImage(QueueCallbacks& func, const char* function_name, std::shared_ptr<bp_state::Image>& state,
+                            IMAGE_SUBRESOURCE_USAGE_BP usage, const VkImageSubresourceLayers& range);
+    void QueueValidateImage(QueueCallbacks& func, const char* function_name, std::shared_ptr<bp_state::Image>& state,
+                            IMAGE_SUBRESOURCE_USAGE_BP usage, uint32_t array_layer, uint32_t mip_level);
+    void ValidateImageInQueue(const char* function_name, bp_state::Image& state, IMAGE_SUBRESOURCE_USAGE_BP usage,
                               uint32_t array_layer, uint32_t mip_level);
-    void ValidateImageInQueueArm(const char *function_name, IMAGE_STATE* image,
-                                 IMAGE_SUBRESOURCE_USAGE_BP last_usage,
-                                 IMAGE_SUBRESOURCE_USAGE_BP usage,
-                                 uint32_t array_layer, uint32_t mip_level);
+    void ValidateImageInQueueArmImg(const char* function_name, const bp_state::Image& image, IMAGE_SUBRESOURCE_USAGE_BP last_usage,
+                                 IMAGE_SUBRESOURCE_USAGE_BP usage, uint32_t array_layer, uint32_t mip_level);
 
     void PreCallRecordCmdResolveImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                                       VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount,
                                       const VkImageResolve* pRegions) override;
-    void PreCallRecordCmdResolveImage2KHR(VkCommandBuffer commandBuffer,
-                                          const VkResolveImageInfo2KHR *pResolveImageInfo) override;
+    void PreCallRecordCmdResolveImage2KHR(VkCommandBuffer commandBuffer, const VkResolveImageInfo2KHR* pResolveImageInfo) override;
+    void PreCallRecordCmdResolveImage2(VkCommandBuffer commandBuffer, const VkResolveImageInfo2* pResolveImageInfo) override;
     void PreCallRecordCmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
                                          const VkClearColorValue* pColor, uint32_t rangeCount,
                                          const VkImageSubresourceRange* pRanges) override;
@@ -396,7 +537,8 @@ class BestPractices : public ValidationStateTracker {
     void PreCallRecordCmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage,
                                    VkImageLayout dstImageLayout, uint32_t regionCount, const VkImageCopy* pRegions) override;
     void PreCallRecordCmdCopyBufferToImage(VkCommandBuffer commandBuffer, VkBuffer srcBuffer, VkImage dstImage,
-                                           VkImageLayout dstImageLayout, uint32_t regionCount, const VkBufferImageCopy* pRegions) override;
+                                           VkImageLayout dstImageLayout, uint32_t regionCount,
+                                           const VkBufferImageCopy* pRegions) override;
     void PreCallRecordCmdCopyImageToBuffer(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
                                            VkBuffer dstBuffer, uint32_t regionCount, const VkBufferImageCopy* pRegions) override;
     void PreCallRecordCmdBlitImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout, VkImage dstImage,
@@ -463,46 +605,108 @@ class BestPractices : public ValidationStateTracker {
     void ManualPostCallRecordGetSwapchainImagesKHR(VkDevice device, VkSwapchainKHR swapchain, uint32_t* pSwapchainImageCount,
                                                    VkImage* pSwapchainImages, VkResult result);
 
-    void ManualPostCallRecordEnumeratePhysicalDevices(VkInstance instance, uint32_t* pPhysicalDeviceCount,
-                                                      VkPhysicalDevice* pPhysicalDevices, VkResult result);
+    void ManualPostCallRecordQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence,
+                                         VkResult result);
 
-    void ManualPostCallRecordCreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo* pCreateInfo,
-                                          const VkAllocationCallbacks* pAllocator, VkDevice* pDevice, VkResult result);
+    void ManualPostCallRecordEndCommandBuffer(VkCommandBuffer commandBuffer, VkResult result);
+
+    void ManualPostCallRecordCreateComputePipelines(VkDevice device, VkPipelineCache pipelineCache,
+                                                             uint32_t createInfoCount,
+                                                             const VkComputePipelineCreateInfo* pCreateInfos,
+                                                             const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines,
+                                                             VkResult result, void* state_data);
+
+    void PostCallRecordCmdPipelineBarrier(VkCommandBuffer commandBuffer, VkPipelineStageFlags srcStageMask,
+                                          VkPipelineStageFlags dstStageMask, VkDependencyFlags dependencyFlags,
+                                          uint32_t memoryBarrierCount, const VkMemoryBarrier* pMemoryBarriers,
+                                          uint32_t bufferMemoryBarrierCount, const VkBufferMemoryBarrier* pBufferMemoryBarriers,
+                                          uint32_t imageMemoryBarrierCount,
+                                          const VkImageMemoryBarrier* pImageMemoryBarriers) override;
+
+    void PreCallRecordCreateGraphicsPipelines(VkDevice device, VkPipelineCache pipelineCache, uint32_t createInfoCount,
+                                              const VkGraphicsPipelineCreateInfo* pCreateInfos,
+                                              const VkAllocationCallbacks* pAllocator, VkPipeline* pPipelines,
+                                              void* cgpl_state) override;
+
+    bool PreCallValidateUpdateDescriptorSets(VkDevice device, uint32_t descriptorWriteCount,
+                                             const VkWriteDescriptorSet* pDescriptorWrites, uint32_t descriptorCopyCount,
+                                             const VkCopyDescriptorSet* pDescriptorCopies) const override;
+    bool PreCallValidateCreateDescriptorUpdateTemplate(VkDevice device, const VkDescriptorUpdateTemplateCreateInfo* pCreateInfo,
+                                                       const VkAllocationCallbacks* pAllocator,
+                                                       VkDescriptorUpdateTemplate* pDescriptorUpdateTemplate) const override;
+    bool PreCallValidateCmdClearColorImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
+                                           const VkClearColorValue* pColor, uint32_t rangeCount,
+                                           const VkImageSubresourceRange* pRanges) const override;
+
+    bool PreCallValidateCmdClearDepthStencilImage(VkCommandBuffer commandBuffer, VkImage image, VkImageLayout imageLayout,
+                                                  const VkClearDepthStencilValue* pDepthStencil, uint32_t rangeCount,
+                                                  const VkImageSubresourceRange* pRanges) const override;
+
+    bool PreCallValidateCreatePipelineLayout(VkDevice device, const VkPipelineLayoutCreateInfo* pCreateInfo,
+                                             const VkAllocationCallbacks* pAllocator,
+                                             VkPipelineLayout* pPipelineLayout) const override;
+
+    bool PreCallValidateCmdCopyImage(VkCommandBuffer commandBuffer, VkImage srcImage, VkImageLayout srcImageLayout,
+                                     VkImage dstImage, VkImageLayout dstImageLayout, uint32_t regionCount,
+                                     const VkImageCopy* pRegions) const override;
+
+    bool PreCallValidateCmdBindPipeline(VkCommandBuffer commandBuffer, VkPipelineBindPoint pipelineBindPoint,
+                                        VkPipeline pipeline) const override;
+
+    bool PreCallValidateQueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* pPresentInfo) const override;
+
+    bool PreCallValidateCreateSemaphore(VkDevice device, const VkSemaphoreCreateInfo* pCreateInfo,
+                                        const VkAllocationCallbacks* pAllocator, VkSemaphore* pSemaphore) const override;
+    bool PreCallValidateCreateFence(VkDevice device, const VkFenceCreateInfo* pCreateInfo, const VkAllocationCallbacks* pAllocator,
+                                    VkFence* pFence) const override;
 
     void PreCallRecordQueueSubmit(VkQueue queue, uint32_t submitCount, const VkSubmitInfo* pSubmits, VkFence fence) override;
 
-    void PreCallRecordBeginCommandBuffer(VkCommandBuffer commandBuffer, const VkCommandBufferBeginInfo *pBeginInfo) override;
-    void PreCallRecordDestroyCommandPool(VkDevice device, VkCommandPool pool, const VkAllocationCallbacks *pAllocation) override;
-    void PreCallRecordFreeCommandBuffers(VkDevice device, VkCommandPool commandPool,
-                                         uint32_t commandBufferCount, const VkCommandBuffer* pCommandBuffers) override;
-
     void PreCallRecordCmdClearAttachments(VkCommandBuffer commandBuffer, uint32_t attachmentCount,
-                                          const VkClearAttachment* pClearAttachments,
-                                          uint32_t rectCount, const VkClearRect *pRects) override;
+                                          const VkClearAttachment* pClearAttachments, uint32_t rectCount,
+                                          const VkClearRect* pRects) override;
 
     bool PreCallValidateCmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCount,
                                            const VkCommandBuffer* pCommandBuffers) const override;
     void PreCallRecordCmdExecuteCommands(VkCommandBuffer commandBuffer, uint32_t commandBufferCount,
                                          const VkCommandBuffer* pCommandBuffers) override;
 
-    std::shared_ptr<SWAPCHAIN_NODE> CreateSwapchainState(const VkSwapchainCreateInfoKHR* create_info,
-                                                         VkSwapchainKHR swapchain) final {
-        return std::static_pointer_cast<SWAPCHAIN_NODE>(std::make_shared<SWAPCHAIN_STATE_BP>(this, create_info, swapchain));
-    }
-
 // Include code-generated functions
 #include "best_practices.h"
+  protected:
+    std::shared_ptr<CMD_BUFFER_STATE> CreateCmdBufferState(VkCommandBuffer cb, const VkCommandBufferAllocateInfo* create_info,
+                                                           const COMMAND_POOL_STATE* pool) final;
+    std::shared_ptr<SWAPCHAIN_NODE> CreateSwapchainState(const VkSwapchainCreateInfoKHR* create_info,
+                                                         VkSwapchainKHR swapchain) final {
+        return std::static_pointer_cast<SWAPCHAIN_NODE>(std::make_shared<bp_state::Swapchain>(this, create_info, swapchain));
+    }
+
+    std::shared_ptr<PHYSICAL_DEVICE_STATE> CreatePhysicalDeviceState(VkPhysicalDevice phys_dev) final {
+        return std::static_pointer_cast<PHYSICAL_DEVICE_STATE>(std::make_shared<bp_state::PhysicalDevice>(phys_dev));
+    }
+
+    std::shared_ptr<IMAGE_STATE> CreateImageState(VkImage img, const VkImageCreateInfo* pCreateInfo,
+                                                  VkFormatFeatureFlags2KHR features) final {
+        return std::static_pointer_cast<IMAGE_STATE>(std::make_shared<bp_state::Image>(this, img, pCreateInfo, features));
+    }
+
+    std::shared_ptr<IMAGE_STATE> CreateImageState(VkImage img, const VkImageCreateInfo* pCreateInfo, VkSwapchainKHR swapchain,
+                                                  uint32_t swapchain_index, VkFormatFeatureFlags2KHR features) final {
+        return std::static_pointer_cast<IMAGE_STATE>(
+            std::make_shared<bp_state::Image>(this, img, pCreateInfo, swapchain, swapchain_index, features));
+    }
+
+    std::shared_ptr<DESCRIPTOR_POOL_STATE> CreateDescriptorPoolState(VkDescriptorPool pool,
+                                                                     const VkDescriptorPoolCreateInfo* pCreateInfo) final {
+        return std::static_pointer_cast<DESCRIPTOR_POOL_STATE>(std::make_shared<bp_state::DescriptorPool>(this, pool, pCreateInfo));
+    }
+
+    std::shared_ptr<PIPELINE_STATE> CreateGraphicsPipelineState(const VkGraphicsPipelineCreateInfo* pCreateInfo,
+                                                                std::shared_ptr<const RENDER_PASS_STATE>&& render_pass,
+                                                                std::shared_ptr<const PIPELINE_LAYOUT_STATE>&& layout) const final;
 
   private:
-    uint32_t instance_api_version = 0;
-    uint32_t num_mem_objects = 0;
-
-    // Check that vendor-specific checks are enabled for at least one of the vendors
-    bool VendorCheckEnabled(BPVendorFlags vendors) const;
-
-    // State for use in best practices:
-    layer_data::unordered_map<VkDescriptorPool, uint32_t> descriptor_pool_freed_count = {};
-
+    // CacheEntry and PostTransformLRUCacheModel are used on the stack
     struct CacheEntry {
         uint32_t value;
         uint32_t age;
@@ -522,80 +726,51 @@ class BestPractices : public ValidationStateTracker {
         uint32_t iteration = 0;
     };
 
-    struct AttachmentInfo {
-        uint32_t framebufferAttachment;
-        VkImageAspectFlags aspects;
-    };
+    // Check that vendor-specific checks are enabled for at least one of the vendors
+    bool VendorCheckEnabled(BPVendorFlags vendors) const;
 
-    struct GraphicsPipelineCIs {
-        const safe_VkPipelineDepthStencilStateCreateInfo* depthStencilStateCI;
-        const safe_VkPipelineColorBlendStateCreateInfo* colorBlendStateCI;
-        std::vector<AttachmentInfo> accessFramebufferAttachments;
-    };
+    void RecordCmdDrawTypeArm(bp_state::CommandBuffer& cmd_state, uint32_t draw_count, const char* caller);
 
-    // used to track CreateInfos for graphics pipelines
-    layer_data::unordered_map<VkPipeline, GraphicsPipelineCIs> graphicsPipelineCIs = {};
-
-    // used to track state regarding render pass heuristic checks
-    struct RenderPassState {
-        bool depthAttachment = false;
-        bool colorAttachment = false;
-        bool depthOnly = false;
-        bool depthEqualComparison = false;
-        uint32_t numDrawCallsDepthOnly = 0;
-        uint32_t numDrawCallsDepthEqualCompare = 0;
-
-        // For secondaries, we need to keep this around for execute commands.
-        struct ClearInfo {
-            uint32_t framebufferAttachment;
-            uint32_t colorAttachment;
-            VkImageAspectFlags aspects;
-            std::vector<VkClearRect> rects;
-        };
-
-        std::vector<ClearInfo> earlyClearAttachments;
-        std::vector<AttachmentInfo> touchesAttachments;
-        std::vector<AttachmentInfo> nextDrawTouchesAttachments;
-        bool drawTouchAttachments = false;
-    };
-
-    void RecordCmdDrawTypeArm(RenderPassState& render_pass_state, uint32_t draw_count, const char* caller);
-
-    // used to track heuristic data per command buffer
-    layer_data::unordered_map<VkCommandBuffer, RenderPassState> cbRenderPassState = {};
-
-    // Used for instance versions of this object
-    layer_data::unordered_map<VkSwapchainKHR, SWAPCHAIN_STATE_BP> swapchain_bp_state_map;
-
-    // Backing data for BP-specific state data
-    layer_data::unordered_map<VkPhysicalDevice, PHYSICAL_DEVICE_STATE_BP> phys_device_bp_state_map;
-    // Physical device state for this instance
-    PHYSICAL_DEVICE_STATE_BP* instance_device_bp_state = nullptr;
-
-    // Get BestPractices-specific state for the given physical devices
-    PHYSICAL_DEVICE_STATE_BP* GetPhysicalDeviceStateBP(const VkPhysicalDevice& phys_device);
-    const PHYSICAL_DEVICE_STATE_BP* GetPhysicalDeviceStateBP(const VkPhysicalDevice& phys_device) const;
+    void AddDeferredQueueOperations(bp_state::CommandBuffer& cb);
 
     // Get BestPractices-specific for the current instance
-    PHYSICAL_DEVICE_STATE_BP* GetPhysicalDeviceStateBP();
-    const PHYSICAL_DEVICE_STATE_BP* GetPhysicalDeviceStateBP() const;
+    bp_state::PhysicalDevice* GetPhysicalDeviceState() { return static_cast<bp_state::PhysicalDevice*>(physical_device_state); }
+    const bp_state::PhysicalDevice* GetPhysicalDeviceState() const {
+        return static_cast<const bp_state::PhysicalDevice*>(physical_device_state);
+    }
 
-    IMAGE_STATE_BP* GetImageUsageState(VkImage image);
-    void ReleaseImageUsageState(VkImage image);
-    std::unordered_map<VkImage, IMAGE_STATE_BP> imageUsageMap;
-
-    void AddDeferredQueueOperations(CMD_BUFFER_STATE* cb);
-
-    void RecordAttachmentClearAttachments(CMD_BUFFER_STATE* cmd_state, RenderPassState& state,
-                                          uint32_t fb_attachment, uint32_t color_attachment,
-                                          VkImageAspectFlags aspects,
-                                          uint32_t rectCount, const VkClearRect *pRects);
-    void RecordAttachmentAccess(RenderPassState& state, uint32_t attachment, VkImageAspectFlags aspects);
-    bool ClearAttachmentsIsFullClear(const CMD_BUFFER_STATE* cmd, uint32_t rectCount, const VkClearRect* pRects) const;
-    bool ValidateClearAttachment(VkCommandBuffer commandBuffer, const CMD_BUFFER_STATE* cmd,
-                                 uint32_t fb_attachment, uint32_t color_attachment,
+    void RecordAttachmentClearAttachments(bp_state::CommandBuffer& cmd_state, uint32_t fb_attachment, uint32_t color_attachment,
+                                          VkImageAspectFlags aspects, uint32_t rectCount, const VkClearRect* pRects);
+    void RecordAttachmentAccess(bp_state::CommandBuffer& cmd_state, uint32_t attachment, VkImageAspectFlags aspects);
+    bool ClearAttachmentsIsFullClear(const bp_state::CommandBuffer& cmd, uint32_t rectCount, const VkClearRect* pRects) const;
+    bool ValidateClearAttachment(const bp_state::CommandBuffer& cmd, uint32_t fb_attachment, uint32_t color_attachment,
                                  VkImageAspectFlags aspects, bool secondary) const;
 
     bool ValidateCmdEndRenderPass(VkCommandBuffer commandBuffer) const;
-    void RecordCmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo *pRenderPassBegin);
+    void RecordCmdBeginRenderPass(VkCommandBuffer commandBuffer, const VkRenderPassBeginInfo* pRenderPassBegin);
+
+    void PipelineUsedInFrame(VkPipeline pipeline) {
+        WriteLockGuard guard(pipeline_lock_);
+        pipelines_used_in_frame_.insert(pipeline);
+    }
+
+    void ClearPipelinesUsedInFrame() {
+        WriteLockGuard guard(pipeline_lock_);
+        pipelines_used_in_frame_.clear();
+    }
+
+    bool IsPipelineUsedInFrame(VkPipeline pipeline) const {
+        ReadLockGuard guard(pipeline_lock_);
+        return pipelines_used_in_frame_.count(pipeline) != 0;
+    }
+
+    // AMD tracked
+    std::atomic<uint32_t> num_barriers_objects_{0};
+    std::atomic<uint32_t> num_pso_{0};
+    std::atomic<uint32_t> num_queue_submissions_{0};
+
+    std::atomic<VkPipelineCache> pipeline_cache_{VK_NULL_HANDLE};
+
+    layer_data::unordered_set<VkPipeline> pipelines_used_in_frame_;
+    mutable ReadWriteLock pipeline_lock_;
 };

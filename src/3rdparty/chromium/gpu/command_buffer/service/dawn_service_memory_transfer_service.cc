@@ -4,6 +4,7 @@
 
 #include "gpu/command_buffer/service/dawn_service_memory_transfer_service.h"
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/common/dawn_memory_transfer_handle.h"
 #include "gpu/command_buffer/service/common_decoder.h"
 
@@ -13,7 +14,7 @@ namespace webgpu {
 namespace {
 
 class ReadHandleImpl
-    : public dawn_wire::server::MemoryTransferService::ReadHandle {
+    : public dawn::wire::server::MemoryTransferService::ReadHandle {
  public:
   ReadHandleImpl(void* ptr, uint32_t size)
       : ReadHandle(), ptr_(ptr), size_(size) {}
@@ -29,8 +30,13 @@ class ReadHandleImpl
                            size_t offset,
                            size_t size,
                            void* serializePointer) override {
-    DCHECK_LE(offset, size_);
-    DCHECK_LE(size, size_ - offset);
+    // TODO(crbug.com/1373314): A compromised renderer could have a shared
+    // memory size not large enough to fit the GPU buffer contents. Instead of
+    // DCHECK, do a CHECK here to crash the release build. The crash is fine
+    // since it is not reachable from normal behavior. WebGPU post-V1 will have
+    // a refactored API.
+    CHECK_LE(offset, size_);
+    CHECK_LE(size, size_ - offset);
     // Copy the data into the shared memory allocation.
     // In the case of buffer mapping, this is the mapped GPU memory which we
     // copy into client-visible shared memory.
@@ -38,12 +44,12 @@ class ReadHandleImpl
   }
 
  private:
-  void* ptr_;
+  raw_ptr<void> ptr_;
   uint32_t size_;
 };
 
 class WriteHandleImpl
-    : public dawn_wire::server::MemoryTransferService::WriteHandle {
+    : public dawn::wire::server::MemoryTransferService::WriteHandle {
  public:
   WriteHandleImpl(const void* ptr, uint32_t size)
       : WriteHandle(), ptr_(ptr), size_(size) {}
@@ -76,7 +82,7 @@ class WriteHandleImpl
   }
 
  private:
-  const void* ptr_;  // Pointer to client-visible shared memory.
+  raw_ptr<const void> ptr_;  // Pointer to client-visible shared memory.
   uint32_t size_;
 };
 
@@ -84,7 +90,7 @@ class WriteHandleImpl
 
 DawnServiceMemoryTransferService::DawnServiceMemoryTransferService(
     CommonDecoder* decoder)
-    : dawn_wire::server::MemoryTransferService(), decoder_(decoder) {}
+    : dawn::wire::server::MemoryTransferService(), decoder_(decoder) {}
 
 DawnServiceMemoryTransferService::~DawnServiceMemoryTransferService() = default;
 
@@ -93,7 +99,10 @@ bool DawnServiceMemoryTransferService::DeserializeReadHandle(
     size_t deserialize_size,
     ReadHandle** read_handle) {
   DCHECK(deserialize_pointer);
-  DCHECK_EQ(deserialize_size, sizeof(MemoryTransferHandle));
+  // Use CHECK instead of DCHECK because the cast of the memory to
+  // MemoryTransferHandle and subsequent reads won't be safe if deserialize_size
+  // is too small.
+  CHECK_EQ(deserialize_size, sizeof(MemoryTransferHandle));
   const volatile MemoryTransferHandle* handle =
       reinterpret_cast<const volatile MemoryTransferHandle*>(
           deserialize_pointer);
@@ -118,7 +127,10 @@ bool DawnServiceMemoryTransferService::DeserializeWriteHandle(
     size_t deserialize_size,
     WriteHandle** write_handle) {
   DCHECK(deserialize_pointer);
-  DCHECK_EQ(deserialize_size, sizeof(MemoryTransferHandle));
+  // Use CHECK instead of DCHECK because the cast of the memory to
+  // MemoryTransferHandle and subsequent reads won't be safe if deserialize_size
+  // is too small.
+  CHECK_EQ(deserialize_size, sizeof(MemoryTransferHandle));
   const volatile MemoryTransferHandle* handle =
       reinterpret_cast<const volatile MemoryTransferHandle*>(
           deserialize_pointer);

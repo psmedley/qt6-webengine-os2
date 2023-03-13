@@ -7,8 +7,8 @@
 #include "compiler/translator/TranslatorMetalDirect/IntroduceVertexIndexID.h"
 #include "compiler/translator/StaticType.h"
 #include "compiler/translator/TranslatorMetalDirect/AstHelpers.h"
-#include "compiler/translator/TranslatorMetalDirect/IntermRebuild.h"
 #include "compiler/translator/tree_util/BuiltIn.h"
+#include "compiler/translator/tree_util/IntermRebuild.h"
 using namespace sh;
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -23,8 +23,15 @@ constexpr const TVariable kgl_VertexIDMetal(BuiltInId::gl_VertexID,
                                             StaticType::Get<EbtUInt, EbpHigh, EvqVertexID, 1, 1>());
 
 constexpr const TVariable kgl_instanceIdMetal(
-    BuiltInId::gl_VertexID,
+    BuiltInId::gl_InstanceID,
     ImmutableString("instanceIdMod"),
+    SymbolType::AngleInternal,
+    TExtension::UNDEFINED,
+    StaticType::Get<EbtUInt, EbpHigh, EvqInstanceID, 1, 1>());
+
+constexpr const TVariable kgl_baseInstanceMetal(
+    BuiltInId::gl_BaseInstance,
+    ImmutableString("baseInstance"),
     SymbolType::AngleInternal,
     TExtension::UNDEFINED,
     StaticType::Get<EbtUInt, EbpHigh, EvqInstanceID, 1, 1>());
@@ -60,7 +67,9 @@ class Rewriter : public TIntermRebuild
             }
             if (needsInstanceId)
             {
+                // Ensure these variables are present because they are required for XFB emulation.
                 mVariablesToIntroduce.push_back(&kgl_instanceIdMetal);
+                mVariablesToIntroduce.push_back(&kgl_baseInstanceMetal);
             }
             if (needsVertexId)
             {

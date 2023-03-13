@@ -8,7 +8,6 @@
 #define CORE_FPDFAPI_PARSER_CPDF_DICTIONARY_H_
 
 #include <map>
-#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -23,10 +22,12 @@
 
 class CPDF_IndirectObjectHolder;
 
+// Dictionaries never contain nullptr for valid keys, but some of the methods
+// will return nullptr to indicate non-existent keys.
 class CPDF_Dictionary final : public CPDF_Object {
  public:
-  using const_iterator =
-      std::map<ByteString, RetainPtr<CPDF_Object>>::const_iterator;
+  using DictMap = std::map<ByteString, RetainPtr<CPDF_Object>>;
+  using const_iterator = DictMap::const_iterator;
 
   CONSTRUCT_VIA_MAKE_RETAIN;
 
@@ -40,9 +41,6 @@ class CPDF_Dictionary final : public CPDF_Object {
   const CPDF_Dictionary* AsDictionary() const override;
   bool WriteTo(IFX_ArchiveStream* archive,
                const CPDF_Encryptor* encryptor) const override;
-
-  // `key` must be non-empty and ASCII, per PDF 32000 standard, section 7.2.1.
-  static bool IsValidKey(const ByteString& key);
 
   bool IsLocked() const { return !!m_LockCount; }
 
@@ -69,9 +67,11 @@ class CPDF_Dictionary final : public CPDF_Object {
   int GetIntegerFor(const ByteString& key, int default_int) const;
   float GetNumberFor(const ByteString& key) const;
   const CPDF_Dictionary* GetDictFor(const ByteString& key) const;
-  CPDF_Dictionary* GetDictFor(const ByteString& key);
+  CPDF_Dictionary* GetDictFor(const ByteString& key);  // Prefer next form.
+  RetainPtr<CPDF_Dictionary> GetMutableDictFor(const ByteString& key);
   const CPDF_Array* GetArrayFor(const ByteString& key) const;
-  CPDF_Array* GetArrayFor(const ByteString& key);
+  CPDF_Array* GetArrayFor(const ByteString& key);  // Prefer next form.
+  RetainPtr<CPDF_Array> GetMutableArrayFor(const ByteString& key);
   const CPDF_Stream* GetStreamFor(const ByteString& key) const;
   CPDF_Stream* GetStreamFor(const ByteString& key);
   CFX_FloatRect GetRectFor(const ByteString& key) const;
@@ -81,9 +81,10 @@ class CPDF_Dictionary final : public CPDF_Object {
   std::vector<ByteString> GetKeys() const;
 
   // Creates a new object owned by the dictionary and returns an unowned
-  // pointer to it. Prefer using these templates over calls to SetFor(),
-  // since by creating a new object with no previous references, they ensure
-  // cycles can not be introduced.
+  // pointer to it. Invalidates iterators for the element with the key |key|.
+  // Prefer using these templates over calls to SetFor(), since by creating
+  // a new object with no previous references, they ensure cycles can not be
+  // introduced.
   template <typename T, typename... Args>
   typename std::enable_if<!CanInternStrings<T>::value, T*>::type SetNewFor(
       const ByteString& key,
@@ -99,13 +100,14 @@ class CPDF_Dictionary final : public CPDF_Object {
         key, pdfium::MakeRetain<T>(m_pPool, std::forward<Args>(args)...)));
   }
 
+  // If |pObj| is null, then |key| is erased from the map. Otherwise, takes
+  // ownership of |pObj|, returns an unowned pointer to it. Invalidates
+  // iterators for the element with the key |key|.
+  CPDF_Object* SetFor(const ByteString& key, RetainPtr<CPDF_Object> pObj);
+
   // Convenience functions to convert native objects to array form.
   void SetRectFor(const ByteString& key, const CFX_FloatRect& rect);
   void SetMatrixFor(const ByteString& key, const CFX_Matrix& matrix);
-
-  // Set* functions invalidate iterators for the element with the key |key|.
-  // Takes ownership of |pObj|, returns an unowned pointer to it.
-  CPDF_Object* SetFor(const ByteString& key, RetainPtr<CPDF_Object> pObj);
 
   void ConvertToIndirectObjectFor(const ByteString& key,
                                   CPDF_IndirectObjectHolder* pHolder);
@@ -132,11 +134,12 @@ class CPDF_Dictionary final : public CPDF_Object {
 
   mutable uint32_t m_LockCount = 0;
   WeakPtr<ByteStringPool> m_pPool;
-  std::map<ByteString, RetainPtr<CPDF_Object>> m_Map;
+  DictMap m_Map;
 };
 
 class CPDF_DictionaryLocker {
  public:
+  FX_STACK_ALLOCATED();
   using const_iterator = CPDF_Dictionary::const_iterator;
 
   explicit CPDF_DictionaryLocker(const CPDF_Dictionary* pDictionary);
@@ -165,6 +168,11 @@ inline const CPDF_Dictionary* ToDictionary(const CPDF_Object* obj) {
 
 inline RetainPtr<CPDF_Dictionary> ToDictionary(RetainPtr<CPDF_Object> obj) {
   return RetainPtr<CPDF_Dictionary>(ToDictionary(obj.Get()));
+}
+
+inline RetainPtr<const CPDF_Dictionary> ToDictionary(
+    RetainPtr<const CPDF_Object> obj) {
+  return RetainPtr<const CPDF_Dictionary>(ToDictionary(obj.Get()));
 }
 
 #endif  // CORE_FPDFAPI_PARSER_CPDF_DICTIONARY_H_

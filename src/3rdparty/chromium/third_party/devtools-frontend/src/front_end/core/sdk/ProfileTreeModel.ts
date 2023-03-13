@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 import type * as Protocol from '../../generated/protocol.js';
+import type * as Platform from '../platform/platform.js';
 
 import type {Target} from './Target.js';
 
@@ -31,12 +32,12 @@ export class ProfileNode {
     return this.callFrame.functionName;
   }
 
-  get scriptId(): string {
-    return this.callFrame.scriptId;
+  get scriptId(): Protocol.Runtime.ScriptId {
+    return String(this.callFrame.scriptId) as Protocol.Runtime.ScriptId;
   }
 
-  get url(): string {
-    return this.callFrame.url;
+  get url(): Platform.DevToolsPath.UrlString {
+    return this.callFrame.url as Platform.DevToolsPath.UrlString;
   }
 
   get lineNumber(): number {
@@ -49,12 +50,12 @@ export class ProfileNode {
 }
 
 export class ProfileTreeModel {
-  private readonly targetInternal: Target|null;
+  readonly #targetInternal: Target|null;
   root!: ProfileNode;
   total!: number;
   maxDepth!: number;
   constructor(target?: Target|null) {
-    this.targetInternal = target || null;
+    this.#targetInternal = target || null;
   }
 
   initialize(root: ProfileNode): void {
@@ -105,6 +106,6 @@ export class ProfileTreeModel {
   }
 
   target(): Target|null {
-    return this.targetInternal;
+    return this.#targetInternal;
   }
 }

@@ -19,13 +19,16 @@ the License.
 #include <string>
 #include <utility>
 
+#include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "tensorflow/compiler/xla/service/dfs_hlo_visitor.h"
 #include "tensorflow/compiler/xla/service/hlo_alias_analysis.h"
 #include "tensorflow/compiler/xla/service/hlo_buffer.h"
 #include "tensorflow/compiler/xla/service/hlo_dataflow_analysis.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
 #include "tensorflow/compiler/xla/service/hlo_module.h"
 #include "tensorflow/compiler/xla/service/hlo_ordering.h"
+#include "tensorflow/compiler/xla/service/hlo_value.h"
 #include "tensorflow/compiler/xla/statusor.h"
 #include "tensorflow/compiler/xla/types.h"
 #include "tensorflow/core/lib/core/status.h"
@@ -47,11 +50,15 @@ class HloLiveRange {
   // LogicalTime represents the time in a virtual clock. Each instruction has
   // one monotonically increasing logical time assigned according to the
   // schedule.
-  using LogicalTime = int64;
+  using LogicalTime = int64_t;
 
   struct TimeBound {
     LogicalTime start;
     LogicalTime end;
+    // The buffer can hold multiple instructions during its life time (each
+    // tenant exclusively owns the buffer at any given time). `end_instruction`
+    // represents the last instruction that the buffer holds.
+    HloPosition end_position;
 
     bool friend operator==(const TimeBound& a, const TimeBound& b) {
       return a.start == b.start && a.end == b.end;
@@ -90,7 +97,9 @@ class HloLiveRange {
   }
 
   // Returns the time stamp of the end of the program.
-  LogicalTime schedule_end_time() const { return schedule_end_time_; }
+  LogicalTime schedule_end_time() const {
+    return flattened_instruction_sequence_.size();
+  }
 
   // Returns whether hlo live range is available on this entire module. Hlo live
   // range is not available if the module is partially ordered.
@@ -108,9 +117,15 @@ class HloLiveRange {
   // recurse into each called computations in module_scoped_analysis mode. As it
   // walks it also tracks down the ordinal number of each instruction in the
   // schedule and store it in the `instruction_schedule` and
-  // 'flattened_instruction_sequence`. The end of each computation is tracked in
-  // `computation_end_time`.
-  int64 FlattenSchedule(const HloComputation& computation, int64 start_time);
+  // 'flattened_instruction_sequence`.
+  void FlattenSchedule(const HloComputation& computation);
+
+  // Returns the last position of a value.
+  TimeBound GetLastPosition(const HloValue& value,
+                            LogicalTime definition_end_time) const;
+
+  // Returns the time of the last use of a value.
+  LogicalTime GetLastUsageTime(const HloValue& value) const;
 
   // Based on the flattened schedule, calculate the start and end of each
   // buffer.
@@ -195,16 +210,17 @@ class HloLiveRange {
   // Note there is no overlap of live ranges after normalization.
   void NormalizeAliasedBuffers();
 
+  LogicalTime ComputePeakMemoryMoment() const;
+
   const HloSchedule& schedule_;
   const HloAliasAnalysis& alias_analysis_;
   bool module_scoped_analysis_;
   bool total_order_scheduled_ = true;
 
   HloInstructionSequence flattened_instruction_sequence_;
-  absl::flat_hash_map<const HloInstruction*, int64> instruction_schedule_;
+  absl::flat_hash_map<const HloInstruction*, LogicalTime> instruction_schedule_;
   absl::flat_hash_map<const HloComputation*, TimeBound> computation_span_times_;
   absl::flat_hash_map<const HloValue*, TimeBound> buffer_live_ranges_;
-  LogicalTime schedule_end_time_;
 };
 
 }  // namespace xla

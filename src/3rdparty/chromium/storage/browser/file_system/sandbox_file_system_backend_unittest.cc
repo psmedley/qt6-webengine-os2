@@ -11,10 +11,8 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
@@ -30,7 +28,6 @@
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 #include "url/gurl.h"
-#include "url/origin.h"
 
 // PS stands for path separator.
 #if defined(FILE_PATH_USES_WIN_SEPARATORS)
@@ -95,7 +92,7 @@ class SandboxFileSystemBackendTest
     incognito_env_override_ = leveldb_chrome::NewMemEnv("FileSystem");
     delegate_ = std::make_unique<SandboxFileSystemBackendDelegate>(
         /*quota_manager_proxy=*/nullptr, base::ThreadTaskRunnerHandle::Get(),
-        data_dir_.GetPath(),
+        data_dir_.GetPath(), data_dir_.GetPath(),
         /*special_storage_policy=*/nullptr, options,
         options.is_in_memory() ? incognito_env_override_.get() : nullptr);
   }
@@ -105,14 +102,14 @@ class SandboxFileSystemBackendTest
     backend_ = std::make_unique<SandboxFileSystemBackend>(delegate_.get());
   }
 
-  SandboxFileSystemBackendDelegate::OriginEnumerator* CreateOriginEnumerator()
-      const {
-    return backend_->CreateOriginEnumerator();
+  SandboxFileSystemBackendDelegate::StorageKeyEnumerator*
+  CreateStorageKeyEnumerator() const {
+    return backend_->CreateStorageKeyEnumerator();
   }
 
   void CreateOriginTypeDirectory(const char* origin_url, FileSystemType type) {
-    base::FilePath target = delegate_->GetBaseDirectoryForOriginAndType(
-        url::Origin::Create(GURL(origin_url)), type, true);
+    base::FilePath target = delegate_->GetBaseDirectoryForStorageKeyAndType(
+        blink::StorageKey::CreateFromStringForTesting(origin_url), type, true);
     ASSERT_TRUE(!target.empty());
     ASSERT_TRUE(base::DirectoryExists(target));
   }
@@ -131,8 +128,8 @@ class SandboxFileSystemBackendTest
     if (error != base::File::FILE_OK)
       return false;
     base::FilePath returned_root_path =
-        delegate_->GetBaseDirectoryForOriginAndType(
-            url::Origin::Create(GURL(origin_url)), type,
+        delegate_->GetBaseDirectoryForStorageKeyAndType(
+            blink::StorageKey::CreateFromStringForTesting(origin_url), type,
             /*create=*/false);
     if (root_path)
       *root_path = returned_root_path;
@@ -158,8 +155,8 @@ INSTANTIATE_TEST_SUITE_P(All, SandboxFileSystemBackendTest, ::testing::Bool());
 
 TEST_P(SandboxFileSystemBackendTest, Empty) {
   SetUpNewBackend(CreateAllowFileAccessOptions());
-  std::unique_ptr<SandboxFileSystemBackendDelegate::OriginEnumerator>
-      enumerator(CreateOriginEnumerator());
+  std::unique_ptr<SandboxFileSystemBackendDelegate::StorageKeyEnumerator>
+      enumerator(CreateStorageKeyEnumerator());
   ASSERT_FALSE(enumerator->Next());
 }
 
@@ -175,27 +172,29 @@ TEST_P(SandboxFileSystemBackendTest, EnumerateOrigins) {
       "http://www.foo.com:8080/",
       "http://www.foo.com:80/",
   };
-  size_t temporary_size = base::size(temporary_origins);
-  size_t persistent_size = base::size(persistent_origins);
-  std::set<url::Origin> temporary_set, persistent_set;
+  size_t temporary_size = std::size(temporary_origins);
+  size_t persistent_size = std::size(persistent_origins);
+  std::set<blink::StorageKey> temporary_set, persistent_set;
   for (size_t i = 0; i < temporary_size; ++i) {
     CreateOriginTypeDirectory(temporary_origins[i], kFileSystemTypeTemporary);
-    temporary_set.insert(url::Origin::Create(GURL(temporary_origins[i])));
+    temporary_set.insert(
+        blink::StorageKey::CreateFromStringForTesting(temporary_origins[i]));
   }
   for (size_t i = 0; i < persistent_size; ++i) {
     CreateOriginTypeDirectory(persistent_origins[i], kFileSystemTypePersistent);
-    persistent_set.insert(url::Origin::Create(GURL(persistent_origins[i])));
+    persistent_set.insert(
+        blink::StorageKey::CreateFromStringForTesting(persistent_origins[i]));
   }
 
-  std::unique_ptr<SandboxFileSystemBackendDelegate::OriginEnumerator>
-      enumerator(CreateOriginEnumerator());
+  std::unique_ptr<SandboxFileSystemBackendDelegate::StorageKeyEnumerator>
+      enumerator(CreateStorageKeyEnumerator());
   size_t temporary_actual_size = 0;
   size_t persistent_actual_size = 0;
 
-  absl::optional<url::Origin> current;
+  absl::optional<blink::StorageKey> current;
   while ((current = enumerator->Next()).has_value()) {
     SCOPED_TRACE(testing::Message()
-                 << "EnumerateOrigin " << current->Serialize());
+                 << "EnumerateOrigin " << current->origin().Serialize());
     if (enumerator->HasFileSystemType(kFileSystemTypeTemporary)) {
       ASSERT_TRUE(temporary_set.find(current.value()) != temporary_set.end());
       ++temporary_actual_size;
@@ -211,12 +210,11 @@ TEST_P(SandboxFileSystemBackendTest, EnumerateOrigins) {
 }
 
 TEST_P(SandboxFileSystemBackendTest, GetRootPathCreateAndExamine) {
-  std::vector<base::FilePath> returned_root_path(
-      base::size(kRootPathTestCases));
+  std::vector<base::FilePath> returned_root_path(std::size(kRootPathTestCases));
   SetUpNewBackend(CreateAllowFileAccessOptions());
 
   // Create a new root directory.
-  for (size_t i = 0; i < base::size(kRootPathTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (create) #" << i << " "
                                     << kRootPathTestCases[i].expected_path);
 
@@ -235,7 +233,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathCreateAndExamine) {
 
   // Get the root directory with create=false and see if we get the
   // same directory.
-  for (size_t i = 0; i < base::size(kRootPathTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (get) #" << i << " "
                                     << kRootPathTestCases[i].expected_path);
 
@@ -250,8 +248,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathCreateAndExamine) {
 
 TEST_P(SandboxFileSystemBackendTest,
        GetRootPathCreateAndExamineWithNewBackend) {
-  std::vector<base::FilePath> returned_root_path(
-      base::size(kRootPathTestCases));
+  std::vector<base::FilePath> returned_root_path(std::size(kRootPathTestCases));
   SetUpNewBackend(CreateAllowFileAccessOptions());
 
   base::FilePath root_path1;
@@ -270,7 +267,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathGetWithoutCreate) {
   SetUpNewBackend(CreateDisallowFileAccessOptions());
 
   // Try to get a root directory without creating.
-  for (size_t i = 0; i < base::size(kRootPathTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (create=false) #" << i << " "
                                     << kRootPathTestCases[i].expected_path);
     EXPECT_FALSE(GetRootPath(kRootPathTestCases[i].origin_url,
@@ -283,7 +280,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathInIncognito) {
   SetUpNewBackend(CreateIncognitoFileSystemOptions());
 
   // Try to get a root directory.
-  for (size_t i = 0; i < base::size(kRootPathTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (incognito) #" << i << " "
                                     << kRootPathTestCases[i].expected_path);
     EXPECT_EQ(IsPersistentFileSystemEnabledIncognito() ||
@@ -296,7 +293,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathInIncognito) {
 
 TEST_P(SandboxFileSystemBackendTest, GetRootPathFileURI) {
   SetUpNewBackend(CreateDisallowFileAccessOptions());
-  for (size_t i = 0; i < base::size(kRootPathFileURITestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathFileURITestCases); ++i) {
     SCOPED_TRACE(testing::Message()
                  << "RootPathFileURI (disallow) #" << i << " "
                  << kRootPathFileURITestCases[i].expected_path);
@@ -308,7 +305,7 @@ TEST_P(SandboxFileSystemBackendTest, GetRootPathFileURI) {
 
 TEST_P(SandboxFileSystemBackendTest, GetRootPathFileURIWithAllowFlag) {
   SetUpNewBackend(CreateAllowFileAccessOptions());
-  for (size_t i = 0; i < base::size(kRootPathFileURITestCases); ++i) {
+  for (size_t i = 0; i < std::size(kRootPathFileURITestCases); ++i) {
     SCOPED_TRACE(testing::Message()
                  << "RootPathFileURI (allow) #" << i << " "
                  << kRootPathFileURITestCases[i].expected_path);

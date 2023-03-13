@@ -18,6 +18,7 @@
 #include "SamplerCore.hpp"
 #include "Device/Primitive.hpp"
 #include "Device/Renderer.hpp"
+#include "Vulkan/VkDevice.hpp"
 
 namespace sw {
 
@@ -95,9 +96,9 @@ void PixelProgram::setBuiltins(Int &x, Int &y, Float4 (&z)[4], Float4 &w, Int cM
 
 	routine.invocationsPerSubgroup = SIMD::Width;
 	routine.helperInvocation = ~maskAny(cMask, samples);
-	routine.windowSpacePosition[0] = x + SIMD::Int(0, 1, 0, 1);
-	routine.windowSpacePosition[1] = y + SIMD::Int(0, 0, 1, 1);
-	routine.viewID = *Pointer<Int>(data + OFFSET(DrawData, viewID));
+	routine.windowSpacePosition[0] = SIMD::Int(x) + SIMD::Int(0, 1, 0, 1);
+	routine.windowSpacePosition[1] = SIMD::Int(y) + SIMD::Int(0, 0, 1, 1);
+	routine.layer = *Pointer<Int>(data + OFFSET(DrawData, layer));
 
 	// PointCoord formula reference: https://www.khronos.org/registry/vulkan/specs/1.2/html/vkspec.html#primsrast-points-basic
 	// Note we don't add a 0.5 offset to x and y here (like for fragCoord) because pointCoordX/Y have 0.5 subtracted as part of the viewport transform.
@@ -107,7 +108,7 @@ void PixelProgram::setBuiltins(Int &x, Int &y, Float4 (&z)[4], Float4 &w, Int cM
 
 	routine.setInputBuiltin(spirvShader, spv::BuiltInViewIndex, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
 		assert(builtin.SizeInComponents == 1);
-		value[builtin.FirstComponent] = As<SIMD::Float>(SIMD::Int(routine.viewID));
+		value[builtin.FirstComponent] = As<SIMD::Float>(SIMD::Int(routine.layer));
 	});
 
 	routine.setInputBuiltin(spirvShader, spv::BuiltInFragCoord, [&](const SpirvShader::BuiltinMapping &builtin, Array<SIMD::Float> &value) {
@@ -137,10 +138,11 @@ void PixelProgram::setBuiltins(Int &x, Int &y, Float4 (&z)[4], Float4 &w, Int cM
 
 void PixelProgram::executeShader(Int cMask[4], Int sMask[4], Int zMask[4], const SampleSet &samples)
 {
+	routine.device = device;
 	routine.descriptorSets = data + OFFSET(DrawData, descriptorSets);
 	routine.descriptorDynamicOffsets = data + OFFSET(DrawData, descriptorDynamicOffsets);
 	routine.pushConstants = data + OFFSET(DrawData, pushConstants);
-	routine.constants = *Pointer<Pointer<Byte>>(data + OFFSET(DrawData, constants));
+	routine.constants = device + OFFSET(vk::Device, constants);
 
 	auto it = spirvShader->inputBuiltins.find(spv::BuiltInFrontFacing);
 	if(it != spirvShader->inputBuiltins.end())
@@ -195,7 +197,7 @@ void PixelProgram::executeShader(Int cMask[4], Int sMask[4], Int zMask[4], const
 	// handled separately, through the cMask.
 	auto activeLaneMask = SIMD::Int(0xFFFFFFFF);
 	auto storesAndAtomicsMask = maskAny(cMask, sMask, zMask, samples);
-	routine.killMask = 0;
+	routine.discardMask = 0;
 
 	spirvShader->emit(&routine, activeLaneMask, storesAndAtomicsMask, descriptorSets, state.multiSampleCount);
 	spirvShader->emitEpilog(&routine);
@@ -206,25 +208,21 @@ void PixelProgram::executeShader(Int cMask[4], Int sMask[4], Int zMask[4], const
 		spirvShader->clearPhis(&routine);
 	}
 
-	for(int i = 0; i < RENDERTARGETS; i++)
+	for(int i = 0; i < MAX_COLOR_BUFFERS; i++)
 	{
-		c[i].x = routine.outputs[i * 4];
+		c[i].x = routine.outputs[i * 4 + 0];
 		c[i].y = routine.outputs[i * 4 + 1];
 		c[i].z = routine.outputs[i * 4 + 2];
 		c[i].w = routine.outputs[i * 4 + 3];
-		outputMasks[i] = ((spirvShader->outputs[i * 4 + 0].Type != SpirvShader::ATTRIBTYPE_UNUSED) ? 0x1 : 0x0) |
-		                 ((spirvShader->outputs[i * 4 + 1].Type != SpirvShader::ATTRIBTYPE_UNUSED) ? 0x2 : 0x0) |
-		                 ((spirvShader->outputs[i * 4 + 2].Type != SpirvShader::ATTRIBTYPE_UNUSED) ? 0x4 : 0x0) |
-		                 ((spirvShader->outputs[i * 4 + 3].Type != SpirvShader::ATTRIBTYPE_UNUSED) ? 0x8 : 0x0);
 	}
 
 	clampColor(c);
 
-	if(spirvShader->getModes().ContainsKill)
+	if(spirvShader->getAnalysis().ContainsDiscard)
 	{
 		for(unsigned int q : samples)
 		{
-			cMask[q] &= ~routine.killMask;
+			cMask[q] &= ~routine.discardMask;
 		}
 	}
 
@@ -245,11 +243,6 @@ void PixelProgram::executeShader(Int cMask[4], Int sMask[4], Int zMask[4], const
 		for(unsigned int q : samples)
 		{
 			z[q] = routine.getVariable(it->second.Id)[it->second.FirstComponent];
-
-			if(state.depthClamp)
-			{
-				z[q] = Min(Max(z[q], Float4(state.minDepthClamp)), Float4(state.maxDepthClamp));
-			}
 		}
 	}
 }
@@ -272,18 +265,25 @@ Bool PixelProgram::alphaTest(Int cMask[4], const SampleSet &samples)
 	return pass != 0x0;
 }
 
-void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4], Int zMask[4], Int cMask[4], const SampleSet &samples)
+void PixelProgram::blendColor(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4], Int zMask[4], Int cMask[4], const SampleSet &samples)
 {
-	for(int index = 0; index < RENDERTARGETS; index++)
+	for(int index = 0; index < MAX_COLOR_BUFFERS; index++)
 	{
 		if(!state.colorWriteActive(index))
 		{
 			continue;
 		}
 
-		auto format = state.targetFormat[index];
+		auto format = state.colorFormat[index];
 		switch(format)
 		{
+		case VK_FORMAT_R4G4B4A4_UNORM_PACK16:
+		case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
+		case VK_FORMAT_A4R4G4B4_UNORM_PACK16:
+		case VK_FORMAT_A4B4G4R4_UNORM_PACK16:
+		case VK_FORMAT_B5G6R5_UNORM_PACK16:
+		case VK_FORMAT_R5G5B5A1_UNORM_PACK16:
+		case VK_FORMAT_B5G5R5A1_UNORM_PACK16:
 		case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
 		case VK_FORMAT_R5G6B5_UNORM_PACK16:
 		case VK_FORMAT_B8G8R8A8_UNORM:
@@ -292,8 +292,6 @@ void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4
 		case VK_FORMAT_R8G8B8A8_SRGB:
 		case VK_FORMAT_R8G8_UNORM:
 		case VK_FORMAT_R8_UNORM:
-		case VK_FORMAT_R16G16_UNORM:
-		case VK_FORMAT_R16G16B16A16_UNORM:
 		case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
 		case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
 		case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
@@ -301,14 +299,14 @@ void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4
 			for(unsigned int q : samples)
 			{
 				Pointer<Byte> buffer = cBuffer[index] + q * *Pointer<Int>(data + OFFSET(DrawData, colorSliceB[index]));
+
+				Vector4f colorf = alphaBlend(index, buffer, c[index], x);
+
 				Vector4s color;
-
-				color.x = convertFixed16(c[index].x, false);
-				color.y = convertFixed16(c[index].y, false);
-				color.z = convertFixed16(c[index].z, false);
-				color.w = convertFixed16(c[index].w, false);
-
-				alphaBlend(index, buffer, color, x);
+				color.x = convertFixed16(colorf.x, true);
+				color.y = convertFixed16(colorf.y, true);
+				color.z = convertFixed16(colorf.z, true);
+				color.w = convertFixed16(colorf.w, true);
 				writeColor(index, buffer, x, color, sMask[q], zMask[q], cMask[q]);
 			}
 			break;
@@ -325,6 +323,9 @@ void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4
 		case VK_FORMAT_R32_UINT:
 		case VK_FORMAT_R32G32_UINT:
 		case VK_FORMAT_R32G32B32A32_UINT:
+		case VK_FORMAT_R16_UNORM:
+		case VK_FORMAT_R16G16_UNORM:
+		case VK_FORMAT_R16G16B16A16_UNORM:
 		case VK_FORMAT_R16_SINT:
 		case VK_FORMAT_R16G16_SINT:
 		case VK_FORMAT_R16G16B16A16_SINT:
@@ -344,9 +345,8 @@ void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4
 			for(unsigned int q : samples)
 			{
 				Pointer<Byte> buffer = cBuffer[index] + q * *Pointer<Int>(data + OFFSET(DrawData, colorSliceB[index]));
-				Vector4f color = c[index];
 
-				alphaBlend(index, buffer, color, x);
+				Vector4f color = alphaBlend(index, buffer, c[index], x);
 				writeColor(index, buffer, x, color, sMask[q], zMask[q], cMask[q]);
 			}
 			break;
@@ -356,19 +356,30 @@ void PixelProgram::rasterOperation(Pointer<Byte> cBuffer[4], Int &x, Int sMask[4
 	}
 }
 
-void PixelProgram::clampColor(Vector4f oC[RENDERTARGETS])
+void PixelProgram::clampColor(Vector4f color[MAX_COLOR_BUFFERS])
 {
-	for(int index = 0; index < RENDERTARGETS; index++)
+	// "If the color attachment is fixed-point, the components of the source and destination values and blend factors
+	//  are each clamped to [0,1] or [-1,1] respectively for an unsigned normalized or signed normalized color attachment
+	//  prior to evaluating the blend operations. If the color attachment is floating-point, no clamping occurs."
+
+	for(int index = 0; index < MAX_COLOR_BUFFERS; index++)
 	{
 		if(!state.colorWriteActive(index) && !(index == 0 && state.alphaToCoverage))
 		{
 			continue;
 		}
 
-		switch(state.targetFormat[index])
+		switch(state.colorFormat[index])
 		{
 		case VK_FORMAT_UNDEFINED:
 			break;
+		case VK_FORMAT_R4G4B4A4_UNORM_PACK16:
+		case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
+		case VK_FORMAT_A4R4G4B4_UNORM_PACK16:
+		case VK_FORMAT_A4B4G4R4_UNORM_PACK16:
+		case VK_FORMAT_B5G6R5_UNORM_PACK16:
+		case VK_FORMAT_R5G5B5A1_UNORM_PACK16:
+		case VK_FORMAT_B5G5R5A1_UNORM_PACK16:
 		case VK_FORMAT_A1R5G5B5_UNORM_PACK16:
 		case VK_FORMAT_R5G6B5_UNORM_PACK16:
 		case VK_FORMAT_B8G8R8A8_UNORM:
@@ -377,20 +388,17 @@ void PixelProgram::clampColor(Vector4f oC[RENDERTARGETS])
 		case VK_FORMAT_R8G8B8A8_SRGB:
 		case VK_FORMAT_R8G8_UNORM:
 		case VK_FORMAT_R8_UNORM:
+		case VK_FORMAT_R16_UNORM:
 		case VK_FORMAT_R16G16_UNORM:
 		case VK_FORMAT_R16G16B16A16_UNORM:
 		case VK_FORMAT_A8B8G8R8_UNORM_PACK32:
 		case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
 		case VK_FORMAT_A2B10G10R10_UNORM_PACK32:
 		case VK_FORMAT_A2R10G10B10_UNORM_PACK32:
-			oC[index].x = Max(oC[index].x, Float4(0.0f));
-			oC[index].x = Min(oC[index].x, Float4(1.0f));
-			oC[index].y = Max(oC[index].y, Float4(0.0f));
-			oC[index].y = Min(oC[index].y, Float4(1.0f));
-			oC[index].z = Max(oC[index].z, Float4(0.0f));
-			oC[index].z = Min(oC[index].z, Float4(1.0f));
-			oC[index].w = Max(oC[index].w, Float4(0.0f));
-			oC[index].w = Min(oC[index].w, Float4(1.0f));
+			color[index].x = Min(Max(color[index].x, Float4(0.0f)), Float4(1.0f));
+			color[index].y = Min(Max(color[index].y, Float4(0.0f)), Float4(1.0f));
+			color[index].z = Min(Max(color[index].z, Float4(0.0f)), Float4(1.0f));
+			color[index].w = Min(Max(color[index].w, Float4(0.0f)), Float4(1.0f));
 			break;
 		case VK_FORMAT_R32_SFLOAT:
 		case VK_FORMAT_R32G32_SFLOAT:
@@ -423,7 +431,7 @@ void PixelProgram::clampColor(Vector4f oC[RENDERTARGETS])
 		case VK_FORMAT_A2R10G10B10_UINT_PACK32:
 			break;
 		default:
-			UNSUPPORTED("VkFormat: %d", int(state.targetFormat[index]));
+			UNSUPPORTED("VkFormat: %d", int(state.colorFormat[index]));
 		}
 	}
 }

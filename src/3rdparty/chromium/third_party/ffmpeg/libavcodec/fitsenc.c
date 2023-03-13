@@ -32,8 +32,8 @@
 #include "libavutil/intreadwrite.h"
 #include "avcodec.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 
 static int fits_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
                             const AVFrame *pict, int *got_packet)
@@ -105,20 +105,19 @@ static int fits_encode_frame(AVCodecContext *avctx, AVPacket *pkt,
     bytes_left = padded_data_size - data_size;
     memset(bytestream, 0, bytes_left);
 
-    pkt->flags |= AV_PKT_FLAG_KEY;
     *got_packet = 1;
 
     return 0;
 }
 
-const AVCodec ff_fits_encoder = {
-    .name           = "fits",
-    .long_name      = NULL_IF_CONFIG_SMALL("Flexible Image Transport System"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_FITS,
-    .capabilities   = AV_CODEC_CAP_DR1,
+const FFCodec ff_fits_encoder = {
+    .p.name         = "fits",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Flexible Image Transport System"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_FITS,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .encode2        = fits_encode_frame,
-    .pix_fmts       = (const enum AVPixelFormat[]) { AV_PIX_FMT_GBRAP16BE,
+    .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_GBRAP16BE,
                                                      AV_PIX_FMT_GBRP16BE,
                                                      AV_PIX_FMT_GBRP,
                                                      AV_PIX_FMT_GBRAP,

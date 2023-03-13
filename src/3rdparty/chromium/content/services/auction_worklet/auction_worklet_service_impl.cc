@@ -26,39 +26,63 @@ AuctionWorkletServiceImpl::AuctionWorkletServiceImpl(
 
 AuctionWorkletServiceImpl::~AuctionWorkletServiceImpl() = default;
 
-void AuctionWorkletServiceImpl::LoadBidderWorkletAndGenerateBid(
+void AuctionWorkletServiceImpl::LoadBidderWorklet(
     mojo::PendingReceiver<mojom::BidderWorklet> bidder_worklet_receiver,
+    bool pause_for_debugger_on_start,
     mojo::PendingRemote<network::mojom::URLLoaderFactory>
         pending_url_loader_factory,
-    mojom::BiddingInterestGroupPtr bidding_interest_group,
-    const absl::optional<std::string>& auction_signals_json,
-    const absl::optional<std::string>& per_buyer_signals_json,
-    const url::Origin& top_window_origin,
-    const url::Origin& seller_origin,
-    base::Time auction_start_time,
-    LoadBidderWorkletAndGenerateBidCallback
-        load_bidder_worklet_and_generate_bid_callback) {
-  bidder_worklets_.Add(
-      std::make_unique<BidderWorklet>(
-          auction_v8_helper_, std::move(pending_url_loader_factory),
-          std::move(bidding_interest_group), auction_signals_json,
-          per_buyer_signals_json, top_window_origin, seller_origin,
-          auction_start_time,
-          std::move(load_bidder_worklet_and_generate_bid_callback)),
-      std::move(bidder_worklet_receiver));
+    const GURL& script_source_url,
+    const absl::optional<GURL>& wasm_helper_url,
+    const absl::optional<GURL>& trusted_bidding_signals_url,
+    const url::Origin& top_window_origin) {
+  auto bidder_worklet = std::make_unique<BidderWorklet>(
+      auction_v8_helper_, pause_for_debugger_on_start,
+      std::move(pending_url_loader_factory), script_source_url, wasm_helper_url,
+      trusted_bidding_signals_url, top_window_origin);
+  auto* bidder_worklet_ptr = bidder_worklet.get();
+
+  mojo::ReceiverId receiver_id = bidder_worklets_.Add(
+      std::move(bidder_worklet), std::move(bidder_worklet_receiver));
+
+  bidder_worklet_ptr->set_close_pipe_callback(
+      base::BindOnce(&AuctionWorkletServiceImpl::DisconnectBidderWorklet,
+                     base::Unretained(this), receiver_id));
 }
 
 void AuctionWorkletServiceImpl::LoadSellerWorklet(
     mojo::PendingReceiver<mojom::SellerWorklet> seller_worklet_receiver,
+    bool pause_for_debugger_on_start,
     mojo::PendingRemote<network::mojom::URLLoaderFactory>
         pending_url_loader_factory,
-    const GURL& script_source_url,
-    LoadSellerWorkletCallback load_seller_worklet_callback) {
-  seller_worklets_.Add(
-      std::make_unique<SellerWorklet>(
-          auction_v8_helper_, std::move(pending_url_loader_factory),
-          script_source_url, std::move(load_seller_worklet_callback)),
-      std::move(seller_worklet_receiver));
+    const GURL& decision_logic_url,
+    const absl::optional<GURL>& trusted_scoring_signals_url,
+    const url::Origin& top_window_origin) {
+  auto seller_worklet = std::make_unique<SellerWorklet>(
+      auction_v8_helper_, pause_for_debugger_on_start,
+      std::move(pending_url_loader_factory), decision_logic_url,
+      trusted_scoring_signals_url, top_window_origin);
+  auto* seller_worklet_ptr = seller_worklet.get();
+
+  mojo::ReceiverId receiver_id = seller_worklets_.Add(
+      std::move(seller_worklet), std::move(seller_worklet_receiver));
+
+  seller_worklet_ptr->set_close_pipe_callback(
+      base::BindOnce(&AuctionWorkletServiceImpl::DisconnectSellerWorklet,
+                     base::Unretained(this), receiver_id));
+}
+
+void AuctionWorkletServiceImpl::DisconnectSellerWorklet(
+    mojo::ReceiverId receiver_id,
+    const std::string& reason) {
+  seller_worklets_.RemoveWithReason(receiver_id, /*custom_reason_code=*/0,
+                                    reason);
+}
+
+void AuctionWorkletServiceImpl::DisconnectBidderWorklet(
+    mojo::ReceiverId receiver_id,
+    const std::string& reason) {
+  bidder_worklets_.RemoveWithReason(receiver_id, /*custom_reason_code=*/0,
+                                    reason);
 }
 
 }  // namespace auction_worklet

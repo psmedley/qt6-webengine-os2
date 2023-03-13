@@ -5,6 +5,7 @@
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 
 #include "base/no_destructor.h"
+#include "build/build_config.h"
 #include "content/browser/gpu/gpu_data_manager_impl_private.h"
 #include "content/public/browser/browser_thread.h"
 #include "gpu/ipc/common/memory_stats.h"
@@ -162,7 +163,7 @@ void GpuDataManagerImpl::UpdateGpuInfo(
   private_->UpdateGpuInfo(gpu_info, gpu_info_for_hardware_gpu);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 void GpuDataManagerImpl::UpdateDxDiagNode(
     const gpu::DxDiagNode& dx_diagnostics) {
   base::AutoLock auto_lock(lock_);
@@ -318,9 +319,9 @@ void GpuDataManagerImpl::AddLogMessage(int level,
   private_->AddLogMessage(level, header, message);
 }
 
-void GpuDataManagerImpl::ProcessCrashed(base::TerminationStatus exit_code) {
+void GpuDataManagerImpl::ProcessCrashed() {
   base::AutoLock auto_lock(lock_);
-  private_->ProcessCrashed(exit_code);
+  private_->ProcessCrashed();
 }
 
 std::unique_ptr<base::ListValue> GpuDataManagerImpl::GetLogMessages() const {

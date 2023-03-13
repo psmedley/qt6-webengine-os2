@@ -5,7 +5,6 @@
 #ifndef UI_GL_GL_SURFACE_WGL_H_
 #define UI_GL_GL_SURFACE_WGL_H_
 
-#include "base/macros.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/gl/gl_export.h"
 #include "ui/gl/gl_surface.h"
@@ -18,7 +17,7 @@ class GL_EXPORT GLSurfaceWGL : public GLSurface {
   GLSurfaceWGL();
 
   // Implement GLSurface.
-  void* GetDisplay() override;
+  GLDisplay* GetGLDisplay() override;
 
   static bool InitializeOneOff();
   static bool InitializeExtensionSettingsOneOff();
@@ -29,7 +28,6 @@ class GL_EXPORT GLSurfaceWGL : public GLSurface {
   ~GLSurfaceWGL() override;
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(GLSurfaceWGL);
   static bool initialized_;
 };
 
@@ -61,8 +59,6 @@ class GL_EXPORT NativeViewGLSurfaceWGL : public GLSurfaceWGL {
   gfx::AcceleratedWidget window_;
   gfx::AcceleratedWidget child_window_;
   HDC device_context_;
-
-  DISALLOW_COPY_AND_ASSIGN(NativeViewGLSurfaceWGL);
 };
 
 
@@ -86,8 +82,6 @@ class GL_EXPORT PbufferGLSurfaceWGL : public GLSurfaceWGL {
   gfx::Size size_;
   HDC device_context_;
   void* pbuffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(PbufferGLSurfaceWGL);
 };
 
 }  // namespace gl

@@ -14,10 +14,6 @@
 # ==============================================================================
 """Tests for ragged.to_tensor."""
 
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import random
 
 from absl.testing import parameterized
@@ -359,8 +355,8 @@ class RaggedTensorToTensorOpTest(test_util.TensorFlowTestCase,
       {
           'rt_input': [[1, 2, 3]],
           'default': [0],
-          'error': r'default_value\.shape=\[1\] and '
-                   r'rt_input\.flat_values\.shape=\[3\] are incompatible: '
+          'error': r'default_value\.shape=.* and '
+                   r'rt_input\.flat_values\.shape=.* are incompatible: '
                    r'default_value\.rank = 1  must be less than '
                    r'rt_input\.flat_values\.rank = 1'
       },
@@ -368,8 +364,8 @@ class RaggedTensorToTensorOpTest(test_util.TensorFlowTestCase,
           'rt_input': [[[1, 2], [3, 4]], [[5, 6]]],
           'ragged_rank': 1,
           'default': [7, 8, 9],
-          'error': r'default_value\.shape=\[3\] and '
-                   r'rt_input\.flat_values\.shape=\[3,2\] are incompatible: '
+          'error': r'default_value\.shape.* and '
+                   r'rt_input\.flat_values\.shape.* are incompatible: '
                    r'default_value\.shape\[-1\] = 3 but '
                    r'rt_input\.flat_values\.shape\[-1\] = 2'
       },
@@ -396,11 +392,11 @@ class RaggedTensorToTensorOpTest(test_util.TensorFlowTestCase,
                 shape=None):
 
     rt = ragged_factory_ops.constant(rt_input, ragged_rank=ragged_rank)
-    with self.assertRaisesRegexp(error_type, error):
+    with self.assertRaisesRegex(error_type, error):
       self.evaluate(rt.to_tensor(default_value=default, shape=shape))
     rt_placeholder = nest.map_structure(
         make_placeholder, rt, expand_composites=True)
-    with self.assertRaisesRegexp(error_type, error):
+    with self.assertRaisesRegex(error_type, error):
       self.evaluate(
           rt_placeholder.to_tensor(default_value=default, shape=shape))
 
@@ -610,7 +606,6 @@ class RaggedTensorToTensorOpTest(test_util.TensorFlowTestCase,
           output_value  = [],
           output_grad   = [])
   ])  # pyformat: disable
-  @test_util.run_deprecated_v1
   def test_gradient(self,
                     shape,
                     rt_value,
@@ -720,6 +715,11 @@ class RaggedTensorToTensorOpTest(test_util.TensorFlowTestCase,
     if shape_info == 'unknown_dims':
       return array_ops.placeholder_with_default(arg, [None] * arg.shape.rank)
     raise AssertionError('Unexpected shape_info %r' % shape_info)
+
+  def test_shape_is_list_including_tensor_element(self):
+    rt = ragged_factory_ops.constant([[1, 2, 3], [4], [5, 6]])
+    result = rt.to_tensor(shape=[2, constant_op.constant(2)])
+    self.assertAllEqual(result, [[1, 2], [4, 0]])
 
 
 class RaggedToDenseBenchmark(googletest.Benchmark):

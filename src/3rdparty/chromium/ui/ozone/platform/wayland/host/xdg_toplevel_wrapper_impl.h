@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/ozone/platform/wayland/host/shell_toplevel_wrapper.h"
 
 namespace ui {
@@ -43,10 +42,15 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
   void SetMaxSize(int32_t width, int32_t height) override;
   void SetAppId(const std::string& app_id) override;
   void SetDecoration(DecorationMode decoration) override;
+  void Lock(WaylandOrientationLockType lock_type) override;
+  void Unlock() override;
+  void RequestWindowBounds(const gfx::Rect& bounds) override;
 
   XDGSurfaceWrapperImpl* xdg_surface_wrapper() const;
 
  private:
+  bool ProtocolSupportsScreenCoordinates();
+
   // xdg_toplevel_listener
   static void ConfigureTopLevel(void* data,
                                 struct xdg_toplevel* xdg_toplevel,
@@ -60,6 +64,20 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
       void* data,
       struct zxdg_toplevel_decoration_v1* decoration,
       uint32_t mode);
+
+  // aura_toplevel_listener
+  static void ConfigureAuraTopLevel(void* data,
+                                    struct zaura_toplevel* zaura_toplevel,
+                                    int32_t x,
+                                    int32_t y,
+                                    int32_t width,
+                                    int32_t height,
+                                    struct wl_array* states);
+
+  static void OnOriginChange(void* data,
+                             struct zaura_toplevel* zaura_toplevel,
+                             int32_t x,
+                             int32_t y);
 
   // Send request to wayland compositor to enable a requested decoration mode.
   void SetTopLevelDecorationMode(DecorationMode requested_mode);
@@ -76,6 +94,8 @@ class XDGToplevelWrapperImpl : public ShellToplevelWrapper {
 
   // XDG Shell Stable object.
   wl::Object<xdg_toplevel> xdg_toplevel_;
+  // Aura shell toplevel addons.
+  wl::Object<zaura_toplevel> aura_toplevel_;
 
   wl::Object<zxdg_toplevel_decoration_v1> zxdg_toplevel_decoration_;
 

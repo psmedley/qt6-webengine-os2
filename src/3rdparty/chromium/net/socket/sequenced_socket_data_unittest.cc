@@ -6,8 +6,7 @@
 #include <string>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "net/base/completion_once_callback.h"
@@ -33,13 +32,13 @@ namespace net {
 namespace {
 
 const char kMsg1[] = "\0hello!\xff";
-const int kLen1 = base::size(kMsg1);
+const int kLen1 = std::size(kMsg1);
 const char kMsg2[] = "\0a2345678\0";
-const int kLen2 = base::size(kMsg2);
+const int kLen2 = std::size(kMsg2);
 const char kMsg3[] = "bye!";
-const int kLen3 = base::size(kMsg3);
+const int kLen3 = std::size(kMsg3);
 const char kMsg4[] = "supercalifragilisticexpialidocious";
-const int kLen4 = base::size(kMsg4);
+const int kLen4 = std::size(kMsg4);
 
 // Helper class for starting the next operation operation reentrantly after the
 // previous operation completed asynchronously. When OnIOComplete is called,
@@ -56,6 +55,9 @@ class ReentrantHelper {
         second_read_(false),
         second_write_data_(nullptr),
         second_len_(-1) {}
+
+  ReentrantHelper(const ReentrantHelper&) = delete;
+  ReentrantHelper& operator=(const ReentrantHelper&) = delete;
 
   // Expect that the previous operation will return |first_len| and will fill
   // |first_read_data_| with |first_read_data|.
@@ -131,7 +133,7 @@ class ReentrantHelper {
     }
   }
 
-  StreamSocket* socket_;
+  raw_ptr<StreamSocket> socket_;
 
   bool verify_read_;
   scoped_refptr<IOBuffer> first_read_buf_;
@@ -144,8 +146,6 @@ class ReentrantHelper {
   scoped_refptr<IOBuffer> second_read_buf_;
   const char* second_write_data_;
   int second_len_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReentrantHelper);
 };
 
 class SequencedSocketDataTest : public TestWithTaskEnvironment {
@@ -659,7 +659,7 @@ TEST_F(SequencedSocketDataTest, SingleSyncWriteTooSmall) {
       "Expected: (data.length()) >= (expected_data.length())",
       "Value of: actual_data == expected_data\n  Actual: false\nExpected: true",
       "Expected equality of these values:\n  rv"};
-  ASSERT_EQ(base::size(kExpectedFailures),
+  ASSERT_EQ(std::size(kExpectedFailures),
             static_cast<size_t>(gtest_failures.size()));
 
   for (int i = 0; i < gtest_failures.size(); ++i) {

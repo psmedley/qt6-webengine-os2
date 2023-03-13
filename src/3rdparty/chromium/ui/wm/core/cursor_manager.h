@@ -7,8 +7,6 @@
 
 #include <memory>
 
-#include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/display/display.h"
@@ -38,6 +36,10 @@ class WM_CORE_EXPORT CursorManager : public aura::client::CursorClient,
                                      public NativeCursorManagerDelegate {
  public:
   explicit CursorManager(std::unique_ptr<NativeCursorManager> delegate);
+
+  CursorManager(const CursorManager&) = delete;
+  CursorManager& operator=(const CursorManager&) = delete;
+
   ~CursorManager() override;
 
   // Resets the last visibility state, etc. Currently only called by tests.
@@ -63,6 +65,7 @@ class WM_CORE_EXPORT CursorManager : public aura::client::CursorClient,
   void AddObserver(aura::client::CursorClientObserver* observer) override;
   void RemoveObserver(aura::client::CursorClientObserver* observer) override;
   bool ShouldHideCursorOnKeyEvent(const ui::KeyEvent& event) const override;
+  gfx::Size GetSystemCursorSize() const override;
 
  private:
   // Overridden from NativeCursorManagerDelegate:
@@ -70,6 +73,7 @@ class WM_CORE_EXPORT CursorManager : public aura::client::CursorClient,
   void CommitVisibility(bool visible) override;
   void CommitCursorSize(ui::CursorSize cursor_size) override;
   void CommitMouseEventsEnabled(bool enabled) override;
+  void CommitSystemCursorSize(const gfx::Size& cursor_size) override;
 
   void SetCursorImpl(gfx::NativeCursor cursor, bool forced);
 
@@ -95,8 +99,6 @@ class WM_CORE_EXPORT CursorManager : public aura::client::CursorClient,
   // CursorManager instance is created it gets populated with the correct
   // cursor visibility state.
   static bool last_cursor_visibility_state_;
-
-  DISALLOW_COPY_AND_ASSIGN(CursorManager);
 };
 
 }  // namespace wm

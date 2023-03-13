@@ -7,7 +7,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
-#include "base/macros.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
@@ -51,8 +50,12 @@ std::string RemoveQuotes(const std::string& has_quotes) {
 // |WebDatabase::MigrateOldVersionsAsNeeded()|.
 class WebDatabaseMigrationTest : public testing::Test {
  public:
-  WebDatabaseMigrationTest() {}
-  ~WebDatabaseMigrationTest() override {}
+  WebDatabaseMigrationTest() = default;
+
+  WebDatabaseMigrationTest(const WebDatabaseMigrationTest&) = delete;
+  WebDatabaseMigrationTest& operator=(const WebDatabaseMigrationTest&) = delete;
+
+  ~WebDatabaseMigrationTest() override = default;
 
   void SetUp() override { ASSERT_TRUE(temp_dir_.CreateUniqueTempDir()); }
 
@@ -120,11 +123,9 @@ class WebDatabaseMigrationTest : public testing::Test {
 
  private:
   base::ScopedTempDir temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 97;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 104;
 
 void WebDatabaseMigrationTest::LoadDatabase(
     const base::FilePath::StringType& file) {
@@ -1173,17 +1174,16 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion70ToCurrent) {
     // for the billing_address_id. The values are added to the table in
     // version_70.sql.
     sql::Statement s_masked_cards(
-        connection.GetUniqueStatement("SELECT id, status, name_on_card, "
+        connection.GetUniqueStatement("SELECT id, name_on_card, "
                                       "network, last_four, exp_month, exp_year "
                                       "FROM masked_credit_cards"));
     ASSERT_TRUE(s_masked_cards.Step());
     EXPECT_EQ("card_1", s_masked_cards.ColumnString(0));
-    EXPECT_EQ("status", s_masked_cards.ColumnString(1));
-    EXPECT_EQ("bob", s_masked_cards.ColumnString(2));
-    EXPECT_EQ("VISA", s_masked_cards.ColumnString(3));
-    EXPECT_EQ("1234", s_masked_cards.ColumnString(4));
-    EXPECT_EQ(12, s_masked_cards.ColumnInt(5));
-    EXPECT_EQ(2050, s_masked_cards.ColumnInt(6));
+    EXPECT_EQ("bob", s_masked_cards.ColumnString(1));
+    EXPECT_EQ("VISA", s_masked_cards.ColumnString(2));
+    EXPECT_EQ("1234", s_masked_cards.ColumnString(3));
+    EXPECT_EQ(12, s_masked_cards.ColumnInt(4));
+    EXPECT_EQ(2050, s_masked_cards.ColumnInt(5));
   }
 }
 
@@ -1353,7 +1353,9 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion73WithTypeColumnToCurrent) {
   }
 }
 
-// Tests adding "validity_bitfield" column for the "autofill_profiles" table.
+// Tests temporarily adding "validity_bitfield" column for the
+// "autofill_profiles" table. Note that the field is deprecated and removed in
+// version 100.
 TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
   ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_74.sql")));
 
@@ -1381,7 +1383,8 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
     // Check version.
     EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
 
-    EXPECT_TRUE(
+    // Note, those fields have been deprecated in version 100.
+    EXPECT_FALSE(
         connection.DoesColumnExist("autofill_profiles", "validity_bitfield"));
 
     // Data should have been preserved. Validity bitfield should have been set
@@ -1389,7 +1392,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
     sql::Statement s_profiles(connection.GetUniqueStatement(
         "SELECT guid, company_name, street_address, dependent_locality,"
         " city, state, zipcode, sorting_code, country_code, date_modified,"
-        " origin, language_code, validity_bitfield "
+        " origin, language_code "
         "FROM autofill_profiles"));
 
     ASSERT_TRUE(s_profiles.Step());
@@ -1407,8 +1410,6 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16(autofill::kSettingsOrigin),
               s_profiles.ColumnString16(10));
     EXPECT_EQ("en", s_profiles.ColumnString(11));
-    // The new validity bitfield should have the default value of 0.
-    EXPECT_EQ(0, s_profiles.ColumnInt(12));
 
     // No more entries expected.
     ASSERT_FALSE(s_profiles.Step());
@@ -1579,6 +1580,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion78ToCurrent) {
 
 // Tests adding "is_client_validity_states_updated" column for the
 // "autofill_profiles" table.
+// Note that the field was deprecated and deleted in version 100.
 TEST_F(WebDatabaseMigrationTest, MigrateVersion79ToCurrent) {
   ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_79.sql")));
 
@@ -1600,15 +1602,15 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion79ToCurrent) {
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
     // Check version.
     EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
-    EXPECT_TRUE(connection.DoesColumnExist(
+    // Note that the field was deprecated and removed in version 100.
+    EXPECT_FALSE(connection.DoesColumnExist(
         "autofill_profiles", "is_client_validity_states_updated"));
     // Data should have been preserved. Validity
     // is_client_validity_states_updated should have been set to false.
     sql::Statement s_profiles(connection.GetUniqueStatement(
         "SELECT guid, company_name, street_address, dependent_locality,"
         " city, state, zipcode, sorting_code, country_code, date_modified,"
-        " origin, language_code, validity_bitfield, "
-        " is_client_validity_states_updated "
+        " origin, language_code "
         " FROM autofill_profiles"));
     ASSERT_TRUE(s_profiles.Step());
     EXPECT_EQ("00000000-0000-0000-0000-000000000001",
@@ -1625,10 +1627,6 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion79ToCurrent) {
     EXPECT_EQ(ASCIIToUTF16(autofill::kSettingsOrigin),
               s_profiles.ColumnString16(10));
     EXPECT_EQ("en", s_profiles.ColumnString(11));
-    EXPECT_EQ(1365, s_profiles.ColumnInt(12));
-    // The new is_client_validity_states_updated should have the default value
-    // of FALSE.
-    EXPECT_FALSE(s_profiles.ColumnBool(13));
 
     // No more entries expected.
     ASSERT_FALSE(s_profiles.Step());
@@ -2092,8 +2090,6 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion94ToCurrent) {
     sql::MetaTable meta_table;
     ASSERT_TRUE(meta_table.Init(&connection, 94, 83));
 
-    EXPECT_FALSE(connection.DoesTableExist("credit_card_art_images"));
-
     EXPECT_FALSE(connection.DoesColumnExist("masked_credit_cards",
                                             "virtual_card_enrollment_state"));
     EXPECT_FALSE(
@@ -2117,13 +2113,6 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion94ToCurrent) {
                                            "virtual_card_enrollment_state"));
     EXPECT_TRUE(
         connection.DoesColumnExist("masked_credit_cards", "card_art_url"));
-
-    // New columns in credit_card_art_images should exist.
-    EXPECT_TRUE(connection.DoesColumnExist("credit_card_art_images", "id"));
-    EXPECT_TRUE(
-        connection.DoesColumnExist("credit_card_art_images", "instrument_id"));
-    EXPECT_TRUE(
-        connection.DoesColumnExist("credit_card_art_images", "card_art_image"));
   }
 }
 
@@ -2188,5 +2177,236 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion96ToCurrent) {
     EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
 
     EXPECT_TRUE(connection.DoesColumnExist("keywords", "is_active"));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion97ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_97.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 97, 83));
+
+    // The status column should exist.
+    EXPECT_TRUE(connection.DoesColumnExist("masked_credit_cards", "status"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    // The status column should not exist.
+    EXPECT_FALSE(connection.DoesColumnExist("masked_credit_cards", "status"));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion98ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_98.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 98, 98));
+
+    // The autofill_profiles_trash table should exist.
+    EXPECT_TRUE(connection.DoesTableExist("autofill_profiles_trash"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+    // The autofill_profiles_trash table should not exist.
+    EXPECT_FALSE(connection.DoesTableExist("autofill_profiles_trash"));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion99ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_99.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 99, 99));
+
+    // The validity-related columns should exist.
+    EXPECT_TRUE(
+        connection.DoesColumnExist("autofill_profiles", "validity_bitfield"));
+    EXPECT_TRUE(connection.DoesColumnExist(
+        "autofill_profiles", "is_client_validity_states_updated"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_FALSE(
+        connection.DoesColumnExist("autofill_profiles", "validity_bitfield"));
+    EXPECT_FALSE(connection.DoesColumnExist(
+        "autofill_profiles", "is_client_validity_states_updated"));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion100ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_100.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 100, 99));
+
+    // The validity-related columns should exist.
+    EXPECT_TRUE(connection.DoesTableExist("credit_card_art_images"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_FALSE(connection.DoesTableExist("credit_card_art_images"));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion101ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_101.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(101, VersionFromConnection(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 101, 99));
+
+    // The birthdate table should not exist.
+    EXPECT_FALSE(connection.DoesTableExist("autofill_profile_birthdates"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    // The birthdate table should exist.
+    EXPECT_TRUE(connection.DoesTableExist("autofill_profile_birthdates"));
+  }
+}
+
+// Tests addition of starter_pack_id column in keywords table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion102ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_102.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 102, 99));
+
+    EXPECT_FALSE(connection.DoesColumnExist("keywords", "starter_pack_id"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    EXPECT_TRUE(connection.DoesColumnExist("keywords", "starter_pack_id"));
+  }
+}
+
+// Tests addition of product_description in masked_credit_cards table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion103ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_103.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 103, 99));
+
+    EXPECT_FALSE(connection.DoesColumnExist("masked_credit_cards",
+                                            "product_description"));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    // The product_description column and should exist.
+    EXPECT_TRUE(connection.DoesColumnExist("masked_credit_cards",
+                                           "product_description"));
   }
 }

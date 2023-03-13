@@ -293,7 +293,6 @@ static const AVFilterPad avfilter_vf_boxblur_inputs[] = {
         .config_props = config_input,
         .filter_frame = filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad avfilter_vf_boxblur_outputs[] = {
@@ -301,7 +300,6 @@ static const AVFilterPad avfilter_vf_boxblur_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_boxblur = {
@@ -310,8 +308,8 @@ const AVFilter ff_vf_boxblur = {
     .priv_size     = sizeof(BoxBlurContext),
     .priv_class    = &boxblur_class,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = avfilter_vf_boxblur_inputs,
-    .outputs       = avfilter_vf_boxblur_outputs,
+    FILTER_INPUTS(avfilter_vf_boxblur_inputs),
+    FILTER_OUTPUTS(avfilter_vf_boxblur_outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

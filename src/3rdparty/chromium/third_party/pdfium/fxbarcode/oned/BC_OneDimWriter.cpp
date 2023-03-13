@@ -86,7 +86,7 @@ void CBC_OneDimWriter::SetFontColor(FX_ARGB color) {
 }
 
 uint8_t* CBC_OneDimWriter::EncodeWithHint(const ByteString& contents,
-                                          BCFORMAT format,
+                                          BC_TYPE format,
                                           int32_t& outWidth,
                                           int32_t& outHeight,
                                           int32_t hints) {
@@ -95,7 +95,7 @@ uint8_t* CBC_OneDimWriter::EncodeWithHint(const ByteString& contents,
 }
 
 uint8_t* CBC_OneDimWriter::Encode(const ByteString& contents,
-                                  BCFORMAT format,
+                                  BC_TYPE format,
                                   int32_t& outWidth,
                                   int32_t& outHeight) {
   return EncodeWithHint(contents, format, outWidth, outHeight, 0);
@@ -148,7 +148,7 @@ void CBC_OneDimWriter::CalcTextInfo(const ByteString& text,
   charPos[0].m_Origin = CFX_PointF(penX + left, penY + top);
   charPos[0].m_GlyphIndex = encoding->GlyphFromCharCode(charcodes[0]);
   charPos[0].m_FontCharWidth = cFont->GetGlyphWidth(charPos[0].m_GlyphIndex);
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   charPos[0].m_ExtGID = charPos[0].m_GlyphIndex;
 #endif
   penX += (float)(charPos[0].m_FontCharWidth) * (float)fontSize / 1000.0f;
@@ -156,7 +156,7 @@ void CBC_OneDimWriter::CalcTextInfo(const ByteString& text,
     charPos[i].m_Origin = CFX_PointF(penX + left, penY + top);
     charPos[i].m_GlyphIndex = encoding->GlyphFromCharCode(charcodes[i]);
     charPos[i].m_FontCharWidth = cFont->GetGlyphWidth(charPos[i].m_GlyphIndex);
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
     charPos[i].m_ExtGID = charPos[i].m_GlyphIndex;
 #endif
     penX += (float)(charPos[i].m_FontCharWidth) * (float)fontSize / 1000.0f;
@@ -183,9 +183,9 @@ void CBC_OneDimWriter::ShowDeviceChars(CFX_RenderDevice* device,
   CFX_Matrix affine_matrix(1.0, 0.0, 0.0, -1.0, (float)locX,
                            (float)(locY + iFontSize));
   affine_matrix.Concat(matrix);
-  device->DrawNormalText(str.GetLength(), pCharPos, m_pFont.Get(),
-                         static_cast<float>(iFontSize), affine_matrix,
-                         m_fontColor, GetTextRenderOptions());
+  device->DrawNormalText(pdfium::make_span(pCharPos, str.GetLength()),
+                         m_pFont.Get(), static_cast<float>(iFontSize),
+                         affine_matrix, m_fontColor, GetTextRenderOptions());
 }
 
 bool CBC_OneDimWriter::ShowChars(WideStringView contents,
@@ -200,11 +200,11 @@ bool CBC_OneDimWriter::ShowChars(WideStringView contents,
   std::vector<TextCharPos> charpos(str.GetLength());
   float charsLen = 0;
   float geWidth = 0;
-  if (m_locTextLoc == BC_TEXT_LOC_ABOVEEMBED ||
-      m_locTextLoc == BC_TEXT_LOC_BELOWEMBED) {
+  if (m_locTextLoc == BC_TEXT_LOC::kAboveEmbed ||
+      m_locTextLoc == BC_TEXT_LOC::kBelowEmbed) {
     geWidth = 0;
-  } else if (m_locTextLoc == BC_TEXT_LOC_ABOVE ||
-             m_locTextLoc == BC_TEXT_LOC_BELOW) {
+  } else if (m_locTextLoc == BC_TEXT_LOC::kAbove ||
+             m_locTextLoc == BC_TEXT_LOC::kBelow) {
     geWidth = (float)barWidth;
   }
   int32_t iFontSize = static_cast<int32_t>(fabs(m_fFontSize));
@@ -217,22 +217,22 @@ bool CBC_OneDimWriter::ShowChars(WideStringView contents,
   int32_t locX = 0;
   int32_t locY = 0;
   switch (m_locTextLoc) {
-    case BC_TEXT_LOC_ABOVEEMBED:
+    case BC_TEXT_LOC::kAboveEmbed:
       locX = static_cast<int32_t>(barWidth - charsLen) / 2;
       locY = 0;
       geWidth = charsLen;
       break;
-    case BC_TEXT_LOC_ABOVE:
+    case BC_TEXT_LOC::kAbove:
       locX = 0;
       locY = 0;
       geWidth = (float)barWidth;
       break;
-    case BC_TEXT_LOC_BELOWEMBED:
+    case BC_TEXT_LOC::kBelowEmbed:
       locX = static_cast<int32_t>(barWidth - charsLen) / 2;
       locY = m_Height - iTextHeight;
       geWidth = charsLen;
       break;
-    case BC_TEXT_LOC_BELOW:
+    case BC_TEXT_LOC::kBelow:
     default:
       locX = 0;
       locY = m_Height - iTextHeight;
@@ -254,18 +254,18 @@ bool CBC_OneDimWriter::RenderDeviceResult(CFX_RenderDevice* device,
   CFX_Path path;
   path.AppendRect(0, 0, static_cast<float>(m_Width),
                   static_cast<float>(m_Height));
-  device->DrawPath(&path, &matrix, &stateData, kBackgroundColor,
+  device->DrawPath(path, &matrix, &stateData, kBackgroundColor,
                    kBackgroundColor, CFX_FillRenderOptions::EvenOddOptions());
   CFX_Matrix scaledMatrix(m_outputHScale, 0.0, 0.0,
                           static_cast<float>(m_Height), 0.0, 0.0);
   scaledMatrix.Concat(matrix);
   for (const auto& rect : m_output) {
     CFX_GraphStateData data;
-    device->DrawPath(&rect, &scaledMatrix, &data, kBarColor, 0,
+    device->DrawPath(rect, &scaledMatrix, &data, kBarColor, 0,
                      CFX_FillRenderOptions::WindingOptions());
   }
 
-  return m_locTextLoc == BC_TEXT_LOC_NONE || !contents.Contains(' ') ||
+  return m_locTextLoc == BC_TEXT_LOC::kNone || !contents.Contains(' ') ||
          ShowChars(contents, device, matrix, m_barWidth, m_multiple);
 }
 

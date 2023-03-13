@@ -6,21 +6,25 @@ import 'chrome://resources/polymer/v3_0/paper-spinner/paper-spinner-lite.js';
 import 'chrome://resources/cr_elements/cr_button/cr_button.m.js';
 import 'chrome://resources/cr_elements/icons.m.js';
 import 'chrome://resources/polymer/v3_0/iron-icon/iron-icon.js';
+import 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
 
 import {isChromeOS} from '//resources/js/cr.m.js';
-import {CrViewManagerElement} from 'chrome://resources/cr_elements/cr_view_manager/cr_view_manager.js';
+import {I18nBehavior} from 'chrome://resources/js/i18n_behavior.m.js';
 import {loadTimeData} from 'chrome://resources/js/load_time_data.m.js';
 import {isRTL} from 'chrome://resources/js/util.m.js';
 import {WebUIListenerBehavior} from 'chrome://resources/js/web_ui_listener_behavior.m.js';
 import {html, Polymer} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
-// <if expr="chromeos">
+// <if expr="chromeos_ash">
+import './arc_account_picker/arc_account_picker_app.js';
 import './gaia_action_buttons.js';
+import './signin_blocked_by_policy_page.js';
 import './welcome_page_app.js';
 import './strings.m.js';
+import {getAccountAdditionOptionsFromJSON} from './inline_login_util.js';
 // </if>
 
-import {AuthCompletedCredentials, Authenticator, AuthParams} from '../gaia_auth_host/authenticator.m.js';
+import {AuthCompletedCredentials, Authenticator, AuthParams} from './gaia_auth_host/authenticator.m.js';
 import {InlineLoginBrowserProxy, InlineLoginBrowserProxyImpl} from './inline_login_browser_proxy.js';
 
 /**
@@ -31,7 +35,9 @@ import {InlineLoginBrowserProxy, InlineLoginBrowserProxyImpl} from './inline_log
 /** @enum {string} */
 const View = {
   addAccount: 'addAccount',
+  signinBlockedByPolicy: 'signinBlockedByPolicy',
   welcome: 'welcome',
+  arcAccountPicker: 'arcAccountPicker',
 };
 
 Polymer({
@@ -39,7 +45,7 @@ Polymer({
 
   _template: html`{__html_template__}`,
 
-  behaviors: [WebUIListenerBehavior],
+  behaviors: [WebUIListenerBehavior, I18nBehavior],
 
   properties: {
     /** Mirroring the enum so that it can be used from HTML bindings. */
@@ -66,19 +72,7 @@ Polymer({
       value: null,
     },
 
-    // <if expr="chromeos">
-    /**
-     * True if redesign of account management flows is enabled.
-     * @private
-     */
-    isAccountManagementFlowsV2Enabled_: {
-      type: Boolean,
-      value() {
-        return loadTimeData.getBoolean('isAccountManagementFlowsV2Enabled');
-      },
-      readOnly: true,
-    },
-
+    // <if expr="chromeos_ash">
     /*
      * True if welcome page should not be shown.
      * @private
@@ -92,6 +86,18 @@ Polymer({
     },
 
     /*
+     * True if `kArcAccountRestrictions` feature is enabled.
+     * @private
+     */
+    isArcAccountRestrictionsEnabled_: {
+      type: Boolean,
+      value() {
+        return loadTimeData.getBoolean('isArcAccountRestrictionsEnabled');
+      },
+      readOnly: true,
+    },
+
+    /*
      * True if the dialog is open for reauthentication.
      * @private
      */
@@ -99,6 +105,27 @@ Polymer({
       type: Boolean,
       value: false,
     },
+
+    /*
+     * True if the account should be available in ARC++ after addition.
+     * @private
+     */
+    isAvailableInArc_: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * User's email used in the sign-in flow.
+     * @private {string}
+     */
+    email_: {type: String, value: ''},
+
+    /**
+     * Hosted domain of the user's email used in the sign-in flow.
+     * @private {string}
+     */
+    hostedDomain_: {type: String, value: ''},
     // </if>
 
     /**
@@ -146,6 +173,11 @@ Polymer({
     this.addWebUIListener(
         'send-lst-fetch-results', arg => this.sendLSTFetchResults_(arg));
     this.addWebUIListener('close-dialog', () => this.closeDialog_());
+    // <if expr="chromeos_ash">
+    this.addWebUIListener(
+        'show-signin-blocked-by-policy-page',
+        data => this.signinBlockedByPolicyShowView_(data));
+    // </if>
   },
 
   /** @private */
@@ -189,12 +221,10 @@ Polymer({
   onNewWindow_(e) {
     window.open(e.detail.targetUrl, '_blank');
     e.detail.window.discard();
-    // <if expr="chromeos">
-    if (this.isAccountManagementFlowsV2Enabled_) {
-      // On Chrome OS this dialog is always-on-top, so we have to close it if
-      // user opens a link in a new window.
-      this.closeDialog_();
-    }
+    // <if expr="chromeos_ash">
+    // On Chrome OS this dialog is always-on-top, so we have to close it if
+    // user opens a link in a new window.
+    this.closeDialog_();
     // </if>
   },
 
@@ -221,7 +251,16 @@ Polymer({
    */
   onAuthCompleted_(e) {
     this.loading_ = true;
-    this.browserProxy_.completeLogin(e.detail);
+    /** @type {!AuthCompletedCredentials} */
+    const credentials = e.detail;
+
+    // <if expr="chromeos_ash">
+    if (this.isArcAccountRestrictionsEnabled_ && !this.isReauthentication_) {
+      credentials.isAvailableInArc = this.isAvailableInArc_;
+    }
+    // </if>
+
+    this.browserProxy_.completeLogin(credentials);
   },
 
   /** @private */
@@ -250,7 +289,7 @@ Polymer({
     if (data.email) {
       this.isReauthentication_ = true;
     }
-    this.switchView_(this.getDefaultView_());
+    this.switchToDefaultView_();
   },
 
   /**
@@ -272,6 +311,15 @@ Polymer({
    */
   closeDialog_() {
     this.browserProxy_.dialogClose();
+  },
+
+  // <if expr="chromeos_ash">
+  /**
+   * Navigates to the welcome screen.
+   * @private
+   */
+  goToWelcomeScreen_() {
+    this.switchView_(View.welcome);
   },
 
   /**
@@ -299,6 +347,17 @@ Polymer({
   },
 
   /**
+   * @return {string}
+   * @private
+   */
+  getNextButtonLabel_() {
+    return this.currentView_ === View.signinBlockedByPolicy ||
+            !this.isArcAccountRestrictionsEnabled_ ?
+        this.i18n('ok') :
+        this.i18n('nextButtonLabel');
+  },
+
+  /**
    * @return {boolean}
    * @private
    */
@@ -311,7 +370,8 @@ Polymer({
    * @private
    */
   shouldShowOkButton_() {
-    return this.currentView_ === View.welcome;
+    return this.currentView_ === View.welcome ||
+        this.currentView_ === View.signinBlockedByPolicy;
   },
 
   /**
@@ -322,13 +382,61 @@ Polymer({
     return this.enableGaiaActionButtons_ &&
         this.currentView_ === View.addAccount;
   },
+  // </if>
+
+  /**
+   * Navigates to the default view.
+   * @private
+   */
+  switchToDefaultView_() {
+    const view = this.getDefaultView_();
+
+    // <if expr="chromeos_ash">
+    if (this.isArcAccountRestrictionsEnabled_ &&
+        view === View.arcAccountPicker) {
+      this.$$('arc-account-picker-app')
+          .loadAccounts()
+          .then(
+              accountsFound => {
+                this.switchView_(
+                    accountsFound ? View.arcAccountPicker : View.welcome);
+              },
+              reject => {
+                this.switchView_(View.welcome);
+              });
+      return;
+    }
+    // </if>
+
+    this.switchView_(view);
+  },
 
   /**
    * @return {View}
    * @private
    */
   getDefaultView_() {
-    return this.isWelcomePageEnabled_() ? View.welcome : View.addAccount;
+    // TODO(https://crbug.com/1155041): simplify this when the file will be
+    // split into CrOS and non-CrOS parts.
+    // <if expr="not chromeos_ash">
+    // On non-ChromeOS always show 'Add account'.
+    return View.addAccount;
+    // </if>
+
+    // <if expr="chromeos_ash">
+    if (this.isReauthentication_) {
+      return View.addAccount;
+    }
+    if (this.isArcAccountRestrictionsEnabled_) {
+      const options = getAccountAdditionOptionsFromJSON(
+          InlineLoginBrowserProxyImpl.getInstance().getDialogArguments());
+      if (!!options && options.showArcAvailabilityPicker) {
+        return View.arcAccountPicker;
+      }
+    }
+    return this.shouldSkipWelcomePage_ ? View.addAccount :
+                                         View.welcome;
+    // </if>
   },
 
   /**
@@ -338,6 +446,7 @@ Polymer({
   switchView_(id) {
     this.currentView_ = id;
     /** @type {CrViewManagerElement} */ (this.$.viewManager).switchView(id);
+    this.dispatchEvent(new CustomEvent('switch-view-notify-for-testing'));
   },
 
   /**
@@ -345,22 +454,43 @@ Polymer({
    * @private
    */
   isWelcomePageEnabled_() {
-    if (!isChromeOS) {
-      return false;
-    }
-    return this.isAccountManagementFlowsV2Enabled_ &&
-        !this.shouldSkipWelcomePage_ && !this.isReauthentication_;
+    // <if expr="not chromeos_ash">
+    return false;
+    // </if>
+    // <if expr="chromeos_ash">
+    return !this.shouldSkipWelcomePage_ && !this.isReauthentication_;
+    // </if>
   },
 
-  // <if expr="chromeos">
+  // <if expr="chromeos_ash">
+
+  /**
+   * Shows the sign-in blocked by policy screen.
+   * @param {{email:string, hostedDomain:string}} data parameters.
+   * @private
+   */
+  signinBlockedByPolicyShowView_(data) {
+    this.set('email_', data.email);
+    this.set('hostedDomain_', data.hostedDomain);
+    this.switchView_(View.signinBlockedByPolicy);
+    this.setFocusToWebview_();
+  },
+
   /** @private */
   onOkButtonClick_() {
-    this.switchView_(View.addAccount);
-    const skipChecked =
-        /** @type {WelcomePageAppElement} */ (this.$$('welcome-page-app'))
-            .isSkipCheckboxChecked();
-    this.browserProxy_.skipWelcomePage(skipChecked);
-    this.setFocusToWebview_();
+    switch (this.currentView_) {
+      case View.welcome:
+        this.switchView_(View.addAccount);
+        const skipChecked =
+            /** @type {WelcomePageAppElement} */ (this.$$('welcome-page-app'))
+                .isSkipCheckboxChecked();
+        this.browserProxy_.skipWelcomePage(skipChecked);
+        this.setFocusToWebview_();
+        break;
+      case View.signinBlockedByPolicy:
+        this.closeDialog_();
+        break;
+    }
   },
 
   /** @private */

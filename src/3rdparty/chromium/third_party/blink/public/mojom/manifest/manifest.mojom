@@ -8,6 +8,8 @@ import "services/device/public/mojom/screen_orientation_lock_types.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 import "third_party/blink/public/mojom/manifest/display_mode.mojom";
 import "third_party/blink/public/mojom/manifest/capture_links.mojom";
+import "third_party/blink/public/mojom/manifest/handle_links.mojom";
+import "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "url/mojom/url.mojom";
 import "url/mojom/origin.mojom";
@@ -51,8 +53,6 @@ struct Manifest {
   // As such, this field should not be exposed by default.
   array<ManifestFileHandler> file_handlers;
 
-  // TODO(crbug.com/1019239): This is going into the mainline manifest spec,
-  // remove the TODO once that PR goes in.
   // The URLProtocolHandler explainer can be found here:
   // https://github.com/MicrosoftEdge/MSEdgeExplainers/blob/main/URLProtocolHandler/explainer.md
   array<ManifestProtocolHandler> protocol_handlers;
@@ -99,10 +99,28 @@ struct Manifest {
   // https://github.com/robbiemc/pwa-isolated-storage/blob/main/explainer.md
   bool isolated_storage;
 
+  array<ParsedPermissionsPolicyDeclaration> permissions_policy;
+
   // TODO(crbug.com/1231886): This field is non-standard and part of a Chrome
   // experiment. See:
   // https://github.com/WICG/sw-launch/blob/main/launch_handler.md
   ManifestLaunchHandler? launch_handler;
+
+  // TODO(crbug.com/1259777): This field is non-standard and part of a Chrome
+  // experiment. See:
+  // https://github.com/WICG/manifest-incubations/blob/gh-pages/translations-explainer.md
+  // A mapping of locales to their translations.
+  map<mojo_base.mojom.String16, ManifestTranslationItem> translations;
+
+  // TODO(crbug.com/1271804): This field is non-standard and part of a Chrome
+  // experiment. See:
+  // https://github.com/w3c/manifest/issues/975#issuecomment-960222756
+  ManifestUserPreferences? user_preferences;
+
+  // TODO(crbug.com/1254457): This field is non-standard and part of a Chrome
+  // experiment. See:
+  // https://github.com/WICG/pwa-url-handler/blob/main/handle_links/explainer.md
+  HandleLinks handle_links;
 };
 
 // Structure representing a Shortcut Item per the Manifest specification, see:
@@ -246,6 +264,16 @@ struct ManifestFileHandler {
   array<ManifestImageResource> icons;
   // A mapping of a MIME types to a corresponding list of file extensions.
   map<mojo_base.mojom.String16, array<mojo_base.mojom.String16>> accept;
+
+  // How the app should be launched when there are multiple files being opened.
+  // For `kSingleClient`, they'll all be passed in a single launch. For
+  // `kMultipleClients`, multiple launched app instances will each get a single
+  // file.
+  enum LaunchType {
+    kSingleClient,
+    kMultipleClients,
+  };
+  LaunchType launch_type;
 };
 
 // Represents how web app launches should be handled with regard to opening
@@ -259,17 +287,41 @@ struct ManifestLaunchHandler {
     // Create a new client for each app launch.
     kNewClient,
     // Use an existing client if available, otherwise create a new one to use.
-    kExistingClient,
+    // Navigate the existing client to the launch URL.
+    kExistingClientNavigate,
+    // Use an existing client if available, otherwise create a new one to use.
+    // Do not navigate the client and just enqueue a LaunchParams in the
+    // document's LaunchQueue.
+    kExistingClientRetain,
   };
   RouteTo route_to;
+};
 
-  // When routing to an existing client this specifies whether to navigate it to
-  // the launch URL or just pass the URL in the enqueued LaunchParams.
-  enum NavigateExistingClient {
-    kAlways,
-    kNever,
-  };
-  NavigateExistingClient navigate_existing_client;
+// Structure representing the translated manifest fields. Each field corresponds
+// to a translatable field in the Web App Manifest and contains a translation of
+// that field. Each field is optional as there is no mandatory field which must
+// be translated in any locale.
+struct ManifestTranslationItem {
+  mojo_base.mojom.String16? name;
+
+  mojo_base.mojom.String16? short_name;
+
+  mojo_base.mojom.String16? description;
+};
+
+// Structure representing overrides for certain user preferences.
+struct ManifestUserPreferences {
+  ManifestUserPreferenceOverrides? color_scheme_dark;
+};
+
+// Structure representing manifest fields that can be overridden given certain
+// user preferences (eg. dark mode). All fields are optional.
+struct ManifestUserPreferenceOverrides {
+  bool has_theme_color;
+  uint32 theme_color;
+
+  bool has_background_color;
+  uint32 background_color;
 };
 
 // Debug information for a parsed manifest.

@@ -297,6 +297,10 @@ MinMaxSizes ComputeTransferredMinMaxInlineSizes(
     const MinMaxSizes& block_min_max,
     const NGBoxStrut& border_padding,
     const EBoxSizing sizing);
+MinMaxSizes ComputeTransferredMinMaxBlockSizes(const LogicalSize& ratio,
+                                               const MinMaxSizes& block_min_max,
+                                               const NGBoxStrut& border_padding,
+                                               const EBoxSizing sizing);
 
 // Computes the transferred min/max inline sizes from the min/max block
 // sizes and the aspect ratio.
@@ -393,6 +397,7 @@ LayoutUnit ComputeInitialBlockSizeForFragment(
 CORE_EXPORT LayoutUnit
 CalculateDefaultBlockSize(const NGConstraintSpace& space,
                           const NGBlockNode& node,
+                          const NGBlockBreakToken* break_token,
                           const NGBoxStrut& border_scrollbar_padding);
 
 // Flex layout is interested in ignoring lengths in a particular axis. This
@@ -509,11 +514,6 @@ inline NGLineBoxStrut ComputeLineMarginsForVisualContainer(
           {constraint_space.GetWritingMode(), TextDirection::kLtr});
 }
 
-// Compute margins for a child during the min-max size calculation.
-// TODO(ikilpatrick): Replace this function with ComputeMarginsFor.
-CORE_EXPORT NGBoxStrut ComputeMinMaxMargins(const ComputedStyle& parent_style,
-                                            NGLayoutInputNode child);
-
 CORE_EXPORT NGBoxStrut ComputeBorders(const NGConstraintSpace&,
                                       const NGBlockNode&);
 
@@ -526,10 +526,6 @@ inline NGLineBoxStrut ComputeLineBorders(
 }
 
 CORE_EXPORT NGBoxStrut ComputeBordersForTest(const ComputedStyle& style);
-
-CORE_EXPORT NGBoxStrut ComputeIntrinsicPadding(const NGConstraintSpace&,
-                                               const ComputedStyle&,
-                                               const NGBoxStrut& scrollbar);
 
 CORE_EXPORT NGBoxStrut ComputePadding(const NGConstraintSpace&,
                                       const ComputedStyle&);
@@ -596,6 +592,7 @@ inline LayoutUnit ConstrainByMinMax(LayoutUnit length,
 CORE_EXPORT NGFragmentGeometry
 CalculateInitialFragmentGeometry(const NGConstraintSpace&,
                                  const NGBlockNode&,
+                                 const NGBlockBreakToken*,
                                  bool is_intrinsic = false);
 
 // Shrinks the logical |size| by |insets|.
@@ -630,6 +627,7 @@ LogicalSize CalculateReplacedChildPercentageSize(
 LayoutUnit ClampIntrinsicBlockSize(
     const NGConstraintSpace&,
     const NGBlockNode&,
+    const NGBlockBreakToken* break_token,
     const NGBoxStrut& border_scrollbar_padding,
     LayoutUnit current_intrinsic_block_size,
     absl::optional<LayoutUnit> body_margin_block_sum = absl::nullopt);
@@ -641,6 +639,18 @@ LayoutUnit ClampIntrinsicBlockSize(
 absl::optional<MinMaxSizesResult> CalculateMinMaxSizesIgnoringChildren(
     const NGBlockNode&,
     const NGBoxStrut& border_scrollbar_padding);
+
+// Determine which scrollbars to freeze in the next layout pass. Scrollbars that
+// appear will be frozen (while scrollbars that disappear will not). Input is
+// the scrollbar situation before and after the previous layout pass, and the
+// current freeze state (|freeze_horizontal|, |freeze_vertical|). Output is the
+// new freeze state (|freeze_horizontal|, |freeze_vertical|). A scrollbar that
+// was previously frozen will not become unfrozen.
+void AddScrollbarFreeze(const NGBoxStrut& scrollbars_before,
+                        const NGBoxStrut& scrollbars_after,
+                        WritingDirectionMode,
+                        bool* freeze_horizontal,
+                        bool* freeze_vertical);
 
 }  // namespace blink
 

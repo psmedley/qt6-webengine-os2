@@ -16,19 +16,19 @@ class F extends ValidationTest {
     let code;
     switch (shaderStage) {
       case 'compute': {
-        code = `[[stage(compute), workgroup_size(1)]] fn ${entryPoint}() {}`;
+        code = `@stage(compute) @workgroup_size(1) fn ${entryPoint}() {}`;
         break;
       }
       case 'vertex': {
         code = `
-        [[stage(vertex)]] fn ${entryPoint}() -> [[builtin(position)]] vec4<f32> {
+        @stage(vertex) fn ${entryPoint}() -> @builtin(position) vec4<f32> {
           return vec4<f32>(0.0, 0.0, 0.0, 1.0);
         }`;
         break;
       }
       case 'fragment': {
         code = `
-        [[stage(fragment)]] fn ${entryPoint}() -> [[location(0)]] vec4<i32> {
+        @stage(fragment) fn ${entryPoint}() -> @location(0) vec4<i32> {
           return vec4<i32>(0, 1, 0, 1);
         }`;
         break;
@@ -62,13 +62,9 @@ class F extends ValidationTest {
         this.shouldReject('OperationError', this.device.createComputePipelineAsync(descriptor));
       }
     } else {
-      if (_success) {
+      this.expectValidationError(() => {
         this.device.createComputePipeline(descriptor);
-      } else {
-        this.expectValidationError(() => {
-          this.device.createComputePipeline(descriptor);
-        });
-      }
+      }, !_success);
     }
   }
 }
@@ -130,7 +126,7 @@ and check that the APIs only accept compute shader.
     t.doCreateComputePipelineTest(isAsync, shaderModuleStage === 'compute', descriptor);
   });
 
-g.test('enrty_point_name_must_match')
+g.test('entry_point_name_must_match')
   .desc(
     `
 Tests calling createComputePipeline(Async) with valid compute stage shader and different entryPoint,
@@ -142,6 +138,7 @@ The entryPoint assigned in descriptor include:
 - Empty string
 - Mistyping
 - Containing invalid char, including space and control codes (Null character)
+- Unicode entrypoints and their ASCIIfied version
 `
   )
   .params(u =>
@@ -161,6 +158,8 @@ The entryPoint assigned in descriptor include:
       { shaderModuleEntryPoint: 'main_t12V3', stageEntryPoint: 'main_t12V3' },
       { shaderModuleEntryPoint: 'main_t12V3', stageEntryPoint: 'main_t12V5' },
       { shaderModuleEntryPoint: 'main_t12V3', stageEntryPoint: '_main_t12V3' },
+      { shaderModuleEntryPoint: 'séquençage', stageEntryPoint: 'séquençage' },
+      { shaderModuleEntryPoint: 'séquençage', stageEntryPoint: 'sequencage' },
     ])
   )
   .fn(async t => {
@@ -180,11 +179,52 @@ g.test('pipeline_layout,device_mismatch')
     'Tests createComputePipeline(Async) cannot be called with a pipeline layout created from another device'
   )
   .paramsSubcasesOnly(u => u.combine('isAsync', [true, false]).combine('mismatched', [true, false]))
-  .unimplemented();
+  .fn(async t => {
+    const { isAsync, mismatched } = t.params;
+
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const layout = device.createPipelineLayout({ bindGroupLayouts: [] });
+
+    const descriptor = {
+      layout,
+      compute: {
+        module: t.getShaderModule('compute', 'main'),
+        entryPoint: 'main',
+      },
+    };
+
+    t.doCreateComputePipelineTest(isAsync, !mismatched, descriptor);
+  });
 
 g.test('shader_module,device_mismatch')
   .desc(
     'Tests createComputePipeline(Async) cannot be called with a shader module created from another device'
   )
   .paramsSubcasesOnly(u => u.combine('isAsync', [true, false]).combine('mismatched', [true, false]))
-  .unimplemented();
+  .fn(async t => {
+    const { isAsync, mismatched } = t.params;
+
+    if (mismatched) {
+      await t.selectMismatchedDeviceOrSkipTestCase(undefined);
+    }
+
+    const device = mismatched ? t.mismatchedDevice : t.device;
+
+    const module = device.createShaderModule({
+      code: '@stage(compute) @workgroup_size(1) fn main() {}',
+    });
+
+    const descriptor = {
+      compute: {
+        module,
+        entryPoint: 'main',
+      },
+    };
+
+    t.doCreateComputePipelineTest(isAsync, !mismatched, descriptor);
+  });

@@ -7,9 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/desktop_media_id.h"
 #include "media/capture/video/video_capture_device.h"
@@ -40,6 +40,9 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
   // requested window was destroyed).
   static std::unique_ptr<media::VideoCaptureDevice> Create(
       const DesktopMediaID& source);
+
+  DesktopCaptureDevice(const DesktopCaptureDevice&) = delete;
+  DesktopCaptureDevice& operator=(const DesktopCaptureDevice&) = delete;
 
   ~DesktopCaptureDevice() override;
 
@@ -75,8 +78,6 @@ class CONTENT_EXPORT DesktopCaptureDevice : public media::VideoCaptureDevice {
   // cases may mean that there is either not a chance for it to be called, or it
   // may have been called but not yet scheduled to run.
   base::Thread thread_;
-
-  DISALLOW_COPY_AND_ASSIGN(DesktopCaptureDevice);
 };
 
 }  // namespace content

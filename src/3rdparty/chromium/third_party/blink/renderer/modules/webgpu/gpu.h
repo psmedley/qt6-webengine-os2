@@ -12,9 +12,14 @@
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/core/execution_context/navigator_base.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
+// Forward declarations from webgpu.h
 struct WGPUDeviceProperties;
+typedef struct WGPUBufferImpl* WGPUBuffer;
+// Forward declaration from dawn_proc.h
+struct DawnProcTable;
 
 namespace blink {
 
@@ -25,6 +30,25 @@ class NavigatorBase;
 class ScriptPromiseResolver;
 class ScriptState;
 class DawnControlClientHolder;
+
+struct BoxedMappableWGPUBufferHandles
+    : public RefCounted<BoxedMappableWGPUBufferHandles> {
+ public:
+  // Basic typed wrapper around |contents_|.
+  void insert(WGPUBuffer buffer) { contents_.insert(buffer); }
+
+  // Basic typed wrapper around |contents_|.
+  void erase(WGPUBuffer buffer) { contents_.erase(buffer); }
+
+  void ClearAndDestroyAll(const DawnProcTable& procs);
+
+ private:
+  // void* because HashSet tries to infer if T is GarbageCollected,
+  // but WGPUBufferImpl has no real definition. We could define
+  // IsGarbageCollectedType<struct WGPUBufferImpl> but it could easily
+  // lead to a ODR violation.
+  HashSet<void*> contents_;
+};
 
 class MODULES_EXPORT GPU final : public ScriptWrappable,
                                  public Supplement<NavigatorBase>,
@@ -38,6 +62,10 @@ class MODULES_EXPORT GPU final : public ScriptWrappable,
   static GPU* gpu(NavigatorBase&);
 
   explicit GPU(NavigatorBase&);
+
+  GPU(const GPU&) = delete;
+  GPU& operator=(const GPU&) = delete;
+
   ~GPU() override;
 
   // ScriptWrappable overrides
@@ -51,11 +79,15 @@ class MODULES_EXPORT GPU final : public ScriptWrappable,
                                const GPURequestAdapterOptions* options);
 
   // Store the buffer in a weak hash set so we can destroy it when the
-  // context is destroyed. Note: there is no need to "untrack" buffers
-  // because Oilpan automatically removes them from the weak hash set
-  // when the GPUBuffer is garbage-collected.
-  // https://chromium.googlesource.com/chromium/src/+/refs/heads/main/third_party/blink/renderer/platform/heap/BlinkGCAPIReference.md#weak-collections
+  // context is destroyed.
   void TrackMappableBuffer(GPUBuffer* buffer);
+  // Untrack the GPUBuffer. This is called eagerly when the buffer is
+  // destroyed.
+  void UntrackMappableBuffer(GPUBuffer* buffer);
+
+  BoxedMappableWGPUBufferHandles* mappable_buffer_handles() const {
+    return mappable_buffer_handles_.get();
+  }
 
   void SetDawnControlClientHolderForTesting(
       scoped_refptr<DawnControlClientHolder> dawn_control_client);
@@ -74,8 +106,10 @@ class MODULES_EXPORT GPU final : public ScriptWrappable,
 
   scoped_refptr<DawnControlClientHolder> dawn_control_client_;
   HeapHashSet<WeakMember<GPUBuffer>> mappable_buffers_;
-
-  DISALLOW_COPY_AND_ASSIGN(GPU);
+  // Mappable buffers remove themselves from this set on destruction.
+  // It is boxed in a scoped_refptr so GPUBuffer can access it in its
+  // destructor.
+  scoped_refptr<BoxedMappableWGPUBufferHandles> mappable_buffer_handles_;
 };
 
 }  // namespace blink

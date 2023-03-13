@@ -156,13 +156,6 @@ CSSValue* ConsumeScrollTimelineOrientation(CSSParserTokenRange& range) {
       CSSValueID::kHorizontal, CSSValueID::kVertical>(range);
 }
 
-CSSValue* ConsumeTimeRange(CSSParserTokenRange& range,
-                           const CSSParserContext& context) {
-  if (auto* value = css_parsing_utils::ConsumeIdent<CSSValueID::kAuto>(range))
-    return value;
-  return css_parsing_utils::ConsumeTime(range, context, kValueRangeAll);
-}
-
 CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
                             AtRuleDescriptorID id,
                             const CSSTokenizedValue& tokenized_value,
@@ -173,6 +166,8 @@ CSSValue* ConsumeDescriptor(StyleRule::RuleType rule_type,
   switch (rule_type) {
     case StyleRule::kFontFace:
       return Parser::ParseFontFaceDescriptor(id, range, context);
+    case StyleRule::kFontPaletteValues:
+      return Parser::ParseAtFontPaletteValuesDescriptor(id, range, context);
     case StyleRule::kProperty:
       return Parser::ParseAtPropertyDescriptor(id, tokenized_value, context);
     case StyleRule::kCounterStyle:
@@ -204,8 +199,8 @@ CSSValue* ConsumeFontMetricOverride(CSSParserTokenRange& range,
           css_parsing_utils::ConsumeIdent<CSSValueID::kNormal>(range)) {
     return normal;
   }
-  return css_parsing_utils::ConsumePercent(range, context,
-                                           kValueRangeNonNegative);
+  return css_parsing_utils::ConsumePercent(
+      range, context, CSSPrimitiveValue::ValueRange::kNonNegative);
 }
 
 }  // namespace
@@ -218,6 +213,11 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
   range.ConsumeWhitespace();
   switch (id) {
     case AtRuleDescriptorID::FontFamily:
+      // In order to avoid confusion, <family-name> does not accept unquoted
+      // <generic-family> keywords and general CSS keywords.
+      // ConsumeGenericFamily will take care of excluding the former while the
+      // ConsumeFamilyName will take care of excluding the latter.
+      // See https://drafts.csswg.org/css-fonts/#family-name-syntax,
       if (css_parsing_utils::ConsumeGenericFamily(range))
         return nullptr;
       parsed_value = css_parsing_utils::ConsumeFamilyName(range);
@@ -265,7 +265,7 @@ CSSValue* AtRuleDescriptorParser::ParseFontFaceDescriptor(
     case AtRuleDescriptorID::SizeAdjust:
       if (RuntimeEnabledFeatures::CSSFontFaceSizeAdjustEnabled()) {
         parsed_value = css_parsing_utils::ConsumePercent(
-            range, context, kValueRangeNonNegative);
+            range, context, CSSPrimitiveValue::ValueRange::kNonNegative);
       }
       break;
     default:
@@ -350,9 +350,6 @@ CSSValue* AtRuleDescriptorParser::ParseAtScrollTimelineDescriptor(
     case AtRuleDescriptorID::Start:
     case AtRuleDescriptorID::End:
       parsed_value = css_parsing_utils::ConsumeScrollOffset(range, context);
-      break;
-    case AtRuleDescriptorID::TimeRange:
-      parsed_value = ConsumeTimeRange(range, context);
       break;
     default:
       break;

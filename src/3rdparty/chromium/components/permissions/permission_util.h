@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
@@ -15,7 +14,6 @@
 
 namespace content {
 enum class PermissionType;
-class WebContents;
 class RenderFrameHost;
 }  // namespace content
 
@@ -39,6 +37,10 @@ enum class PermissionAction {
 // A utility class for permissions.
 class PermissionUtil {
  public:
+  PermissionUtil() = delete;
+  PermissionUtil(const PermissionUtil&) = delete;
+  PermissionUtil& operator=(const PermissionUtil&) = delete;
+
   // Returns the permission string for the given permission.
   static std::string GetPermissionString(ContentSettingsType);
 
@@ -68,16 +70,9 @@ class PermissionUtil {
   static bool CanPermissionBeAllowedOnce(ContentSettingsType type);
 
   // Returns the authoritative `embedding origin`, as a GURL, to be used for
-  // permission decisions in `web_contents`.
-  // TODO(crbug.com/698985): This method should only be used temporarily, and
-  // ultimately all call sites should be migrated to determine the authoritative
-  // security origin based on the requesting RenderFrameHost.
-  static GURL GetLastCommittedOriginAsURL(content::WebContents* web_contents);
+  // permission decisions in `render_frame_host`.
   static GURL GetLastCommittedOriginAsURL(
       content::RenderFrameHost* render_frame_host);
-
- private:
-  DISALLOW_IMPLICIT_CONSTRUCTORS(PermissionUtil);
 };
 
 }  // namespace permissions

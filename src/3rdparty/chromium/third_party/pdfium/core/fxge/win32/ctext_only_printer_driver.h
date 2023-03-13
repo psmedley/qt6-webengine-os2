@@ -20,15 +20,15 @@ class CTextOnlyPrinterDriver final : public RenderDeviceDriverIface {
   // RenderDeviceDriverIface:
   DeviceType GetDeviceType() const override;
   int GetDeviceCaps(int caps_id) const override;
-  void SaveState() override {}
-  void RestoreState(bool bKeepSaved) override {}
-  bool SetClip_PathFill(const CFX_Path* pPath,
+  void SaveState() override;
+  void RestoreState(bool bKeepSaved) override;
+  bool SetClip_PathFill(const CFX_Path& path,
                         const CFX_Matrix* pObject2Device,
                         const CFX_FillRenderOptions& fill_options) override;
-  bool SetClip_PathStroke(const CFX_Path* pPath,
+  bool SetClip_PathStroke(const CFX_Path& path,
                           const CFX_Matrix* pObject2Device,
                           const CFX_GraphStateData* pGraphState) override;
-  bool DrawPath(const CFX_Path* pPath,
+  bool DrawPath(const CFX_Path& path,
                 const CFX_Matrix* pObject2Device,
                 const CFX_GraphStateData* pGraphState,
                 uint32_t fill_color,
@@ -58,8 +58,7 @@ class CTextOnlyPrinterDriver final : public RenderDeviceDriverIface {
                    const FXDIB_ResampleOptions& options,
                    std::unique_ptr<CFX_ImageRenderer>* handle,
                    BlendMode blend_type) override;
-  bool DrawDeviceText(int nChars,
-                      const TextCharPos* pCharPos,
+  bool DrawDeviceText(pdfium::span<const TextCharPos> pCharPos,
                       CFX_Font* pFont,
                       const CFX_Matrix& mtObject2Device,
                       float font_size,

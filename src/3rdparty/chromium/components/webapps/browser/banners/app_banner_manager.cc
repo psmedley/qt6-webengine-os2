@@ -13,7 +13,9 @@
 #include "base/compiler_specific.h"
 #include "base/containers/cxx20_erase.h"
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "components/back_forward_cache/back_forward_cache_disable.h"
@@ -34,7 +36,9 @@
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/common/manifest/manifest_util.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/mojom/installation/installation.mojom.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -84,7 +88,7 @@ class ConsoleStatusReporter : public AppBannerManager::StatusReporter {
   }
 
  private:
-  content::WebContents* web_contents_;
+  raw_ptr<content::WebContents> web_contents_;
 };
 
 // Tracks installable status codes via an UMA histogram.
@@ -142,8 +146,7 @@ AppBannerManager* AppBannerManager::FromWebContents(
 
 // static
 base::Time AppBannerManager::GetCurrentTime() {
-  return base::Time::Now() +
-         base::TimeDelta::FromDays(gTimeDeltaInDaysForTesting);
+  return base::Time::Now() + base::Days(gTimeDeltaInDaysForTesting);
 }
 
 // static
@@ -222,16 +225,9 @@ AppBannerManager::AppBannerManager(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       SiteEngagementObserver(site_engagement::SiteEngagementService::Get(
           web_contents->GetBrowserContext())),
-      has_maskable_primary_icon_(false),
-      state_(State::INACTIVE),
       manager_(InstallableManager::FromWebContents(web_contents)),
       manifest_(blink::mojom::Manifest::New()),
-      has_sufficient_engagement_(false),
-      load_finished_(false),
-      status_reporter_(std::make_unique<NullStatusReporter>()),
-      install_animation_pending_(false),
-      installable_web_app_check_result_(
-          InstallableWebAppCheckResult::kUnknown) {
+      status_reporter_(std::make_unique<NullStatusReporter>()) {
   DCHECK(manager_);
 
   AppBannerSettingsHelper::UpdateFromFieldTrial();
@@ -241,9 +237,9 @@ AppBannerManager::~AppBannerManager() = default;
 
 bool AppBannerManager::ShouldIgnore(content::RenderFrameHost* render_frame_host,
                                     const GURL& url) {
-  // Don't start the banner flow unless the main frame has finished loading.
-  // |render_frame_host| can be null during retry attempts.
-  if (render_frame_host && render_frame_host->GetParent())
+  // Don't start the banner flow unless the primary main frame has finished
+  // loading. |render_frame_host| can be null during retry attempts.
+  if (render_frame_host && !render_frame_host->IsInPrimaryMainFrame())
     return true;
 
   // There is never a need to trigger a banner for a WebUI page.
@@ -612,9 +608,6 @@ void AppBannerManager::UpdateState(State state) {
 }
 
 void AppBannerManager::DidFinishNavigation(content::NavigationHandle* handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (!handle->IsInPrimaryMainFrame() || !handle->HasCommitted() ||
       handle->IsSameDocument()) {
     return;
@@ -625,17 +618,28 @@ void AppBannerManager::DidFinishNavigation(content::NavigationHandle* handle) {
   // only allow the page to enter the cache if we know for sure that no
   // installation is needed. Note: this check must happen before calling
   // Terminate as it might set the installable_web_app_check_result_ to kNo.
-  if (installable_web_app_check_result_ != InstallableWebAppCheckResult::kNo &&
-      state_ != State::INACTIVE) {
-    content::BackForwardCache::DisableForRenderFrameHost(
-        handle->GetPreviousRenderFrameHostId(),
-        back_forward_cache::DisabledReason(
-            back_forward_cache::DisabledReasonId::kAppBannerManager));
+  if (!base::FeatureList::IsEnabled(
+          blink::features::kBackForwardCacheAppBanner)) {
+    if (installable_web_app_check_result_ !=
+            InstallableWebAppCheckResult::kNo &&
+        state_ != State::INACTIVE) {
+      content::BackForwardCache::DisableForRenderFrameHost(
+          handle->GetPreviousRenderFrameHostId(),
+          back_forward_cache::DisabledReason(
+              back_forward_cache::DisabledReasonId::kAppBannerManager));
+    }
   }
 
-  if (state_ != State::COMPLETE && state_ != State::INACTIVE)
-    Terminate();
-  ResetCurrentPageData();
+  if (base::FeatureList::IsEnabled(
+          blink::features::kBackForwardCacheAppBanner) &&
+      handle->IsServedFromBackForwardCache()) {
+    UpdateState(State::INACTIVE);
+    RequestAppBanner(validated_url_);
+  } else {
+    if (state_ != State::COMPLETE && state_ != State::INACTIVE)
+      Terminate();
+    ResetCurrentPageData();
+  }
 }
 
 void AppBannerManager::DidFinishLoad(
@@ -667,7 +671,7 @@ void AppBannerManager::DidActivatePortal(
   // If this page was loaded in a portal, AppBannerManager may have been
   // instantiated after DidFinishLoad. Trigger the banner pipeline now (on
   // portal activation) if we missed the load event.
-  if (!load_finished_ && !web_contents()->IsLoadingToDifferentDocument()) {
+  if (!load_finished_ && !web_contents()->ShouldShowLoadingUI()) {
     DidFinishLoad(web_contents()->GetMainFrame(),
                   web_contents()->GetLastCommittedURL());
   }
@@ -689,7 +693,7 @@ void AppBannerManager::DidUpdateWebManifestURL(
     case State::SENDING_EVENT_GOT_EARLY_PROMPT:
     case State::PENDING_PROMPT:
       Terminate();
-      FALLTHROUGH;
+      [[fallthrough]];
     case State::COMPLETE:
       if (!manifest_url.is_empty()) {
         // This call resets has_sufficient_engagement_data_. In order to

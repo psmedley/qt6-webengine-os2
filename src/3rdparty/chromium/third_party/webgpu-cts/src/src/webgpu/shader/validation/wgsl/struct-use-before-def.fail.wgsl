@@ -3,10 +3,10 @@
 let a : Foo;
 
 struct Foo {
-  a : i32;
+  a : i32
 };
 
-[[stage(fragment)]]
+@stage(fragment)
 fn main() {
   return;
 }

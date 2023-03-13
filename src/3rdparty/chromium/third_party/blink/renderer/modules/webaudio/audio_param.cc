@@ -27,13 +27,14 @@
 
 #include "build/build_config.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_graph_tracer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/audio/vector_math.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 #if defined(ARCH_CPU_X86_FAMILY)
@@ -169,14 +170,13 @@ float AudioParamHandler::Value() {
   // Update value for timeline.
   float v = IntrinsicValue();
   if (GetDeferredTaskHandler().IsAudioThread()) {
-    bool has_value;
-    float timeline_value;
-    std::tie(has_value, timeline_value) = timeline_.ValueForContextTime(
+    auto [has_value, timeline_value] = timeline_.ValueForContextTime(
         DestinationHandler(), v, MinValue(), MaxValue(),
         GetDeferredTaskHandler().RenderQuantumFrames());
 
-    if (has_value)
+    if (has_value) {
       v = timeline_value;
+    }
   }
 
   SetIntrinsicValue(v);
@@ -184,7 +184,7 @@ float AudioParamHandler::Value() {
 }
 
 void AudioParamHandler::SetIntrinsicValue(float new_value) {
-  new_value = clampTo(new_value, min_value_, max_value_);
+  new_value = ClampTo(new_value, min_value_, max_value_);
   intrinsic_value_.store(new_value, std::memory_order_relaxed);
 }
 
@@ -199,9 +199,7 @@ float AudioParamHandler::SmoothedValue() {
 bool AudioParamHandler::Smooth() {
   // If values have been explicitly scheduled on the timeline, then use the
   // exact value.  Smoothing effectively is performed by the timeline.
-  bool use_timeline_value = false;
-  float value;
-  std::tie(use_timeline_value, value) = timeline_.ValueForContextTime(
+  auto [use_timeline_value, value] = timeline_.ValueForContextTime(
       DestinationHandler(), IntrinsicValue(), MinValue(), MaxValue(),
       GetDeferredTaskHandler().RenderQuantumFrames());
 
@@ -221,8 +219,9 @@ bool AudioParamHandler::Smooth() {
     // If we get close enough then snap to actual value.
     // FIXME: the threshold needs to be adjustable depending on range - but
     // this is OK general purpose value.
-    if (fabs(smoothed_value - value) < kSnapThreshold)
+    if (fabs(smoothed_value - value) < kSnapThreshold) {
       smoothed_value = value;
+    }
     timeline_.SetSmoothedValue(smoothed_value);
   }
 
@@ -307,15 +306,14 @@ void AudioParamHandler::CalculateFinalValues(float* values,
     CalculateTimelineValues(values, number_of_values);
   } else {
     // Calculate control-rate (k-rate) intrinsic value.
-    bool has_value;
     float value = IntrinsicValue();
-    float timeline_value;
-    std::tie(has_value, timeline_value) = timeline_.ValueForContextTime(
+    auto [has_value, timeline_value] = timeline_.ValueForContextTime(
         DestinationHandler(), value, MinValue(), MaxValue(),
         GetDeferredTaskHandler().RenderQuantumFrames());
 
-    if (has_value)
+    if (has_value) {
       value = timeline_value;
+    }
 
     for (unsigned k = 0; k < number_of_values; ++k) {
       values[k] = value;
@@ -448,7 +446,8 @@ float AudioParam::value() const {
 }
 
 void AudioParam::WarnIfOutsideRange(const String& param_method, float value) {
-  if (value < minValue() || value > maxValue()) {
+  if (Context()->GetExecutionContext() &&
+      (value < minValue() || value > maxValue())) {
     Context()->GetExecutionContext()->AddConsoleMessage(
         MakeGarbageCollected<ConsoleMessage>(
             mojom::ConsoleMessageSource::kJavaScript,
@@ -581,9 +580,7 @@ AudioParam* AudioParam::setValueCurveAtTime(const Vector<float>& curve,
   // Find the first value in the curve (if any) that is outside the
   // nominal range.  It's probably not necessary to produce a warning
   // on every value outside the nominal range.
-  for (unsigned k = 0; k < curve.size(); ++k) {
-    float value = curve[k];
-
+  for (float value : curve) {
     if (value < min || value > max) {
       WarnIfOutsideRange("setValueCurveAtTime value", value);
       break;

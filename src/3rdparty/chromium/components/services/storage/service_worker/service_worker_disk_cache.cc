@@ -13,9 +13,10 @@
 #include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/files/file_path.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/completion_repeating_callback.h"
@@ -46,7 +47,8 @@ class ServiceWorkerDiskCache::CreateBackendCallbackShim
 
   ~CreateBackendCallbackShim() = default;
 
-  ServiceWorkerDiskCache* service_worker_disk_cache_;  // Unowned pointer.
+  raw_ptr<ServiceWorkerDiskCache>
+      service_worker_disk_cache_;  // Unowned pointer.
 };
 
 ServiceWorkerDiskCacheEntry::ServiceWorkerDiskCacheEntry(
@@ -271,9 +273,9 @@ net::Error ServiceWorkerDiskCache::Init(net::CacheType cache_type,
       base::MakeRefCounted<CreateBackendCallbackShim>(this);
 
   net::Error return_value = disk_cache::CreateCacheBackend(
-      cache_type, net::CACHE_BACKEND_SIMPLE, cache_directory, cache_size,
-      disk_cache::ResetHandling::kNeverReset, nullptr,
-      &(create_backend_callback_->backend_ptr_),
+      cache_type, net::CACHE_BACKEND_SIMPLE, /*file_operations=*/nullptr,
+      cache_directory, cache_size, disk_cache::ResetHandling::kNeverReset,
+      nullptr, &(create_backend_callback_->backend_ptr_),
       std::move(post_cleanup_callback),
       base::BindOnce(&CreateBackendCallbackShim::Callback,
                      create_backend_callback_));

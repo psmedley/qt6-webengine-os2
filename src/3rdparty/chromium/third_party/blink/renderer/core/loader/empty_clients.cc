@@ -54,7 +54,7 @@ ChromeClient& GetStaticEmptyChromeClientInstance() {
 
 class EmptyPopupMenu : public PopupMenu {
  public:
-  void Show() override {}
+  void Show(ShowEventType) override {}
   void Hide() override {}
   void UpdateFromElement(UpdateReason) override {}
   void DisconnectClient() override {}
@@ -104,6 +104,8 @@ void EmptyLocalFrameClient::BeginNavigation(
     NavigationPolicy,
     WebFrameLoadType,
     bool,
+    // TODO(crbug.com/1315802): Refactor _unfencedTop handling.
+    bool,
     mojom::blink::TriggeringEventInfo,
     HTMLFormElement*,
     network::mojom::CSPDisposition,
@@ -111,7 +113,6 @@ void EmptyLocalFrameClient::BeginNavigation(
     base::TimeTicks,
     const String&,
     const absl::optional<WebImpression>&,
-    network::mojom::IPAddressSpace,
     const LocalFrameToken* initiator_frame_token,
     std::unique_ptr<SourceLocation>,
     mojo::PendingRemote<mojom::blink::PolicyContainerHostKeepAliveHandle>) {}
@@ -146,7 +147,10 @@ RemoteFrame* EmptyLocalFrameClient::AdoptPortal(HTMLPortalElement*) {
   return nullptr;
 }
 
-RemoteFrame* EmptyLocalFrameClient::CreateFencedFrame(HTMLFencedFrameElement*) {
+RemoteFrame* EmptyLocalFrameClient::CreateFencedFrame(
+    HTMLFencedFrameElement*,
+    mojo::PendingAssociatedReceiver<mojom::blink::FencedFrameOwnerHost>,
+    mojom::blink::FencedFrameMode) {
   return nullptr;
 }
 

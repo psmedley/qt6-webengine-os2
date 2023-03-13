@@ -4,6 +4,7 @@
 
 #include "content/browser/speculation_rules/speculation_host_impl.h"
 
+#include "base/memory/raw_ptr.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/prerender/prerender_host_registry.h"
@@ -24,7 +25,9 @@ class PrerenderWebContentsDelegate : public WebContentsDelegate {
  public:
   PrerenderWebContentsDelegate() = default;
 
-  bool IsPrerender2Supported() override { return true; }
+  bool IsPrerender2Supported(WebContents& web_contents) override {
+    return true;
+  }
 };
 
 class SpeculationHostImplTest : public RenderViewHostImplTestHarness {
@@ -105,28 +108,8 @@ TEST_F(SpeculationHostImplTest, StartPrerender) {
   EXPECT_TRUE(registry->FindHostByUrlForTesting(kPrerenderingUrl));
 }
 
-// Tests that SpeculationHostImpl will skip the prerender candidate if it is a
-// cross-origin url.
-TEST_F(SpeculationHostImplTest, SkipCrossOriginPrerenderCandidates) {
-  RenderFrameHostImpl* render_frame_host = GetRenderFrameHost();
-  PrerenderHostRegistry* registry = GetPrerenderHostRegistry();
-  mojo::Remote<blink::mojom::SpeculationHost> remote;
-  SpeculationHostImpl::Bind(render_frame_host,
-                            remote.BindNewPipeAndPassReceiver());
-
-  const GURL kPrerenderingUrl = GetCrossOriginUrl("/empty.html");
-  std::vector<blink::mojom::SpeculationCandidatePtr> candidates;
-  candidates.push_back(CreatePrerenderCandidate(kPrerenderingUrl));
-
-  remote->UpdateSpeculationCandidates(std::move(candidates));
-  remote.FlushForTesting();
-  EXPECT_FALSE(registry->FindHostByUrlForTesting(kPrerenderingUrl));
-}
-
 // Tests that SpeculationHostImpl will skip a cross-origin candidate even if it
 // is the first prerender candidate in the candidate list.
-// TODO(crbug.com/1197133): After supporting selection by scores, test this case
-// by assigning the cross-origin candidate the highest score.
 TEST_F(SpeculationHostImplTest, ProcessFirstSameOriginPrerenderCandidate) {
   RenderFrameHostImpl* render_frame_host = GetRenderFrameHost();
   PrerenderHostRegistry* registry = GetPrerenderHostRegistry();
@@ -220,7 +203,7 @@ class ScopedSpeculationHostImplContentBrowserClient
   }
 
  private:
-  ContentBrowserClient* old_browser_client_;
+  raw_ptr<ContentBrowserClient> old_browser_client_;
 };
 
 // Tests that SpeculationHostDelegate can take the process candidates away and

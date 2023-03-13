@@ -28,8 +28,9 @@
 #include "libavutil/buffer.h"
 #include "libavutil/dict.h"
 #include "libavutil/rational.h"
+#include "libavutil/version.h"
 
-#include "libavcodec/version.h"
+#include "libavcodec/version_major.h"
 
 /**
  * @defgroup lavc_packet AVPacket
@@ -391,6 +392,30 @@ typedef struct AVPacket {
     int64_t duration;
 
     int64_t pos;                            ///< byte position in stream, -1 if unknown
+
+    /**
+     * for some private data of the user
+     */
+    void *opaque;
+
+    /**
+     * AVBufferRef for free use by the API user. FFmpeg will never check the
+     * contents of the buffer ref. FFmpeg calls av_buffer_unref() on it when
+     * the packet is unreferenced. av_packet_copy_props() calls create a new
+     * reference with av_buffer_ref() for the target packet's opaque_ref field.
+     *
+     * This is unrelated to the opaque field, although it serves a similar
+     * purpose.
+     */
+    AVBufferRef *opaque_ref;
+
+    /**
+     * Time base of the packet's timestamps.
+     * In the future, this field may be set on packets output by encoders or
+     * demuxers, but its value will be by default ignored on input to decoders
+     * or muxers.
+     */
+    AVRational time_base;
 } AVPacket;
 
 #if FF_API_INIT_PACKET
@@ -423,8 +448,13 @@ typedef struct AVPacketList {
 #define AV_PKT_FLAG_DISPOSABLE 0x0010
 
 enum AVSideDataParamChangeFlags {
+#if FF_API_OLD_CHANNEL_LAYOUT
+    /**
+     * @deprecated those are not used by any decoder
+     */
     AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_COUNT  = 0x0001,
     AV_SIDE_DATA_PARAM_CHANGE_CHANNEL_LAYOUT = 0x0002,
+#endif
     AV_SIDE_DATA_PARAM_CHANGE_SAMPLE_RATE    = 0x0004,
     AV_SIDE_DATA_PARAM_CHANGE_DIMENSIONS     = 0x0008,
 };

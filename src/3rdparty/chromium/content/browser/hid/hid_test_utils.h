@@ -29,10 +29,12 @@ class MockHidDelegate : public HidDelegate {
 
   // Simulates opening the HID device chooser dialog and selecting an item. The
   // chooser automatically selects the item returned by RunChooserInternal,
-  // which may be mocked. Returns nullptr. Device filters are ignored.
+  // which may be mocked. Returns nullptr. Device filters and exclusion_filters
+  // are ignored.
   std::unique_ptr<HidChooser> RunChooser(
       RenderFrameHost* frame,
       std::vector<blink::mojom::HidDeviceFilterPtr> filters,
+      std::vector<blink::mojom::HidDeviceFilterPtr> exclusion_filters,
       HidChooser::Callback callback) override;
 
   void AddObserver(RenderFrameHost* frame, Observer* observer) override;
@@ -52,13 +54,18 @@ class MockHidDelegate : public HidDelegate {
   MOCK_METHOD2(HasDevicePermission,
                bool(RenderFrameHost* render_frame_host,
                     const device::mojom::HidDeviceInfo& device));
+  MOCK_METHOD2(RevokeDevicePermission,
+               void(RenderFrameHost* render_frame_host,
+                    const device::mojom::HidDeviceInfo& device));
   MOCK_METHOD1(GetHidManager,
                device::mojom::HidManager*(RenderFrameHost* render_frame_host));
   MOCK_METHOD2(
       GetDeviceInfo,
       const device::mojom::HidDeviceInfo*(RenderFrameHost* render_frame_host,
                                           const std::string& guid));
-  MOCK_METHOD1(IsFidoAllowedForOrigin, bool(const url::Origin& origin));
+  MOCK_METHOD2(IsFidoAllowedForOrigin,
+               bool(RenderFrameHost* render_frame_host,
+                    const url::Origin& origin));
 
  private:
   base::ObserverList<Observer> observer_list_;

@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/containers/contains.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
@@ -79,15 +80,16 @@
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "url/gurl.h"
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
+#include "ash/components/tpm/stub_install_attributes.h"
 #include "chrome/browser/ash/login/users/mock_user_manager.h"
-#include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
+#include "chrome/browser/ash/net/network_portal_detector_test_impl.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
-#include "chromeos/tpm/stub_install_attributes.h"
 #include "components/user_manager/scoped_user_manager.h"
 #endif
 
@@ -119,12 +121,12 @@ void InitNetwork() {
           ->network_state_handler()
           ->DefaultNetwork();
 
-  auto* portal_detector = new chromeos::NetworkPortalDetectorTestImpl();
+  auto* portal_detector = new ash::NetworkPortalDetectorTestImpl();
   portal_detector->SetDefaultNetworkForTesting(default_network->guid());
 
   portal_detector->SetDetectionResultsForTesting(
       default_network->guid(),
-      chromeos::NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204);
+      ash::NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE, 204);
 
   chromeos::network_portal_detector::InitializeForTesting(portal_detector);
 }
@@ -139,10 +141,11 @@ class AsyncFunctionRunner {
                         content::BrowserContext* browser_context) {
     response_delegate_ =
         std::make_unique<api_test_utils::SendResponseHelper>(function);
-    std::unique_ptr<base::ListValue> parsed_args(utils::ParseList(args));
-    ASSERT_TRUE(parsed_args.get())
+    function->preserve_results_for_testing();
+    absl::optional<base::Value> parsed_args(utils::ParseList(args));
+    ASSERT_TRUE(parsed_args)
         << "Could not parse extension function arguments: " << args;
-    function->SetArgs(base::Value::FromUniquePtrValue(std::move(parsed_args)));
+    function->SetArgs(std::move(*parsed_args));
 
     if (!function->extension()) {
       scoped_refptr<const Extension> empty_extension(
@@ -173,7 +176,7 @@ class AsyncFunctionRunner {
         << "Unexpected error: " << function->GetError();
     EXPECT_NE(nullptr, function->GetResultList());
 
-    const auto& result_list = function->GetResultList()->GetList();
+    const auto& result_list = function->GetResultList()->GetListDeprecated();
     EXPECT_EQ(2ul, result_list.size());
 
     *first_result = result_list[0].Clone();
@@ -282,9 +285,9 @@ class TestOAuth2MintTokenFlow : public OAuth2MintTokenFlow {
 
  private:
   ResultType result_;
-  const std::set<std::string>* requested_scopes_;
+  raw_ptr<const std::set<std::string>> requested_scopes_;
   std::set<std::string> granted_scopes_;
-  OAuth2MintTokenFlow::Delegate* delegate_;
+  raw_ptr<OAuth2MintTokenFlow::Delegate> delegate_;
 };
 
 // Waits for a specific GURL to generate a NOTIFICATION_LOAD_STOP event and
@@ -330,7 +333,7 @@ class WaitForGURLAndCloseWindow : public content::WindowedNotificationObserver {
 
  private:
   GURL url_;
-  content::WebContents* embedder_web_contents_;
+  raw_ptr<content::WebContents> embedder_web_contents_;
 };
 
 }  // namespace
@@ -408,9 +411,8 @@ class FakeGetAuthTokenFunction : public IdentityGetAuthTokenFunction {
         error = GoogleServiceAuthError(
             GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS);
       }
-      OnGetAccessTokenComplete(
-          access_token, base::Time::Now() + base::TimeDelta::FromHours(1LL),
-          error);
+      OnGetAccessTokenComplete(access_token,
+                               base::Time::Now() + base::Hours(1LL), error);
     } else {
       // Make a request to the IdentityManager. The test now must tell the
       // service to issue an access token (or an error).
@@ -631,7 +633,7 @@ class IdentityGetAccountsFunctionTest : public IdentityTestWithSignin {
     if (!callback_arguments)
       return GenerateFailureResult(gaia_ids, absl::nullopt) << "NULL result";
     base::Value::ConstListView callback_arguments_list =
-        callback_arguments->GetList();
+        callback_arguments->GetListDeprecated();
 
     if (callback_arguments_list.size() != 1u) {
       return GenerateFailureResult(gaia_ids, absl::nullopt)
@@ -642,7 +644,8 @@ class IdentityGetAccountsFunctionTest : public IdentityTestWithSignin {
     if (!callback_arguments_list[0].is_list())
       GenerateFailureResult(gaia_ids, absl::nullopt)
           << "Result was not an array";
-    base::Value::ConstListView results = callback_arguments_list[0].GetList();
+    base::Value::ConstListView results =
+        callback_arguments_list[0].GetListDeprecated();
 
     std::set<std::string> result_ids;
     for (const base::Value& item : results) {
@@ -863,8 +866,7 @@ class GetAuthTokenFunctionTest
     std::string access_token = "access_token-" + account_id.ToString();
     identity_test_env()
         ->WaitForAccessTokenRequestIfNecessaryAndRespondWithToken(
-            account_id, access_token,
-            base::Time::Now() + base::TimeDelta::FromSeconds(3600));
+            account_id, access_token, base::Time::Now() + base::Seconds(3600));
     return access_token;
   }
 
@@ -997,7 +999,7 @@ class GetAuthTokenFunctionTest
         << "Unexpected error: " << function->GetError();
     EXPECT_NE(nullptr, function->GetResultList());
 
-    const auto& result_list = function->GetResultList()->GetList();
+    const auto& result_list = function->GetResultList()->GetListDeprecated();
     EXPECT_EQ(2ul, result_list.size());
 
     const auto& access_token_value = result_list[0];
@@ -1006,7 +1008,7 @@ class GetAuthTokenFunctionTest
     EXPECT_TRUE(granted_scopes_value.is_list());
 
     std::set<std::string> scopes;
-    for (const auto& scope : granted_scopes_value.GetList()) {
+    for (const auto& scope : granted_scopes_value.GetListDeprecated()) {
       EXPECT_TRUE(scope.is_string());
       scopes.insert(scope.GetString());
     }
@@ -1032,7 +1034,7 @@ class GetAuthTokenFunctionTest
     EXPECT_TRUE(granted_scopes_value.is_list());
 
     std::set<std::string> scopes;
-    for (const auto& scope : granted_scopes_value.GetList()) {
+    for (const auto& scope : granted_scopes_value.GetListDeprecated()) {
       EXPECT_TRUE(scope.is_string());
       scopes.insert(scope.GetString());
     }
@@ -1592,7 +1594,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, InteractiveApprovalSuccess) {
       1);
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 // Test was originally written for http://crbug.com/753014 and subsequently
 // modified to use the remote consent flow.
 //
@@ -1624,7 +1626,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
       kGetAuthTokenResultHistogramName,
       IdentityGetAuthTokenError::State::kRemoteConsentPageLoadFailure, 1);
 }
-#endif  // !defined(OS_MAC)
+#endif  // !BUILDFLAG(IS_MAC)
 
 IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, NoninteractiveQueue) {
   SignIn("primary@example.com");
@@ -1794,7 +1796,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, NonInteractiveCacheHit) {
 
   // Pre-populate the cache with a token.
   IdentityTokenCacheValue token =
-      CreateToken(kAccessToken, base::TimeDelta::FromSeconds(3600));
+      CreateToken(kAccessToken, base::Seconds(3600));
   SetCachedToken(token);
 
   // Get a token. Should not require a GAIA request.
@@ -1834,7 +1836,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest,
 
   // Pre-populate the cache with a token.
   IdentityTokenCacheValue token =
-      CreateToken(kAccessToken, base::TimeDelta::FromSeconds(3600));
+      CreateToken(kAccessToken, base::Seconds(3600));
   SetCachedTokenForAccount(account_info, token);
 
   if (id_api()->AreExtensionsRestrictedToPrimaryAccount()) {
@@ -1935,7 +1937,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, InteractiveCacheHit) {
 
   // Populate the cache with a token while the request is blocked.
   IdentityTokenCacheValue token =
-      CreateToken(kAccessToken, base::TimeDelta::FromSeconds(3600));
+      CreateToken(kAccessToken, base::Seconds(3600));
   SetCachedToken(token);
 
   // When we wake up the request, it returns the cached token without
@@ -1965,7 +1967,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, LoginInvalidatesTokenCache) {
 
   // Pre-populate the cache with a token.
   IdentityTokenCacheValue token =
-      CreateToken(kAccessToken, base::TimeDelta::FromSeconds(3600));
+      CreateToken(kAccessToken, base::Seconds(3600));
   SetCachedToken(token);
 
   // Because the user is not signed in, the token will be removed,
@@ -2732,7 +2734,7 @@ IN_PROC_BROWSER_TEST_F(GetAuthTokenFunctionTest, SubsetMatchCacheHit) {
 
   std::set<std::string> scopes = {"email", "foo", "bar"};
   IdentityTokenCacheValue token = IdentityTokenCacheValue::CreateToken(
-      kAccessToken, scopes, base::TimeDelta::FromSeconds(3600));
+      kAccessToken, scopes, base::Seconds(3600));
   SetCachedToken(token);
 
   std::string access_token;
@@ -2856,9 +2858,8 @@ class GetAuthTokenFunctionDeviceLocalAccountTest
 
   // Set up fake install attributes to make the device appeared as
   // enterprise-managed.
-  chromeos::ScopedStubInstallAttributes test_install_attributes_{
-      chromeos::StubInstallAttributes::CreateCloudManaged("example.com",
-                                                          "fake-id")};
+  ash::ScopedStubInstallAttributes test_install_attributes_{
+      ash::StubInstallAttributes::CreateCloudManaged("example.com", "fake-id")};
 
   // Owned by |user_manager_enabler|.
   ash::MockUserManager* user_manager_;
@@ -3227,7 +3228,7 @@ IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, RemoteConsent) {
 
 IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, NonMatchingToken) {
   IdentityTokenCacheValue token =
-      CreateToken("non_matching_token", base::TimeDelta::FromSeconds(3600));
+      CreateToken("non_matching_token", base::Seconds(3600));
   SetCachedToken(token);
   EXPECT_TRUE(InvalidateDefaultToken());
   EXPECT_EQ(IdentityTokenCacheValue::CACHE_STATUS_TOKEN,
@@ -3237,7 +3238,7 @@ IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, NonMatchingToken) {
 
 IN_PROC_BROWSER_TEST_F(RemoveCachedAuthTokenFunctionTest, MatchingToken) {
   IdentityTokenCacheValue token =
-      CreateToken(kAccessToken, base::TimeDelta::FromSeconds(3600));
+      CreateToken(kAccessToken, base::Seconds(3600));
   SetCachedToken(token);
   EXPECT_EQ(IdentityTokenCacheValue::CACHE_STATUS_TOKEN,
             GetCachedToken().status());
@@ -3255,14 +3256,7 @@ class LaunchWebAuthFlowFunctionTest : public AsyncExtensionBrowserTest {
   }
 };
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
-// This test times out on Linux MSan Tests.
-// See https://crbug.com/831848 .
-#define MAYBE_UserCloseWindow DISABLED_UserCloseWindow
-#else
-#define MAYBE_UserCloseWindow UserCloseWindow
-#endif
-IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, MAYBE_UserCloseWindow) {
+IN_PROC_BROWSER_TEST_F(LaunchWebAuthFlowFunctionTest, UserCloseWindow) {
   net::EmbeddedTestServer https_server(net::EmbeddedTestServer::TYPE_HTTPS);
   https_server.ServeFilesFromSourceDirectory(
       "chrome/test/data/extensions/api_test/identity");
@@ -3407,7 +3401,7 @@ class ClearAllCachedAuthTokensFunctionTest : public AsyncExtensionBrowserTest {
   bool RunClearAllCachedAuthTokensFunction() {
     auto function =
         base::MakeRefCounted<IdentityClearAllCachedAuthTokensFunction>();
-    function->set_extension(extension_);
+    function->set_extension(extension_.get());
     return utils::RunFunction(function.get(), "[]", browser(),
                               api_test_utils::NONE);
   }
@@ -3418,7 +3412,7 @@ class ClearAllCachedAuthTokensFunctionTest : public AsyncExtensionBrowserTest {
 
  private:
   base::test::ScopedFeatureList feature_list_;
-  const Extension* extension_ = nullptr;
+  raw_ptr<const Extension> extension_ = nullptr;
 };
 
 IN_PROC_BROWSER_TEST_F(ClearAllCachedAuthTokensFunctionTest,
@@ -3433,9 +3427,8 @@ IN_PROC_BROWSER_TEST_F(ClearAllCachedAuthTokensFunctionTest,
                        EraseCachedTokens) {
   ExtensionTokenKey token_key(extension()->id(), CoreAccountInfo(), {"foo"});
   id_api()->token_cache()->SetToken(
-      token_key,
-      IdentityTokenCacheValue::CreateToken("access_token", {"foo"},
-                                           base::TimeDelta::FromSeconds(3600)));
+      token_key, IdentityTokenCacheValue::CreateToken("access_token", {"foo"},
+                                                      base::Seconds(3600)));
   EXPECT_NE(IdentityTokenCacheValue::CACHE_STATUS_NOTFOUND,
             id_api()->token_cache()->GetToken(token_key).status());
   ASSERT_TRUE(RunClearAllCachedAuthTokensFunction());

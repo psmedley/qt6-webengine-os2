@@ -28,6 +28,11 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
     client_native_pixmap_factory_ = ui::CreateClientNativePixmapFactoryOzone();
   }
 
+  GLImageNativePixmapTestDelegate(const GLImageNativePixmapTestDelegate&) =
+      delete;
+  GLImageNativePixmapTestDelegate& operator=(
+      const GLImageNativePixmapTestDelegate&) = delete;
+
   ~GLImageNativePixmapTestDelegate() override = default;
 
   scoped_refptr<GLImage> CreateSolidColorImage(const gfx::Size& size,
@@ -78,15 +83,21 @@ class GLImageNativePixmapTestDelegate : public GLImageTestDelegateBase {
 
  private:
   std::unique_ptr<gfx::ClientNativePixmapFactory> client_native_pixmap_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(GLImageNativePixmapTestDelegate);
 };
 
 using GLImageScanoutType = testing::Types<
     GLImageNativePixmapTestDelegate<gfx::BufferUsage::SCANOUT,
                                     gfx::BufferFormat::BGRA_8888>>;
 
-INSTANTIATE_TYPED_TEST_SUITE_P(GLImageNativePixmapScanoutBGRA,
+#if BUILDFLAG(IS_CHROMEOS)
+// Disabled due to failures on ChromeOS MSan builder.
+// TODO(crbug.com/1314304) Reenable the test.
+#define MAYBE_GLImageNativePixmapScanoutBGRA \
+  DISABLED_GLImageNativePixmapScanoutBGRA
+#else
+#define MAYBE_GLImageNativePixmapScanoutBGRA GLImageNativePixmapScanoutBGRA
+#endif
+INSTANTIATE_TYPED_TEST_SUITE_P(MAYBE_GLImageNativePixmapScanoutBGRA,
                                GLImageTest,
                                GLImageScanoutType);
 

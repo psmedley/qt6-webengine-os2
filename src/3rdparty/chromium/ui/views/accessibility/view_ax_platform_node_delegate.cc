@@ -14,9 +14,14 @@
 #include "base/containers/adapters.h"
 #include "base/lazy_instance.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "ui/accessibility/ax_action_data.h"
+#include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_role_properties.h"
+#include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_data.h"
+#include "ui/accessibility/ax_tree_id.h"
+#include "ui/accessibility/ax_tree_update.h"
 #include "ui/accessibility/platform/ax_platform_node.h"
 #include "ui/accessibility/platform/ax_platform_node_base.h"
 #include "ui/accessibility/platform/ax_unique_id.h"
@@ -262,11 +267,11 @@ void ViewAXPlatformNodeDelegate::NotifyAccessibilityEvent(
   ax_platform_node_->NotifyAccessibilityEvent(event_type);
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 void ViewAXPlatformNodeDelegate::AnnounceText(const std::u16string& text) {
   ax_platform_node_->AnnounceText(text);
 }
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
   // Clear the data, then populate it.
@@ -276,9 +281,9 @@ const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
   // View::IsDrawn is true if a View is visible and all of its ancestors are
   // visible too, since invisibility inherits.
   //
-  // TODO(dmazzoni): Maybe consider moving this to ViewAccessibility?
-  // This will require ensuring that Chrome OS invalidates the whole
-  // subtree when a View changes its visibility state.
+  // (We could try to move this logic to ViewAccessibility, but
+  // that would require ensuring that Chrome OS invalidates the whole
+  // subtree when a View changes its visibility state.)
   if (!view()->IsDrawn())
     data_.AddState(ax::mojom::State::kInvisible);
 
@@ -286,7 +291,7 @@ const ui::AXNodeData& ViewAXPlatformNodeDelegate::GetData() const {
   // focusable parent. All keyboard focusable elements should be leaf nodes.
   // Exceptions to this rule will themselves be accessibility focusable.
   //
-  // TODO(dmazzoni): this code was added to support MacViews acccessibility,
+  // Note: this code was added to support MacViews accessibility,
   // because we needed a way to mark a View as a leaf node in the
   // accessibility tree. We need to replace this with a cross-platform
   // solution that works for ChromeVox, too, and move it to ViewAccessibility.
@@ -434,6 +439,36 @@ bool ViewAXPlatformNodeDelegate::IsChildOfLeaf() const {
   return AXPlatformNodeDelegateBase::IsChildOfLeaf();
 }
 
+ui::AXNodePosition::AXPositionInstance
+ViewAXPlatformNodeDelegate::CreateTextPositionAt(
+    int offset,
+    ax::mojom::TextAffinity affinity) const {
+  // Support text navigation only on text fields for now. Primarily this is to
+  // support navigating the address bar.
+  if (!IsDescendantOfAtomicTextField())
+    return ui::AXNodePosition::CreateNullPosition();
+
+  if (!dummy_tree_manager_) {
+    ui::AXTreeUpdate initial_state;
+    initial_state.root_id = GetData().id;
+    initial_state.nodes = {GetData()};
+    initial_state.has_tree_data = true;
+    initial_state.tree_data.tree_id = ui::AXTreeID::CreateNewAXTreeID();
+    auto dummy_tree = std::make_unique<ui::AXTree>(initial_state);
+    dummy_tree_manager_ =
+        std::make_unique<ui::TestAXTreeManager>(std::move(dummy_tree));
+  } else {
+    DCHECK(dummy_tree_manager_->GetTree());
+    ui::AXTreeUpdate update;
+    update.nodes = {GetData()};
+    const_cast<ui::AXTree*>(dummy_tree_manager_->GetTree())
+        ->Unserialize(update);
+  }
+
+  return ui::AXNodePosition::CreatePosition(
+      *dummy_tree_manager_->GetRootAsAXNode(), offset, affinity);
+}
+
 gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetNSWindow() {
   NOTIMPLEMENTED() << "Should only be called on Mac.";
   return nullptr;
@@ -454,7 +489,7 @@ ViewAXPlatformNodeDelegate::GetNativeViewAccessible() {
   return view()->GetNativeViewAccessible();
 }
 
-gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetParent() {
+gfx::NativeViewAccessible ViewAXPlatformNodeDelegate::GetParent() const {
   if (View* parent_view = view()->parent()) {
     ViewAccessibility& view_accessibility = parent_view->GetViewAccessibility();
     if (!view_accessibility.IsIgnored())

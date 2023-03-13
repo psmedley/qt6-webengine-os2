@@ -5,7 +5,7 @@
 #include "components/search_engines/template_url_fetcher.h"
 
 #include "base/bind.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -71,6 +71,9 @@ class TemplateURLFetcher::RequestDelegate {
                   int render_frame_id,
                   int32_t request_id);
 
+  RequestDelegate(const RequestDelegate&) = delete;
+  RequestDelegate& operator=(const RequestDelegate&) = delete;
+
   // If data contains a valid OSDD, a TemplateURL is created and added to
   // the TemplateURLService.
   void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
@@ -87,7 +90,7 @@ class TemplateURLFetcher::RequestDelegate {
   void AddSearchProvider();
 
   std::unique_ptr<network::SimpleURLLoader> simple_url_loader_;
-  TemplateURLFetcher* fetcher_;
+  raw_ptr<TemplateURLFetcher> fetcher_;
   std::unique_ptr<TemplateURL> template_url_;
   std::u16string keyword_;
   const GURL osdd_url_;
@@ -96,8 +99,6 @@ class TemplateURLFetcher::RequestDelegate {
   base::CallbackListSubscription template_url_subscription_;
 
   base::WeakPtrFactory<RequestDelegate> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(RequestDelegate);
 };
 
 TemplateURLFetcher::RequestDelegate::RequestDelegate(
@@ -137,7 +138,7 @@ TemplateURLFetcher::RequestDelegate::RequestDelegate(
       std::move(resource_request), kTrafficAnnotation);
   simple_url_loader_->SetAllowHttpErrorResults(true);
   simple_url_loader_->SetTimeoutDuration(
-      base::TimeDelta::FromSeconds(kOpenSearchTimeoutSeconds));
+      base::Seconds(kOpenSearchTimeoutSeconds));
   simple_url_loader_->SetRetryOptions(
       kOpenSearchRetryCount, network::SimpleURLLoader::RETRY_ON_NETWORK_CHANGE);
   simple_url_loader_->SetRequestID(request_id);

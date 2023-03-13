@@ -38,10 +38,9 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_result.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener_map.h"
-#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
@@ -75,14 +74,16 @@ struct FiringEventIterator {
 };
 using FiringEventIteratorVector = Vector<FiringEventIterator, 1>;
 
-class CORE_EXPORT EventTargetData : public GarbageCollectedMixin {
+class CORE_EXPORT EventTargetData final {
+  DISALLOW_NEW();
+
  public:
   EventTargetData();
   EventTargetData(const EventTargetData&) = delete;
   EventTargetData& operator=(const EventTargetData&) = delete;
   ~EventTargetData();
 
-  void Trace(Visitor*) const override;
+  void Trace(Visitor*) const;
 
   EventListenerMap event_listener_map;
   std::unique_ptr<FiringEventIteratorVector> firing_event_iterators;
@@ -151,7 +152,7 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
       const V8UnionBooleanOrEventListenerOptions* bool_or_options);
   bool removeEventListener(const AtomicString& event_type,
                            const EventListener*,
-                           bool use_capture = false);
+                           bool use_capture);
   bool removeEventListener(const AtomicString& event_type,
                            const EventListener*,
                            EventListenerOptions*);
@@ -171,7 +172,7 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
                                  EventListener*);
   EventListener* GetAttributeEventListener(const AtomicString& event_type);
 
-  bool HasEventListeners() const override;
+  bool HasEventListeners() const;
   bool HasEventListeners(const AtomicString& event_type) const;
   bool HasAnyEventListeners(const Vector<AtomicString>& event_types) const;
   bool HasCapturingEventListeners(const AtomicString& event_type);
@@ -240,20 +241,18 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
 };
 
 // Provide EventTarget with inlined EventTargetData for improved performance.
-class CORE_EXPORT EventTargetWithInlineData : public EventTarget,
-                                              private EventTargetData {
+class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
  public:
   ~EventTargetWithInlineData() override = default;
 
   void Trace(Visitor* visitor) const override;
 
  protected:
-  EventTargetData* GetEventTargetData() final {
-    return static_cast<EventTargetData*>(this);
-  }
-  EventTargetData& EnsureEventTargetData() final {
-    return *static_cast<EventTargetData*>(this);
-  }
+  EventTargetData* GetEventTargetData() final { return &data_; }
+  EventTargetData& EnsureEventTargetData() final { return data_; }
+
+ private:
+  EventTargetData data_;
 };
 
 // Macros to define an attribute event listener.

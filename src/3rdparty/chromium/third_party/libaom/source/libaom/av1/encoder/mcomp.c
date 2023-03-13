@@ -41,9 +41,14 @@ static INLINE void init_mv_cost_params(MV_COST_PARAMS *mv_cost_params,
   mv_cost_params->mv_cost_type = MV_COST_ENTROPY;
   mv_cost_params->error_per_bit = errorperbit;
   mv_cost_params->sad_per_bit = sadperbit;
-  mv_cost_params->mvjcost = mv_costs->nmv_joint_cost;
-  mv_cost_params->mvcost[0] = mv_costs->mv_cost_stack[0];
-  mv_cost_params->mvcost[1] = mv_costs->mv_cost_stack[1];
+  // For allintra encoding mode, 'mv_costs' is not allocated. Hence, the
+  // population of mvjcost and mvcost are avoided. In case of IntraBC, these
+  // values are populated from 'dv_costs' in av1_set_ms_to_intra_mode().
+  if (mv_costs != NULL) {
+    mv_cost_params->mvjcost = mv_costs->nmv_joint_cost;
+    mv_cost_params->mvcost[0] = mv_costs->mv_cost_stack[0];
+    mv_cost_params->mvcost[1] = mv_costs->mv_cost_stack[1];
+  }
 }
 
 static INLINE void init_ms_buffers(MSBuffers *ms_buffers, const MACROBLOCK *x) {
@@ -89,7 +94,7 @@ void av1_init_obmc_buffer(OBMCBuffer *obmc_buffer) {
 void av1_make_default_fullpel_ms_params(
     FULLPEL_MOTION_SEARCH_PARAMS *ms_params, const struct AV1_COMP *cpi,
     const MACROBLOCK *x, BLOCK_SIZE bsize, const MV *ref_mv,
-    const search_site_config search_sites[NUM_SEARCH_METHODS],
+    const search_site_config search_sites[NUM_DISTINCT_SEARCH_METHODS],
     int fine_search_interval) {
   const MV_SPEED_FEATURES *mv_sf = &cpi->sf.mv_sf;
 
@@ -122,7 +127,9 @@ void av1_make_default_fullpel_ms_params(
   ms_params->mesh_patterns[0] = mv_sf->mesh_patterns;
   ms_params->mesh_patterns[1] = mv_sf->intrabc_mesh_patterns;
   ms_params->force_mesh_thresh = mv_sf->exhaustive_searches_thresh;
-  ms_params->prune_mesh_search = mv_sf->prune_mesh_search;
+  ms_params->prune_mesh_search =
+      (cpi->sf.mv_sf.prune_mesh_search == PRUNE_MESH_SEARCH_LVL_2) ? 1 : 0;
+  ms_params->mesh_search_mv_diff_threshold = 4;
   ms_params->run_mesh_search = 0;
   ms_params->fine_search_interval = fine_search_interval;
 
@@ -1727,7 +1734,7 @@ int av1_full_pixel_search(const FULLPEL_MV start_mv,
   if (!is_intra_mode && ms_params->prune_mesh_search) {
     const int full_pel_mv_diff = AOMMAX(abs(start_mv.row - best_mv->row),
                                         abs(start_mv.col - best_mv->col));
-    if (full_pel_mv_diff <= 4) {
+    if (full_pel_mv_diff <= ms_params->mesh_search_mv_diff_threshold) {
       run_mesh_search = 0;
     }
   }

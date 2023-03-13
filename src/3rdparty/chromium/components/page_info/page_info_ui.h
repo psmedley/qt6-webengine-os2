@@ -14,11 +14,12 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/page_info/page_info.h"
 #include "components/permissions/object_permission_context_base.h"
+#include "components/privacy_sandbox/canonical_topic.h"
 #include "components/safe_browsing/buildflags.h"
 #include "ui/base/models/image_model.h"
 #include "ui/gfx/native_widget_types.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 #include "ui/gfx/image/image_skia.h"
 #endif
 
@@ -119,7 +120,7 @@ class PageInfoUI {
     // Textual description of the Safe Browsing status.
     std::u16string safe_browsing_details;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // Textual description of the site's identity status that is displayed to
     // the user.
     std::string identity_status_description_android;
@@ -152,6 +153,21 @@ class PageInfoUI {
     bool is_vr_presentation_in_headset;
   };
 
+  struct PermissionUIInfo {
+    ContentSettingsType type;
+    int string_id;
+    int string_id_mid_sentence;
+  };
+
+  struct AdPersonalizationInfo {
+    AdPersonalizationInfo();
+    ~AdPersonalizationInfo();
+    bool is_empty() const;
+
+    bool has_joined_user_to_interest_group;
+    std::vector<privacy_sandbox::CanonicalTopic> accessed_topics;
+  };
+
   using CookieInfoList = std::vector<CookieInfo>;
   using PermissionInfoList = std::vector<PageInfo::PermissionInfo>;
   using ChosenObjectInfoList = std::vector<std::unique_ptr<ChosenObjectInfo>>;
@@ -160,6 +176,12 @@ class PageInfoUI {
 
   // Returns the UI string for the given permission |type|.
   static std::u16string PermissionTypeToUIString(ContentSettingsType type);
+  // Returns the UI string for the given permission |type| when used
+  // mid-sentence.
+  static std::u16string PermissionTypeToUIStringMidSentence(
+      ContentSettingsType type);
+  static base::span<const PermissionUIInfo>
+  GetContentSettingsUIInfoForTesting();
 
   // Returns the UI string describing the action taken for a permission,
   // including why that action was taken. E.g. "Allowed by you",
@@ -205,7 +227,7 @@ class PageInfoUI {
   // Returns the color to use for the permission decision reason strings.
   static SkColor GetSecondaryTextColor();
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Returns the identity icon ID for the given identity |status|.
   static int GetIdentityIconID(PageInfo::SiteIdentityStatus status);
 
@@ -217,13 +239,17 @@ class PageInfoUI {
 
   // Returns the connection icon color ID for the given connection |status|.
   static int GetConnectionIconColorID(PageInfo::SiteConnectionStatus status);
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // Return true if the given ContentSettingsType is in PageInfoUI.
   static bool ContentSettingsTypeInPageInfo(ContentSettingsType type);
 
   static std::unique_ptr<SecurityDescription>
   CreateSafetyTipSecurityDescription(const security_state::SafetyTipInfo& info);
+
+  // Ensures the cookie information UI is present, with placeholder information
+  // if necessary.
+  virtual void EnsureCookieInfo() {}
 
   // Sets cookie information.
   virtual void SetCookieInfo(const CookieInfoList& cookie_info_list) {}
@@ -239,6 +265,10 @@ class PageInfoUI {
   // Sets feature related information; for now only if VR content is being
   // presented in a headset.
   virtual void SetPageFeatureInfo(const PageFeatureInfo& page_feature_info) {}
+
+  // Sets ad personalization information.
+  virtual void SetAdPersonalizationInfo(
+      const AdPersonalizationInfo& ad_personalization_info) {}
 
   // Helper to get security description info to display to the user.
   std::unique_ptr<SecurityDescription> GetSecurityDescription(

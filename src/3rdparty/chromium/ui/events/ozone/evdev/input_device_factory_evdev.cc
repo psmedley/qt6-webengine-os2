@@ -12,7 +12,6 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/feature_list.h"
 #include "base/files/scoped_file.h"
 #include "base/memory/ptr_util.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -29,6 +28,7 @@
 #include "ui/events/ozone/evdev/stylus_button_event_converter_evdev.h"
 #include "ui/events/ozone/evdev/switches.h"
 #include "ui/events/ozone/evdev/tablet_event_converter_evdev.h"
+#include "ui/events/ozone/evdev/touch_evdev_types.h"
 #include "ui/events/ozone/evdev/touch_event_converter_evdev.h"
 #include "ui/events/ozone/features.h"
 #include "ui/events/ozone/gamepad/gamepad_provider_ozone.h"
@@ -38,6 +38,10 @@
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_feedback.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_interpreter_libevdev_cros.h"
 #include "ui/events/ozone/evdev/libgestures_glue/gesture_property_provider.h"
+#endif
+
+#if defined(USE_LIBINPUT)
+#include "ui/events/ozone/evdev/libinput_event_converter.h"
 #endif
 
 #ifndef EVIOCSCLOCKID
@@ -95,6 +99,14 @@ std::unique_ptr<EventConverterEvdev> CreateConverter(
     const OpenInputDeviceParams& params,
     base::ScopedFD fd,
     const EventDeviceInfo& devinfo) {
+#if defined(USE_LIBINPUT)
+  // Use LibInputEventConverter for odd touchpads
+  if (devinfo.UseLibinput()) {
+    return LibInputEventConverter::Create(params.path, params.id, devinfo,
+                                          params.cursor, params.dispatcher);
+  }
+#endif
+
 #if defined(USE_EVDEV_GESTURES)
   // Touchpad or mouse: use gestures library.
   // EventReaderLibevdevCros -> GestureInterpreterLibevdevCros -> DispatchEvent
@@ -197,8 +209,7 @@ InputDeviceFactoryEvdev::InputDeviceFactoryEvdev(
       dispatcher_(std::move(dispatcher)) {
 }
 
-InputDeviceFactoryEvdev::~InputDeviceFactoryEvdev() {
-}
+InputDeviceFactoryEvdev::~InputDeviceFactoryEvdev() = default;
 
 void InputDeviceFactoryEvdev::AddInputDevice(int id,
                                              const base::FilePath& path) {
@@ -250,6 +261,20 @@ void InputDeviceFactoryEvdev::AttachInputDevice(
         base::FeatureList::IsEnabled(kEnablePalmSuppression)) {
       converter->SetPalmSuppressionCallback(
           base::BindRepeating(&InputDeviceFactoryEvdev::EnablePalmSuppression,
+                              base::Unretained(this)));
+    }
+
+    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+        converter->HasPen()) {
+      converter->SetReportStylusStateCallback(
+          base::BindRepeating(&InputDeviceFactoryEvdev::SetLatestStylusState,
+                              base::Unretained(this)));
+    }
+
+    if (converter->type() == InputDeviceType::INPUT_DEVICE_INTERNAL &&
+        converter->HasTouchscreen() && !converter->HasPen()) {
+      converter->SetGetLatestStylusStateCallback(
+          base::BindRepeating(&InputDeviceFactoryEvdev::GetLatestStylusState,
                               base::Unretained(this)));
     }
 
@@ -345,6 +370,9 @@ base::WeakPtr<InputDeviceFactoryEvdev> InputDeviceFactoryEvdev::GetWeakPtr() {
 void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
   TRACE_EVENT0("evdev", "ApplyInputDeviceSettings");
 
+  SetIntPropertyForOneType(
+      DT_TOUCHPAD, "Haptic Button Sensitivity",
+      input_device_settings_.touchpad_haptic_click_sensitivity);
   SetIntPropertyForOneType(DT_TOUCHPAD, "Pointer Sensitivity",
                            input_device_settings_.touchpad_sensitivity);
   SetIntPropertyForOneType(DT_TOUCHPAD, "Scroll Sensitivity",
@@ -405,6 +433,8 @@ void InputDeviceFactoryEvdev::ApplyInputDeviceSettings() {
           input_device_settings_.internal_keyboard_allowed_keys);
     }
 
+    converter->ApplyDeviceSettings(input_device_settings_);
+
     converter->SetTouchEventLoggingEnabled(
         input_device_settings_.touch_event_logging_enabled);
   }
@@ -449,6 +479,26 @@ void InputDeviceFactoryEvdev::StopVibration(int id) {
     if (it.second->id() == id) {
       it.second->StopVibration();
       return;
+    }
+  }
+}
+
+void InputDeviceFactoryEvdev::PlayHapticTouchpadEffect(
+    ui::HapticTouchpadEffect effect,
+    ui::HapticTouchpadEffectStrength strength) {
+  for (const auto& it : converters_) {
+    if (it.second->HasHapticTouchpad()) {
+      it.second->PlayHapticTouchpadEffect(effect, strength);
+    }
+  }
+}
+
+void InputDeviceFactoryEvdev::SetHapticTouchpadEffectForNextButtonRelease(
+    ui::HapticTouchpadEffect effect,
+    ui::HapticTouchpadEffectStrength strength) {
+  for (const auto& it : converters_) {
+    if (it.second->HasHapticTouchpad()) {
+      it.second->SetHapticTouchpadEffectForNextButtonRelease(effect, strength);
     }
   }
 }
@@ -578,13 +628,16 @@ void InputDeviceFactoryEvdev::NotifyMouseDevicesUpdated() {
 
 void InputDeviceFactoryEvdev::NotifyTouchpadDevicesUpdated() {
   std::vector<InputDevice> touchpads;
-  for (auto it = converters_.begin(); it != converters_.end(); ++it) {
-    if (it->second->HasTouchpad()) {
-      touchpads.push_back(it->second->input_device());
+  bool has_haptic_touchpad = false;
+  for (const auto& it : converters_) {
+    if (it.second->HasTouchpad()) {
+      if (it.second->HasHapticTouchpad())
+        has_haptic_touchpad = true;
+      touchpads.push_back(it.second->input_device());
     }
   }
 
-  dispatcher_->DispatchTouchpadDevicesUpdated(touchpads);
+  dispatcher_->DispatchTouchpadDevicesUpdated(touchpads, has_haptic_touchpad);
 }
 
 void InputDeviceFactoryEvdev::NotifyGamepadDevicesUpdated() {
@@ -658,6 +711,42 @@ void InputDeviceFactoryEvdev::EnableDevices() {
   // ApplyInputDeviceSettings() instead of this function.
   for (const auto& it : converters_)
     it.second->SetEnabled(IsDeviceEnabled(it.second.get()));
+}
+
+void InputDeviceFactoryEvdev::SetLatestStylusState(
+    const InProgressTouchEvdev& event,
+    const int32_t x_res,
+    const int32_t y_res,
+    const base::TimeTicks& timestamp) {
+  // TODO(alanlxl): Copy happens here. This function may be called very
+  // frequently because the firmware reports stylus status every few ms.
+  // Comments it out for the timebeing until it's really used.
+  // latest_stylus_state_.stylus_event = event;
+
+  if (x_res <= 0) {
+    VLOG(1) << "Invalid resolution " << x_res;
+    latest_stylus_state_.x_res = 1;
+  } else {
+    latest_stylus_state_.x_res = x_res;
+  }
+
+  if (y_res <= 0) {
+    VLOG(1) << "Invalid resolution " << y_res;
+    latest_stylus_state_.y_res = 1;
+  } else {
+    latest_stylus_state_.y_res = y_res;
+  }
+
+  if (timestamp < latest_stylus_state_.timestamp) {
+    VLOG(1) << "Unexpected decreased timestamp received.";
+  }
+
+  latest_stylus_state_.timestamp = timestamp;
+}
+
+void InputDeviceFactoryEvdev::GetLatestStylusState(
+    const InProgressStylusState** stylus_state) const {
+  *stylus_state = &latest_stylus_state_;
 }
 
 }  // namespace ui

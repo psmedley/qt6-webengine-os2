@@ -8,7 +8,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "url/gurl.h"
 
 namespace media_router {
@@ -32,7 +31,7 @@ class MediaRoute;
 class RouteRequestResult {
  public:
   // Keep in sync with:
-  // - RouteRequestResultCode in media_router.mojom
+  // - RouteRequestResultCode in route_request_result_code.mojom
   // - MediaRouteProviderResult enum in tools/metrics/histograms/enums.xml
   // - media_router_mojom_traits.h
   enum ResultCode {
@@ -42,7 +41,7 @@ class RouteRequestResult {
     ROUTE_NOT_FOUND = 3,
     SINK_NOT_FOUND = 4,
     INVALID_ORIGIN = 5,
-    OFF_THE_RECORD_MISMATCH = 6,
+    DEPRECATED_OFF_THE_RECORD_MISMATCH = 6,  // DEPRECATED.
     NO_SUPPORTED_PROVIDER = 7,
     CANCELLED = 8,
     ROUTE_ALREADY_EXISTS = 9,
@@ -63,6 +62,9 @@ class RouteRequestResult {
                      const std::string& error,
                      ResultCode result_code);
 
+  RouteRequestResult(const RouteRequestResult&) = delete;
+  RouteRequestResult& operator=(const RouteRequestResult&) = delete;
+
   ~RouteRequestResult();
 
   // Note the caller does not own the returned MediaRoute. The caller must
@@ -79,8 +81,6 @@ class RouteRequestResult {
   GURL presentation_url_;
   std::string error_;
   ResultCode result_code_;
-
-  DISALLOW_COPY_AND_ASSIGN(RouteRequestResult);
 };
 
 }  // namespace media_router

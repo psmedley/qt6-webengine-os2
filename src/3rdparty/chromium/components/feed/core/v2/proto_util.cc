@@ -15,6 +15,8 @@
 #include "components/feed/core/proto/v2/store.pb.h"
 #include "components/feed/core/proto/v2/wire/capability.pb.h"
 #include "components/feed/core/proto/v2/wire/chrome_client_info.pb.h"
+#include "components/feed/core/proto/v2/wire/feed_entry_point_data.pb.h"
+#include "components/feed/core/proto/v2/wire/feed_entry_point_source.pb.h"
 #include "components/feed/core/proto/v2/wire/feed_query.pb.h"
 #include "components/feed/core/proto/v2/wire/feed_request.pb.h"
 #include "components/feed/core/proto/v2/wire/request.pb.h"
@@ -23,13 +25,16 @@
 #include "components/feed/core/v2/feed_stream.h"
 #include "components/feed/core/v2/public/feed_api.h"
 #include "components/feed/feed_feature_list.h"
+#include "components/reading_list/features/reading_list_switches.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
 namespace feed {
 namespace {
+using feedwire::Capability;
+
 feedwire::Version::Architecture GetBuildArchitecture() {
 #if defined(ARCH_CPU_X86_64)
   return feedwire::Version::X86_64;
@@ -88,7 +93,7 @@ feedwire::Version GetPlatformVersionMessage() {
   result.set_major(major);
   result.set_minor(minor);
   result.set_revision(revision);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   result.set_api_version(base::android::BuildInfo::GetInstance()->sdk_int());
 #endif
   return result;
@@ -107,7 +112,7 @@ feedwire::Version GetAppVersionMessage(const ChromeInfo& chrome_info) {
     result.set_revision(static_cast<int32_t>(numbers[3]));
   }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   result.set_api_version(base::android::BuildInfo::GetInstance()->sdk_int());
 #endif
   return result;
@@ -123,25 +128,42 @@ feedwire::Request CreateFeedQueryRequest(
   request.set_request_version(feedwire::Request::FEED_QUERY);
 
   feedwire::FeedRequest& feed_request = *request.mutable_feed_request();
-  feed_request.add_client_capability(feedwire::Capability::BASE_UI);
-  feed_request.add_client_capability(feedwire::Capability::CARD_MENU);
-  feed_request.add_client_capability(feedwire::Capability::LOTTIE_ANIMATIONS);
-  feed_request.add_client_capability(
-      feedwire::Capability::LONG_PRESS_CARD_MENU);
-  feed_request.add_client_capability(feedwire::Capability::SHARE);
-  if (stream_type.IsWebFeed()) {
-    feed_request.add_client_capability(feedwire::Capability::WEB_FEEDS);
+
+  for (Capability capability :
+       {Capability::CARD_MENU, Capability::LOTTIE_ANIMATIONS,
+        Capability::LONG_PRESS_CARD_MENU, Capability::SHARE,
+        Capability::OPEN_IN_TAB, Capability::OPEN_IN_INCOGNITO,
+        Capability::DISMISS_COMMAND, Capability::INFINITE_FEED,
+        Capability::PREFETCH_METADATA, Capability::REQUEST_SCHEDULE,
+        Capability::UI_THEME_V2, Capability::UNDO_FOR_DISMISS_COMMAND}) {
+    feed_request.add_client_capability(capability);
   }
+
   for (auto capability : GetFeedConfig().experimental_capabilities)
     feed_request.add_client_capability(capability);
+
   if (base::FeatureList::IsEnabled(kInterestFeedV2Hearts)) {
-    feed_request.add_client_capability(feedwire::Capability::HEART);
+    feed_request.add_client_capability(Capability::HEART);
   }
   if (request_metadata.autoplay_enabled) {
-    feed_request.add_client_capability(
-        feedwire::Capability::INLINE_VIDEO_AUTOPLAY);
-    feed_request.add_client_capability(
-        feedwire::Capability::OPEN_VIDEO_COMMAND);
+    feed_request.add_client_capability(Capability::INLINE_VIDEO_AUTOPLAY);
+    feed_request.add_client_capability(Capability::OPEN_VIDEO_COMMAND);
+  }
+
+  if (base::FeatureList::IsEnabled(kFeedStamp)) {
+    feed_request.add_client_capability(Capability::SILK_AMP_OPEN_COMMAND);
+    feed_request.add_client_capability(Capability::AMP_STORY_PLAYER);
+    feed_request.add_client_capability(Capability::AMP_GROUP_DATASTORE);
+  }
+
+  if (base::FeatureList::IsEnabled(reading_list::switches::kReadLater)) {
+    feed_request.add_client_capability(Capability::READ_LATER);
+  } else {
+    feed_request.add_client_capability(Capability::DOWNLOAD_LINK);
+  }
+
+  if (base::FeatureList::IsEnabled(kPersonalizeFeedUnsignedUsers)) {
+    feed_request.add_client_capability(Capability::ON_DEVICE_USER_PROFILE);
   }
 
   *feed_request.mutable_client_info() = CreateClientInfo(request_metadata);
@@ -158,6 +180,17 @@ feedwire::Request CreateFeedQueryRequest(
       break;
     case ContentOrder::kUnspecified:
       break;
+  }
+
+  // Set the feed entry point based on the stream type.
+  feedwire::FeedEntryPointData& entry_point =
+      *query.mutable_feed_entry_point_data();
+  if (stream_type == kForYouStream) {
+    entry_point.set_feed_entry_point_source_value(
+        feedwire::FeedEntryPointSource::CHROME_DISCOVER_FEED);
+  } else if (stream_type == kWebFeedStream) {
+    entry_point.set_feed_entry_point_source_value(
+        feedwire::FeedEntryPointSource::CHROME_FOLLOWING_FEED);
   }
 
   // |consistency_token|, for action reporting, is only applicable to signed-in
@@ -184,6 +217,17 @@ void SetNoticeCardAcknowledged(feedwire::Request* request,
         ->mutable_feed_query()
         ->mutable_chrome_fulfillment_info()
         ->set_notice_card_acknowledged(true);
+  }
+}
+
+void SetCardSpecificNoticeAcknowledged(
+    feedwire::Request* request,
+    const RequestMetadata& request_metadata) {
+  for (const auto& key : request_metadata.acknowledged_notice_keys) {
+    request->mutable_feed_request()
+        ->mutable_feed_query()
+        ->mutable_chrome_fulfillment_info()
+        ->add_acknowledged_notice_key(key);
   }
 }
 
@@ -237,9 +281,9 @@ feedwire::ClientInfo CreateClientInfo(const RequestMetadata& request_metadata) {
 
   client_info.set_locale(request_metadata.language_tag);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   client_info.set_platform_type(feedwire::ClientInfo::ANDROID_ID);
-#elif defined(OS_IOS)
+#elif BUILDFLAG(IS_IOS)
   client_info.set_platform_type(feedwire::ClientInfo::IOS);
 #endif
   client_info.set_app_type(feedwire::ClientInfo::CHROME_ANDROID);
@@ -282,6 +326,7 @@ feedwire::Request CreateFeedQueryRefreshRequest(
         ->set_web_feed_token(kChromeFollowToken);
   }
   SetNoticeCardAcknowledged(&request, request_metadata);
+  SetCardSpecificNoticeAcknowledged(&request, request_metadata);
   return request;
 }
 

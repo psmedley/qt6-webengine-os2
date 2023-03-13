@@ -406,8 +406,6 @@ void CFWL_ComboBox::OnProcessMessage(CFWL_Message* pMessage) {
     case CFWL_Message::Type::kKey: {
       backDefault = false;
       CFWL_MessageKey* pKey = static_cast<CFWL_MessageKey*>(pMessage);
-      if (pKey->m_dwCmd == CFWL_MessageKey::KeyCommand::kKeyUp)
-        break;
       if (IsDropListVisible() &&
           pKey->m_dwCmd == CFWL_MessageKey::KeyCommand::kKeyDown) {
         bool bListKey = pKey->m_dwKeyCodeOrChar == XFA_FWL_VKEY_Up ||
@@ -474,7 +472,7 @@ void CFWL_ComboBox::OnLButtonDown(CFWL_MessageMouse* pMsg) {
 void CFWL_ComboBox::OnFocusGained() {
   m_Properties.m_dwStates |= FWL_STATE_WGT_Focused;
   if ((m_pEdit->GetStates() & FWL_STATE_WGT_Focused) == 0) {
-    CFWL_MessageSetFocus msg(nullptr, m_pEdit);
+    CFWL_MessageSetFocus msg(m_pEdit);
     m_pEdit->GetDelegate()->OnProcessMessage(&msg);
   }
 }
@@ -482,7 +480,7 @@ void CFWL_ComboBox::OnFocusGained() {
 void CFWL_ComboBox::OnFocusLost() {
   m_Properties.m_dwStates &= ~FWL_STATE_WGT_Focused;
   HideDropDownList();
-  CFWL_MessageKillFocus msg(m_pEdit);
+  CFWL_MessageKillFocus msg(nullptr);
   m_pEdit->GetDelegate()->OnProcessMessage(&msg);
 }
 

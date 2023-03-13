@@ -11,7 +11,6 @@
 #include <string>
 
 #include "base/mac/scoped_cftyperef.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "net/base/hash_value.h"
 #include "net/base/net_export.h"
@@ -20,28 +19,6 @@
 namespace net {
 
 namespace x509_util {
-
-// Tests that a given |cert_handle| is actually a valid X.509 certificate, and
-// returns true if it is.
-//
-// On OS X, SecCertificateCreateFromData() does not return any errors if
-// called with invalid data, as long as data is present. The actual decoding
-// of the certificate does not happen until an API that requires a CSSM
-// handle is called. While SecCertificateGetCLHandle is the most likely
-// candidate, as it performs the parsing, it does not check whether the
-// parsing was actually successful. Instead, SecCertificateGetSubject is
-// used (supported since 10.3), as a means to check that the certificate
-// parsed as a valid X.509 certificate.
-NET_EXPORT bool IsValidSecCertificate(SecCertificateRef cert_handle);
-
-// Creates a SecCertificate handle from the DER-encoded representation.
-// Returns NULL on failure.
-NET_EXPORT base::ScopedCFTypeRef<SecCertificateRef>
-CreateSecCertificateFromBytes(const uint8_t* data, size_t length);
-
-// Returns a SecCertificate representing |cert|, or NULL on failure.
-NET_EXPORT base::ScopedCFTypeRef<SecCertificateRef>
-CreateSecCertificateFromX509Certificate(const X509Certificate* cert);
 
 // Creates an X509Certificate representing |sec_cert| with intermediates
 // |sec_chain|.
@@ -109,6 +86,10 @@ class CSSMFieldValue {
   CSSMFieldValue(CSSM_CL_HANDLE cl_handle,
                  const CSSM_OID* oid,
                  CSSM_DATA_PTR field);
+
+  CSSMFieldValue(const CSSMFieldValue&) = delete;
+  CSSMFieldValue& operator=(const CSSMFieldValue&) = delete;
+
   ~CSSMFieldValue();
 
   CSSM_OID_PTR oid() const { return oid_; }
@@ -133,8 +114,6 @@ class CSSMFieldValue {
   CSSM_CL_HANDLE cl_handle_;
   CSSM_OID_PTR oid_;
   CSSM_DATA_PTR field_;
-
-  DISALLOW_COPY_AND_ASSIGN(CSSMFieldValue);
 };
 
 // CSSMCachedCertificate is a container class that is used to wrap the

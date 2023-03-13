@@ -33,7 +33,6 @@
 #include <algorithm>
 #include <memory>
 
-#include "base/cxx17_backports.h"
 #include "base/strings/char_traits.h"
 #include "third_party/blink/public/platform/web_crypto_algorithm_params.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -42,6 +41,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_crypto_key.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+#include "third_party/blink/renderer/modules/crypto/crypto_key.h"
 #include "third_party/blink/renderer/modules/crypto/crypto_utilities.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -90,7 +90,7 @@ const AlgorithmNameMapping kAlgorithmNameMappings[] = {
 // Reminder to update the table mapping names to IDs whenever adding a new
 // algorithm ID.
 static_assert(kWebCryptoAlgorithmIdLast + 1 ==
-                  base::size(kAlgorithmNameMappings),
+                  std::size(kAlgorithmNameMappings),
               "algorithmNameMappings needs to be updated");
 
 #if DCHECK_IS_ON()
@@ -181,7 +181,7 @@ bool LookupAlgorithmIdByName(const String& algorithm_name,
                              WebCryptoAlgorithmId& id) {
   const AlgorithmNameMapping* begin = kAlgorithmNameMappings;
   const AlgorithmNameMapping* end =
-      kAlgorithmNameMappings + base::size(kAlgorithmNameMappings);
+      kAlgorithmNameMappings + std::size(kAlgorithmNameMappings);
 
 #if DCHECK_IS_ON()
   DCHECK(VerifyAlgorithmNameMappings(begin, end));
@@ -816,7 +816,7 @@ const CurveNameMapping kCurveNameMappings[] = {
     {"P-521", kWebCryptoNamedCurveP521}};
 
 // Reminder to update curveNameMappings when adding a new curve.
-static_assert(kWebCryptoNamedCurveLast + 1 == base::size(kCurveNameMappings),
+static_assert(kWebCryptoNamedCurveLast + 1 == std::size(kCurveNameMappings),
               "curveNameMappings needs to be updated");
 
 bool ParseNamedCurve(const Dictionary& raw,
@@ -830,7 +830,7 @@ bool ParseNamedCurve(const Dictionary& raw,
     return false;
   }
 
-  for (size_t i = 0; i < base::size(kCurveNameMappings); ++i) {
+  for (size_t i = 0; i < std::size(kCurveNameMappings); ++i) {
     if (kCurveNameMappings[i].name == named_curve_string) {
       named_curve = kCurveNameMappings[i].value;
       return true;

@@ -19,6 +19,8 @@ namespace metrics_util {
 
 using IsUsernameChanged = base::StrongAlias<class IsUsernameChangedTag, bool>;
 using IsPasswordChanged = base::StrongAlias<class IsPasswordChangedTag, bool>;
+using IsPasswordNoteChanged =
+    base::StrongAlias<class IsPasswordNoteChangedTag, bool>;
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
@@ -63,7 +65,7 @@ enum UIDismissalReason {
 };
 
 // Enum representing the different leak detection dialogs shown to the user.
-// Corresponds to LeakDetectionDialogType suffix in histograms.xml.
+// Corresponds to LeakDetectionDialogType suffix in histogram_suffixes_list.xml.
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
 enum class LeakDialogType {
@@ -74,7 +76,10 @@ enum class LeakDialogType {
   // The user is asked to visit the Password Checkup and change the password for
   // the current site.
   kCheckupAndChange = 2,
-  kMaxValue = kCheckupAndChange,
+  // The user is asked to let Chrome automatically change their password for the
+  // current site.
+  kChangeAutomatically = 3,
+  kMaxValue = kChangeAutomatically,
 };
 
 // Enum recording the dismissal reason of the data breach dialog which is shown
@@ -88,7 +93,8 @@ enum class LeakDialogDismissalReason {
   kClickedClose = 1,
   kClickedCheckPasswords = 2,
   kClickedOk = 3,
-  kMaxValue = kClickedOk,
+  kClickedChangePasswordAutomatically = 4,
+  kMaxValue = kClickedChangePasswordAutomatically,
 };
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -105,18 +111,18 @@ enum FormDeserializationStatus {
 
 // These values are persisted to logs. Entries should not be renumbered and
 // numeric values should never be reused.
-// Metrics: "PasswordManager.PasswordSyncState"
-enum PasswordSyncState {
-  SYNCING_OK = 0,
-  NOT_SYNCING_FAILED_READ = 1,
-  NOT_SYNCING_DUPLICATE_TAGS = 2,
-  NOT_SYNCING_SERVER_ERROR = 3,
-  NOT_SYNCING_FAILED_CLEANUP = 4,
-  NOT_SYNCING_FAILED_DECRYPTION = 5,
-  NOT_SYNCING_FAILED_ADD = 6,
-  NOT_SYNCING_FAILED_UPDATE = 7,
-  NOT_SYNCING_FAILED_METADATA_PERSISTENCE = 8,
-  NUM_SYNC_STATES
+// Metrics: "PasswordManager.PasswordSyncState2"
+enum class PasswordSyncState {
+  kSyncingOk = 0,
+  kNotSyncingFailedRead = 1,
+  kNotSyncingDuplicateTags = 2,
+  kNotSyncingServerError = 3,
+  kNotSyncingFailedCleanup = 4,
+  kNotSyncingFailedDecryption = 5,
+  kNotSyncingFailedAdd = 6,
+  kNotSyncingFailedUpdate = 7,
+  kNotSyncingFailedMetadataPersistence = 8,
+  kMaxValue = kNotSyncingFailedMetadataPersistence,
 };
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -390,7 +396,9 @@ enum class PasswordDropdownSelectedOption {
   kUnlockAccountStoreGeneration = 4,
   // Previoulsy opted-in user decided to log-in again to access their passwords.
   kResigninToUnlockAccountStore = 5,
-  kMaxValue = kResigninToUnlockAccountStore
+  // User selected a WebAuthn credential.
+  kWebAuthn = 6,
+  kMaxValue = kWebAuthn
 };
 
 // These values are persisted to logs. Entries should not be renumbered and
@@ -412,17 +420,17 @@ enum class PasswordAccountStorageUserState {
   kSignedOutUser = 0,
   // Signed-out user, but an account storage opt-in exists.
   kSignedOutAccountStoreUser = 1,
-  // Signed-in user, not opted in to the account storage (but will save
-  // passwords to the account storage by default).
+  // Signed-in non-syncing user, not opted in to the account storage (but may
+  // save passwords to the account storage by default).
   kSignedInUser = 2,
-  // Signed-in user, not opted in to the account storage, and has explicitly
-  // chosen to save passwords only on the device.
+  // Signed-in non-syncing user, not opted in to the account storage, and has
+  // explicitly chosen to save passwords only on the device.
   kSignedInUserSavingLocally = 3,
-  // Signed-in user, opted in to the account storage, and saving passwords to
-  // the account storage.
+  // Signed-in non-syncing user, opted in to the account storage, and saving
+  // passwords to the account storage.
   kSignedInAccountStoreUser = 4,
-  // Signed-in user and opted in to the account storage, but has chosen to save
-  // passwords only on the device.
+  // Signed-in non-syncing user and opted in to the account storage, but has
+  // chosen to save passwords only on the device.
   kSignedInAccountStoreUserSavingLocally = 5,
   // Syncing user.
   kSyncUser = 6,
@@ -441,8 +449,32 @@ enum class PasswordCheckInteraction {
   kEditPassword = 4,
   kRemovePassword = 5,
   kShowPassword = 6,
+  kMutePassword = 7,
+  kUnmutePassword = 8,
   // Must be last.
-  kMaxValue = kShowPassword,
+  kMaxValue = kUnmutePassword,
+};
+
+// Represents different user interactions related to adding credential from the
+// setting. These values are persisted to logs. Entries should not be renumbered
+// and numeric values should never be reused. Always keep this enum in sync with
+// the corresponding PasswordCheckInteraction in enums.xml and
+// password_manager_proxy.js.
+enum class AddCredentialFromSettingsUserInteractions {
+  // Used when the add credential dialog is opened from the settings.
+  kAddDialogOpened = 0,
+  // Used when the add credential dialog is closed from the settings.
+  kAddDialogClosed = 1,
+  // Used when a new credential is added from the settings .
+  kCredentialAdded = 2,
+  // Used when a new credential is being added from the add credential dialog in
+  // settings and another credential exists with the same username/website
+  // combination.
+  kDuplicatedCredentialEntered = 3,
+  // Used when an existing credential is viewed while adding a new credential
+  // from the settings.
+  kDuplicateCredentialViewed = 4,
+  kMaxValue = kDuplicateCredentialViewed
 };
 
 // Metrics: PasswordManager.MoveToAccountStoreTrigger.
@@ -506,7 +538,8 @@ enum class PasswordAccountStorageUsageLevel {
   // The user is not using the account-scoped password storage. Either they're
   // not signed in, or they haven't opted in to the account storage.
   kNotUsingAccountStorage = 0,
-  // The user is signed in and has opted in to the account storage.
+  // The user is signed in (but not syncing) and has opted in to the account
+  // storage.
   kUsingAccountStorage = 1,
   // The user has enabled Sync.
   kSyncing = 2,
@@ -520,17 +553,24 @@ void LogGeneralUIDismissalReason(UIDismissalReason reason);
 
 // Log the |reason| a user dismissed the save password bubble. If
 // |user_state| is set, the |reason| is also logged to a separate
-// user-state-specific histogram.
+// user-state-specific histogram. If the submission is detected on a cleared
+// change password form, dismissal reason is also recorded in a histogram
+// specific for this type of submission.
 void LogSaveUIDismissalReason(
     UIDismissalReason reason,
+    autofill::mojom::SubmissionIndicatorEvent submission_event,
     absl::optional<PasswordAccountStorageUserState> user_state);
 
 // Log the |reason| a user dismissed the save password prompt after previously
 // having unblocklisted the origin while on the page.
 void LogSaveUIDismissalReasonAfterUnblocklisting(UIDismissalReason reason);
 
-// Log the |reason| a user dismissed the update password bubble.
-void LogUpdateUIDismissalReason(UIDismissalReason reason);
+// Log the |reason| a user dismissed the update password bubble. If the
+// submission is detected on a cleared change password form, dismissal reason is
+// also recorded in a histogram specific for this type of submission.
+void LogUpdateUIDismissalReason(
+    UIDismissalReason reason,
+    autofill::mojom::SubmissionIndicatorEvent submission_event);
 
 // Log the |reason| a user dismissed the move password bubble.
 void LogMoveUIDismissalReason(UIDismissalReason reason,
@@ -575,8 +615,7 @@ void LogCredentialManagerGetResult(CredentialManagerGetResult result,
                                    CredentialMediationRequirement mediation);
 
 // Log the password reuse.
-void LogPasswordReuse(int password_length,
-                      int saved_passwords,
+void LogPasswordReuse(int saved_passwords,
                       int number_matches,
                       bool password_field_detected,
                       PasswordType reused_password_type);
@@ -643,16 +682,20 @@ void LogGaiaPasswordHashChange(GaiaPasswordHashChange event,
 void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state,
                                 bool is_under_advanced_protection);
 
-// Log the number of Gaia password hashes saved, and the number of enterprise
-// password hashes saved. Currently only called on profile start up.
+// Log the number of Gaia password hashes saved. Currently only called on
+// profile start up.
 void LogProtectedPasswordHashCounts(size_t gaia_hash_count,
-                                    size_t enterprise_hash_count,
                                     bool does_primary_account_exists,
                                     bool is_signed_in);
 
 // Log the result of the password edit action.
 void LogPasswordEditResult(IsUsernameChanged password_changed,
                            IsPasswordChanged username_changed);
+
+// Log the user interaction events when creating a new credential from settings.
+void LogUserInteractionsWhenAddingCredentialFromSettings(
+    AddCredentialFromSettingsUserInteractions
+        add_credential_from_settings_user_interaction);
 
 }  // namespace metrics_util
 

@@ -199,10 +199,13 @@ if(AOM_TARGET_SYSTEM MATCHES "Darwin\|Linux\|Windows\|Android")
   set(CONFIG_OS_SUPPORT 1)
 endif()
 
-# The default _WIN32_WINNT value in MinGW is 0x0502 (Windows XP with SP2). Set
-# it to 0x0601 (Windows 7).
 if(AOM_TARGET_SYSTEM STREQUAL "Windows")
+  # The default _WIN32_WINNT value in MinGW is 0x0502 (Windows XP with SP2). Set
+  # it to 0x0601 (Windows 7).
   add_compiler_flag_if_supported("-D_WIN32_WINNT=0x0601")
+  # Prevent windows.h from defining the min and max macros. This allows us to
+  # use std::min and std::max.
+  add_compiler_flag_if_supported("-DNOMINMAX")
 endif()
 
 #
@@ -274,7 +277,10 @@ else()
   add_compiler_flag_if_supported("-Wall")
   add_compiler_flag_if_supported("-Wdisabled-optimization")
   add_compiler_flag_if_supported("-Wextra")
+  add_compiler_flag_if_supported("-Wextra-semi")
+  add_compiler_flag_if_supported("-Wextra-semi-stmt")
   add_compiler_flag_if_supported("-Wfloat-conversion")
+  add_compiler_flag_if_supported("-Wformat=2")
   add_c_flag_if_supported("-Wimplicit-function-declaration")
   add_compiler_flag_if_supported("-Wlogical-op")
   add_compiler_flag_if_supported("-Wpointer-arith")

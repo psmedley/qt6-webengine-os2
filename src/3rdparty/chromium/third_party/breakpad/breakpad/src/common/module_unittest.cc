@@ -193,7 +193,8 @@ TEST(Write, OmitUnusedFiles) {
   function->lines.push_back(line2);
   m.AddFunction(function);
 
-  m.AssignSourceIds();
+  std::set<Module::InlineOrigin*, Module::InlineOriginCompare> inline_origins;
+  m.AssignSourceIds(inline_origins);
 
   vector<Module::File*> vec;
   m.GetFiles(&vec);
@@ -255,7 +256,7 @@ TEST(Write, NoCFI) {
   // the module must work fine.
   m.SetLoadAddress(0x2ab698b0b6407073ULL);
 
-  m.Write(s, NO_CFI);
+  m.Write(s, SYMBOLS_AND_FILES | INLINES);
   string contents = s.str();
   EXPECT_STREQ("MODULE os-name architecture id-string name with spaces\n"
                "FILE 0 filename.cc\n"

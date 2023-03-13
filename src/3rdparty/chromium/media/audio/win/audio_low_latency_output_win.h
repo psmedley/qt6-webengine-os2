@@ -103,10 +103,11 @@
 #include <string>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/simple_thread.h"
+#include "base/time/time.h"
 #include "base/win/scoped_co_mem.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_handle.h"
@@ -132,6 +133,9 @@ class MEDIA_EXPORT WASAPIAudioOutputStream :
                           const AudioParameters& params,
                           ERole device_role,
                           AudioManager::LogCallback log_callback);
+
+  WASAPIAudioOutputStream(const WASAPIAudioOutputStream&) = delete;
+  WASAPIAudioOutputStream& operator=(const WASAPIAudioOutputStream&) = delete;
 
   // The dtor is typically called by the AudioManager only and it is usually
   // triggered by calling AudioOutputStream::Close().
@@ -187,7 +191,7 @@ class MEDIA_EXPORT WASAPIAudioOutputStream :
   const base::PlatformThreadId creating_thread_id_;
 
   // Our creator, the audio manager needs to be notified when we close.
-  AudioManagerWin* const manager_;
+  const raw_ptr<AudioManagerWin> manager_;
 
   // Rendering is driven by this thread (which has no message loop).
   // All OnMoreData() callbacks will be called from this thread.
@@ -249,7 +253,7 @@ class MEDIA_EXPORT WASAPIAudioOutputStream :
   base::TimeDelta largest_glitch_;
 
   // Pointer to the client that will deliver audio samples to be played out.
-  AudioSourceCallback* source_;
+  raw_ptr<AudioSourceCallback> source_;
 
   // Callback to send log messages to registered clients.
   AudioManager::LogCallback log_callback_;
@@ -281,8 +285,6 @@ class MEDIA_EXPORT WASAPIAudioOutputStream :
   // thread, it's possible to end up in a state where that task would execute
   // after destruction of this class -- so use a WeakPtr to cancel safely.
   base::WeakPtrFactory<WASAPIAudioOutputStream> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WASAPIAudioOutputStream);
 };
 
 }  // namespace media

@@ -8,7 +8,6 @@
 #include <bitset>
 #include <set>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_piece.h"
 #include "base/time/tick_clock.h"
@@ -25,6 +24,7 @@ class Origin;
 
 namespace content {
 class BackForwardCacheCanStoreDocumentResult;
+class BackForwardCacheCanStoreTreeResult;
 class NavigationEntryImpl;
 class NavigationRequest;
 class RenderFrameHostImpl;
@@ -43,7 +43,7 @@ class BackForwardCacheMetrics
   // tools/metrics/histograms/enums.xml. These values should not be renumbered.
   enum class NotRestoredReason : uint8_t {
     kMinValue = 0,
-    kNotMainFrame = 0,
+    kNotPrimaryMainFrame = 0,
     // BackForwardCache is disabled due to low memory device, base::Feature or
     // command line. Note that the more specific NotRestoredReasons
     // kBackForwardCacheDisabledByLowMemory and
@@ -94,7 +94,7 @@ class BackForwardCacheMetrics
     kNetworkRequestTimeout = 39,
     kNetworkExceedsBufferLimit = 40,
     kNavigationCancelledWhileRestoring = 41,
-    kBackForwardCacheDisabledForPrerender = 42,
+    // 42: kBackForwardCacheDisabledForPrerender was removed and merged into 0.
     kUserAgentOverrideDiffers = 43,
     // 44: kNetworkRequestDatapipeDrainedAsDatapipe was removed now that
     // ScriptStreamer is supported.
@@ -102,17 +102,18 @@ class BackForwardCacheMetrics
     kForegroundCacheLimit = 46,
     kBrowsingInstanceNotSwapped = 47,
     kBackForwardCacheDisabledForDelegate = 48,
-    kOptInUnloadHeaderNotPresent = 49,
-    // 50: kUnloadHandlerExistsInMainFrame = 50 was removed, such cases would
-    // report kOptInUnloadHeaderNotPresent.
+    // 49: kOptInUnloadHeaderNotPresent was removed as the experiments ended.
+    kUnloadHandlerExistsInMainFrame = 50,
     kUnloadHandlerExistsInSubFrame = 51,
     kServiceWorkerUnregistration = 52,
     kCacheControlNoStore = 53,
     kCacheControlNoStoreCookieModified = 54,
     kCacheControlNoStoreHTTPOnlyCookieModified = 55,
     kNoResponseHead = 56,
-    kActivationNavigationsDisallowedForBug1234857 = 57,
-    kMaxValue = kActivationNavigationsDisallowedForBug1234857,
+    // 57: kActivationNavigationsDisallowedForBug1234857 was fixed.
+    kErrorDocument = 58,
+    kFencedFramesEmbedder = 59,
+    kMaxValue = kFencedFramesEmbedder,
   };
 
   using NotRestoredReasons =
@@ -167,6 +168,9 @@ class BackForwardCacheMetrics
       bool is_main_frame_navigation,
       int64_t document_sequence_number);
 
+  BackForwardCacheMetrics(const BackForwardCacheMetrics&) = delete;
+  BackForwardCacheMetrics& operator=(const BackForwardCacheMetrics&) = delete;
+
   // Records when the page is evicted after the document is restored e.g. when
   // the race condition by JavaScript happens.
   static void RecordEvictedAfterDocumentRestored(
@@ -218,6 +222,13 @@ class BackForwardCacheMetrics
   void MarkNotRestoredWithReason(
       const BackForwardCacheCanStoreDocumentResult& can_store);
 
+  // TODO: Take BackForwardCacheCanStoreDocumentResultWithTree as an argument
+  // instead of using BackForwardCacheCanStoreDocumentResult and
+  // BackForwardCacheCanStoreTreeResult as arguments.
+  void FinalizeNotRestoredReasons(
+      const BackForwardCacheCanStoreDocumentResult& can_store_flat,
+      std::unique_ptr<BackForwardCacheCanStoreTreeResult> can_store_tree);
+
   // Exported for testing.
   // The DisabledReason's source and id combined to give a unique uint64.
   CONTENT_EXPORT static uint64_t MetricValue(BackForwardCache::DisabledReason);
@@ -225,6 +236,18 @@ class BackForwardCacheMetrics
   // Injects a clock for mocking time.
   // Should be called only from the UI thread.
   CONTENT_EXPORT static void OverrideTimeForTesting(base::TickClock* clock);
+
+  class TestObserver {
+   public:
+    virtual ~TestObserver() = default;
+    // Report the tree result of NotRestoredReason to the observer.
+    virtual void NotifyNotRestoredReasons(
+        std::unique_ptr<BackForwardCacheCanStoreTreeResult> tree_result) = 0;
+  };
+
+  void SetObserverForTesting(TestObserver* observer) {
+    test_observer_ = observer;
+  }
 
  private:
   friend class base::RefCounted<BackForwardCacheMetrics>;
@@ -284,7 +307,11 @@ class BackForwardCacheMetrics
   absl::optional<base::TimeTicks> started_navigation_timestamp_;
   absl::optional<base::TimeTicks> navigated_away_from_main_document_timestamp_;
 
+  // TODO: Store BackForwardCacheCanStoreDocumentResultWithTree instead of
+  // storing unique_ptr of BackForwardCacheCanStoreDocumentResult and
+  // BackForwardCacheCanStoreTreeResult respectively.
   std::unique_ptr<BackForwardCacheCanStoreDocumentResult> page_store_result_;
+  std::unique_ptr<BackForwardCacheCanStoreTreeResult> page_store_tree_result_;
 
   // This value is updated only for navigations which are not same-document and
   // main-frame navigations.
@@ -293,11 +320,11 @@ class BackForwardCacheMetrics
 
   absl::optional<base::TimeTicks> renderer_killed_timestamp_;
 
+  TestObserver* test_observer_ = nullptr;
+
   // The reason why the last attempted navigation in the frame used or didn't
   // use a new BrowsingInstance.
   absl::optional<ShouldSwapBrowsingInstance> browsing_instance_swap_result_;
-
-  DISALLOW_COPY_AND_ASSIGN(BackForwardCacheMetrics);
 };
 
 }  // namespace content

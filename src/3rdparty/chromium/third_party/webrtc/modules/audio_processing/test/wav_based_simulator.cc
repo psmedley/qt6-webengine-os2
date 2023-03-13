@@ -44,10 +44,7 @@ WavBasedSimulator::GetCustomEventChain(const std::string& filename) {
       case '\n':
         break;
       default:
-        RTC_FATAL()
-            << "Incorrect custom call order file, reverting to using the "
-            << "default call order";
-        return WavBasedSimulator::GetDefaultEventChain();
+        RTC_FATAL() << "Incorrect custom call order file";
     }
 
     num_read = file_wrapper.Read(&c, sizeof(char));
@@ -85,7 +82,7 @@ void WavBasedSimulator::PrepareProcessStreamCall() {
   if (settings_.fixed_interface) {
     fwd_frame_.CopyFrom(*in_buf_);
   }
-  ap_->set_stream_key_pressed(settings_.use_ts && (*settings_.use_ts));
+  ap_->set_stream_key_pressed(settings_.override_key_pressed.value_or(false));
 
   if (!settings_.use_stream_delay || *settings_.use_stream_delay) {
     RTC_CHECK_EQ(AudioProcessing::kNoError,

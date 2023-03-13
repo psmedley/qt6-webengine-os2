@@ -9,17 +9,18 @@
 
 #include <stdint.h>
 
-#include "base/macros.h"
 #include "media/cast/net/rtp/rtp_defines.h"
 
 namespace media {
 namespace cast {
 
-// TODO(miu): Consolidate with RtpPacketizer as a single Cast packet
-// serialization implementation.
 class RtpPacketBuilder {
  public:
   RtpPacketBuilder();
+
+  RtpPacketBuilder(const RtpPacketBuilder&) = delete;
+  RtpPacketBuilder& operator=(const RtpPacketBuilder&) = delete;
+
   void SetKeyFrame(bool is_key);
   void SetFrameIds(uint32_t frame_id, uint32_t reference_frame_id);
   void SetPacketId(uint16_t packet_id);
@@ -45,8 +46,6 @@ class RtpPacketBuilder {
 
   void BuildCastHeader(uint8_t* data, uint32_t data_length);
   void BuildCommonHeader(uint8_t* data, uint32_t data_length);
-
-  DISALLOW_COPY_AND_ASSIGN(RtpPacketBuilder);
 };
 
 }  // namespace cast

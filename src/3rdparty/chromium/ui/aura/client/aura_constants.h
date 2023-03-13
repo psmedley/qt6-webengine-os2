@@ -33,8 +33,12 @@ constexpr int kResizeBehaviorCanResize = 1 << 0;
 constexpr int kResizeBehaviorCanMaximize = 1 << 1;
 constexpr int kResizeBehaviorCanMinimize = 1 << 2;
 
-// A value used to represent an unassigned workspace for kWindowWorkspaceKey.
-constexpr int kUnassignedWorkspace = -1;
+// A value used to represent an unassigned workspace for `kWindowWorkspaceKey`.
+constexpr int kWindowWorkspaceUnassignedWorkspace = -1;
+
+// A value used to represent a window being assigned to all workspaces for
+// `kWindowWorkspaceKey`.
+constexpr int kWindowWorkspaceVisibleOnAllWorkspaces = -2;
 
 // Alphabetical sort.
 
@@ -102,6 +106,26 @@ AURA_EXPORT extern const WindowProperty<ui::ModalType>* const kModalKey;
 // A property key to store the name of the window; mostly used for debugging.
 AURA_EXPORT extern const WindowProperty<std::string*>* const kNameKey;
 
+// A property key to store anchor to attach an owned anchored window to (such
+// as tooltips, menus, etc).
+AURA_EXPORT extern const WindowProperty<struct ui::OwnedWindowAnchor*>* const
+    kOwnedWindowAnchor;
+
+// A property key to store if a window drop shadow and resize shadow of a
+// window are exactly the same as the window bounds, i.e. if resizing a window
+// immediately resizes its shadows. Generally, resizing and content rendering
+// happen in server side without any client involved, so without any delay in
+// communication this value should be true: shadow bounds are the same as
+// window bounds which define content bounds. For LaCros and other windows with
+// server-controlled shadow but client-controlled content, this value should be
+// false to ensure that the shadow is not immediately resized along with window
+// in server side. Instead, the shadow waits for client content to catch up with
+// the new window bounds first to avoid a gap between shadow and content
+// (crbug.com/1199497).
+// TODO(crbug/1247880): all exo clients that use server side resize shadow
+// should have this property set to true.
+AURA_EXPORT extern const WindowProperty<bool>* const kUseWindowBoundsForShadow;
+
 // A property key to store the accessible parent of a native view. This is
 // used to allow WebContents to access their accessible parents for use in
 // walking up the accessibility tree via platform APIs.
@@ -136,6 +160,15 @@ AURA_EXPORT extern const WindowProperty<gfx::Rect*>* const kRestoreBoundsKey;
 AURA_EXPORT extern const WindowProperty<ui::WindowShowState>* const
     kShowStateKey;
 
+// A property key to indicate if a window is currently being restored. Normally
+// restoring a window equals to changing window's state to normal window state.
+// This property will be used in ash to decide if we should use window state
+// restore stack to decide which window state the window should restore back to,
+// and it's not unnecessarily always the normal window state. As an example,
+// unminimizing a window will restore the window back to its pre-minimized
+// window state.
+AURA_EXPORT extern const WindowProperty<bool>* const kIsRestoringKey;
+
 // A property key to store key event dispatch policy. The default value is
 // false, which means IME receives a key event in PREDISPATCH phace before a
 // window receives it. If it's true, a window receives a key event before IME.
@@ -150,9 +183,6 @@ AURA_EXPORT extern const WindowProperty<std::u16string*>* const kTitleKey;
 // the web contents for app windows and varies for fullscreen windows.
 AURA_EXPORT extern const WindowProperty<int>* const kTopViewInset;
 
-// A property key to store whether this window is visible on all workspaces.
-AURA_EXPORT extern const WindowProperty<bool>* const kVisibleOnAllWorkspacesKey;
-
 // A property key to store the window icon, typically 16x16 for title bars.
 AURA_EXPORT extern const WindowProperty<gfx::ImageSkia*>* const kWindowIconKey;
 
@@ -161,7 +191,7 @@ AURA_EXPORT extern const WindowProperty<gfx::ImageSkia*>* const kWindowIconKey;
 AURA_EXPORT extern const WindowProperty<int>* const kWindowCornerRadiusKey;
 
 // A property key to indicate a desk index of a workspace this window belongs
-// to. The default value is kUnassignedWorkspace.
+// to. The default value is kWindowWorkspaceUnassignedWorkspace.
 AURA_EXPORT extern const WindowProperty<int>* const kWindowWorkspaceKey;
 
 // A property key to store the z-ordering.

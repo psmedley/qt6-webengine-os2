@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VARIABLE_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_VARIABLE_DATA_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenized_value.h"
@@ -99,11 +100,18 @@ class CORE_EXPORT CSSVariableData : public RefCounted<CSSVariableData> {
         has_font_units_(has_font_units),
         has_root_font_units_(has_root_font_units),
         base_url_(base_url),
-        charset_(charset) {}
+        charset_(charset) {
+#if EXPENSIVE_DCHECKS_ARE_ON()
+    VerifyStringBacking();
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
+  }
   CSSVariableData(const CSSVariableData&) = delete;
   CSSVariableData& operator=(const CSSVariableData&) = delete;
 
   void ConsumeAndUpdateTokens(const CSSParserTokenRange&);
+#if EXPENSIVE_DCHECKS_ARE_ON()
+  void VerifyStringBacking() const;
+#endif  // EXPENSIVE_DCHECKS_ARE_ON()
 
   // tokens_ may have raw pointers to string data, we store the String objects
   // owning that data in backing_strings_ to keep it alive alongside the

@@ -46,8 +46,17 @@ static_assert(pdfium::size(kOnedCodaCharacterEncoding) ==
 
 const char kStartEndChars[] = {'A', 'B', 'C', 'D', 'T', 'N', '*', 'E',
                                'a', 'b', 'c', 'd', 't', 'n', 'e'};
-const char kCOntentChars[] = {'0', '1', '2', '3', '4', '5', '6', '7',
+const char kContentChars[] = {'0', '1', '2', '3', '4', '5', '6', '7',
                               '8', '9', '-', '$', '/', ':', '+', '.'};
+
+bool IsValidChar(wchar_t ch, bool isContent) {
+  if (ch > 0x7F)
+    return false;
+
+  char narrow_ch = static_cast<char>(ch);
+  return pdfium::Contains(kContentChars, narrow_ch) ||
+         (isContent && pdfium::Contains(kStartEndChars, narrow_ch));
+}
 
 }  // namespace
 
@@ -75,12 +84,8 @@ void CBC_OnedCodaBarWriter::SetDataLength(int32_t length) {
   m_iDataLenth = length + 2;
 }
 
-bool CBC_OnedCodaBarWriter::SetTextLocation(BC_TEXT_LOC location) {
-  if (location < BC_TEXT_LOC_NONE || location > BC_TEXT_LOC_BELOWEMBED) {
-    return false;
-  }
+void CBC_OnedCodaBarWriter::SetTextLocation(BC_TEXT_LOC location) {
   m_locTextLoc = location;
-  return true;
 }
 
 bool CBC_OnedCodaBarWriter::SetWideNarrowRatio(int8_t ratio) {
@@ -91,20 +96,10 @@ bool CBC_OnedCodaBarWriter::SetWideNarrowRatio(int8_t ratio) {
   return true;
 }
 
-bool CBC_OnedCodaBarWriter::FindChar(wchar_t ch, bool isContent) {
-  if (ch > 0x7F)
-    return false;
-
-  char narrow_ch = static_cast<char>(ch);
-  return pdfium::Contains(kCOntentChars, narrow_ch) ||
-         (isContent && pdfium::Contains(kStartEndChars, narrow_ch));
-}
-
 bool CBC_OnedCodaBarWriter::CheckContentValidity(WideStringView contents) {
   return HasValidContentSize(contents) &&
-         std::all_of(
-             contents.begin(), contents.end(),
-             [this](const wchar_t& ch) { return this->FindChar(ch, false); });
+         std::all_of(contents.begin(), contents.end(),
+                     [](const wchar_t& ch) { return IsValidChar(ch, false); });
 }
 
 WideString CBC_OnedCodaBarWriter::FilterContents(WideStringView contents) {
@@ -117,7 +112,7 @@ WideString CBC_OnedCodaBarWriter::FilterContents(WideStringView contents) {
       index++;
       continue;
     }
-    if (!FindChar(ch, true))
+    if (!IsValidChar(ch, true))
       continue;
     filtercontents += ch;
   }
@@ -125,12 +120,13 @@ WideString CBC_OnedCodaBarWriter::FilterContents(WideStringView contents) {
 }
 
 uint8_t* CBC_OnedCodaBarWriter::EncodeWithHint(const ByteString& contents,
-                                               BCFORMAT format,
+                                               BC_TYPE format,
                                                int32_t& outWidth,
                                                int32_t& outHeight,
                                                int32_t hints) {
-  if (format != BCFORMAT_CODABAR)
+  if (format != BC_TYPE::kCodabar)
     return nullptr;
+
   return CBC_OneDimWriter::EncodeWithHint(contents, format, outWidth, outHeight,
                                           hints);
 }

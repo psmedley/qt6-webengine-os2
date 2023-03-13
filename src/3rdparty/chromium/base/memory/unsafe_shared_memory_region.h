@@ -5,10 +5,12 @@
 #ifndef BASE_MEMORY_UNSAFE_SHARED_MEMORY_REGION_H_
 #define BASE_MEMORY_UNSAFE_SHARED_MEMORY_REGION_H_
 
-#include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/base_export.h"
+#include "base/check.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/shared_memory_mapping.h"
+
+#include <stdint.h>
 
 namespace base {
 
@@ -57,6 +59,9 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
   UnsafeSharedMemoryRegion(UnsafeSharedMemoryRegion&&);
   UnsafeSharedMemoryRegion& operator=(UnsafeSharedMemoryRegion&&);
 
+  UnsafeSharedMemoryRegion(const UnsafeSharedMemoryRegion&) = delete;
+  UnsafeSharedMemoryRegion& operator=(const UnsafeSharedMemoryRegion&) = delete;
+
   // Destructor closes shared memory region if valid.
   // All created mappings will remain valid.
   ~UnsafeSharedMemoryRegion();
@@ -78,7 +83,7 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
   // starting with the given |offset|. |offset| must be aligned to value of
   // |SysInfo::VMAllocationGranularity()|. Returns an invalid mapping if
   // requested bytes are out of the region limits.
-  WritableSharedMemoryMapping MapAt(off_t offset, size_t size) const;
+  WritableSharedMemoryMapping MapAt(uint64_t offset, size_t size) const;
 
   // Whether the underlying platform handle is valid.
   bool IsValid() const;
@@ -97,7 +102,7 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
 
   // Returns a platform shared memory handle. |this| remains the owner of the
   // handle.
-  subtle::PlatformSharedMemoryRegion::PlatformHandle GetPlatformHandle() const {
+  subtle::PlatformSharedMemoryHandle GetPlatformHandle() const {
     DCHECK(IsValid());
     return handle_.GetPlatformHandle();
   }
@@ -112,8 +117,6 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
   static CreateFunction* create_hook_;
 
   subtle::PlatformSharedMemoryRegion handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(UnsafeSharedMemoryRegion);
 };
 
 }  // namespace base

@@ -23,7 +23,7 @@
 #include "components/viz/test/compositor_frame_helpers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 namespace viz {
 namespace {
@@ -38,7 +38,7 @@ constexpr bool kIsChildRoot = false;
 class SurfaceAggregatorPixelTest : public VizPixelTestWithParam {
  public:
   SurfaceAggregatorPixelTest()
-      : manager_(&shared_bitmap_manager_),
+      : manager_(FrameSinkManagerImpl::InitParams(&shared_bitmap_manager_)),
         support_(std::make_unique<CompositorFrameSinkSupport>(
             nullptr,
             &manager_,
@@ -57,8 +57,7 @@ class SurfaceAggregatorPixelTest : public VizPixelTestWithParam {
   FrameSinkManagerImpl manager_;
   ParentLocalSurfaceIdAllocator root_allocator_;
   std::unique_ptr<CompositorFrameSinkSupport> support_;
-  base::TimeTicks next_display_time_ =
-      base::TimeTicks() + base::TimeDelta::FromSeconds(1);
+  base::TimeTicks next_display_time_ = base::TimeTicks() + base::Seconds(1);
 };
 
 INSTANTIATE_TEST_SUITE_P(,
@@ -409,4 +408,4 @@ TEST_P(SurfaceAggregatorPixelTest, DrawAndEraseDelegatedInkTrail) {
 }  // namespace
 }  // namespace viz
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)

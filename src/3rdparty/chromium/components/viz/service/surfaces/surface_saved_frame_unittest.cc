@@ -24,14 +24,23 @@
 #include "third_party/skia/include/core/SkBlendMode.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/rrect_f.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/rrect_f.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace viz {
 namespace {
 
 constexpr gfx::Rect kQuadLayerRect{0, 0, 20, 20};
 constexpr gfx::Rect kVisibleLayerRect{5, 5, 10, 10};
+
+std::vector<CompositorFrameTransitionDirective::SharedElement>
+CreateSharedElements(const std::vector<CompositorRenderPassId>& render_passes) {
+  std::vector<CompositorFrameTransitionDirective::SharedElement> elements(
+      render_passes.size());
+  for (size_t i = 0; i < render_passes.size(); i++)
+    elements[i].render_pass_id = render_passes[i];
+  return elements;
+}
 
 class SurfaceSavedFrameTest : public testing::Test {
  public:
@@ -101,7 +110,8 @@ class SurfaceSavedFrameTest : public testing::Test {
 
  protected:
   ServerSharedBitmapManager shared_bitmap_manager_;
-  FrameSinkManagerImpl frame_sink_manager_{&shared_bitmap_manager_};
+  FrameSinkManagerImpl frame_sink_manager_{
+      FrameSinkManagerImpl::InitParams(&shared_bitmap_manager_)};
   std::unique_ptr<CompositorFrameSinkSupport> support_;
   SurfaceId surface_id_;
 
@@ -120,9 +130,8 @@ TEST_F(SurfaceSavedFrameTest, OnlyRootSnapshotNoSharedPass) {
 
   const uint32_t sequence_id = 2u;
   CompositorFrameTransitionDirective directive(
-      sequence_id, CompositorFrameTransitionDirective::Type::kSave,
-      CompositorFrameTransitionDirective::Effect::kCoverDown,
-      /*shared_render_pass_ids=*/{});
+      sequence_id, CompositorFrameTransitionDirective::Type::kSave, false,
+      CompositorFrameTransitionDirective::Effect::kCoverDown);
   auto saved_frame = CreateSavedFrame(directive);
   saved_frame->RequestCopyOfOutput(GetSurface());
   EXPECT_FALSE(GetSurface()->HasInterpolatedFrame());
@@ -143,9 +152,10 @@ TEST_F(SurfaceSavedFrameTest, OnlyRootSnapshotNullSharedPass) {
 
   const uint32_t sequence_id = 2u;
   CompositorFrameTransitionDirective directive(
-      sequence_id, CompositorFrameTransitionDirective::Type::kSave,
+      sequence_id, CompositorFrameTransitionDirective::Type::kSave, false,
       CompositorFrameTransitionDirective::Effect::kCoverDown,
-      /*shared_render_pass_ids=*/{CompositorRenderPassId(0u)});
+      CompositorFrameTransitionDirective::TransitionConfig(),
+      CreateSharedElements({CompositorRenderPassId(0u)}));
   auto saved_frame = CreateSavedFrame(directive);
   saved_frame->RequestCopyOfOutput(GetSurface());
   EXPECT_FALSE(GetSurface()->HasInterpolatedFrame());
@@ -182,9 +192,10 @@ TEST_F(SurfaceSavedFrameTest, RemoveSharedElementQuadOnly) {
 
   const uint32_t sequence_id = 2u;
   CompositorFrameTransitionDirective directive(
-      sequence_id, CompositorFrameTransitionDirective::Type::kSave,
+      sequence_id, CompositorFrameTransitionDirective::Type::kSave, false,
       CompositorFrameTransitionDirective::Effect::kCoverDown,
-      /*shared_render_pass_ids=*/{shared_pass_id});
+      CompositorFrameTransitionDirective::TransitionConfig(),
+      CreateSharedElements({shared_pass_id}));
   auto saved_frame = CreateSavedFrame(directive);
   saved_frame->RequestCopyOfOutput(GetSurface());
   EXPECT_TRUE(GetSurface()->HasInterpolatedFrame());
@@ -254,10 +265,10 @@ TEST_F(SurfaceSavedFrameTest, SharedElementNestedInNonSharedElementPass) {
 
   const uint32_t sequence_id = 2u;
   CompositorFrameTransitionDirective directive(
-      sequence_id, CompositorFrameTransitionDirective::Type::kSave,
+      sequence_id, CompositorFrameTransitionDirective::Type::kSave, false,
       CompositorFrameTransitionDirective::Effect::kCoverDown,
-      /*shared_render_pass_ids=*/
-      {shared_pass_id});
+      CompositorFrameTransitionDirective::TransitionConfig(),
+      CreateSharedElements({shared_pass_id}));
   auto saved_frame = CreateSavedFrame(directive);
   saved_frame->RequestCopyOfOutput(GetSurface());
   EXPECT_TRUE(GetSurface()->HasInterpolatedFrame());
@@ -334,10 +345,10 @@ TEST_F(SurfaceSavedFrameTest, SharedElementNestedInSharedElementPass) {
 
   const uint32_t sequence_id = 2u;
   CompositorFrameTransitionDirective directive(
-      sequence_id, CompositorFrameTransitionDirective::Type::kSave,
+      sequence_id, CompositorFrameTransitionDirective::Type::kSave, false,
       CompositorFrameTransitionDirective::Effect::kCoverDown,
-      /*shared_render_pass_ids=*/
-      {child_shared_pass_id, parent_shared_pass->id});
+      CompositorFrameTransitionDirective::TransitionConfig(),
+      CreateSharedElements({child_shared_pass_id, parent_shared_pass->id}));
   auto saved_frame = CreateSavedFrame(directive);
   saved_frame->RequestCopyOfOutput(GetSurface());
   EXPECT_TRUE(GetSurface()->HasInterpolatedFrame());

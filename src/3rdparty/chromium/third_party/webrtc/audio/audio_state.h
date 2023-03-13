@@ -13,12 +13,12 @@
 
 #include <map>
 #include <memory>
-#include <unordered_set>
 
 #include "api/sequence_checker.h"
 #include "audio/audio_transport_impl.h"
 #include "audio/null_audio_poller.h"
 #include "call/audio_state.h"
+#include "rtc_base/containers/flat_set.h"
 #include "rtc_base/ref_count.h"
 
 namespace webrtc {
@@ -51,8 +51,6 @@ class AudioState : public webrtc::AudioState {
     return config_.audio_device_module.get();
   }
 
-  bool typing_noise_detected() const;
-
   void AddReceivingStream(webrtc::AudioReceiveStream* stream);
   void RemoveReceivingStream(webrtc::AudioReceiveStream* stream);
 
@@ -80,7 +78,7 @@ class AudioState : public webrtc::AudioState {
   // stats are still updated.
   std::unique_ptr<NullAudioPoller> null_audio_poller_;
 
-  std::unordered_set<webrtc::AudioReceiveStream*> receiving_streams_;
+  webrtc::flat_set<webrtc::AudioReceiveStream*> receiving_streams_;
   struct StreamProperties {
     int sample_rate_hz = 0;
     size_t num_channels = 0;

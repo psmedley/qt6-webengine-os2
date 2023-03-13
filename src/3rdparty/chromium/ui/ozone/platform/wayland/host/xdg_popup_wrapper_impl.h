@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/ozone/platform/wayland/host/shell_popup_wrapper.h"
 
 namespace ui {
@@ -22,6 +21,10 @@ class XDGPopupWrapperImpl : public ShellPopupWrapper {
   XDGPopupWrapperImpl(std::unique_ptr<XDGSurfaceWrapperImpl> surface,
                       WaylandWindow* wayland_window,
                       WaylandConnection* connection);
+
+  XDGPopupWrapperImpl(const XDGPopupWrapperImpl&) = delete;
+  XDGPopupWrapperImpl& operator=(const XDGPopupWrapperImpl&) = delete;
+
   ~XDGPopupWrapperImpl() override;
 
   // XDGPopupWrapper:
@@ -29,9 +32,11 @@ class XDGPopupWrapperImpl : public ShellPopupWrapper {
   void AckConfigure(uint32_t serial) override;
   bool IsConfigured() override;
   bool SetBounds(const gfx::Rect& new_bounds) override;
+  void SetWindowGeometry(const gfx::Rect& bounds) override;
+  void Grab(uint32_t serial) override;
 
  private:
-  struct xdg_positioner* CreatePositioner(WaylandWindow* parent_window);
+  wl::Object<xdg_positioner> CreatePositioner(WaylandWindow* parent_window);
 
   // xdg_popup_listener
   static void Configure(void* data,
@@ -57,12 +62,13 @@ class XDGPopupWrapperImpl : public ShellPopupWrapper {
   // XDG Shell Stable object.
   wl::Object<xdg_popup> xdg_popup_;
 
+  // Aura shell popup object
+  wl::Object<zaura_popup> aura_popup_;
+
   // Parameters that help to configure this popup.
   ShellPopupParams params_;
 
   uint32_t next_reposition_token_ = 1;
-
-  DISALLOW_COPY_AND_ASSIGN(XDGPopupWrapperImpl);
 };
 
 }  // namespace ui

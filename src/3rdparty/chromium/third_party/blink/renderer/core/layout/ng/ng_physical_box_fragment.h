@@ -26,18 +26,16 @@ enum class NGOutlineType;
 
 class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
  public:
-  static scoped_refptr<const NGPhysicalBoxFragment> Create(
+  static const NGPhysicalBoxFragment* Create(
       NGBoxFragmentBuilder* builder,
       WritingMode block_or_line_writing_mode);
   // Creates a copy of |other| but uses the "post-layout" fragments to ensure
   // fragment-tree consistency.
-  static scoped_refptr<const NGPhysicalBoxFragment>
-  CloneWithPostLayoutFragments(const NGPhysicalBoxFragment& other,
-                               const absl::optional<PhysicalRect>
-                                   updated_layout_overflow = absl::nullopt);
+  static const NGPhysicalBoxFragment* CloneWithPostLayoutFragments(
+      const NGPhysicalBoxFragment& other,
+      const absl::optional<PhysicalRect> updated_layout_overflow =
+          absl::nullopt);
 
-  using MulticolCollection =
-      HashMap<LayoutBox*, NGMulticolWithPendingOOFs<PhysicalOffset>>;
   using PassKey = base::PassKey<NGPhysicalBoxFragment>;
   NGPhysicalBoxFragment(PassKey,
                         NGBoxFragmentBuilder* builder,
@@ -58,19 +56,7 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
                         const PhysicalRect& layout_overflow,
                         bool recalculate_layout_overflow);
 
-  ~NGPhysicalBoxFragment() {
-    ink_overflow_.Reset(InkOverflowType());
-    if (const_has_fragment_items_)
-      ComputeItemsAddress()->~NGFragmentItems();
-    if (const_has_rare_data_)
-      ComputeRareDataAddress()->~RareData();
-    if (ChildrenValid()) {
-      for (const NGLink& child : Children()) {
-        if (child.fragment)
-          child.fragment->Release();
-      }
-    }
-  }
+  ~NGPhysicalBoxFragment();
 
 #if DCHECK_IS_ON()
   class AllowPostLayoutScope {
@@ -85,6 +71,8 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
     static unsigned allow_count_;
   };
 #endif
+
+  void TraceAfterDispatch(Visitor* visitor) const;
 
   const NGPhysicalBoxFragment* PostLayout() const;
 
@@ -205,44 +193,6 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
     return *ComputeInflowBoundsAddress();
   }
 
-  bool HasOutOfFlowPositionedFragmentainerDescendants() const {
-    if (!const_has_rare_data_)
-      return false;
-
-    return !ComputeRareDataAddress()
-                ->oof_positioned_fragmentainer_descendants.IsEmpty();
-  }
-
-  base::span<NGPhysicalOOFNodeForFragmentation>
-  OutOfFlowPositionedFragmentainerDescendants() const {
-    if (!const_has_rare_data_)
-      return base::span<NGPhysicalOOFNodeForFragmentation>();
-    Vector<NGPhysicalOOFNodeForFragmentation>& descendants =
-        const_cast<Vector<NGPhysicalOOFNodeForFragmentation>&>(
-            ComputeRareDataAddress()->oof_positioned_fragmentainer_descendants);
-    return {descendants.data(), descendants.size()};
-  }
-
-  bool HasMulticolsWithPendingOOFs() const {
-    if (!const_has_rare_data_)
-      return false;
-
-    return !ComputeRareDataAddress()->multicols_with_pending_oofs.IsEmpty();
-  }
-
-  MulticolCollection MulticolsWithPendingOOFs() const {
-    if (!const_has_rare_data_)
-      return MulticolCollection();
-    return const_cast<MulticolCollection&>(
-        ComputeRareDataAddress()->multicols_with_pending_oofs);
-  }
-
-  NGPixelSnappedPhysicalBoxStrut PixelSnappedPadding() const {
-    if (!has_padding_)
-      return NGPixelSnappedPhysicalBoxStrut();
-    return ComputePaddingAddress()->SnapToDevicePixels();
-  }
-
   // Return true if this is either a container that establishes an inline
   // formatting context, or if it's non-atomic inline content participating in
   // one. Empty blocks don't establish an inline formatting context.
@@ -279,7 +229,8 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
   const LayoutBox* OwnerLayoutBox() const;
   LayoutBox* MutableOwnerLayoutBox() const;
 
-  // Returns the offset in the |OwnerLayoutBox| coordinate system.
+  // Returns the offset in the |OwnerLayoutBox| coordinate system. This is only
+  // supported for CSS boxes (i.e. not for fragmentainers, for instance).
   PhysicalOffset OffsetFromOwnerLayoutBox() const;
 
   PhysicalRect ScrollableOverflow(TextHeightType height_type) const;
@@ -301,7 +252,7 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
       const PhysicalOffset& location,
       const NGBlockBreakToken* incoming_break_token,
       OverlayScrollbarClipBehavior = kIgnoreOverlayScrollbarSize) const;
-  IntPoint PixelSnappedScrolledContentOffset() const;
+  gfx::Vector2d PixelSnappedScrolledContentOffset() const;
   PhysicalSize ScrollSize() const;
 
   NGInkOverflow::Type InkOverflowType() const {
@@ -355,7 +306,8 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
   // Needed to compensate for LayoutInline Legacy code offsets.
   void AddSelfOutlineRects(const PhysicalOffset& additional_offset,
                            NGOutlineType include_block_overflows,
-                           Vector<PhysicalRect>* outline_rects) const;
+                           Vector<PhysicalRect>* outline_rects,
+                           LayoutObject::OutlineInfo* info) const;
   // Same as |AddSelfOutlineRects|, except when |this.IsInlineBox()|, in which
   // case the coordinate system is relative to the inline formatting context.
   void AddOutlineRects(const PhysicalOffset& additional_offset,
@@ -364,13 +316,10 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
 
   PositionWithAffinity PositionForPoint(PhysicalOffset) const;
 
-  UBiDiLevel BidiLevel() const;
-
   PhysicalBoxSides SidesToInclude() const {
     return PhysicalBoxSides(include_border_top_, include_border_right_,
                             include_border_bottom_, include_border_left_);
   }
-  NGPixelSnappedPhysicalBoxStrut BorderWidths() const;
 
   // Return true if this is the first fragment generated from a node.
   bool IsFirstForNode() const { return is_first_for_node_; }
@@ -385,12 +334,6 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
 
   bool IsFragmentationContextRoot() const {
     return is_fragmentation_context_root_;
-  }
-
-  // Returns true if we have a descendant within this formatting context, which
-  // is potentially above our block-start edge.
-  bool MayHaveDescendantAboveBlockStart() const {
-    return may_have_descendant_above_block_start_;
   }
 
 #if DCHECK_IS_ON()
@@ -446,25 +389,30 @@ class CORE_EXPORT NGPhysicalBoxFragment final : public NGPhysicalFragment {
 #if DCHECK_IS_ON()
   void InvalidateInkOverflow();
   void AssertFragmentTreeSelf() const;
-  void AssertFragmentTreeChildren(bool allow_destroyed = false) const;
+  void AssertFragmentTreeChildren(bool allow_destroyed_or_moved = false) const;
 #endif
 
+ protected:
+  friend class NGPhysicalFragment;
+  void Dispose();
+
  private:
-  static size_t ByteSize(wtf_size_t num_fragment_items,
-                         wtf_size_t num_children,
-                         bool has_layout_overflow,
-                         bool has_borders,
-                         bool has_padding,
-                         bool has_inflow_bounds,
-                         bool has_rare_data);
+  static size_t AdditionalByteSize(wtf_size_t num_fragment_items,
+                                   wtf_size_t num_children,
+                                   bool has_layout_overflow,
+                                   bool has_borders,
+                                   bool has_padding,
+                                   bool has_inflow_bounds,
+                                   bool has_rare_data);
 
   struct RareData {
-    RareData(const RareData&);
-    RareData(NGBoxFragmentBuilder*, PhysicalSize size);
+    DISALLOW_NEW();
 
-    Vector<NGPhysicalOOFNodeForFragmentation>
-        oof_positioned_fragmentainer_descendants;
-    MulticolCollection multicols_with_pending_oofs;
+   public:
+    RareData(const RareData&);
+    explicit RareData(NGBoxFragmentBuilder*);
+    void Trace(Visitor*) const;
+
     const std::unique_ptr<const NGMathMLPaintInfo> mathml_paint_info;
 
     // TablesNG rare data.

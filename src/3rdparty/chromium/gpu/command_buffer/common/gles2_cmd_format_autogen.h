@@ -11,9 +11,9 @@
 #ifndef GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_COMMON_GLES2_CMD_FORMAT_AUTOGEN_H_
 
-#define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
-#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
 #define GL_SCANOUT_CHROMIUM 0x6000
+#define GL_SYNC_GPU_COMMANDS_COMPLETE 0x9117
+#define GL_SYNC_FLUSH_COMMANDS_BIT 0x00000001
 
 struct ActiveTexture {
   typedef ActiveTexture ValueType;
@@ -14881,76 +14881,6 @@ static_assert(offsetof(LoseContextCHROMIUM, current) == 4,
               "offset of LoseContextCHROMIUM current should be 4");
 static_assert(offsetof(LoseContextCHROMIUM, other) == 8,
               "offset of LoseContextCHROMIUM other should be 8");
-
-struct UnpremultiplyAndDitherCopyCHROMIUM {
-  typedef UnpremultiplyAndDitherCopyCHROMIUM ValueType;
-  static const CommandId kCmdId = kUnpremultiplyAndDitherCopyCHROMIUM;
-  static const cmd::ArgFlags kArgFlags = cmd::kFixed;
-  static const uint8_t cmd_flags = CMD_FLAG_SET_TRACE_LEVEL(3);
-
-  static uint32_t ComputeSize() {
-    return static_cast<uint32_t>(sizeof(ValueType));  // NOLINT
-  }
-
-  void SetHeader() { header.SetCmd<ValueType>(); }
-
-  void Init(GLuint _source_id,
-            GLuint _dest_id,
-            GLint _x,
-            GLint _y,
-            GLsizei _width,
-            GLsizei _height) {
-    SetHeader();
-    source_id = _source_id;
-    dest_id = _dest_id;
-    x = _x;
-    y = _y;
-    width = _width;
-    height = _height;
-  }
-
-  void* Set(void* cmd,
-            GLuint _source_id,
-            GLuint _dest_id,
-            GLint _x,
-            GLint _y,
-            GLsizei _width,
-            GLsizei _height) {
-    static_cast<ValueType*>(cmd)->Init(_source_id, _dest_id, _x, _y, _width,
-                                       _height);
-    return NextCmdAddress<ValueType>(cmd);
-  }
-
-  gpu::CommandHeader header;
-  uint32_t source_id;
-  uint32_t dest_id;
-  int32_t x;
-  int32_t y;
-  int32_t width;
-  int32_t height;
-};
-
-static_assert(sizeof(UnpremultiplyAndDitherCopyCHROMIUM) == 28,
-              "size of UnpremultiplyAndDitherCopyCHROMIUM should be 28");
-static_assert(
-    offsetof(UnpremultiplyAndDitherCopyCHROMIUM, header) == 0,
-    "offset of UnpremultiplyAndDitherCopyCHROMIUM header should be 0");
-static_assert(
-    offsetof(UnpremultiplyAndDitherCopyCHROMIUM, source_id) == 4,
-    "offset of UnpremultiplyAndDitherCopyCHROMIUM source_id should be 4");
-static_assert(
-    offsetof(UnpremultiplyAndDitherCopyCHROMIUM, dest_id) == 8,
-    "offset of UnpremultiplyAndDitherCopyCHROMIUM dest_id should be 8");
-static_assert(offsetof(UnpremultiplyAndDitherCopyCHROMIUM, x) == 12,
-              "offset of UnpremultiplyAndDitherCopyCHROMIUM x should be 12");
-static_assert(offsetof(UnpremultiplyAndDitherCopyCHROMIUM, y) == 16,
-              "offset of UnpremultiplyAndDitherCopyCHROMIUM y should be 16");
-static_assert(
-    offsetof(UnpremultiplyAndDitherCopyCHROMIUM, width) == 20,
-    "offset of UnpremultiplyAndDitherCopyCHROMIUM width should be 20");
-static_assert(
-    offsetof(UnpremultiplyAndDitherCopyCHROMIUM, height) == 24,
-    "offset of UnpremultiplyAndDitherCopyCHROMIUM height should be 24");
 
 struct DrawBuffersEXTImmediate {
   typedef DrawBuffersEXTImmediate ValueType;

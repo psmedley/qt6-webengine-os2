@@ -7,16 +7,17 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
@@ -80,11 +81,13 @@ class BlobRegistryImplTest : public testing::Test {
         /*quota_manager_proxy=*/nullptr,
         std::vector<std::unique_ptr<FileSystemBackend>>(),
         std::vector<URLRequestAutoMountHandler>(), data_dir_.GetPath(),
+        data_dir_.GetPath(),
         FileSystemOptions(FileSystemOptions::PROFILE_MODE_INCOGNITO,
                           /*force_in_memory=*/false,
                           std::vector<std::string>()));
     registry_impl_ = std::make_unique<BlobRegistryImpl>(
-        context_->AsWeakPtr(), url_registry_.AsWeakPtr(), file_system_context_);
+        context_->AsWeakPtr(), url_registry_.AsWeakPtr(),
+        base::SequencedTaskRunnerHandle::Get(), file_system_context_);
     auto delegate = std::make_unique<MockBlobRegistryDelegate>();
     delegate_ptr_ = delegate.get();
     registry_impl_->Bind(registry_.BindNewPipeAndPassReceiver(),
@@ -196,7 +199,7 @@ class BlobRegistryImplTest : public testing::Test {
   BlobUrlRegistry url_registry_;
   std::unique_ptr<BlobRegistryImpl> registry_impl_;
   mojo::Remote<blink::mojom::BlobRegistry> registry_;
-  MockBlobRegistryDelegate* delegate_ptr_;
+  raw_ptr<MockBlobRegistryDelegate> delegate_ptr_;
   scoped_refptr<base::SequencedTaskRunner> bytes_provider_runner_;
 
   size_t reply_request_count_ = 0;
@@ -332,7 +335,7 @@ TEST_F(BlobRegistryImplTest, Register_ReferencedBlobClosedPipe) {
 
   std::vector<blink::mojom::DataElementPtr> elements;
   mojo::PendingRemote<blink::mojom::Blob> referenced_blob_remote;
-  ignore_result(referenced_blob_remote.InitWithNewPipeAndPassReceiver());
+  std::ignore = referenced_blob_remote.InitWithNewPipeAndPassReceiver();
   elements.push_back(
       blink::mojom::DataElement::NewBlob(blink::mojom::DataElementBlob::New(
           std::move(referenced_blob_remote), 0, 16)));
@@ -973,7 +976,7 @@ TEST_F(BlobRegistryImplTest, Register_BytesProviderClosedPipe) {
   const std::string kId = "id";
 
   mojo::PendingRemote<blink::mojom::BytesProvider> bytes_provider_remote;
-  ignore_result(bytes_provider_remote.InitWithNewPipeAndPassReceiver());
+  std::ignore = bytes_provider_remote.InitWithNewPipeAndPassReceiver();
 
   std::vector<blink::mojom::DataElementPtr> elements;
   elements.push_back(

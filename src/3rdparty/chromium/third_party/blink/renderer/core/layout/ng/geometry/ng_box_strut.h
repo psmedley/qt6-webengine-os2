@@ -7,6 +7,7 @@
 
 #include <utility>
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/logical_offset.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect_outsets.h"
@@ -136,17 +137,6 @@ struct CORE_EXPORT NGLineBoxStrut {
 
 CORE_EXPORT std::ostream& operator<<(std::ostream&, const NGLineBoxStrut&);
 
-// Struct to store pixel snapped physical dimensions.
-struct CORE_EXPORT NGPixelSnappedPhysicalBoxStrut {
-  NGPixelSnappedPhysicalBoxStrut() = default;
-  NGPixelSnappedPhysicalBoxStrut(int top, int right, int bottom, int left)
-      : top(top), right(right), bottom(bottom), left(left) {}
-  int top;
-  int right;
-  int bottom;
-  int left;
-};
-
 // Struct to store physical dimensions, independent of writing mode and
 // direction.
 // See https://drafts.csswg.org/css-writing-modes-3/#abstract-box
@@ -188,11 +178,6 @@ struct CORE_EXPORT NGPhysicalBoxStrut {
       WritingDirectionMode writing_direction) const {
     return NGLineBoxStrut(ConvertToLogical(writing_direction),
                           writing_direction.IsFlippedLines());
-  }
-
-  NGPixelSnappedPhysicalBoxStrut SnapToDevicePixels() const {
-    return NGPixelSnappedPhysicalBoxStrut(top.Round(), right.Round(),
-                                          bottom.Round(), left.Round());
   }
 
   LayoutUnit HorizontalSum() const { return left + right; }

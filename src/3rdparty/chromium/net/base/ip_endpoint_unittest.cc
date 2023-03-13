@@ -7,9 +7,9 @@
 #include <string.h>
 
 #include <string>
+#include <tuple>
 
 #include "base/check_op.h"
-#include "base/macros.h"
 #include "base/notreached.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
@@ -17,16 +17,17 @@
 #include "build/build_config.h"
 #include "net/base/ip_address.h"
 #include "net/base/sockaddr_storage.h"
+#include "net/base/sys_addrinfo.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include <winsock2.h>
 #include <ws2bth.h>
 
 #include "base/test/gtest_util.h"   // For EXPECT_DCHECK_DEATH
 #include "net/base/winsock_util.h"  // For kBluetoothAddressSize
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
 #include <netinet/in.h>
 #endif
 
@@ -84,8 +85,10 @@ class IPEndPointTest : public PlatformTest {
 };
 
 TEST_F(IPEndPointTest, Constructor) {
-  IPEndPoint endpoint;
-  EXPECT_EQ(0, endpoint.port());
+  {
+    IPEndPoint endpoint;
+    EXPECT_EQ(0, endpoint.port());
+  }
 
   for (const auto& test : tests) {
     IPEndPoint endpoint(test.ip_address, 80);
@@ -159,7 +162,7 @@ TEST_F(IPEndPointTest, FromSockAddrBufTooSmall) {
   EXPECT_FALSE(ip_endpoint.FromSockAddr(sockaddr, sizeof(addr) - 1));
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 
 namespace {
 constexpr uint8_t kBluetoothAddrBytes[kBluetoothAddressSize] = {1, 2, 3,
@@ -199,7 +202,7 @@ TEST_F(IPEndPointTest, WinBluetoothSockAddrCompareWithSelf) {
   EXPECT_DCHECK_DEATH(bt_endpoint.port());
   SockaddrStorage storage;
   EXPECT_DCHECK_DEATH(
-      ignore_result(bt_endpoint.ToSockAddr(storage.addr, &storage.addr_len)));
+      std::ignore = bt_endpoint.ToSockAddr(storage.addr, &storage.addr_len));
   EXPECT_DCHECK_DEATH(bt_endpoint.ToString());
   EXPECT_DCHECK_DEATH(bt_endpoint.ToStringWithoutPort());
 }
@@ -243,8 +246,8 @@ TEST_F(IPEndPointTest, WinBluetoothSockAddrCompareWithCopy) {
   // Test that IPv4/IPv6-only methods crash.
   EXPECT_DCHECK_DEATH(bt_endpoint_other.port());
   SockaddrStorage storage;
-  EXPECT_DCHECK_DEATH(ignore_result(
-      bt_endpoint_other.ToSockAddr(storage.addr, &storage.addr_len)));
+  EXPECT_DCHECK_DEATH(std::ignore = bt_endpoint_other.ToSockAddr(
+                          storage.addr, &storage.addr_len));
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToString());
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToStringWithoutPort());
 }
@@ -274,8 +277,8 @@ TEST_F(IPEndPointTest, WinBluetoothSockAddrCompareWithDifferentPort) {
   // Test that IPv4/IPv6-only methods crash.
   EXPECT_DCHECK_DEATH(bt_endpoint_other.port());
   SockaddrStorage storage;
-  EXPECT_DCHECK_DEATH(ignore_result(
-      bt_endpoint_other.ToSockAddr(storage.addr, &storage.addr_len)));
+  EXPECT_DCHECK_DEATH(std::ignore = bt_endpoint_other.ToSockAddr(
+                          storage.addr, &storage.addr_len));
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToString());
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToStringWithoutPort());
 }
@@ -304,8 +307,8 @@ TEST_F(IPEndPointTest, WinBluetoothSockAddrCompareWithDifferentAddress) {
   // Test that IPv4/IPv6-only methods crash.
   EXPECT_DCHECK_DEATH(bt_endpoint_other.port());
   SockaddrStorage storage;
-  EXPECT_DCHECK_DEATH(ignore_result(
-      bt_endpoint_other.ToSockAddr(storage.addr, &storage.addr_len)));
+  EXPECT_DCHECK_DEATH(std::ignore = bt_endpoint_other.ToSockAddr(
+                          storage.addr, &storage.addr_len));
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToString());
   EXPECT_DCHECK_DEATH(bt_endpoint_other.ToStringWithoutPort());
 }
@@ -353,8 +356,10 @@ TEST_F(IPEndPointTest, LessThan) {
 }
 
 TEST_F(IPEndPointTest, ToString) {
-  IPEndPoint endpoint;
-  EXPECT_EQ(0, endpoint.port());
+  {
+    IPEndPoint endpoint;
+    EXPECT_EQ(0, endpoint.port());
+  }
 
   uint16_t port = 100;
   for (const auto& test : tests) {

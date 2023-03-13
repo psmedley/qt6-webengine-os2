@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/autofill_assistant/browser/actions/action_delegate_util.h"
+#include "components/autofill_assistant/browser/web/element_action_util.h"
 
 #include "base/guid.h"
 #include "base/test/bind.h"
@@ -21,29 +21,26 @@ namespace {
 using ::base::test::RunOnceCallback;
 using ::testing::_;
 using ::testing::InSequence;
-using ::testing::Return;
 
 class ElementActionUtilTest : public testing::Test {
  public:
   ElementActionUtilTest() {}
 
-  void SetUp() override {
-    element_.dom_object.object_data.object_id = "element";
-  }
+  void SetUp() override { element_.SetObjectId("element"); }
 
   MOCK_METHOD2(MockAction,
-               void(const ElementFinder::Result& element,
+               void(const ElementFinderResult& element,
                     base::OnceCallback<void(const ClientStatus&)> done));
 
   MOCK_METHOD3(MockIndexedAction,
                void(int index,
-                    const ElementFinder::Result&,
+                    const ElementFinderResult&,
                     base::OnceCallback<void(const ClientStatus&)> done));
 
   MOCK_METHOD1(MockDone, void(const ClientStatus& status));
 
   MOCK_METHOD2(MockGetAction,
-               void(const ElementFinder::Result& element,
+               void(const ElementFinderResult& element,
                     base::OnceCallback<void(const ClientStatus&,
                                             const std::string&)> done));
 
@@ -52,7 +49,7 @@ class ElementActionUtilTest : public testing::Test {
 
  protected:
   MockWebController mock_web_controller_;
-  ElementFinder::Result element_;
+  ElementFinderResult element_;
 };
 
 TEST_F(ElementActionUtilTest, ExecuteSingleAction) {
@@ -116,7 +113,7 @@ TEST_F(ElementActionUtilTest, ExecuteActionsAbortOnError) {
 }
 
 TEST_F(ElementActionUtilTest, TakeElementAndPerform) {
-  auto expected_element = std::make_unique<ElementFinder::Result>();
+  auto expected_element = std::make_unique<ElementFinderResult>();
 
   EXPECT_CALL(*this, MockAction(EqualsElement(*expected_element), _))
       .WillOnce(RunOnceCallback<1>(OkClientStatus()));
@@ -130,7 +127,7 @@ TEST_F(ElementActionUtilTest, TakeElementAndPerform) {
 }
 
 TEST_F(ElementActionUtilTest, TakeElementAndPerformWithFailedStatus) {
-  auto expected_element = std::make_unique<ElementFinder::Result>();
+  auto expected_element = std::make_unique<ElementFinderResult>();
 
   EXPECT_CALL(*this, MockAction(_, _)).Times(0);
   EXPECT_CALL(*this,
@@ -144,31 +141,33 @@ TEST_F(ElementActionUtilTest, TakeElementAndPerformWithFailedStatus) {
 }
 
 TEST_F(ElementActionUtilTest, TakeElementAndGetProperty) {
-  auto expected_element = std::make_unique<ElementFinder::Result>();
+  auto expected_element = std::make_unique<ElementFinderResult>();
 
   EXPECT_CALL(*this, MockGetAction(EqualsElement(*expected_element), _))
       .WillOnce(RunOnceCallback<1>(OkClientStatus(), "value"));
   EXPECT_CALL(*this, MockDoneGet(EqualsStatus(OkClientStatus()), "value"));
 
-  TakeElementAndGetProperty<std::string>(
+  TakeElementAndGetProperty<const std::string&>(
       base::BindOnce(&ElementActionUtilTest::MockGetAction,
                      base::Unretained(this)),
+      std::string(),
       base::BindOnce(&ElementActionUtilTest::MockDoneGet,
                      base::Unretained(this)),
       OkClientStatus(), std::move(expected_element));
 }
 
 TEST_F(ElementActionUtilTest, TakeElementAndGetPropertyWithFailedStatus) {
-  auto expected_element = std::make_unique<ElementFinder::Result>();
+  auto expected_element = std::make_unique<ElementFinderResult>();
 
   EXPECT_CALL(*this, MockGetAction(_, _)).Times(0);
   EXPECT_CALL(*this,
               MockDoneGet(EqualsStatus(ClientStatus(ELEMENT_RESOLUTION_FAILED)),
                           std::string()));
 
-  TakeElementAndGetProperty<std::string>(
+  TakeElementAndGetProperty<const std::string&>(
       base::BindOnce(&ElementActionUtilTest::MockGetAction,
                      base::Unretained(this)),
+      std::string(),
       base::BindOnce(&ElementActionUtilTest::MockDoneGet,
                      base::Unretained(this)),
       ClientStatus(ELEMENT_RESOLUTION_FAILED), std::move(expected_element));

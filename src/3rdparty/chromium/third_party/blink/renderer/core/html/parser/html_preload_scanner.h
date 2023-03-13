@@ -34,8 +34,8 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/media_values_cached.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/html/parser/compact_html_token.h"
 #include "third_party/blink/renderer/core/html/parser/css_preload_scanner.h"
 #include "third_party/blink/renderer/core/html/parser/html_token.h"
 #include "third_party/blink/renderer/core/html/parser/preload_request.h"
@@ -72,6 +72,7 @@ struct CORE_EXPORT CachedDocumentParameters {
   WeakPersistent<SubresourceRedirectOriginsPreloader>
       subresource_redirect_origins_preloader;
   HashSet<String> disabled_image_types;
+  WeakPersistent<LocalDOMWindow> local_dom_window;
 };
 
 class TokenPreloadScanner {
@@ -94,11 +95,6 @@ class TokenPreloadScanner {
             PreloadRequestStream& requests,
             absl::optional<ViewportDescription>*,
             bool* is_csp_meta_tag);
-  void Scan(const CompactHTMLToken&,
-            const SegmentedString&,
-            PreloadRequestStream& requests,
-            absl::optional<ViewportDescription>*,
-            bool* is_csp_meta_tag);
 
   void SetPredictedBaseElementURL(const KURL& url) {
     predicted_base_element_url_ = url;
@@ -111,6 +107,10 @@ class TokenPreloadScanner {
 
  private:
   class StartTagScanner;
+
+  template <typename Token>
+  void HandleMetaNameAttribute(const Token& token,
+                               absl::optional<ViewportDescription>* viewport);
 
   template <typename Token>
   inline void ScanCommon(const Token&,
@@ -127,17 +127,20 @@ class TokenPreloadScanner {
         const KURL& predicted_base_element_url,
         bool in_style,
         bool in_script,
+        bool in_script_web_bundle,
         size_t template_count,
         scoped_refptr<const PreloadRequest::ExclusionInfo> exclusion_info)
         : predicted_base_element_url(predicted_base_element_url),
           in_style(in_style),
           in_script(in_script),
+          in_script_web_bundle(in_script_web_bundle),
           template_count(template_count),
           exclusion_info(std::move(exclusion_info)) {}
 
     KURL predicted_base_element_url;
     bool in_style;
     bool in_script;
+    bool in_script_web_bundle;
     size_t template_count;
     scoped_refptr<const PreloadRequest::ExclusionInfo> exclusion_info;
   };
@@ -157,6 +160,7 @@ class TokenPreloadScanner {
   bool in_style_;
   bool in_picture_;
   bool in_script_;
+  bool in_script_web_bundle_;
   bool seen_body_;
   bool seen_img_;
   PictureData picture_data_;

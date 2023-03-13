@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
@@ -28,7 +28,7 @@ namespace cert_verifier {
 
 // Wrapper around TrialComparisonCertVerifier that does trial configuration and
 // reporting over Mojo pipes.
-class COMPONENT_EXPORT(NETWORK_SERVICE) TrialComparisonCertVerifierMojo
+class TrialComparisonCertVerifierMojo
     : public net::CertVerifier,
       public mojom::TrialComparisonCertVerifierConfigClient {
  public:
@@ -46,6 +46,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) TrialComparisonCertVerifierMojo
           report_client,
       scoped_refptr<net::CertVerifyProc> primary_verify_proc,
       scoped_refptr<net::CertVerifyProc> trial_verify_proc);
+
+  TrialComparisonCertVerifierMojo(const TrialComparisonCertVerifierMojo&) =
+      delete;
+  TrialComparisonCertVerifierMojo& operator=(
+      const TrialComparisonCertVerifierMojo&) = delete;
+
   ~TrialComparisonCertVerifierMojo() override;
 
   // CertVerifier implementation
@@ -81,8 +87,6 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) TrialComparisonCertVerifierMojo
 
   std::unique_ptr<net::TrialComparisonCertVerifier>
       trial_comparison_cert_verifier_;
-
-  DISALLOW_COPY_AND_ASSIGN(TrialComparisonCertVerifierMojo);
 };
 
 }  // namespace cert_verifier

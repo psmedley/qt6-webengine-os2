@@ -8,6 +8,7 @@
 #include "base/strings/string_piece.h"
 #include "mojo/public/cpp/bindings/array_traits_wtf_vector.h"
 #include "mojo/public/cpp/bindings/message.h"
+#include "mojo/public/cpp/test_support/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/common/interest_group/interest_group.h"
 #include "third_party/blink/public/mojom/interest_group/interest_group_types.mojom-blink.h"
@@ -44,7 +45,12 @@ class ValidateBlinkInterestGroupTest : public testing::Test {
     EXPECT_TRUE(error_field_value.IsNull());
     EXPECT_TRUE(error.IsNull());
 
-    EXPECT_TRUE(CanSerializeAndDeserialize(blink_interest_group));
+    blink::InterestGroup interest_group;
+    EXPECT_TRUE(
+        mojo::test::SerializeAndDeserialize<mojom::blink::InterestGroup>(
+            blink_interest_group, interest_group));
+    EXPECT_EQ(EstimateBlinkInterestGroupSize(*blink_interest_group),
+              interest_group.EstimateSize());
   }
 
   // Check that `blink_interest_group` is valid, if added from `blink_origin`,
@@ -63,26 +69,11 @@ class ValidateBlinkInterestGroupTest : public testing::Test {
     EXPECT_EQ(String::FromUTF8(expected_error_field_value), error_field_value);
     EXPECT_EQ(String::FromUTF8(expected_error), error);
 
-    EXPECT_FALSE(CanSerializeAndDeserialize(blink_interest_group));
-  }
-
-  // Tries to Converts a mojom::blink::InterestGroupPtr to a
-  // blink::InterestGroup by using Mojo to serialize and deserialize it. Returns
-  // true on success, false on failure. Failure indicates the traits conversion
-  // logic refused to serialize the InterestGroup, since it was invalid. Based
-  // off of mojo::test::SerializeAndDeserialize(), which can't convert between
-  // blink and non-blink types.
-  bool CanSerializeAndDeserialize(
-      const mojom::blink::InterestGroupPtr& blink_interest_group) {
-    mojo::Message message =
-        mojom::blink::InterestGroup::SerializeAsMessage(&blink_interest_group);
-    mojo::ScopedMessageHandle handle = message.TakeMojoMessage();
-    message = mojo::Message::CreateFromMessageHandle(&handle);
-    DCHECK(!message.IsNull());
-
-    auto interest_group = std::make_unique<blink::InterestGroup>();
-    return mojom::InterestGroup::DeserializeFromMessage(std::move(message),
-                                                        interest_group.get());
+    blink::InterestGroup interest_group;
+    // mojo deserialization will call InterestGroup::IsValid.
+    EXPECT_FALSE(
+        mojo::test::SerializeAndDeserialize<mojom::blink::InterestGroup>(
+            blink_interest_group, interest_group));
   }
 
   // Creates and returns a minimally populated mojom::blink::InterestGroup.
@@ -104,7 +95,8 @@ class ValidateBlinkInterestGroupTest : public testing::Test {
     const KURL kAllowedUrl =
         KURL(String::FromUTF8("https://origin.test/foo?bar"));
     blink_interest_group->bidding_url = kAllowedUrl;
-    blink_interest_group->update_url = kAllowedUrl;
+    blink_interest_group->daily_update_url = kAllowedUrl;
+    blink_interest_group->bidding_wasm_helper_url = kAllowedUrl;
 
     // `trusted_bidding_signals_url` doesn't allow query strings, unlike the
     // above ones.
@@ -131,6 +123,21 @@ class ValidateBlinkInterestGroupTest : public testing::Test {
     mojo_ad2->render_url =
         KURL(String::FromUTF8("https://origin.test/foo?bar#baz2"));
     blink_interest_group->ads->push_back(std::move(mojo_ad2));
+
+    // Add two ad components. Use different URLs, with references.
+    blink_interest_group->ad_components.emplace();
+    auto mojo_ad_component1 = mojom::blink::InterestGroupAd::New();
+    mojo_ad_component1->render_url =
+        KURL(String::FromUTF8("https://origin.test/components?bar#baz"));
+    mojo_ad_component1->metadata =
+        String::FromUTF8("\"This field isn't actually validated\"");
+    blink_interest_group->ad_components->push_back(
+        std::move(mojo_ad_component1));
+    auto mojo_ad_component2 = mojom::blink::InterestGroupAd::New();
+    mojo_ad_component2->render_url =
+        KURL(String::FromUTF8("https://origin.test/foo?component#baz2"));
+    blink_interest_group->ad_components->push_back(
+        std::move(mojo_ad_component2));
 
     return blink_interest_group;
   }
@@ -181,8 +188,8 @@ TEST_F(ValidateBlinkInterestGroupTest, NonHttpsOriginRejected) {
       "owner origin must be HTTPS." /* expected_error */);
 }
 
-// Check that `bidding_url`, `update_url`, and `trusted_bidding_signals_url`
-// must be same-origin and HTTPS.
+// Check that `bidding_url`, `bidding_wasm_helper_url`, `daily_update_url`, and
+// `trusted_bidding_signals_url` must be same-origin and HTTPS.
 //
 // Ad URLs do not have to be same origin, so they're checked in a different
 // test.
@@ -191,6 +198,9 @@ TEST_F(ValidateBlinkInterestGroupTest, RejectedUrls) {
   const char kBadBiddingUrlError[] =
       "biddingUrl must have the same origin as the InterestGroup owner "
       "and have no fragment identifier or embedded credentials.";
+  const char kBadBiddingWasmHelperUrlError[] =
+      "biddingWasmHelperUrl must have the same origin as the InterestGroup "
+      "owner and have no fragment identifier or embedded credentials.";
   const char kBadUpdateUrlError[] =
       "updateUrl must have the same origin as the InterestGroup owner "
       "and have no fragment identifier or embedded credentials.";
@@ -248,9 +258,18 @@ TEST_F(ValidateBlinkInterestGroupTest, RejectedUrls) {
         rejected_url.GetString().Utf8() /* expected_error_field_value */,
         kBadBiddingUrlError /* expected_error */);
 
-    // Test `update_url`.
+    // Test `bidding_wasm_helper_url`
     blink_interest_group = CreateMinimalInterestGroup();
-    blink_interest_group->update_url = rejected_url;
+    blink_interest_group->bidding_wasm_helper_url = rejected_url;
+    ExpectInterestGroupIsNotValid(
+        blink_interest_group,
+        "biddingWasmHelperUrl" /* expected_error_field_name */,
+        rejected_url.GetString().Utf8() /* expected_error_field_value */,
+        kBadBiddingWasmHelperUrlError /* expected_error */);
+
+    // Test `daily_update_url`.
+    blink_interest_group = CreateMinimalInterestGroup();
+    blink_interest_group->daily_update_url = rejected_url;
     ExpectInterestGroupIsNotValid(
         blink_interest_group, "updateUrl" /* expected_error_field_name */,
         rejected_url.GetString().Utf8() /* expected_error_field_value */,
@@ -349,6 +368,81 @@ TEST_F(ValidateBlinkInterestGroupTest, AdRenderUrlValidation) {
   }
 }
 
+// Tests valid and invalid ad render URLs.
+TEST_F(ValidateBlinkInterestGroupTest, AdComponentRenderUrlValidation) {
+  const char kBadAdUrlError[] =
+      "renderUrls must be HTTPS and have no embedded credentials.";
+
+  const struct {
+    bool expect_allowed;
+    const char* url;
+  } kTestCases[] = {
+      // Same origin URLs are allowed.
+      {true, "https://origin.test/foo?bar"},
+
+      // Cross origin URLs are allowed, as long as they're HTTPS.
+      {true, "https://b.test/"},
+      {true, "https://a.test:1234/"},
+
+      // URLs with the wrong scheme are rejected.
+      {false, "http://a.test/"},
+      {false, "data://text/html,payload"},
+      {false, "filesystem:https://a.test/foo"},
+
+      // URLs with user/ports are rejected.
+      {false, "https://user:pass@a.test/"},
+
+      // References are allowed for ads, though not other requests, since they
+      // only have an effect when loading a page in a renderer.
+      {true, "https://a.test/#foopy"},
+  };
+
+  for (const auto& test_case : kTestCases) {
+    SCOPED_TRACE(test_case.url);
+
+    KURL test_case_url = KURL(String::FromUTF8(test_case.url));
+
+    // Add an InterestGroup with the test cases's URL as the only ad
+    // component's URL.
+    mojom::blink::InterestGroupPtr blink_interest_group =
+        CreateMinimalInterestGroup();
+    blink_interest_group->ad_components.emplace();
+    blink_interest_group->ad_components->emplace_back(
+        mojom::blink::InterestGroupAd::New(test_case_url,
+                                           String() /* metadata */));
+    if (test_case.expect_allowed) {
+      ExpectInterestGroupIsValid(blink_interest_group);
+    } else {
+      ExpectInterestGroupIsNotValid(
+          blink_interest_group,
+          "adComponent[0].renderUrl" /* expected_error_field_name */,
+          test_case_url.GetString().Utf8() /* expected_error_field_value */,
+          kBadAdUrlError /* expected_error */);
+    }
+
+    // Add an InterestGroup with the test cases's URL as the second ad
+    // component's URL.
+    blink_interest_group = CreateMinimalInterestGroup();
+    blink_interest_group->ad_components.emplace();
+    blink_interest_group->ad_components->emplace_back(
+        mojom::blink::InterestGroupAd::New(
+            KURL(String::FromUTF8("https://origin.test/")),
+            String() /* metadata */));
+    blink_interest_group->ad_components->emplace_back(
+        mojom::blink::InterestGroupAd::New(test_case_url,
+                                           String() /* metadata */));
+    if (test_case.expect_allowed) {
+      ExpectInterestGroupIsValid(blink_interest_group);
+    } else {
+      ExpectInterestGroupIsNotValid(
+          blink_interest_group,
+          "adComponent[1].renderUrl" /* expected_error_field_name */,
+          test_case_url.GetString().Utf8() /* expected_error_field_value */,
+          kBadAdUrlError /* expected_error */);
+    }
+  }
+}
+
 // Mojo rejects malformed URLs when converting mojom::blink::InterestGroup to
 // blink::InterestGroup. Since the rejection happens internally in Mojo,
 // typemapping code that invokes blink::InterestGroup::IsValid() isn't run, so
@@ -387,6 +481,70 @@ TEST_F(ValidateBlinkInterestGroupTest, MalformedUrl) {
   interest_group.ads->emplace_back(
       blink::InterestGroup::Ad(GURL(kMalformedUrl), /*metadata=*/""));
   EXPECT_FALSE(interest_group.IsValid());
+}
+
+TEST_F(ValidateBlinkInterestGroupTest, TooLarge) {
+  mojom::blink::InterestGroupPtr blink_interest_group =
+      CreateMinimalInterestGroup();
+  std::string long_string(51173, 'n');
+  blink_interest_group->name = String(long_string);
+  ExpectInterestGroupIsNotValid(
+      blink_interest_group, "size" /* expected_error_field_name */,
+      "51200" /* expected_error_field_value */,
+      "interest groups must be less than 51200 bytes" /* expected_error */);
+
+  // Almost too big should still work.
+  long_string = std::string(51200 - 28, 'n');
+  blink_interest_group->name = String(long_string);
+
+  ExpectInterestGroupIsValid(blink_interest_group);
+}
+
+TEST_F(ValidateBlinkInterestGroupTest, TooLargeAds) {
+  mojom::blink::InterestGroupPtr blink_interest_group =
+      CreateMinimalInterestGroup();
+  blink_interest_group->name = "padding to 51200.......";
+  blink_interest_group->ad_components.emplace();
+  for (int i = 0; i < 682; ++i) {
+    // Each ad component is 75 bytes.
+    auto mojo_ad_component1 = mojom::blink::InterestGroupAd::New();
+    mojo_ad_component1->render_url =
+        KURL(String::FromUTF8("https://origin.test/components?bar#baz"));
+    mojo_ad_component1->metadata =
+        String::FromUTF8("\"This field isn't actually validated\"");
+    blink_interest_group->ad_components->push_back(
+        std::move(mojo_ad_component1));
+  }
+  ExpectInterestGroupIsNotValid(
+      blink_interest_group, "size" /* expected_error_field_name */,
+      "51200" /* expected_error_field_value */,
+      "interest groups must be less than 51200 bytes" /* expected_error */);
+
+  // Almost too big should still work.
+  blink_interest_group->ad_components->resize(681);
+
+  ExpectInterestGroupIsValid(blink_interest_group);
+}
+
+TEST_F(ValidateBlinkInterestGroupTest, InvalidPriority) {
+  struct {
+    double priority;
+    const char* priority_text;
+  } test_cases[] = {
+      {std::numeric_limits<double>::quiet_NaN(), "NaN"},
+      {std::numeric_limits<double>::signaling_NaN(), "NaN"},
+      {std::numeric_limits<double>::infinity(), "Infinity"},
+      {-std::numeric_limits<double>::infinity(), "-Infinity"},
+  };
+  for (const auto& test_case : test_cases) {
+    mojom::blink::InterestGroupPtr blink_interest_group =
+        CreateMinimalInterestGroup();
+    blink_interest_group->priority = test_case.priority;
+    ExpectInterestGroupIsNotValid(
+        blink_interest_group, "priority" /* expected_error_field_name */,
+        test_case.priority_text, /*expected_error_field_value */
+        "priority must be finite." /* expected_error */);
+  }
 }
 
 }  // namespace blink

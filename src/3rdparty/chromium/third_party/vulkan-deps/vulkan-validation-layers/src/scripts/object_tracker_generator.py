@@ -1,9 +1,9 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2021 The Khronos Group Inc.
-# Copyright (c) 2015-2021 Valve Corporation
-# Copyright (c) 2015-2021 LunarG, Inc.
-# Copyright (c) 2015-2021 Google Inc.
+# Copyright (c) 2015-2022 The Khronos Group Inc.
+# Copyright (c) 2015-2022 Valve Corporation
+# Copyright (c) 2015-2022 LunarG, Inc.
+# Copyright (c) 2015-2022 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -35,8 +35,6 @@ from io import open
 # object_tracker layer generation.
 #
 # Additional members
-#   prefixText - list of strings to prefix generated header with
-#     (usually a copyright statement + calling convention macros).
 #   protectFile - True if multiple inclusion protection should be
 #     generated (based on the filename) around the entire header.
 #   protectFeature - True if #ifndef..#endif protection should be
@@ -68,27 +66,26 @@ class ObjectTrackerGeneratorOptions(GeneratorOptions):
                  filename = None,
                  directory = '.',
                  genpath = None,
-                 apiname = None,
+                 apiname = 'vulkan',
                  profile = None,
                  versions = '.*',
                  emitversions = '.*',
-                 defaultExtensions = None,
+                 defaultExtensions = 'vulkan',
                  addExtensions = None,
                  removeExtensions = None,
                  emitExtensions = None,
                  emitSpirv = None,
                  sortProcedure = regSortFeatures,
-                 prefixText = "",
                  genFuncPointers = True,
                  protectFile = True,
-                 protectFeature = True,
-                 apicall = '',
-                 apientry = '',
-                 apientryp = '',
+                 protectFeature = False,
+                 apicall = 'VKAPI_ATTR ',
+                 apientry = 'VKAPI_CALL ',
+                 apientryp = 'VKAPI_PTR *',
                  indentFuncProto = True,
                  indentFuncPointer = False,
-                 alignFuncParam = 0,
-                 expandEnumerants = True,
+                 alignFuncParam = 48,
+                 expandEnumerants = False,
                  valid_usage_path = ''):
         GeneratorOptions.__init__(self,
                 conventions = conventions,
@@ -105,7 +102,6 @@ class ObjectTrackerGeneratorOptions(GeneratorOptions):
                 emitExtensions = emitExtensions,
                 emitSpirv = emitSpirv,
                 sortProcedure = sortProcedure)
-        self.prefixText      = prefixText
         self.genFuncPointers = genFuncPointers
         self.protectFile     = protectFile
         self.protectFeature  = protectFeature
@@ -181,7 +177,10 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             'vkSetDebugUtilsObjectTagEXT',
             'vkCreateDescriptorUpdateTemplate',
             'vkCreateDescriptorUpdateTemplateKHR',
-
+            'vkCmdBuildAccelerationStructuresKHR',
+            'vkCmdBuildAccelerationStructuresIndirectKHR',
+            'vkBuildAccelerationStructuresKHR',
+            'vkCreateRayTracingPipelinesKHR',
             ]
         # These VUIDS are not implicit, but are best handled in this layer. Codegen for vkDestroy calls will generate a key
         # which is translated here into a good VU.  Saves ~40 checks.
@@ -227,6 +226,10 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             "VkComputePipelineCreateInfo-basePipelineHandle": "\"VUID-VkComputePipelineCreateInfo-flags-00697\"",
             "VkRayTracingPipelineCreateInfoNV-basePipelineHandle": "\"VUID-VkRayTracingPipelineCreateInfoNV-flags-03421\"",
 			"VkRayTracingPipelineCreateInfoKHR-basePipelineHandle": "\"VUID-VkRayTracingPipelineCreateInfoKHR-flags-03421\"",
+            "VkAccelerationStructureKHR-accelerationStructure-compatalloc": "\"VUID-vkDestroyAccelerationStructureKHR-accelerationStructure-02443\"",
+            "VkAccelerationStructureKHR-accelerationStructure-nullalloc": "\"VUID-vkDestroyAccelerationStructureKHR-accelerationStructure-02444\"",
+            "VkAccelerationStructureNV-accelerationStructure-compatalloc": "\"VUID-vkDestroyAccelerationStructureNV-accelerationStructure-03753\"",
+            "VkAccelerationStructureNV-accelerationStructure-nullalloc": "\"VUID-vkDestroyAccelerationStructureNV-accelerationStructure-03754\"",
            }
 
         # Commands shadowed by interface functions and are not implemented
@@ -419,10 +422,10 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         copyright += '\n'
         copyright += '/***************************************************************************\n'
         copyright += ' *\n'
-        copyright += ' * Copyright (c) 2015-2021 The Khronos Group Inc.\n'
-        copyright += ' * Copyright (c) 2015-2021 Valve Corporation\n'
-        copyright += ' * Copyright (c) 2015-2021 LunarG, Inc.\n'
-        copyright += ' * Copyright (c) 2015-2021 Google Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 The Khronos Group Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 Valve Corporation\n'
+        copyright += ' * Copyright (c) 2015-2022 LunarG, Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 Google Inc.\n'
         copyright += ' *\n'
         copyright += ' * Licensed under the Apache License, Version 2.0 (the "License");\n'
         copyright += ' * you may not use this file except in compliance with the License.\n'
@@ -445,8 +448,8 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
         self.otwrite('cpp', '#include "chassis.h"')
         self.otwrite('cpp', '#include "object_lifetime_validation.h"')
         self.newline()
-        self.otwrite('cpp', 'read_lock_guard_t ObjectLifetimes::read_lock() { return read_lock_guard_t(validation_object_mutex, std::defer_lock); }')
-        self.otwrite('cpp', 'write_lock_guard_t ObjectLifetimes::write_lock() { return write_lock_guard_t(validation_object_mutex, std::defer_lock); }')
+        self.otwrite('cpp', 'ReadLockGuard ObjectLifetimes::ReadLock() { return ReadLockGuard(validation_object_mutex, std::defer_lock); }')
+        self.otwrite('cpp', 'WriteLockGuard ObjectLifetimes::WriteLock() { return WriteLockGuard(validation_object_mutex, std::defer_lock); }')
 
 
     #
@@ -742,6 +745,18 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
             indent = self.decIndent(indent)
 
         return create_obj_code
+
+    def get_alloc_vuid(self, param_name, param_type, alloc_type):
+        lookup_string = '%s-%s' %(param_name, alloc_type)
+        vuid = self.manual_vuids.get(lookup_string, None)
+        if vuid is not None:
+            return vuid
+        lookup_string = '%s-%s-%s' %(param_type, param_name, alloc_type)
+        vuid = self.manual_vuids.get(lookup_string, None)
+        if vuid is not None:
+            return vuid
+        return "kVUIDUndefined"
+
     #
     # Generate source for destroying a non-dispatchable object
     def generate_destroy_object_code(self, indent, proto, cmd_info):
@@ -759,10 +774,8 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
                 allocator = 'nullptr'
             else:
                 param = -2
-            compatalloc_vuid_string = '%s-compatalloc' % cmd_info[param].name
-            nullalloc_vuid_string = '%s-nullalloc' % cmd_info[param].name
-            compatalloc_vuid = self.manual_vuids.get(compatalloc_vuid_string, "kVUIDUndefined")
-            nullalloc_vuid = self.manual_vuids.get(nullalloc_vuid_string, "kVUIDUndefined")
+            compatalloc_vuid = self.get_alloc_vuid(cmd_info[param].name, cmd_info[param].type, "compatalloc")
+            nullalloc_vuid = self.get_alloc_vuid(cmd_info[param].name, cmd_info[param].type, "nullalloc")
             if cmd_info[param].type in self.handle_types:
                 if object_array == True:
                     # This API is freeing an array of handles -- add loop control
@@ -801,7 +814,7 @@ class ObjectTrackerOutputGenerator(OutputGenerator):
                 parent_vuid = self.GetVuid(parent_name, 'commonparent')
 
         if obj_count is not None:
-            pre_call_code += '%sif (%s%s) {\n' % (indent, prefix, obj_name)
+            pre_call_code += '%sif ((%s > 0) && (%s%s)) {\n' % (indent, obj_count, prefix, obj_name)
             indent = self.incIndent(indent)
             pre_call_code += '%sfor (uint32_t %s = 0; %s < %s; ++%s) {\n' % (indent, index, index, obj_count, index)
             indent = self.incIndent(indent)

@@ -10,7 +10,9 @@
 #ifndef EIGEN_REPLICATE_H
 #define EIGEN_REPLICATE_H
 
-namespace Eigen { 
+#include "./InternalHeaderCheck.h"
+
+namespace Eigen {
 
 namespace internal {
 template<typename MatrixType,int RowFactor,int ColFactor>
@@ -21,7 +23,7 @@ struct traits<Replicate<MatrixType,RowFactor,ColFactor> >
   typedef typename traits<MatrixType>::StorageKind StorageKind;
   typedef typename traits<MatrixType>::XprKind XprKind;
   typedef typename ref_selector<MatrixType>::type MatrixTypeNested;
-  typedef typename remove_reference<MatrixTypeNested>::type _MatrixTypeNested;
+  typedef typename remove_reference<MatrixTypeNested>::type MatrixTypeNested_;
   enum {
     RowsAtCompileTime = RowFactor==Dynamic || int(MatrixType::RowsAtCompileTime)==Dynamic
                       ? Dynamic
@@ -35,7 +37,7 @@ struct traits<Replicate<MatrixType,RowFactor,ColFactor> >
     IsRowMajor = MaxRowsAtCompileTime==1 && MaxColsAtCompileTime!=1 ? 1
                : MaxColsAtCompileTime==1 && MaxRowsAtCompileTime!=1 ? 0
                : (MatrixType::Flags & RowMajorBit) ? 1 : 0,
-    
+
     // FIXME enable DirectAccess with negative strides?
     Flags = IsRowMajor ? RowMajorBit : 0
   };
@@ -62,7 +64,7 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
   : public internal::dense_xpr_base< Replicate<MatrixType,RowFactor,ColFactor> >::type
 {
     typedef typename internal::traits<Replicate>::MatrixTypeNested MatrixTypeNested;
-    typedef typename internal::traits<Replicate>::_MatrixTypeNested _MatrixTypeNested;
+    typedef typename internal::traits<Replicate>::MatrixTypeNested_ MatrixTypeNested_;
   public:
 
     typedef typename internal::dense_xpr_base<Replicate>::type Base;
@@ -88,15 +90,15 @@ template<typename MatrixType,int RowFactor,int ColFactor> class Replicate
                           THE_MATRIX_OR_EXPRESSION_THAT_YOU_PASSED_DOES_NOT_HAVE_THE_EXPECTED_TYPE)
     }
 
-    EIGEN_DEVICE_FUNC
+    EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR
     inline Index rows() const { return m_matrix.rows() * m_rowFactor.value(); }
-    EIGEN_DEVICE_FUNC
+    EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR
     inline Index cols() const { return m_matrix.cols() * m_colFactor.value(); }
 
     EIGEN_DEVICE_FUNC
-    const _MatrixTypeNested& nestedExpression() const
-    { 
-      return m_matrix; 
+    const MatrixTypeNested_& nestedExpression() const
+    {
+      return m_matrix;
     }
 
   protected:

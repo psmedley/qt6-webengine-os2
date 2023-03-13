@@ -7,7 +7,8 @@
 
 #include "third_party/blink/renderer/core/layout/ng/svg/ng_svg_character_data.h"
 #include "third_party/blink/renderer/core/layout/ng/svg/svg_inline_node_data.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 
 namespace blink {
 
@@ -33,14 +34,11 @@ class NGSvgTextLayoutAttributesBuilder final {
  public:
   explicit NGSvgTextLayoutAttributesBuilder(NGInlineNode ifc);
 
-  void Build(const String& ifc_text_content, const Vector<NGInlineItem>& items);
+  void Build(const String& ifc_text_content,
+             const HeapVector<NGInlineItem>& items);
 
   // This function can be called just once after Build().
-  Vector<std::pair<unsigned, NGSvgCharacterData>> CharacterDataList();
-  // This function can be called just once after Build().
-  Vector<SvgTextContentRange> TextLengthRangeList();
-  // This function can be called just once after Build().
-  Vector<SvgTextContentRange> TextPathRangeList();
+  SvgInlineNodeData* CreateSvgInlineNodeData();
 
  private:
   LayoutBlockFlow* block_flow_;
@@ -56,13 +54,13 @@ class NGSvgTextLayoutAttributesBuilder final {
   // addressable character index (inclusive) for an SVGTextContentElement
   // with textLength.
   // This is used in "5. Apply ‘textLength’ attribute".
-  Vector<SvgTextContentRange> text_length_range_list_;
+  HeapVector<SvgTextContentRange> text_length_range_list_;
 
   // The result of Build().
   // A list of a pair of start addressable character index and end
   // addressable character index (inclusive) for a <textPath>.
   // This is used in "8. Position on path".
-  Vector<SvgTextContentRange> text_path_range_list_;
+  HeapVector<SvgTextContentRange> text_path_range_list_;
 };
 
 }  // namespace blink

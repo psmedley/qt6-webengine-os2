@@ -40,9 +40,10 @@ void MediaInternalsProxy::GetEverything() {
 
   MediaInternals::GetInstance()->SendHistoricalMediaEvents();
   MediaInternals::GetInstance()->SendGeneralAudioInformation();
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   MediaInternals::GetInstance()->SendAudioFocusState();
 #endif
+  MediaInternals::GetInstance()->GetRegisteredCdms();
 
   // Ask MediaInternals for its data on IO thread.
   GetIOThreadTaskRunner({})->PostTask(

@@ -232,7 +232,8 @@ CPVT_WordPlace CPVT_Section::AddWord(const CPVT_WordPlace& place,
 
 CPVT_WordPlace CPVT_Section::AddLine(const CPVT_LineInfo& lineinfo) {
   m_LineArray.push_back(std::make_unique<Line>(lineinfo));
-  return CPVT_WordPlace(m_SecPlace.nSecIndex, m_LineArray.size() - 1, -1);
+  return CPVT_WordPlace(m_SecPlace.nSecIndex,
+                        fxcrt::CollectionSize<int32_t>(m_LineArray) - 1, -1);
 }
 
 CPVT_FloatRect CPVT_Section::Rearrange() {
@@ -572,9 +573,9 @@ CPVT_FloatRect CPVT_Section::SplitLines(bool bTypeset, float fFontSize) {
             std::max(fLineAscent, m_pVT->GetWordAscent(*pWord, fFontSize));
         fLineDescent =
             std::min(fLineDescent, m_pVT->GetWordDescent(*pWord, fFontSize));
-        fWordWidth = m_pVT->GetWordWidth(
-            pWord->nFontIndex, pWord->Word, m_pVT->GetSubWord(),
-            m_pVT->GetCharSpace(), fFontSize, pWord->fWordTail);
+        fWordWidth = m_pVT->GetWordWidth(pWord->nFontIndex, pWord->Word,
+                                         m_pVT->GetSubWord(), fFontSize,
+                                         pWord->fWordTail);
       }
       if (!bOpened) {
         if (IsOpenStylePunctuation(pWord->Word)) {

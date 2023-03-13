@@ -30,78 +30,64 @@
 
 import * as Common from '../../core/common/common.js';
 import * as SDK from '../../core/sdk/sdk.js';
+import type * as Platform from '../../core/platform/platform.js';
+import type * as Protocol from '../../generated/protocol.js';
 import * as TextUtils from '../text_utils/text_utils.js';
 import * as Workspace from '../workspace/workspace.js';
 
 import {ContentProviderBasedProject} from './ContentProviderBasedProject.js';
-import type {DebuggerSourceMapping, DebuggerWorkspaceBinding} from './DebuggerWorkspaceBinding.js';
+import type {DebuggerSourceMapping, DebuggerWorkspaceBinding, RawLocationRange} from './DebuggerWorkspaceBinding.js';
 import {IgnoreListManager} from './IgnoreListManager.js';
 import {NetworkProject} from './NetworkProject.js';
 
 export class CompilerScriptMapping implements DebuggerSourceMapping {
-  private readonly debuggerModel: SDK.DebuggerModel.DebuggerModel;
-  private readonly sourceMapManager: SDK.SourceMapManager.SourceMapManager<SDK.Script.Script>;
-  private readonly workspace: Workspace.Workspace.WorkspaceImpl;
-  private readonly debuggerWorkspaceBinding: DebuggerWorkspaceBinding;
-  private readonly regularProject: ContentProviderBasedProject;
-  private readonly contentScriptsProject: ContentProviderBasedProject;
-  private readonly regularBindings: Map<string, Binding>;
-  private readonly contentScriptsBindings: Map<string, Binding>;
-  private readonly stubUISourceCodes: Map<SDK.Script.Script, Workspace.UISourceCode.UISourceCode>;
-  private readonly stubProject: ContentProviderBasedProject;
-  private readonly eventListeners: Common.EventTarget.EventDescriptor[];
+  readonly #debuggerModel: SDK.DebuggerModel.DebuggerModel;
+  readonly #sourceMapManager: SDK.SourceMapManager.SourceMapManager<SDK.Script.Script>;
+  readonly #workspace: Workspace.Workspace.WorkspaceImpl;
+  readonly #debuggerWorkspaceBinding: DebuggerWorkspaceBinding;
+  readonly #regularProject: ContentProviderBasedProject;
+  readonly #contentScriptsProject: ContentProviderBasedProject;
+  readonly #regularBindings: Map<string, Binding>;
+  readonly #contentScriptsBindings: Map<string, Binding>;
+  readonly #stubUISourceCodes: Map<SDK.Script.Script, Workspace.UISourceCode.UISourceCode>;
+  readonly #stubProject: ContentProviderBasedProject;
+  readonly #eventListeners: Common.EventTarget.EventDescriptor[];
   constructor(
       debuggerModel: SDK.DebuggerModel.DebuggerModel, workspace: Workspace.Workspace.WorkspaceImpl,
       debuggerWorkspaceBinding: DebuggerWorkspaceBinding) {
-    this.debuggerModel = debuggerModel;
-    this.sourceMapManager = this.debuggerModel.sourceMapManager();
-    this.workspace = workspace;
-    this.debuggerWorkspaceBinding = debuggerWorkspaceBinding;
+    this.#debuggerModel = debuggerModel;
+    this.#sourceMapManager = this.#debuggerModel.sourceMapManager();
+    this.#workspace = workspace;
+    this.#debuggerWorkspaceBinding = debuggerWorkspaceBinding;
 
     const target = debuggerModel.target();
-    this.regularProject = new ContentProviderBasedProject(
+    this.#regularProject = new ContentProviderBasedProject(
         workspace, 'jsSourceMaps::' + target.id(), Workspace.Workspace.projectTypes.Network, '',
         false /* isServiceProject */);
-    this.contentScriptsProject = new ContentProviderBasedProject(
+    this.#contentScriptsProject = new ContentProviderBasedProject(
         workspace, 'jsSourceMaps:extensions:' + target.id(), Workspace.Workspace.projectTypes.ContentScripts, '',
         false /* isServiceProject */);
-    NetworkProject.setTargetForProject(this.regularProject, target);
-    NetworkProject.setTargetForProject(this.contentScriptsProject, target);
+    NetworkProject.setTargetForProject(this.#regularProject, target);
+    NetworkProject.setTargetForProject(this.#contentScriptsProject, target);
 
-    this.regularBindings = new Map();
-    this.contentScriptsBindings = new Map();
+    this.#regularBindings = new Map();
+    this.#contentScriptsBindings = new Map();
 
-    this.stubUISourceCodes = new Map();
+    this.#stubUISourceCodes = new Map();
 
-    this.stubProject = new ContentProviderBasedProject(
+    this.#stubProject = new ContentProviderBasedProject(
         workspace, 'jsSourceMaps:stub:' + target.id(), Workspace.Workspace.projectTypes.Service, '',
         true /* isServiceProject */);
-    this.eventListeners = [
-      this.sourceMapManager.addEventListener(
-          SDK.SourceMapManager.Events.SourceMapWillAttach,
-          event => {
-            this.sourceMapWillAttach(event);
-          },
-          this),
-      this.sourceMapManager.addEventListener(
-          SDK.SourceMapManager.Events.SourceMapFailedToAttach,
-          event => {
-            this.sourceMapFailedToAttach(event);
-          },
-          this),
-      this.sourceMapManager.addEventListener(
-          SDK.SourceMapManager.Events.SourceMapAttached,
-          event => {
-            this.sourceMapAttached(event);
-          },
-          this),
-      this.sourceMapManager.addEventListener(
-          SDK.SourceMapManager.Events.SourceMapDetached,
-          event => {
-            this.sourceMapDetached(event);
-          },
-          this),
-      this.workspace.addEventListener(
+    this.#eventListeners = [
+      this.#sourceMapManager.addEventListener(
+          SDK.SourceMapManager.Events.SourceMapWillAttach, this.sourceMapWillAttach, this),
+      this.#sourceMapManager.addEventListener(
+          SDK.SourceMapManager.Events.SourceMapFailedToAttach, this.sourceMapFailedToAttach, this),
+      this.#sourceMapManager.addEventListener(
+          SDK.SourceMapManager.Events.SourceMapAttached, this.sourceMapAttached, this),
+      this.#sourceMapManager.addEventListener(
+          SDK.SourceMapManager.Events.SourceMapDetached, this.sourceMapDetached, this),
+      this.#workspace.addEventListener(
           Workspace.Workspace.Events.UISourceCodeAdded,
           event => {
             this.onUiSourceCodeAdded(event);
@@ -110,32 +96,32 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
     ];
   }
 
-  private onUiSourceCodeAdded(event: Common.EventTarget.EventTargetEvent): void {
-    const uiSourceCode = event.data as Workspace.UISourceCode.UISourceCode;
+  private onUiSourceCodeAdded(event: Common.EventTarget.EventTargetEvent<Workspace.UISourceCode.UISourceCode>): void {
+    const uiSourceCode = event.data;
     if (uiSourceCode.contentType().isDocument()) {
-      for (const script of this.debuggerModel.scriptsForSourceURL(uiSourceCode.url())) {
-        this.debuggerWorkspaceBinding.updateLocations(script);
+      for (const script of this.#debuggerModel.scriptsForSourceURL(uiSourceCode.url())) {
+        void this.#debuggerWorkspaceBinding.updateLocations(script);
       }
     }
   }
 
   private addStubUISourceCode(script: SDK.Script.Script): void {
-    const stubUISourceCode = this.stubProject.addContentProvider(
-        script.sourceURL + ':sourcemap',
+    const stubUISourceCode = this.#stubProject.addContentProvider(
+        Common.ParsedURL.ParsedURL.concatenate(script.sourceURL, ':sourcemap'),
         TextUtils.StaticContentProvider.StaticContentProvider.fromString(
             script.sourceURL, Common.ResourceType.resourceTypes.Script,
             '\n\n\n\n\n// Please wait a bit.\n// Compiled script is not shown while source map is being loaded!'),
         'text/javascript');
-    this.stubUISourceCodes.set(script, stubUISourceCode);
+    this.#stubUISourceCodes.set(script, stubUISourceCode);
   }
 
   private async removeStubUISourceCode(script: SDK.Script.Script): Promise<void> {
-    const uiSourceCode = this.stubUISourceCodes.get(script);
-    this.stubUISourceCodes.delete(script);
+    const uiSourceCode = this.#stubUISourceCodes.get(script);
+    this.#stubUISourceCodes.delete(script);
     if (uiSourceCode) {
-      this.stubProject.removeFile(uiSourceCode.url());
+      this.#stubProject.removeFile(uiSourceCode.url());
     }
-    await this.debuggerWorkspaceBinding.updateLocations(script);
+    await this.#debuggerWorkspaceBinding.updateLocations(script);
   }
 
   static uiSourceCodeOrigin(uiSourceCode: Workspace.UISourceCode.UISourceCode): string[] {
@@ -146,20 +132,39 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
     return [];
   }
 
-  mapsToSourceCode(rawLocation: SDK.DebuggerModel.Location): boolean {
+  getLocationRangesForSameSourceLocation(rawLocation: SDK.DebuggerModel.Location): RawLocationRange[] {
+    const debuggerModel = rawLocation.debuggerModel;
     const script = rawLocation.script();
-    const sourceMap = script ? this.sourceMapManager.sourceMapForClient(script) : null;
-    if (!sourceMap) {
-      return true;
+    if (!script) {
+      return [];
     }
+    const sourceMap = this.#sourceMapManager.sourceMapForClient(script);
+    if (!sourceMap) {
+      return [];
+    }
+
+    // Find the source location for the raw location.
     const entry = sourceMap.findEntry(rawLocation.lineNumber, rawLocation.columnNumber);
-    return entry !== null && entry.lineNumber === rawLocation.lineNumber &&
-        entry.columnNumber === rawLocation.columnNumber;
+    if (!entry || !entry.sourceURL) {
+      return [];
+    }
+
+    // Map the source location back to raw location ranges.
+    const ranges = sourceMap.findReverseRanges(entry.sourceURL, entry.sourceLineNumber, entry.sourceColumnNumber);
+    return ranges.map(textRangeToLocationRange);
+
+    function textRangeToLocationRange(t: TextUtils.TextRange.TextRange): RawLocationRange {
+      return {
+        start: debuggerModel.createRawLocation(script as SDK.Script.Script, t.startLine, t.startColumn),
+        end: debuggerModel.createRawLocation(script as SDK.Script.Script, t.endLine, t.endColumn),
+      };
+    }
   }
 
-  uiSourceCodeForURL(url: string, isContentScript: boolean): Workspace.UISourceCode.UISourceCode|null {
-    return isContentScript ? this.contentScriptsProject.uiSourceCodeForURL(url) :
-                             this.regularProject.uiSourceCodeForURL(url);
+  uiSourceCodeForURL(url: Platform.DevToolsPath.UrlString, isContentScript: boolean):
+      Workspace.UISourceCode.UISourceCode|null {
+    return isContentScript ? this.#contentScriptsProject.uiSourceCodeForURL(url) :
+                             this.#regularProject.uiSourceCodeForURL(url);
   }
 
   rawLocationToUILocation(rawLocation: SDK.DebuggerModel.Location): Workspace.UISourceCode.UILocation|null {
@@ -174,12 +179,12 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
       columnNumber -= script.columnOffset;
     }
 
-    const stubUISourceCode = this.stubUISourceCodes.get(script);
+    const stubUISourceCode = this.#stubUISourceCodes.get(script);
     if (stubUISourceCode) {
       return new Workspace.UISourceCode.UILocation(stubUISourceCode, lineNumber, columnNumber);
     }
 
-    const sourceMap = this.sourceMapManager.sourceMapForClient(script);
+    const sourceMap = this.#sourceMapManager.sourceMapForClient(script);
     if (!sourceMap) {
       return null;
     }
@@ -187,8 +192,8 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
     if (!entry || !entry.sourceURL) {
       return null;
     }
-    const uiSourceCode = script.isContentScript() ? this.contentScriptsProject.uiSourceCodeForURL(entry.sourceURL) :
-                                                    this.regularProject.uiSourceCodeForURL(entry.sourceURL);
+    const uiSourceCode = script.isContentScript() ? this.#contentScriptsProject.uiSourceCodeForURL(entry.sourceURL) :
+                                                    this.#regularProject.uiSourceCodeForURL(entry.sourceURL);
     if (!uiSourceCode) {
       return null;
     }
@@ -208,8 +213,8 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
       if (!entry) {
         continue;
       }
-      for (const script of this.sourceMapManager.clientsForSourceMap(sourceMap)) {
-        locations.push(this.debuggerModel.createRawLocation(
+      for (const script of this.#sourceMapManager.clientsForSourceMap(sourceMap)) {
+        locations.push(this.#debuggerModel.createRawLocation(
             script, entry.lineNumber + script.lineOffset,
             !entry.lineNumber ? entry.columnNumber + script.columnOffset : entry.columnNumber));
       }
@@ -217,21 +222,25 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
     return locations;
   }
 
-  private async sourceMapWillAttach(event: Common.EventTarget.EventTargetEvent): Promise<void> {
-    const script = (event.data as SDK.Script.Script);
+  private async sourceMapWillAttach(event: Common.EventTarget.EventTargetEvent<{client: SDK.Script.Script}>):
+      Promise<void> {
+    const script = event.data.client;
     // Create stub UISourceCode for the time source mapping is being loaded.
     this.addStubUISourceCode(script);
-    await this.debuggerWorkspaceBinding.updateLocations(script);
+    await this.#debuggerWorkspaceBinding.updateLocations(script);
   }
 
-  private async sourceMapFailedToAttach(event: Common.EventTarget.EventTargetEvent): Promise<void> {
-    const script = (event.data as SDK.Script.Script);
+  private async sourceMapFailedToAttach(event: Common.EventTarget.EventTargetEvent<{client: SDK.Script.Script}>):
+      Promise<void> {
+    const script = event.data.client;
     await this.removeStubUISourceCode(script);
   }
 
-  private async sourceMapAttached(event: Common.EventTarget.EventTargetEvent): Promise<void> {
-    const script = (event.data.client as SDK.Script.Script);
-    const sourceMap = (event.data.sourceMap as SDK.SourceMap.SourceMap);
+  private async sourceMapAttached(
+      event: Common.EventTarget.EventTargetEvent<{client: SDK.Script.Script, sourceMap: SDK.SourceMap.SourceMap}>):
+      Promise<void> {
+    const script = event.data.client;
+    const sourceMap = event.data.sourceMap;
     await this.removeStubUISourceCode(script);
 
     if (IgnoreListManager.instance().isIgnoreListedURL(script.sourceURL, script.isContentScript())) {
@@ -243,10 +252,12 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
     this.sourceMapAttachedForTest(sourceMap);
   }
 
-  private async sourceMapDetached(event: Common.EventTarget.EventTargetEvent): Promise<void> {
-    const script = (event.data.client as SDK.Script.Script);
-    const sourceMap = (event.data.sourceMap as SDK.SourceMap.SourceMap);
-    const bindings = script.isContentScript() ? this.contentScriptsBindings : this.regularBindings;
+  private async sourceMapDetached(
+      event: Common.EventTarget.EventTargetEvent<{client: SDK.Script.Script, sourceMap: SDK.SourceMap.SourceMap}>):
+      Promise<void> {
+    const script = event.data.client;
+    const sourceMap = event.data.sourceMap;
+    const bindings = script.isContentScript() ? this.#contentScriptsBindings : this.#regularBindings;
     for (const sourceURL of sourceMap.sourceURLs()) {
       const binding = bindings.get(sourceURL);
       if (binding) {
@@ -256,11 +267,11 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
         }
       }
     }
-    await this.debuggerWorkspaceBinding.updateLocations(script);
+    await this.#debuggerWorkspaceBinding.updateLocations(script);
   }
 
   sourceMapForScript(script: SDK.Script.Script): SDK.SourceMap.SourceMap|null {
-    return this.sourceMapManager.sourceMapForClient(script);
+    return this.#sourceMapManager.sourceMapForClient(script);
   }
 
   scriptsForUISourceCode(uiSourceCode: Workspace.UISourceCode.UISourceCode): SDK.Script.Script[] {
@@ -271,7 +282,7 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
 
     const scripts: SDK.Script.Script[] = [];
     for (const sourceMap of binding.getReferringSourceMaps()) {
-      this.sourceMapManager.clientsForSourceMap(sourceMap).forEach(script => scripts.push(script));
+      this.#sourceMapManager.clientsForSourceMap(sourceMap).forEach(script => scripts.push(script));
     }
     return scripts;
   }
@@ -280,8 +291,8 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
   }
 
   private async populateSourceMapSources(script: SDK.Script.Script, sourceMap: SDK.SourceMap.SourceMap): Promise<void> {
-    const project = script.isContentScript() ? this.contentScriptsProject : this.regularProject;
-    const bindings = script.isContentScript() ? this.contentScriptsBindings : this.regularBindings;
+    const project = script.isContentScript() ? this.#contentScriptsProject : this.#regularProject;
+    const bindings = script.isContentScript() ? this.#contentScriptsBindings : this.#regularBindings;
     for (const sourceURL of sourceMap.sourceURLs()) {
       let binding = bindings.get(sourceURL);
       if (!binding) {
@@ -290,7 +301,7 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
       }
       binding.addSourceMap(sourceMap, script.frameId);
     }
-    await this.debuggerWorkspaceBinding.updateLocations(script);
+    await this.#debuggerWorkspaceBinding.updateLocations(script);
   }
 
   static uiLineHasMapping(uiSourceCode: Workspace.UISourceCode.UISourceCode, lineNumber: number): boolean {
@@ -307,55 +318,54 @@ export class CompilerScriptMapping implements DebuggerSourceMapping {
   }
 
   dispose(): void {
-    Common.EventTarget.removeEventListeners(this.eventListeners);
-    this.regularProject.dispose();
-    this.contentScriptsProject.dispose();
-    this.stubProject.dispose();
+    Common.EventTarget.removeEventListeners(this.#eventListeners);
+    this.#regularProject.dispose();
+    this.#contentScriptsProject.dispose();
+    this.#stubProject.dispose();
   }
 }
 
 const uiSourceCodeToBinding = new WeakMap<Workspace.UISourceCode.UISourceCode, Binding>();
 
 class Binding {
-  private readonly project: ContentProviderBasedProject;
-  private readonly url: string;
+  readonly #project: ContentProviderBasedProject;
+  readonly #url: Platform.DevToolsPath.UrlString;
   referringSourceMaps: SDK.SourceMap.SourceMap[];
-  private readonly activeSourceMap?: SDK.SourceMap.SourceMap|null;
   uiSourceCode: Workspace.UISourceCode.UISourceCode|null;
 
-  constructor(project: ContentProviderBasedProject, url: string) {
-    this.project = project;
-    this.url = url;
+  constructor(project: ContentProviderBasedProject, url: Platform.DevToolsPath.UrlString) {
+    this.#project = project;
+    this.#url = url;
 
     this.referringSourceMaps = [];
     this.uiSourceCode = null;
   }
 
-  private recreateUISourceCodeIfNeeded(frameId: string): void {
+  private recreateUISourceCodeIfNeeded(frameId: Protocol.Page.FrameId): void {
     const sourceMap = this.referringSourceMaps[this.referringSourceMaps.length - 1];
 
     const newUISourceCode =
-        this.project.createUISourceCode(this.url, Common.ResourceType.resourceTypes.SourceMapScript);
+        this.#project.createUISourceCode(this.#url, Common.ResourceType.resourceTypes.SourceMapScript);
     uiSourceCodeToBinding.set(newUISourceCode, this);
     const contentProvider =
-        sourceMap.sourceContentProvider(this.url, Common.ResourceType.resourceTypes.SourceMapScript);
-    const mimeType = Common.ResourceType.ResourceType.mimeFromURL(this.url) || 'text/javascript';
-    const embeddedContent = sourceMap.embeddedContentByURL(this.url);
+        sourceMap.sourceContentProvider(this.#url, Common.ResourceType.resourceTypes.SourceMapScript);
+    const mimeType = Common.ResourceType.ResourceType.mimeFromURL(this.#url) || 'text/javascript';
+    const embeddedContent = sourceMap.embeddedContentByURL(this.#url);
     const metadata = typeof embeddedContent === 'string' ?
         new Workspace.UISourceCode.UISourceCodeMetadata(null, embeddedContent.length) :
         null;
 
     if (this.uiSourceCode) {
       NetworkProject.cloneInitialFrameAttribution(this.uiSourceCode, newUISourceCode);
-      this.project.removeFile(this.uiSourceCode.url());
+      this.#project.removeFile(this.uiSourceCode.url());
     } else {
       NetworkProject.setInitialFrameAttribution(newUISourceCode, frameId);
     }
     this.uiSourceCode = newUISourceCode;
-    this.project.addUISourceCodeWithProvider(this.uiSourceCode, contentProvider, metadata, mimeType);
+    this.#project.addUISourceCodeWithProvider(this.uiSourceCode, contentProvider, metadata, mimeType);
   }
 
-  addSourceMap(sourceMap: SDK.SourceMap.SourceMap, frameId: string): void {
+  addSourceMap(sourceMap: SDK.SourceMap.SourceMap, frameId: Protocol.Page.FrameId): void {
     if (this.uiSourceCode) {
       NetworkProject.addFrameAttribution(this.uiSourceCode, frameId);
     }
@@ -363,7 +373,7 @@ class Binding {
     this.recreateUISourceCodeIfNeeded(frameId);
   }
 
-  removeSourceMap(sourceMap: SDK.SourceMap.SourceMap, frameId: string): void {
+  removeSourceMap(sourceMap: SDK.SourceMap.SourceMap, frameId: Protocol.Page.FrameId): void {
     const uiSourceCode = (this.uiSourceCode as Workspace.UISourceCode.UISourceCode);
     NetworkProject.removeFrameAttribution(uiSourceCode, frameId);
     const lastIndex = this.referringSourceMaps.lastIndexOf(sourceMap);
@@ -371,7 +381,7 @@ class Binding {
       this.referringSourceMaps.splice(lastIndex, 1);
     }
     if (!this.referringSourceMaps.length) {
-      this.project.removeFile(uiSourceCode.url());
+      this.#project.removeFile(uiSourceCode.url());
       this.uiSourceCode = null;
     } else {
       this.recreateUISourceCodeIfNeeded(frameId);

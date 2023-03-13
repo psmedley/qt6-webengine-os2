@@ -10,6 +10,7 @@
 
 #include "base/barrier_closure.h"
 #include "base/location.h"
+#include "base/run_loop.h"
 #include "base/sequence_checker.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/scoped_blocking_call.h"
@@ -39,7 +40,7 @@ std::ostream& operator<<(std::ostream& os, const CpuCoreSpeedInfo& info) {
 
 ComputePressureHostSync::ComputePressureHostSync(
     blink::mojom::ComputePressureHost* host)
-    : host_(host) {
+    : host_(*host) {
   DCHECK(host);
 }
 
@@ -50,12 +51,12 @@ blink::mojom::ComputePressureStatus ComputePressureHostSync::AddObserver(
     mojo::PendingRemote<blink::mojom::ComputePressureObserver> observer) {
   blink::mojom::ComputePressureStatus result;
   base::RunLoop run_loop;
-  host_->AddObserver(std::move(observer), quantization.Clone(),
-                     base::BindLambdaForTesting(
-                         [&](blink::mojom::ComputePressureStatus status) {
-                           result = status;
-                           run_loop.Quit();
-                         }));
+  host_.AddObserver(std::move(observer), quantization.Clone(),
+                    base::BindLambdaForTesting(
+                        [&](blink::mojom::ComputePressureStatus status) {
+                          result = status;
+                          run_loop.Quit();
+                        }));
   run_loop.Run();
   return result;
 }

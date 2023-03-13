@@ -10,11 +10,11 @@
 
 #include "base/feature_list.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
+#include "crypto/crypto_buildflags.h"
+#include "net/base/hash_value.h"
 #include "net/base/net_export.h"
-#include "net/cert/x509_cert_types.h"
 
 namespace net {
 
@@ -66,18 +66,34 @@ class NET_EXPORT CertVerifyProc
     kMaxValue = kChainLengthOne
   };
 
-#if !(defined(OS_FUCHSIA) || defined(OS_OS2) || defined(OS_LINUX) || defined(OS_CHROMEOS))
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
+  enum class EKUStatus {
+    kInvalid = 0,
+    kNoEKU = 1,
+    kAnyEKU = 2,
+    kServerAuthOnly = 3,
+    kServerAuthAndClientAuthOnly = 4,
+    kServerAuthAndOthers = 5,
+    kOther = 6,
+    kMaxValue = kOther
+  };
+
+#if !(BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)))
   // Creates and returns a CertVerifyProc that uses the system verifier.
   // |cert_net_fetcher| may not be used, depending on the implementation.
   static scoped_refptr<CertVerifyProc> CreateSystemVerifyProc(
       scoped_refptr<CertNetFetcher> cert_net_fetcher);
 #endif
 
-#if defined(OS_FUCHSIA) || defined(USE_NSS_CERTS) || defined(OS_MAC) || defined(OS_OS2)
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(USE_NSS_CERTS) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_OS2)
   // Creates and returns a CertVerifyProcBuiltin using the SSL SystemTrustStore.
   static scoped_refptr<CertVerifyProc> CreateBuiltinVerifyProc(
       scoped_refptr<CertNetFetcher> cert_net_fetcher);
 #endif
+
+  CertVerifyProc(const CertVerifyProc&) = delete;
+  CertVerifyProc& operator=(const CertVerifyProc&) = delete;
 
   // Verifies the certificate against the given hostname as an SSL server
   // certificate. Returns OK if successful or an error code upon failure.
@@ -200,8 +216,6 @@ class NET_EXPORT CertVerifyProc
   // Feature flag affecting the Legacy Symantec PKI deprecation, documented
   // at https://g.co/chrome/symantecpkicerts
   static const base::Feature kLegacySymantecPKIEnforcement;
-
-  DISALLOW_COPY_AND_ASSIGN(CertVerifyProc);
 };
 
 }  // namespace net

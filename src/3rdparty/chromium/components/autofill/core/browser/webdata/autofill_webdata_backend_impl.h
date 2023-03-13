@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/observer_list.h"
@@ -58,12 +57,13 @@ class AutofillWebDataBackendImpl
       const base::RepeatingCallback<void(syncer::ModelType)>&
           on_sync_started_callback);
 
+  AutofillWebDataBackendImpl(const AutofillWebDataBackendImpl&) = delete;
+  AutofillWebDataBackendImpl& operator=(const AutofillWebDataBackendImpl&) =
+      delete;
+
   void SetAutofillProfileChangedCallback(
       base::RepeatingCallback<void(const AutofillProfileDeepChange&)>
           change_cb);
-  void SetCardArtImagesChangedCallback(
-      base::RepeatingCallback<void(const std::vector<std::string>&)>
-          on_card_art_image_change_callback);
 
   // AutofillWebDataBackend implementation.
   void AddObserver(
@@ -77,8 +77,6 @@ class AutofillWebDataBackendImpl
   void NotifyOfMultipleAutofillChanges() override;
   void NotifyOfAddressConversionCompleted() override;
   void NotifyThatSyncHasStarted(syncer::ModelType model_type) override;
-  void NotifyOfCreditCardArtImagesChanged(
-      const std::vector<std::string>& server_ids) override;
   void CommitChanges() override;
 
   // Returns a SupportsUserData object that may be used to store data accessible
@@ -241,10 +239,12 @@ class AutofillWebDataBackendImpl
   class SupportsUserDataAggregatable : public base::SupportsUserData {
    public:
     SupportsUserDataAggregatable() {}
-    ~SupportsUserDataAggregatable() override {}
 
-   private:
-    DISALLOW_COPY_AND_ASSIGN(SupportsUserDataAggregatable);
+    SupportsUserDataAggregatable(const SupportsUserDataAggregatable&) = delete;
+    SupportsUserDataAggregatable& operator=(
+        const SupportsUserDataAggregatable&) = delete;
+
+    ~SupportsUserDataAggregatable() override {}
   };
 
   // The task runner that this class uses for its UI tasks.
@@ -267,10 +267,6 @@ class AutofillWebDataBackendImpl
   base::RepeatingCallback<void(syncer::ModelType)> on_sync_started_callback_;
   base::RepeatingCallback<void(const AutofillProfileDeepChange&)>
       on_autofill_profile_changed_cb_;
-  base::RepeatingCallback<void(const std::vector<std::string>&)>
-      on_card_art_image_change_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(AutofillWebDataBackendImpl);
 };
 
 }  // namespace autofill

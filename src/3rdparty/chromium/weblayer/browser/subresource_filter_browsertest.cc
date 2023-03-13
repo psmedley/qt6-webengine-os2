@@ -29,7 +29,7 @@
 #include "weblayer/test/subresource_filter_browser_test_harness.h"
 #include "weblayer/test/weblayer_browser_test_utils.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "components/infobars/android/infobar_android.h"  // nogncheck
 #include "components/infobars/content/content_infobar_manager.h"
 #include "components/infobars/core/infobar_manager.h"  // nogncheck
@@ -46,7 +46,7 @@ const char kTimeSinceAdsInterventionTriggeredHistogram[] =
     "TimeSinceLastActiveAdsIntervention";
 const char kSubresourceFilterActionsHistogram[] = "SubresourceFilter.Actions2";
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 class TestInfoBarManagerObserver : public infobars::InfoBarManager::Observer {
  public:
   TestInfoBarManagerObserver() = default;
@@ -73,7 +73,7 @@ class TestInfoBarManagerObserver : public infobars::InfoBarManager::Observer {
   base::OnceClosure on_infobar_added_callback_;
   base::OnceClosure on_infobar_removed_callback_;
 };
-#endif  // if defined(OS_ANDROID)
+#endif  // if BUILDFLAG(IS_ANDROID)
 
 }  // namespace
 
@@ -110,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest, RulesArePublished) {
 // currently has a safe browsing database available in production only on
 // Android; the safe browsing database being non-null is a prerequisite for
 // subresource filter operation.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 
 // Tests that page activation state is computed as part of a pageload.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
@@ -175,7 +175,8 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   EXPECT_TRUE(page_activation);
   EXPECT_EQ(subresource_filter::mojom::ActivationLevel::kEnabled,
             page_activation.value());
-  EXPECT_FALSE(console_observer.messages().empty());
+
+  console_observer.Wait();
 
   // ... but it should not have blocked the subframe from being loaded.
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
@@ -299,7 +300,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterBrowserTest,
   EXPECT_TRUE(console_observer.messages().empty());
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // Test that the ads blocked infobar is presented when visiting a page where the
 // subresource filter blocks resources from being loaded and is removed when
 // navigating away.
@@ -550,14 +551,14 @@ IN_PROC_BROWSER_TEST_F(
   // Advance the clock by less than kAdsInterventionDuration and trigger another
   // intervention. This intervention is a no-op.
   test_clock->Advance(subresource_filter::kAdsInterventionDuration.Get() -
-                      base::TimeDelta::FromMinutes(30));
+                      base::Minutes(30));
   GetPrimaryPageThrottleManager()->OnAdsViolationTriggered(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
 
   // Advance the clock to to kAdsInterventionDuration from the first
   // intervention, this clear the intervention.
-  test_clock->Advance(base::TimeDelta::FromMinutes(30));
+  test_clock->Advance(base::Minutes(30));
   NavigateAndWaitForCompletion(url, shell());
 
   EXPECT_TRUE(WasParsedScriptElementLoaded(web_contents->GetMainFrame()));
@@ -630,7 +631,7 @@ IN_PROC_BROWSER_TEST_F(
       web_contents->GetMainFrame(),
       subresource_filter::mojom::AdsViolation::kMobileAdDensityByHeightAbove30);
 
-  const base::TimeDelta kRenavigationDelay = base::TimeDelta::FromHours(2);
+  const base::TimeDelta kRenavigationDelay = base::Hours(2);
   test_clock->Advance(kRenavigationDelay);
   NavigateAndWaitForCompletion(url, shell());
 

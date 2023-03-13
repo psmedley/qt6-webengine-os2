@@ -25,8 +25,7 @@ int64_t TimeToProtoTime(const base::Time t) {
 
 // Converts a time field from sync protobufs to a time object.
 base::Time ProtoTimeToTime(int64_t proto_t) {
-  return base::Time::FromDeltaSinceWindowsEpoch(
-      base::TimeDelta::FromMicroseconds(proto_t));
+  return base::Time::FromDeltaSinceWindowsEpoch(base::Microseconds(proto_t));
 }
 
 }  // namespace
@@ -50,13 +49,11 @@ SendTabToSelfEntry::SendTabToSelfEntry(
       opened_(false) {
   DCHECK(!guid_.empty());
   DCHECK(url_.is_valid());
-  DCHECK(base::IsStringUTF8(guid_));
-  DCHECK(base::IsStringUTF8(title_));
-  DCHECK(base::IsStringUTF8(target_device_sync_cache_guid_));
-  DCHECK(base::IsStringUTF8(device_name_));
 }
 
 SendTabToSelfEntry::~SendTabToSelfEntry() {}
+
+SendTabToSelfEntry::SendTabToSelfEntry(const SendTabToSelfEntry&) = default;
 
 const std::string& SendTabToSelfEntry::GetGUID() const {
   return guid_;

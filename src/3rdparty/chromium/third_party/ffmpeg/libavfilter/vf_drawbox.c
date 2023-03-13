@@ -25,6 +25,8 @@
  * that needs to write in the input frame.
  */
 
+#include "config_components.h"
+
 #include "libavutil/colorspace.h"
 #include "libavutil/common.h"
 #include "libavutil/opt.h"
@@ -183,21 +185,14 @@ static av_cold int init(AVFilterContext *ctx)
     return 0;
 }
 
-static int query_formats(AVFilterContext *ctx)
-{
-    static const enum AVPixelFormat pix_fmts[] = {
-        AV_PIX_FMT_YUV444P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV420P,
-        AV_PIX_FMT_YUV411P,  AV_PIX_FMT_YUV410P,
-        AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ420P,
-        AV_PIX_FMT_YUV440P,  AV_PIX_FMT_YUVJ440P,
-        AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
-        AV_PIX_FMT_NONE
-    };
-    AVFilterFormats *fmts_list = ff_make_format_list(pix_fmts);
-    if (!fmts_list)
-        return AVERROR(ENOMEM);
-    return ff_set_common_formats(ctx, fmts_list);
-}
+static const enum AVPixelFormat pix_fmts[] = {
+    AV_PIX_FMT_YUV444P,  AV_PIX_FMT_YUV422P,  AV_PIX_FMT_YUV420P,
+    AV_PIX_FMT_YUV411P,  AV_PIX_FMT_YUV410P,
+    AV_PIX_FMT_YUVJ444P, AV_PIX_FMT_YUVJ422P, AV_PIX_FMT_YUVJ420P,
+    AV_PIX_FMT_YUV440P,  AV_PIX_FMT_YUVJ440P,
+    AV_PIX_FMT_YUVA420P, AV_PIX_FMT_YUVA422P, AV_PIX_FMT_YUVA444P,
+    AV_PIX_FMT_NONE
+};
 
 static int config_input(AVFilterLink *inlink)
 {
@@ -387,11 +382,10 @@ static const AVFilterPad drawbox_inputs[] = {
     {
         .name           = "default",
         .type           = AVMEDIA_TYPE_VIDEO,
+        .flags          = AVFILTERPAD_FLAG_NEEDS_WRITABLE,
         .config_props   = config_input,
         .filter_frame   = filter_frame,
-        .needs_writable = 1,
     },
-    { NULL }
 };
 
 static const AVFilterPad drawbox_outputs[] = {
@@ -399,7 +393,6 @@ static const AVFilterPad drawbox_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_drawbox = {
@@ -408,9 +401,9 @@ const AVFilter ff_vf_drawbox = {
     .priv_size     = sizeof(DrawBoxContext),
     .priv_class    = &drawbox_class,
     .init          = init,
-    .query_formats = query_formats,
-    .inputs        = drawbox_inputs,
-    .outputs       = drawbox_outputs,
+    FILTER_INPUTS(drawbox_inputs),
+    FILTER_OUTPUTS(drawbox_outputs),
+    FILTER_PIXFMTS_ARRAY(pix_fmts),
     .process_command = process_command,
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };
@@ -471,11 +464,10 @@ static const AVFilterPad drawgrid_inputs[] = {
     {
         .name           = "default",
         .type           = AVMEDIA_TYPE_VIDEO,
+        .flags          = AVFILTERPAD_FLAG_NEEDS_WRITABLE,
         .config_props   = config_input,
         .filter_frame   = drawgrid_filter_frame,
-        .needs_writable = 1,
     },
-    { NULL }
 };
 
 static const AVFilterPad drawgrid_outputs[] = {
@@ -483,7 +475,6 @@ static const AVFilterPad drawgrid_outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_VIDEO,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_drawgrid = {
@@ -492,9 +483,9 @@ const AVFilter ff_vf_drawgrid = {
     .priv_size     = sizeof(DrawBoxContext),
     .priv_class    = &drawgrid_class,
     .init          = init,
-    .query_formats = query_formats,
-    .inputs        = drawgrid_inputs,
-    .outputs       = drawgrid_outputs,
+    FILTER_INPUTS(drawgrid_inputs),
+    FILTER_OUTPUTS(drawgrid_outputs),
+    FILTER_PIXFMTS_ARRAY(pix_fmts),
     .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
     .process_command = process_command,
 };

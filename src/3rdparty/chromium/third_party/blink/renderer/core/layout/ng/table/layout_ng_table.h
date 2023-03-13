@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_TABLE_LAYOUT_NG_TABLE_H_
 
 #include "base/dcheck_is_on.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/layout_ng_block.h"
 #include "third_party/blink/renderer/core/layout/ng/table/layout_ng_table_interface.h"
@@ -35,6 +36,7 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGBlock,
                                   public LayoutNGTableInterface {
  public:
   explicit LayoutNGTable(Element*);
+  ~LayoutNGTable() override;
 
   // TODO(atotic) Replace all H/VBorderSpacing with BorderSpacing?
   LogicalSize BorderSpacing() const {
@@ -162,18 +164,8 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGBlock,
     return StyleRef().BorderCollapse() == EBorderCollapse::kCollapse;
   }
 
-  bool HasCollapsedBorders() const final;
+  bool HasCollapsedBorders() const;
 
-  bool HasColElements() const final {
-    NOTREACHED();
-    return false;
-  }
-
-  bool IsFixedTableLayout() const final {
-    NOT_DESTROYED();
-    return StyleRef().TableLayout() == ETableLayout::kFixed &&
-           !StyleRef().LogicalWidth().IsAuto();
-  }
   int16_t HBorderSpacing() const final {
     NOT_DESTROYED();
     return ShouldCollapseBorders() ? 0 : StyleRef().HorizontalBorderSpacing();
@@ -187,18 +179,20 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGBlock,
       unsigned absolute_column_index) const final;
 
   // NG does not need this method. Sections are not cached.
-  void RecalcSectionsIfNeeded() const final {}
+  void RecalcSectionsIfNeeded() const final { NOT_DESTROYED(); }
 
   // Not used by NG. Legacy caches sections.
   void ForceSectionsRecalc() final { NOT_DESTROYED(); }
 
   // Used in paint for printing. Should not be needed by NG.
   LayoutUnit RowOffsetFromRepeatingFooter() const final {
+    NOT_DESTROYED();
     NOTIMPLEMENTED();  // OK, never used.
     return LayoutUnit();
   }
   // Used in paint for printing. Should not be needed by NG.
   LayoutUnit RowOffsetFromRepeatingHeader() const final {
+    NOT_DESTROYED();
     NOTIMPLEMENTED();  // OK, never used.
     return LayoutUnit();
   }
@@ -215,16 +209,19 @@ class CORE_EXPORT LayoutNGTable : public LayoutNGBlock,
 
   // Following methods are called during printing, not in TablesNG.
   LayoutNGTableSectionInterface* TopNonEmptySectionInterface() const final {
+    NOT_DESTROYED();
     NOTREACHED();
     return nullptr;
   }
 
   LayoutNGTableSectionInterface* BottomSectionInterface() const final {
+    NOT_DESTROYED();
     NOTREACHED();
     return nullptr;
   }
 
   LayoutNGTableSectionInterface* BottomNonEmptySectionInterface() const final {
+    NOT_DESTROYED();
     NOTREACHED();
     return nullptr;
   }

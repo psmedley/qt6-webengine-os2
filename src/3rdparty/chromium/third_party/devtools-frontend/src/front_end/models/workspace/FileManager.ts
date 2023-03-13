@@ -30,15 +30,17 @@
 
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
+import type * as Platform from '../../core/platform/platform.js';
 
 let fileManagerInstance: FileManager|null;
 
 interface SaveCallbackParam {
-  fileSystemPath?: string;
+  fileSystemPath?: Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString;
 }
 
-export class FileManager extends Common.ObjectWrapper.ObjectWrapper {
-  private readonly saveCallbacks: Map<string, (arg0: SaveCallbackParam|null) => void>;
+export class FileManager extends Common.ObjectWrapper.ObjectWrapper<EventTypes> {
+  private readonly saveCallbacks:
+      Map<Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString, (arg0: SaveCallbackParam|null) => void>;
   private constructor() {
     super();
     this.saveCallbacks = new Map();
@@ -59,24 +61,24 @@ export class FileManager extends Common.ObjectWrapper.ObjectWrapper {
     return fileManagerInstance;
   }
 
-  save(url: string, content: string, forceSaveAs: boolean): Promise<SaveCallbackParam|null> {
+  save(url: Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString, content: string, forceSaveAs: boolean):
+      Promise<SaveCallbackParam|null> {
     // Remove this url from the saved URLs while it is being saved.
     const result = new Promise<SaveCallbackParam|null>(resolve => this.saveCallbacks.set(url, resolve));
     Host.InspectorFrontendHost.InspectorFrontendHostInstance.save(url, content, forceSaveAs);
     return result;
   }
 
-  private savedURL(event: Common.EventTarget.EventTargetEvent): void {
-    const url = event.data.url as string;
+  private savedURL(event: Common.EventTarget.EventTargetEvent<Host.InspectorFrontendHostAPI.SavedURLEvent>): void {
+    const {url, fileSystemPath} = event.data;
     const callback = this.saveCallbacks.get(url);
     this.saveCallbacks.delete(url);
     if (callback) {
-      callback({fileSystemPath: event.data.fileSystemPath as string});
+      callback({fileSystemPath});
     }
   }
 
-  private canceledSavedURL(event: Common.EventTarget.EventTargetEvent): void {
-    const url = event.data as string;
+  private canceledSavedURL({data: url}: Common.EventTarget.EventTargetEvent<Platform.DevToolsPath.UrlString>): void {
     const callback = this.saveCallbacks.get(url);
     this.saveCallbacks.delete(url);
     if (callback) {
@@ -84,16 +86,15 @@ export class FileManager extends Common.ObjectWrapper.ObjectWrapper {
     }
   }
 
-  append(url: string, content: string): void {
+  append(url: Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString, content: string): void {
     Host.InspectorFrontendHost.InspectorFrontendHostInstance.append(url, content);
   }
 
-  close(url: string): void {
+  close(url: Platform.DevToolsPath.RawPathString|Platform.DevToolsPath.UrlString): void {
     Host.InspectorFrontendHost.InspectorFrontendHostInstance.close(url);
   }
 
-  private appendedToURL(event: Common.EventTarget.EventTargetEvent): void {
-    const url = event.data as string;
+  private appendedToURL({data: url}: Common.EventTarget.EventTargetEvent<string>): void {
     this.dispatchEventToListeners(Events.AppendedToURL, url);
   }
 }

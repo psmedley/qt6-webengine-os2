@@ -28,12 +28,12 @@ TEST(WebRequestInfoTest, CreateRequestBodyDataFromFile) {
   request.resource_type =
       static_cast<int>(blink::mojom::ResourceType::kSubResource);
   request.request_body = base::MakeRefCounted<network::ResourceRequestBody>();
-  request.request_body->AppendFileRange(
-      base::FilePath::FromUTF8Unsafe(kFilePath), 0,
-      std::numeric_limits<uint64_t>::max(), base::Time());
-  WebRequestInfo info(
-      WebRequestInfoInitParams(0, 0, 0, nullptr, 0, request, false, false,
-                               false, absl::nullopt, ukm::kInvalidSourceIdObj));
+  request.request_body->AppendFileRange(base::FilePath::FromASCII(kFilePath), 0,
+                                        std::numeric_limits<uint64_t>::max(),
+                                        base::Time());
+  WebRequestInfo info(WebRequestInfoInitParams(0, 0, 0, nullptr, request, false,
+                                               false, false, absl::nullopt,
+                                               ukm::kInvalidSourceIdObj));
   ASSERT_TRUE(info.request_body_data);
   auto* value = info.request_body_data->FindKey(
       extension_web_request_api_constants::kRequestBodyRawKey);
@@ -41,10 +41,10 @@ TEST(WebRequestInfoTest, CreateRequestBodyDataFromFile) {
 
   base::ListValue expected_value;
   auto dict = std::make_unique<base::DictionaryValue>();
-  dict->SetString(extension_web_request_api_constants::kRequestBodyRawFileKey,
-                  kFilePath);
+  dict->SetStringKey(
+      extension_web_request_api_constants::kRequestBodyRawFileKey, kFilePath);
   expected_value.Append(std::move(dict));
-  EXPECT_TRUE(value->Equals(&expected_value));
+  EXPECT_EQ(*value, expected_value);
 }
 
 }  // namespace extensions

@@ -7,13 +7,18 @@
 enum GPUFeatureName {
     "pipeline-statistics-query",
     "texture-compression-bc",
+    "texture-compression-etc2",
+    "texture-compression-astc",
     "timestamp-query",
     "shader-float16",
-    "depth-clamping"
+    "depth-clamping",
+    "depth24unorm-stencil8",
+    "depth32float-stencil8"
 };
 
 [
-    Exposed(Window WebGPU, Worker WebGPU)
+    Exposed(Window WebGPU, DedicatedWorker WebGPU),
+    SecureContext
 ] interface GPUSupportedFeatures {
     readonly setlike<DOMString>;
 };

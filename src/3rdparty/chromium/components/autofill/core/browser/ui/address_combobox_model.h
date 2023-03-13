@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/observer_list.h"
 #include "ui/base/models/combobox_model.h"
 
@@ -30,6 +29,10 @@ class AddressComboboxModel : public ui::ComboboxModel {
   AddressComboboxModel(const PersonalDataManager& personal_data_manager,
                        const std::string& app_locale,
                        const std::string& default_selected_guid);
+
+  AddressComboboxModel(const AddressComboboxModel&) = delete;
+  AddressComboboxModel& operator=(const AddressComboboxModel&) = delete;
+
   ~AddressComboboxModel() override;
 
   // ui::ComboboxModel implementation:
@@ -37,8 +40,6 @@ class AddressComboboxModel : public ui::ComboboxModel {
   std::u16string GetItemAt(int index) const override;
   bool IsItemSeparatorAt(int index) const override;
   int GetDefaultIndex() const override;
-  void AddObserver(ui::ComboboxModelObserver* observer) override;
-  void RemoveObserver(ui::ComboboxModelObserver* observer) override;
 
   // Adds |profile| to model and return its combobox index. The lifespan of
   // |profile| beyond this call is undefined so a copy must be made.
@@ -69,11 +70,6 @@ class AddressComboboxModel : public ui::ComboboxModel {
 
   // If non empty, the guid of the address that should be selected by default.
   std::string default_selected_guid_;
-
-  // To be called when the data for the given country code was loaded.
-  base::ObserverList<ui::ComboboxModelObserver> observers_;
-
-  DISALLOW_COPY_AND_ASSIGN(AddressComboboxModel);
 };
 
 }  // namespace autofill

@@ -16,6 +16,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/hash/hash.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/no_destructor.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
@@ -26,6 +27,7 @@
 #include "base/thread_annotations.h"
 #include "base/threading/sequence_local_storage_slot.h"
 #include "base/trace_event/trace_event.h"
+#include "base/trace_event/typed_macros.h"
 #include "build/build_config.h"
 #include "services/tracing/public/cpp/buildflags.h"
 #include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
@@ -207,7 +209,7 @@ class TracingSamplerProfilerDataSource
  private:
   // TODO(eseckler): Use GUARDED_BY annotations for all members below.
   base::Lock lock_;  // Protects subsequent members.
-  tracing::PerfettoProducer* producer_ GUARDED_BY(lock_) = nullptr;
+  raw_ptr<tracing::PerfettoProducer> producer_ GUARDED_BY(lock_) = nullptr;
   std::set<TracingSamplerProfiler*> profilers_;
   bool is_startup_tracing_ = false;
   bool is_started_ = false;
@@ -368,6 +370,9 @@ base::ModuleCache*
 TracingSamplerProfiler::TracingProfileBuilder::GetModuleCache() {
   return &module_cache_;
 }
+
+using SampleDebugProto =
+    perfetto::protos::pbzero::ChromeSamplingProfilerSampleCollected;
 
 void TracingSamplerProfiler::TracingProfileBuilder::OnSampleCompleted(
     std::vector<base::Frame> frames,
@@ -598,7 +603,7 @@ void TracingSamplerProfiler::StackProfileWriter::ResetEmittedState() {
 
 // static
 void TracingSamplerProfiler::MangleModuleIDIfNeeded(std::string* module_id) {
-#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Linux ELF module IDs are 160bit integers, which we need to mangle
   // down to 128bit integers to match the id that Breakpad outputs.
   // Example on version '66.0.3359.170' x64:
@@ -742,7 +747,7 @@ void TracingSamplerProfiler::StartTracing(
 
   base::StackSamplingProfiler::SamplingParams params;
   params.samples_per_profile = std::numeric_limits<int>::max();
-  params.sampling_interval = base::TimeDelta::FromMilliseconds(50);
+  params.sampling_interval = base::Milliseconds(50);
 
   auto profile_builder = std::make_unique<TracingProfileBuilder>(
       sampled_thread_token_.id, std::move(trace_writer),
@@ -750,7 +755,7 @@ void TracingSamplerProfiler::StartTracing(
 
   profile_builder_ = profile_builder.get();
   // Create and start the stack sampling profiler.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #if ANDROID_ARM64_UNWINDING_SUPPORTED
   const auto create_unwinders = []() {
     std::vector<std::unique_ptr<base::Unwinder>> unwinders;
@@ -765,18 +770,18 @@ void TracingSamplerProfiler::StartTracing(
 #elif ANDROID_CFI_UNWINDING_SUPPORTED
   auto* module_cache = profile_builder->GetModuleCache();
   profiler_ = std::make_unique<base::StackSamplingProfiler>(
-      params, std::move(profile_builder),
+      sampled_thread_token_, params, std::move(profile_builder),
       std::make_unique<StackSamplerAndroid>(sampled_thread_token_,
                                             module_cache));
   profiler_->Start();
 #endif
-#else   // defined(OS_ANDROID)
+#else   // BUILDFLAG(IS_ANDROID)
   profiler_ = std::make_unique<base::StackSamplingProfiler>(
       sampled_thread_token_, params, std::move(profile_builder));
   if (aux_unwinder_factory_)
     profiler_->AddAuxUnwinder(aux_unwinder_factory_.Run());
   profiler_->Start();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 #if BUILDFLAG(ENABLE_LOADER_LOCK_SAMPLING)
   if (loader_lock_sampling_thread_)

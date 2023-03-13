@@ -6,10 +6,11 @@
 #define BASE_PROFILER_SUSPENDABLE_THREAD_DELEGATE_MAC_H_
 
 #include <mach/mach.h>
+#include <memory>
+#include <vector>
 
 #include "base/base_export.h"
 #include "base/profiler/module_cache.h"
-#include "base/profiler/native_unwinder_mac.h"
 #include "base/profiler/sampling_profiler_thread_token.h"
 #include "base/profiler/suspendable_thread_delegate.h"
 #include "base/threading/platform_thread.h"

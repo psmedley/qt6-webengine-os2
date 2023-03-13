@@ -29,7 +29,7 @@ apiBridge.registerCustomHook(function(bindingsAPI) {
   var apiFunctions = bindingsAPI.apiFunctions;
 
   apiFunctions.setCustomCallback('searchDrive',
-      function(name, request, callback, response) {
+      function(callback, response) {
     if (response && !response.error && response.entries) {
       response.entries = response.entries.map(function(entry) {
         return GetExternalFileEntry(entry);
@@ -45,7 +45,7 @@ apiBridge.registerCustomHook(function(bindingsAPI) {
   });
 
   apiFunctions.setCustomCallback('searchDriveMetadata',
-      function(name, request, callback, response) {
+      function(callback, response) {
     if (response && !response.error) {
       for (var i = 0; i < response.length; i++) {
         response[i].entry =
@@ -216,6 +216,14 @@ apiBridge.registerCustomHook(function(bindingsAPI) {
     fileManagerPrivateInternal.getDownloadUrl(url, callback);
   });
 
+  apiFunctions.setHandleRequest(
+      'getDisallowedTransfers', function(entries, destinationEntry, callback) {
+        var sourceUrls = entries.map(getEntryURL);
+        var destinationUrl = getEntryURL(destinationEntry);
+        fileManagerPrivateInternal.getDisallowedTransfers(
+            sourceUrls, destinationUrl, callback);
+      });
+
   apiFunctions.setHandleRequest('startCopy', function(
         entry, parentEntry, newName, callback) {
     var url = getEntryURL(entry);
@@ -313,7 +321,7 @@ apiBridge.registerCustomHook(function(bindingsAPI) {
   });
 
   apiFunctions.setCustomCallback('searchFiles',
-      function(name, request, callback, response) {
+      function(callback, response) {
     if (response && !response.error && response.entries) {
       response.entries = response.entries.map(function(entry) {
         return GetExternalFileEntry(entry);
@@ -358,6 +366,15 @@ apiBridge.registerCustomHook(function(bindingsAPI) {
         fileManagerPrivateInternal.toggleAddedToHoldingSpace(
             urls, added, callback);
       });
+
+  apiFunctions.setHandleRequest('startIOTask', function(type, entries, params) {
+    const urls = entries.map(entry => getEntryURL(entry));
+    let newParams = {};
+    if (params.destinationFolder) {
+      newParams.destinationFolderUrl = getEntryURL(params.destinationFolder);
+    }
+    fileManagerPrivateInternal.startIOTask(type, urls, newParams);
+  });
 });
 
 bindingUtil.registerEventArgumentMassager(

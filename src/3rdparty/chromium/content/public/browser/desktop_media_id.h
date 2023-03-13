@@ -28,7 +28,7 @@ struct CONTENT_EXPORT DesktopMediaID {
   // Represents a fake id to create a dummy capturer for autotests.
   static constexpr Id kFakeId = -3;
 
-#if defined(USE_AURA) || defined(OS_MAC)
+#if defined(USE_AURA) || BUILDFLAG(IS_MAC)
   // Assigns integer identifier to the |window| and returns its DesktopMediaID.
   static DesktopMediaID RegisterNativeWindow(Type type,
                                              gfx::NativeWindow window);
@@ -36,7 +36,7 @@ struct CONTENT_EXPORT DesktopMediaID {
   // Returns the Window that was previously registered using
   // RegisterNativeWindow(), else nullptr.
   static gfx::NativeWindow GetNativeWindowById(const DesktopMediaID& id);
-#endif  // USE_AURA || OS_MAC
+#endif  // defined(USE_AURA) || BUILDFLAG(IS_MAC)
 
   constexpr DesktopMediaID() = default;
 
@@ -67,7 +67,8 @@ struct CONTENT_EXPORT DesktopMediaID {
   // it possible for both of these to be non-null, which means both IDs are
   // referring to the same logical window.
   Id id = kNullId;
-  // TODO(miu): Make this an int, after clean-up for http://crbug.com/513490.
+
+  // TODO(https://crbug.com/1304392): Change window ID to an integer.
   Id window_id = kNullId;
 
   // This records whether the desktop share has sound or not.

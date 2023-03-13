@@ -46,6 +46,8 @@ set(VULKAN_SRC_FILES
     VkDevice.hpp
     VkDeviceMemory.cpp
     VkDeviceMemory.hpp
+    VkDeviceMemoryExternalHost.cpp
+    VkDeviceMemoryExternalHost.hpp
     VkDeviceMemoryExternalLinux.hpp
     VkEvent.hpp
     VkFence.hpp
@@ -70,6 +72,7 @@ set(VULKAN_SRC_FILES
     VkPipeline.hpp
     VkPipelineCache.cpp
     VkPipelineCache.hpp
+    VkPrivateData.hpp
     VkSpecializationInfo.cpp
     VkSpecializationInfo.hpp
     VkPipelineLayout.cpp
@@ -91,6 +94,7 @@ set(VULKAN_SRC_FILES
     VkShaderModule.hpp
     VkStringify.cpp
     VkStringify.hpp
+    VkStructConversion.hpp
     VkTimelineSemaphore.cpp
     VkTimelineSemaphore.hpp
     VulkanPlatform.hpp
@@ -135,6 +139,12 @@ if(FUCHSIA)
     # are not part of the VkStructureType enum. Silence this warning, until
     # the constants are upstreamed to the official Vulkan headers.
     list(APPEND VULKAN_COMPILE_OPTIONS "-Wno-switch")
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    list(APPEND VULKAN_COMPILE_OPTIONS
+        # TODO(b/208256248): Avoid exit-time destructor.
+        #"-Wexit-time-destructors"  # declaration requires an exit-time destructor
+    )
 endif()
 
 set(VULKAN_LINKER_FLAGS "")
@@ -184,7 +194,7 @@ target_link_libraries(vk_swiftshader
         vk_pipeline
         vk_device
         vk_wsi
-        ${Reactor}
+        Reactor
         marl
         ${OS_LIBS}
         ${SWIFTSHADER_LIBS}

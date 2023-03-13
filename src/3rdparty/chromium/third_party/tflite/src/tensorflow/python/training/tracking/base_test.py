@@ -12,10 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==============================================================================
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import functools
 import os
 
@@ -32,14 +28,14 @@ class InterfaceTests(test.TestCase):
     root = base.Trackable()
     leaf = base.Trackable()
     root._track_trackable(leaf, name="leaf")
-    (current_name, current_dependency), = root._checkpoint_dependencies
+    (current_name, current_dependency), = root._trackable_children().items()
     self.assertIs(leaf, current_dependency)
     self.assertEqual("leaf", current_name)
     duplicate_name_dep = base.Trackable()
     with self.assertRaises(ValueError):
       root._track_trackable(duplicate_name_dep, name="leaf")
     root._track_trackable(duplicate_name_dep, name="leaf", overwrite=True)
-    (current_name, current_dependency), = root._checkpoint_dependencies
+    (current_name, current_dependency), = root._trackable_children().items()
     self.assertIs(duplicate_name_dep, current_dependency)
     self.assertEqual("leaf", current_name)
 
@@ -54,8 +50,8 @@ class InterfaceTests(test.TestCase):
           getter=variable_scope.get_variable)
       self.assertEqual([root, b], util.list_objects(root))
     with ops.Graph().as_default():
-      with self.assertRaisesRegexp(
-          ValueError, "already declared as a dependency"):
+      with self.assertRaisesRegex(ValueError,
+                                  "already declared as a dependency"):
         root._add_variable_with_custom_getter(
             name="v", shape=[], overwrite=False,
             getter=variable_scope.get_variable)
@@ -80,7 +76,7 @@ class InterfaceTests(test.TestCase):
     save_path = saved.save(os.path.join(self.get_temp_dir(), "ckpt"))
     restored = util.Checkpoint(obj=base.Trackable())
     status = restored.restore(save_path)
-    with self.assertRaisesRegexp(AssertionError, "foo_attr"):
+    with self.assertRaisesRegex(AssertionError, "foo_attr"):
       status.assert_consumed()
 
   def testBuggyGetConfig(self):

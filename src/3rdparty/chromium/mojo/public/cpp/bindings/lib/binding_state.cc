@@ -65,7 +65,7 @@ void BindingStateBase::Close() {
 }
 
 void BindingStateBase::CloseWithReason(uint32_t custom_reason,
-                                       const std::string& description) {
+                                       base::StringPiece description) {
   if (endpoint_client_)
     endpoint_client_->CloseWithReason(custom_reason, description);
 
@@ -75,7 +75,7 @@ void BindingStateBase::CloseWithReason(uint32_t custom_reason,
 ReportBadMessageCallback BindingStateBase::GetBadMessageCallback() {
   return base::BindOnce(
       [](ReportBadMessageCallback inner_callback,
-         base::WeakPtr<BindingStateBase> binding, const std::string& error) {
+         base::WeakPtr<BindingStateBase> binding, base::StringPiece error) {
         std::move(inner_callback).Run(error);
         if (binding)
           binding->Close();
@@ -107,9 +107,11 @@ void BindingStateBase::BindInternal(
     const char* interface_name,
     std::unique_ptr<MessageReceiver> request_validator,
     bool passes_associated_kinds,
-    bool has_sync_methods,
+    base::span<const uint32_t> sync_method_ordinals,
     MessageReceiverWithResponderStatus* stub,
-    uint32_t interface_version) {
+    uint32_t interface_version,
+    MessageToStableIPCHashCallback ipc_hash_callback,
+    MessageToMethodNameCallback method_name_callback) {
   DCHECK(!is_bound()) << "Attempting to bind interface that is already bound: "
                       << interface_name;
 
@@ -119,7 +121,7 @@ void BindingStateBase::BindInternal(
   MultiplexRouter::Config config =
       passes_associated_kinds
           ? MultiplexRouter::MULTI_INTERFACE
-          : (has_sync_methods
+          : (!sync_method_ordinals.empty()
                  ? MultiplexRouter::SINGLE_INTERFACE_WITH_SYNC_METHODS
                  : MultiplexRouter::SINGLE_INTERFACE);
   router_ = MultiplexRouter::CreateAndStartReceiving(
@@ -129,8 +131,9 @@ void BindingStateBase::BindInternal(
 
   endpoint_client_ = std::make_unique<InterfaceEndpointClient>(
       router_->CreateLocalEndpointHandle(kPrimaryInterfaceId), stub,
-      std::move(request_validator), has_sync_methods,
-      std::move(sequenced_runner), interface_version, interface_name);
+      std::move(request_validator), sync_method_ordinals,
+      std::move(sequenced_runner), interface_version, interface_name,
+      ipc_hash_callback, method_name_callback);
   endpoint_client_->SetIdleTrackingEnabledCallback(
       base::BindOnce(&MultiplexRouter::SetConnectionGroup, router_));
 

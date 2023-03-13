@@ -7,7 +7,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
 #include <sched.h>
 #endif
 #include <setjmp.h>
@@ -16,7 +16,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <sys/resource.h>
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
 #include <sys/syscall.h>
 #endif
 #include <sys/time.h>
@@ -24,7 +24,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-#if defined(OS_OS2)
+#if BUILDFLAG(IS_OS2)
 #include <libcx/spawn2.h>
 #include <sys/socket.h>
 #include <sys/fmutex.h>
@@ -58,7 +58,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 #include <sys/prctl.h>
 #endif
 
@@ -66,24 +66,22 @@
 #include <sys/ioctl.h>
 #endif
 
-#if defined(OS_FREEBSD)
+#if BUILDFLAG(IS_FREEBSD)
 #include <sys/event.h>
 #include <sys/ucontext.h>
 #endif
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 #error "macOS should use launch_mac.cc"
 #endif
 
-#if defined(OS_OS2)
+#if BUILDFLAG(IS_OS2)
 static _fmutex spawn2_mutex = _FMUTEX_INITIALIZER;
 #endif
 
 extern char** environ;
 
 namespace base {
-
-#if !defined(OS_NACL_NONSFI)
 
 namespace {
 
@@ -93,7 +91,7 @@ char** GetEnvironment() {
   return environ;
 }
 
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
 // Set the process's "environment" (i.e. the thing that setenv/getenv
 // work with).
 void SetEnvironment(char** env) {
@@ -104,7 +102,7 @@ void SetEnvironment(char** env) {
 // the previous signal mask.
 sigset_t SetSignalMask(const sigset_t& new_sigmask) {
   sigset_t old_sigmask;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // POSIX says pthread_sigmask() must be used in multi-threaded processes,
   // but Android's pthread_sigmask() was broken until 4.1:
   // https://code.google.com/p/android/issues/detail?id=15337
@@ -116,7 +114,7 @@ sigset_t SetSignalMask(const sigset_t& new_sigmask) {
   return old_sigmask;
 }
 
-#if (!defined(OS_LINUX) && !defined(OS_AIX) && !defined(OS_CHROMEOS)) || \
+#if (!BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_AIX) && !BUILDFLAG(IS_CHROMEOS)) || \
     (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
 void ResetChildSignalHandlersToDefaults() {
   // The previous signal handlers are likely to be meaningless in the child's
@@ -199,12 +197,12 @@ void ResetChildSignalHandlersToDefaults(void) {
 #endif  // !defined(NDEBUG)
   }
 }
-#endif  // !defined(OS_LINUX) ||
+#endif  // !BUILDFLAG(IS_LINUX) ||
         // (!defined(__i386__) && !defined(__x86_64__) && !defined(__arm__))
-#endif  // !defined(OS_OS2)
+#endif  // !BUILDFLAG(IS_OS2)
 }  // anonymous namespace
 
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
 // Functor for |ScopedDIR| (below).
 struct ScopedDIRClose {
   inline void operator()(DIR* x) const {
@@ -216,15 +214,15 @@ struct ScopedDIRClose {
 // Automatically closes |DIR*|s.
 typedef std::unique_ptr<DIR, ScopedDIRClose> ScopedDIR;
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 static const char kFDDir[] = "/proc/self/fd";
-#elif defined(OS_SOLARIS)
+#elif BUILDFLAG(IS_SOLARIS)
 static const char kFDDir[] = "/dev/fd";
-#elif defined(OS_FREEBSD)
+#elif BUILDFLAG(IS_FREEBSD)
 static const char kFDDir[] = "/dev/fd";
-#elif defined(OS_OPENBSD)
+#elif BUILDFLAG(IS_OPENBSD)
 static const char kFDDir[] = "/dev/fd";
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
 static const char kFDDir[] = "/proc/self/fd";
 #endif
 
@@ -287,7 +285,7 @@ void CloseSuperfluousFds(const base::InjectiveMultimap& saved_mapping) {
     DPCHECK(ret == 0);
   }
 }
-#endif  // !defined(OS_OS2)
+#endif  // !BUILDFLAG(IS_OS2)
 
 Process LaunchProcess(const CommandLine& cmdline,
                       const LaunchOptions& options) {
@@ -298,7 +296,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
                       const LaunchOptions& options) {
   TRACE_EVENT0("base", "LaunchProcess");
 
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
   fd_shuffle1.reserve(options.fds_to_remap.size());
@@ -319,7 +317,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
   if (!options.environment.empty())
     new_environ = internal::AlterEnvironment(old_environ, options.environment);
 
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
   sigset_t full_sigset;
   sigfillset(&full_sigset);
   const sigset_t orig_sigmask = SetSignalMask(full_sigset);
@@ -332,7 +330,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
   pid_t pid;
   base::TimeTicks before_fork = TimeTicks::Now();
-#if defined(OS_OS2)
+#if BUILDFLAG(IS_OS2)
   // Use spawn2 on OS/2 instead of fork since spawning is much more natural and
   // resource friendly there.
   const char* executable_path = !options.real_path.empty() ?
@@ -416,7 +414,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     DPCHECK(ret > 0);
   }
 #else
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
   if (options.clone_flags) {
     // Signal handling in this function assumes the creation of a new
     // process, so we check that a thread is not being created by mistake
@@ -465,7 +463,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     // might do things like block waiting for threads that don't even exist
     // in the child.
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
     // See comments on the ResetFDOwnership() declaration in
     // base/files/scoped_file.h regarding why this is called early here.
     subtle::ResetFDOwnership();
@@ -558,7 +556,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
 
     // Set NO_NEW_PRIVS by default. Since NO_NEW_PRIVS only exists in kernel
     // 3.5+, do not check the return value of prctl here.
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 #ifndef PR_SET_NO_NEW_PRIVS
 #define PR_SET_NO_NEW_PRIVS 38
 #endif
@@ -598,7 +596,7 @@ Process LaunchProcess(const std::vector<std::string>& argv,
     if (options.wait) {
       // While this isn't strictly disk IO, waiting for another process to
       // finish is the sort of thing ThreadRestrictions is trying to prevent.
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
       ScopedBlockingCall scoped_blocking_call(FROM_HERE,
                                               BlockingType::MAY_BLOCK);
 #endif
@@ -641,7 +639,7 @@ static bool GetAppOutputInternal(
   // process cannot allocate memory.
   std::vector<char*> argv_cstr;
   argv_cstr.reserve(argv.size() + 1);
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
   InjectiveMultimap fd_shuffle1;
   InjectiveMultimap fd_shuffle2;
   fd_shuffle1.reserve(3);
@@ -656,7 +654,7 @@ static bool GetAppOutputInternal(
   if (pipe(pipe_fd) < 0)
     return false;
 
-#if defined(OS_OS2)
+#if BUILDFLAG(IS_OS2)
   // Use spawn2 on OS/2 instead of fork since spawning is much more natural and
   // resource friendly there.
   for (const auto& arg : argv)
@@ -707,7 +705,7 @@ static bool GetAppOutputInternal(
       // DANGER: no calls to malloc or locks are allowed from now on:
       // http://crbug.com/36678
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
       // See comments on the ResetFDOwnership() declaration in
       // base/files/scoped_file.h regarding why this is called early here.
       subtle::ResetFDOwnership();
@@ -782,7 +780,7 @@ static bool GetAppOutputInternal(
       // process that launched it.
       internal::GetAppOutputScopedAllowBaseSyncPrimitives allow_wait;
       return process.WaitForExit(exit_code);
-#if !defined(OS_OS2)
+#if !BUILDFLAG(IS_OS2)
     }
   }
 #endif
@@ -824,10 +822,7 @@ bool GetAppOutputWithExitCode(const CommandLine& cl,
                               exit_code);
 }
 
-#endif  // !defined(OS_NACL_NONSFI)
-
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_NACL_NONSFI) || \
-    defined(OS_AIX)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 namespace {
 
 // This function runs on the stack specified on the clone call. It uses longjmp
@@ -893,15 +888,15 @@ pid_t ForkWithFlags(unsigned long flags, pid_t* ptid, pid_t* ctid) {
     return CloneAndLongjmpInChild(flags, ptid, ctid, &env);
   }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Since we use clone() directly, it does not call any pthread_aftork()
-  // callbacks, we explicitly clear tid cache here (normally this call is
+  // callbacks, we explicitly invalidate tid cache here (normally this call is
   // done as pthread_aftork() callback).  See crbug.com/902514.
-  base::internal::ClearTidCache();
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+  base::internal::InvalidateTidCache();
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 
   return 0;
 }
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_NACL_NONSFI)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_AIX)
 
 }  // namespace base

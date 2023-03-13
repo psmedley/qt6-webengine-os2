@@ -31,12 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EXPORTED_WEB_PAGE_POPUP_IMPL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EXPORTED_WEB_PAGE_POPUP_IMPL_H_
 
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_context.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/input/pointer_lock_result.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/page/widget.mojom-blink.h"
 #include "third_party/blink/public/platform/cross_variant_mojo_util.h"
+#include "third_party/blink/public/web/web_hit_test_result.h"
 #include "third_party/blink/public/web/web_page_popup.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
@@ -134,7 +136,7 @@ class CORE_EXPORT WebPagePopupImpl final : public WebPagePopup,
       const cc::OverscrollBehavior& overscroll_behavior,
       bool event_processed) override;
   bool SupportsBufferedTouchEvents() override { return true; }
-  void FocusChanged(bool enabled) override;
+  void FocusChanged(mojom::blink::FocusState focus_state) override;
   void ScheduleAnimation() override;
   void UpdateVisualProperties(
       const VisualProperties& visual_properties) override;
@@ -170,8 +172,8 @@ class CORE_EXPORT WebPagePopupImpl final : public WebPagePopup,
   bool HandlingInputEvent() override;
   void SetHandlingInputEvent(bool handling) override;
   bool ImeCompositionReplacement() override;
-  void ProcessInputEventSynchronouslyForTesting(const WebCoalescedInputEvent&,
-                                                HandledEventCallback) override;
+  void ProcessInputEventSynchronouslyForTesting(
+      const WebCoalescedInputEvent&) override;
   void UpdateTextInputState() override;
   void UpdateSelectionBounds() override;
   void ShowVirtualKeyboard() override;
@@ -206,11 +208,13 @@ class CORE_EXPORT WebPagePopupImpl final : public WebPagePopup,
   bool ShouldCheckPopupPositionForTelemetry() const;
   void CheckScreenPointInOwnerWindowAndCount(const gfx::PointF& point_in_screen,
                                              WebFeature feature) const;
-  IntRect OwnerWindowRectInScreen() const;
+  gfx::Rect OwnerWindowRectInScreen() const;
+  // Returns anchor rect in screen coordinates for this popup.
+  gfx::Rect GetAnchorRectInScreen() const;
 
   // PagePopup function
   AXObject* RootAXObject() override;
-  void SetWindowRect(const IntRect&) override;
+  void SetWindowRect(const gfx::Rect&) override;
 
   WebPagePopupImpl(
       CrossVariantMojoAssociatedRemote<

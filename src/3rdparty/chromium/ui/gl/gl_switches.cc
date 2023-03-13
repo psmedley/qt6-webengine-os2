@@ -4,10 +4,9 @@
 
 #include "ui/gl/gl_switches.h"
 
-#include "base/cxx17_backports.h"
 #include "build/build_config.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/build_info.h"
 #endif
 
@@ -18,8 +17,6 @@ const char kGLImplementationCoreProfileName[] = "core_profile";
 const char kGLImplementationAppleName[] = "apple";
 const char kGLImplementationEGLName[] = "egl";
 const char kGLImplementationANGLEName[] = "angle";
-const char kGLImplementationSwiftShaderName[] = "swiftshader";
-const char kGLImplementationSwiftShaderForWebGLName[] = "swiftshader-webgl";
 const char kGLImplementationMockName[] = "mock";
 const char kGLImplementationStubName[] = "stub";
 const char kGLImplementationDisabledName[] = "disabled";
@@ -137,10 +134,6 @@ const char kDisableGLDrawingForTests[] = "disable-gl-drawing-for-tests";
 const char kOverrideUseSoftwareGLForTests[] =
     "override-use-software-gl-for-tests";
 
-// Forces the use of software GL instead of hardware gpu for headless.
-const char kOverrideUseSoftwareGLForHeadless[] =
-    "override-use-software-gl-for-headless";
-
 // Disables specified comma separated GL Extensions if found.
 const char kDisableGLExtensions[] = "disable-gl-extensions";
 
@@ -198,7 +191,7 @@ const char* const kGLSwitchesCopiedFromGpuProcessHost[] = {
     kDirectCompositionVideoSwapChainFormat,
 };
 const int kGLSwitchesCopiedFromGpuProcessHostNumSwitches =
-    base::size(kGLSwitchesCopiedFromGpuProcessHost);
+    std::size(kGLSwitchesCopiedFromGpuProcessHost);
 
 const char kCreateDefaultGLContext[] = "create-default-gl-context";
 
@@ -230,6 +223,17 @@ const base::Feature kDirectCompositionLowLatencyPresentation{
 const base::Feature kDirectCompositionSoftwareOverlays{
     "DirectCompositionSoftwareOverlays", base::FEATURE_ENABLED_BY_DEFAULT};
 
+// TODO(crbug.com/1269749): This is used temporarily for verifying
+// the draw offset bug. The code should be removed once the bug is fixed.
+const base::Feature kDirectCompositionVerifyDrawOffset{
+    "DirectCompositionVerifyDrawOffset", base::FEATURE_DISABLED_BY_DEFAULT};
+
+const base::FeatureParam<int> kVerifyDrawOffsetX{
+    &kDirectCompositionVerifyDrawOffset, "verify_draw_offset_x", 0};
+
+const base::FeatureParam<int> kVerifyDrawOffsetY{
+    &kDirectCompositionVerifyDrawOffset, "verify_draw_offset_y", 0};
+
 // Default to using ANGLE's OpenGL backend
 const base::Feature kDefaultANGLEOpenGL{"DefaultANGLEOpenGL",
                                         base::FEATURE_DISABLED_BY_DEFAULT};
@@ -248,14 +252,18 @@ const base::Feature kDefaultANGLEVulkan{"DefaultANGLEVulkan",
 const base::Feature kTrackCurrentShaders{"TrackCurrentShaders",
                                          base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Enable sharing Vulkan device queue with ANGLE's Vulkan backend.
+const base::Feature kVulkanFromANGLE{"VulkanFromANGLE",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
 bool IsDefaultANGLEVulkan() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // No support for devices before Q -- exit before checking feature flags
   // so that devices are not counted in finch trials.
   if (base::android::BuildInfo::GetInstance()->sdk_int() <
       base::android::SDK_VERSION_Q)
     return false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
   return base::FeatureList::IsEnabled(kDefaultANGLEVulkan);
 }
 

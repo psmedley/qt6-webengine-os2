@@ -5,7 +5,9 @@
 #ifndef COMPONENTS_EMBEDDER_SUPPORT_PERMISSION_CONTEXT_UTILS_H_
 #define COMPONENTS_EMBEDDER_SUPPORT_PERMISSION_CONTEXT_UTILS_H_
 
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
+#include "components/permissions/contexts/camera_pan_tilt_zoom_permission_context.h"
 #include "components/permissions/contexts/geolocation_permission_context.h"
 #include "components/permissions/contexts/nfc_permission_context.h"
 #include "components/permissions/permission_manager.h"
@@ -14,11 +16,11 @@ namespace content {
 class BrowserContext;
 }  // namespace content
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 namespace device {
 class GeolocationManager;
 }  // namespace device
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
 namespace webrtc {
 class MediaStreamDeviceEnumerator;
@@ -34,12 +36,14 @@ struct PermissionContextDelegates {
   PermissionContextDelegates& operator=(PermissionContextDelegates&&);
   ~PermissionContextDelegates();
 
+  std::unique_ptr<permissions::CameraPanTiltZoomPermissionContext::Delegate>
+      camera_pan_tilt_zoom_permission_context_delegate;
   std::unique_ptr<permissions::GeolocationPermissionContext::Delegate>
       geolocation_permission_context_delegate;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   device::GeolocationManager* geolocation_manager;
-#endif  // defined(OS_MAC)
-  webrtc::MediaStreamDeviceEnumerator* media_stream_device_enumerator;
+#endif  // BUILDFLAG(IS_MAC)
+  raw_ptr<webrtc::MediaStreamDeviceEnumerator> media_stream_device_enumerator;
   std::unique_ptr<permissions::NfcPermissionContext::Delegate>
       nfc_permission_context_delegate;
 };

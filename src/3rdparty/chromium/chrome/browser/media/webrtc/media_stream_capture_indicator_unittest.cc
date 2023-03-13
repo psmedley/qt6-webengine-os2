@@ -5,6 +5,7 @@
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "content/public/test/web_contents_tester.h"
@@ -18,6 +19,10 @@ namespace {
 class LenientMockObserver : public MediaStreamCaptureIndicator::Observer {
  public:
   LenientMockObserver() = default;
+
+  LenientMockObserver(const LenientMockObserver&) = delete;
+  LenientMockObserver& operator=(const LenientMockObserver&) = delete;
+
   ~LenientMockObserver() override {}
 
   // Helper functions used to set the expectations of the mock methods. This
@@ -62,8 +67,6 @@ class LenientMockObserver : public MediaStreamCaptureIndicator::Observer {
                void(content::WebContents* contents, bool is_capturing_window));
   MOCK_METHOD2(OnIsCapturingDisplayChanged,
                void(content::WebContents* contents, bool is_capturing_display));
-
-  DISALLOW_COPY_AND_ASSIGN(LenientMockObserver);
 };
 using MockObserver = testing::StrictMock<LenientMockObserver>;
 
@@ -194,7 +197,8 @@ TEST_P(MediaStreamCaptureIndicatorObserverMethodTest, AddAndRemoveDevice) {
   // Make sure that the observer gets called and that the corresponding accessor
   // gets called when |OnStarted| is called.
   (observer()->*(param.observer_method))(source, true);
-  ui->OnStarted(base::OnceClosure(), content::MediaStreamUI::SourceCallback(),
+  ui->OnStarted(base::RepeatingClosure(),
+                content::MediaStreamUI::SourceCallback(),
                 /*label=*/std::string(), /*screen_capture_ids=*/{},
                 content::MediaStreamUI::StateChangeCallback());
   EXPECT_TRUE((indicator()->*(param.accessor_method))(web_contents()));
@@ -217,7 +221,8 @@ TEST_P(MediaStreamCaptureIndicatorObserverMethodTest, CloseActiveWebContents) {
   std::unique_ptr<content::MediaStreamUI> ui =
       indicator()->RegisterMediaStream(source, {CreateFakeDevice(param)});
   (observer()->*(param.observer_method))(source, true);
-  ui->OnStarted(base::OnceClosure(), content::MediaStreamUI::SourceCallback(),
+  ui->OnStarted(base::RepeatingClosure(),
+                content::MediaStreamUI::SourceCallback(),
                 /*label=*/std::string(), /*screen_capture_ids=*/{},
                 content::MediaStreamUI::StateChangeCallback());
   ::testing::Mock::VerifyAndClear(observer());

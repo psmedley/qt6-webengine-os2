@@ -31,17 +31,19 @@
 #include "public/fpdf_formfill.h"
 #include "public/fpdf_progressive.h"
 #include "public/fpdf_structtree.h"
+#include "public/fpdf_sysfontinfo.h"
 #include "public/fpdf_text.h"
 #include "public/fpdfview.h"
 #include "samples/pdfium_test_dump_helper.h"
 #include "samples/pdfium_test_event_helper.h"
 #include "samples/pdfium_test_write_helper.h"
 #include "testing/fx_string_testhelpers.h"
+#include "testing/test_fonts.h"
 #include "testing/test_loader.h"
 #include "testing/utils/file_util.h"
 #include "testing/utils/hash.h"
 #include "testing/utils/path_service.h"
-#include "third_party/base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 #ifdef _WIN32
 #include <io.h>
@@ -88,6 +90,7 @@ enum class OutputFormat {
   kEmf,
   kPs2,
   kPs3,
+  kPs3Type42,
 #endif
 #ifdef PDF_ENABLE_SKIA
   kSkp,
@@ -137,6 +140,7 @@ struct Options {
 #if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))
   bool linux_no_system_fonts = false;
 #endif
+  bool croscore_font_names = false;
   OutputFormat output_format = OutputFormat::kNone;
   std::string password;
   std::string scale_factor_as_string;
@@ -175,7 +179,7 @@ int PageRenderFlagsFromOptions(const Options& options) {
   return flags;
 }
 
-Optional<std::string> ExpandDirectoryPath(const std::string& path) {
+absl::optional<std::string> ExpandDirectoryPath(const std::string& path) {
 #if defined(WORDEXP_AVAILABLE)
   wordexp_t expansion;
   if (wordexp(path.c_str(), &expansion, 0) != 0 || expansion.we_wordc < 1) {
@@ -184,7 +188,7 @@ Optional<std::string> ExpandDirectoryPath(const std::string& path) {
   }
   // Need to contruct the return value before hand, since wordfree will
   // deallocate |expansion|.
-  Optional<std::string> ret_val = {expansion.we_wordv[0]};
+  absl::optional<std::string> ret_val = {expansion.we_wordv[0]};
   wordfree(&expansion);
   return ret_val;
 #else
@@ -192,7 +196,7 @@ Optional<std::string> ExpandDirectoryPath(const std::string& path) {
 #endif  // WORDEXP_AVAILABLE
 }
 
-Optional<const char*> GetCustomFontPath(const Options& options) {
+absl::optional<const char*> GetCustomFontPath(const Options& options) {
 #if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))
   // Set custom font path to an empty path. This avoids the fallback to default
   // font paths.
@@ -202,11 +206,92 @@ Optional<const char*> GetCustomFontPath(const Options& options) {
 
   // No custom font path. Use default.
   if (options.font_directory.empty())
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   // Set custom font path to |options.font_directory|.
   return options.font_directory.c_str();
 }
+
+class FontRenamer final : public FPDF_SYSFONTINFO {
+ public:
+  FontRenamer() : impl_(FPDF_GetDefaultSystemFontInfo()) {
+    version = 1;
+    Release = FontRenamer::ReleaseImpl;
+    EnumFonts = FontRenamer::EnumFontsImpl;
+    MapFont = FontRenamer::MapFontImpl;
+    GetFont = FontRenamer::GetFontImpl;
+    GetFontData = FontRenamer::GetFontDataImpl;
+    GetFaceName = FontRenamer::GetFaceNameImpl;
+    GetFontCharset = FontRenamer::GetFontCharsetImpl;
+    DeleteFont = FontRenamer::DeleteFontImpl;
+    FPDF_SetSystemFontInfo(this);
+  }
+
+  ~FontRenamer() { FPDF_FreeDefaultSystemFontInfo(impl_); }
+
+ private:
+  static void ReleaseImpl(FPDF_SYSFONTINFO* info) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    impl->Release(impl);
+  }
+  static void EnumFontsImpl(FPDF_SYSFONTINFO* info, void* mapper) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    impl->EnumFonts(impl, mapper);
+  }
+
+  static void* MapFontImpl(FPDF_SYSFONTINFO* info,
+                           int weight,
+                           FPDF_BOOL italic,
+                           int charset,
+                           int pitch_family,
+                           const char* face,
+                           FPDF_BOOL* exact) {
+    std::string renamed_face = TestFonts::RenameFont(face);
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    return impl->MapFont(impl, weight, italic, charset, pitch_family,
+                         renamed_face.c_str(), exact);
+  }
+
+  static void* GetFontImpl(FPDF_SYSFONTINFO* info, const char* face) {
+    // Any non-null return will do.
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    std::string renamed_face = TestFonts::RenameFont(face);
+    return impl->GetFont(impl, renamed_face.c_str());
+  }
+
+  static unsigned long GetFontDataImpl(FPDF_SYSFONTINFO* info,
+                                       void* font,
+                                       unsigned int table,
+                                       unsigned char* buffer,
+                                       unsigned long buf_size) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    return impl->GetFontData(impl, font, table, buffer, buf_size);
+  }
+
+  static unsigned long GetFaceNameImpl(FPDF_SYSFONTINFO* info,
+                                       void* font,
+                                       char* buffer,
+                                       unsigned long buf_size) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    return impl->GetFaceName(impl, font, buffer, buf_size);
+  }
+
+  static int GetFontCharsetImpl(FPDF_SYSFONTINFO* info, void* font) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    return impl->GetFontCharset(impl, font);
+  }
+
+  static void DeleteFontImpl(FPDF_SYSFONTINFO* info, void* font) {
+    FPDF_SYSFONTINFO* impl = GetImpl(info);
+    impl->DeleteFont(impl, font);
+  }
+
+  static FPDF_SYSFONTINFO* GetImpl(FPDF_SYSFONTINFO* info) {
+    return static_cast<FontRenamer*>(info)->impl_;
+  }
+
+  FPDF_SYSFONTINFO* const impl_;
+};
 
 struct FPDF_FORMFILLINFO_PDFiumTest final : public FPDF_FORMFILLINFO {
   // Hold a map of the currently loaded pages in order to avoid them
@@ -494,6 +579,8 @@ bool ParseCommandLine(const std::vector<std::string>& args,
     } else if (cur_arg == "--no-system-fonts") {
       options->linux_no_system_fonts = true;
 #endif
+    } else if (cur_arg == "--croscore-font-names") {
+      options->croscore_font_names = true;
     } else if (cur_arg == "--ppm") {
       if (options->output_format != OutputFormat::kNone) {
         fprintf(stderr, "Duplicate or conflicting --ppm argument\n");
@@ -532,7 +619,7 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       std::string path = value;
-      Optional<std::string> expanded_path = ExpandDirectoryPath(path);
+      absl::optional<std::string> expanded_path = ExpandDirectoryPath(path);
       if (!expanded_path.has_value()) {
         fprintf(stderr, "Failed to expand --font-dir, %s\n", path.c_str());
         return false;
@@ -565,6 +652,12 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       options->output_format = OutputFormat::kPs3;
+    } else if (cur_arg == "--ps3-type42") {
+      if (options->output_format != OutputFormat::kNone) {
+        fprintf(stderr, "Duplicate or conflicting --ps3-type42 argument\n");
+        return false;
+      }
+      options->output_format = OutputFormat::kPs3Type42;
     } else if (cur_arg == "--bmp") {
       if (options->output_format != OutputFormat::kNone) {
         fprintf(stderr, "Duplicate or conflicting --bmp argument\n");
@@ -581,7 +674,7 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       std::string path = value;
-      Optional<std::string> expanded_path = ExpandDirectoryPath(path);
+      absl::optional<std::string> expanded_path = ExpandDirectoryPath(path);
       if (!expanded_path.has_value()) {
         fprintf(stderr, "Failed to expand --bin-dir, %s\n", path.c_str());
         return false;
@@ -1003,6 +1096,8 @@ void ProcessPdf(const std::string& name,
     FPDF_SetPrintMode(FPDF_PRINTMODE_POSTSCRIPT2);
   else if (options.output_format == OutputFormat::kPs3)
     FPDF_SetPrintMode(FPDF_PRINTMODE_POSTSCRIPT3);
+  else if (options.output_format == OutputFormat::kPs3Type42)
+    FPDF_SetPrintMode(FPDF_PRINTMODE_POSTSCRIPT3_TYPE42);
 #endif
 
   int page_count = FPDF_GetPageCount(doc.get());
@@ -1124,6 +1219,7 @@ constexpr char kUsageString[] =
 #if defined(__APPLE__) || (defined(__linux__) && !defined(__ANDROID__))
     "  --no-system-fonts      - do not use system fonts, overrides --font-dir\n"
 #endif
+    "  --croscore-font-names  - use Croscore font names\n"
     "  --bin-dir=<path>       - override path to v8 external data\n"
     "  --font-dir=<path>      - override path to external fonts\n"
     "  --scale=<number>       - scale output size by number (e.g. 0.5)\n"
@@ -1135,6 +1231,8 @@ constexpr char kUsageString[] =
     "  --ps2   - write page raw PostScript (Lvl 2) "
     "<pdf-name>.<page-number>.ps\n"
     "  --ps3   - write page raw PostScript (Lvl 3) "
+    "<pdf-name>.<page-number>.ps\n"
+    "  --ps3-type42 - write page raw PostScript (Lvl 3 with Type 42 fonts) "
     "<pdf-name>.<page-number>.ps\n"
 #endif
     "  --txt   - write page text in UTF32-LE <pdf-name>.<page-number>.txt\n"
@@ -1213,13 +1311,17 @@ int main(int argc, const char* argv[]) {
 #endif  // PDF_ENABLE_V8
 
   const char* path_array[2] = {nullptr, nullptr};
-  Optional<const char*> custom_font_path = GetCustomFontPath(options);
+  absl::optional<const char*> custom_font_path = GetCustomFontPath(options);
   if (custom_font_path.has_value()) {
     path_array[0] = custom_font_path.value();
     config.m_pUserFontPaths = path_array;
   }
 
   FPDF_InitLibraryWithConfig(&config);
+
+  std::unique_ptr<FontRenamer> font_renamer;
+  if (options.croscore_font_names)
+    font_renamer = std::make_unique<FontRenamer>();
 
   UNSUPPORT_INFO unsupported_info = {};
   unsupported_info.version = 1;

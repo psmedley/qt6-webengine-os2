@@ -7,13 +7,14 @@
 
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/network/public/mojom/cross_origin_opener_policy.mojom-blink.h"
+#include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/public/common/tokens/tokens.h"
+#include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/transferables.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -88,15 +89,15 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
 
   // Self-referential attributes
   DOMWindow* self() const;
-  DOMWindow* window() const { return self(); }
-  DOMWindow* frames() const { return self(); }
+  DOMWindow* window() const;
+  DOMWindow* frames() const;
 
   DOMWindow* opener() const;
   DOMWindow* parent() const;
   DOMWindow* top() const;
 
   void focus(v8::Isolate*);
-  virtual void blur() = 0;
+  void blur();
   void close(v8::Isolate*);
   void Close(LocalDOMWindow* incumbent_window);
 
@@ -113,6 +114,9 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
 
   // Indexed properties
   DOMWindow* AnonymousIndexedGetter(uint32_t index);
+
+  // Returns the opener and collects cross-origin access metrics.
+  DOMWindow* OpenerWithMetrics() const;
 
   String SanitizedCrossDomainAccessErrorMessage(
       const LocalDOMWindow* accessing_window,
@@ -140,12 +144,9 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
   // Check accesses from |accessing_frame| and every same-origin iframe toward
   // this window. A report is sent to |reporter| when this happens.
   void InstallCoopAccessMonitor(
-      network::mojom::blink::CoopAccessReportType report_type,
       LocalFrame* accessing_frame,
-      mojo::PendingRemote<
-          network::mojom::blink::CrossOriginOpenerPolicyReporter> reporter,
-      bool endpoint_defined,
-      const WTF::String& reported_window_url);
+      network::mojom::blink::CrossOriginOpenerPolicyReporterParamsPtr
+          coop_reporter_params);
   // Whenever we detect that the enforcement of a report-only COOP policy would
   // have resulted in preventing access to this window, a report is potentially
   // sent when calling this function.
@@ -153,6 +154,13 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
   // This function must be called when accessing any attributes and methods
   // marked as "CrossOrigin" in the window.idl.
   void ReportCoopAccess(const char* property_name);
+
+  bool anonymous() const { return anonymous_; }
+
+  // Records metrics for cross-origin access to the WindowProxy properties,
+  void RecordWindowProxyAccessMetrics(
+      mojom::blink::WebFeature property_access,
+      mojom::blink::WebFeature property_access_from_other_page) const;
 
  protected:
   explicit DOMWindow(Frame&);
@@ -212,6 +220,10 @@ class CORE_EXPORT DOMWindow : public EventTargetWithInlineData {
     WTF::String reported_window_url;
   };
   WTF::Vector<CoopAccessMonitor> coop_access_monitor_;
+
+  // Anonymous Iframe:
+  // https://github.com/camillelamy/explainers/blob/main/anonymous_iframes.md
+  const bool anonymous_ = false;
 };
 
 }  // namespace blink

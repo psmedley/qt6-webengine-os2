@@ -18,12 +18,17 @@
 #include "ui/ozone/platform/wayland/test/mock_wp_presentation.h"
 #include "ui/ozone/platform/wayland/test/mock_xdg_shell.h"
 #include "ui/ozone/platform/wayland/test/mock_zwp_linux_dmabuf.h"
+#include "ui/ozone/platform/wayland/test/test_alpha_compositing.h"
 #include "ui/ozone/platform/wayland/test/test_compositor.h"
 #include "ui/ozone/platform/wayland/test/test_data_device_manager.h"
 #include "ui/ozone/platform/wayland/test/test_output.h"
+#include "ui/ozone/platform/wayland/test/test_overlay_prioritizer.h"
 #include "ui/ozone/platform/wayland/test/test_seat.h"
 #include "ui/ozone/platform/wayland/test/test_subcompositor.h"
+#include "ui/ozone/platform/wayland/test/test_surface_augmenter.h"
 #include "ui/ozone/platform/wayland/test/test_viewporter.h"
+#include "ui/ozone/platform/wayland/test/test_wp_pointer_gestures.h"
+#include "ui/ozone/platform/wayland/test/test_zcr_text_input_extension.h"
 #include "ui/ozone/platform/wayland/test/test_zwp_linux_explicit_synchronization.h"
 #include "ui/ozone/platform/wayland/test/test_zwp_text_input_manager.h"
 
@@ -41,9 +46,11 @@ struct DisplayDeleter {
 // Server configuration related enums and structs.
 enum class ShellVersion { kV6, kStable };
 enum class PrimarySelectionProtocol { kNone, kGtk, kZwp };
+enum class CompositorVersion { kV3, kV4 };
 
 struct ServerConfig {
   ShellVersion shell_version = ShellVersion::kStable;
+  CompositorVersion compositor_version = CompositorVersion::kV4;
   PrimarySelectionProtocol primary_selection_protocol =
       PrimarySelectionProtocol::kNone;
 };
@@ -56,6 +63,10 @@ class TestWaylandServerThread : public base::Thread,
   class OutputDelegate;
 
   TestWaylandServerThread();
+
+  TestWaylandServerThread(const TestWaylandServerThread&) = delete;
+  TestWaylandServerThread& operator=(const TestWaylandServerThread&) = delete;
+
   ~TestWaylandServerThread() override;
 
   // Starts the test Wayland server thread. If this succeeds, the WAYLAND_SOCKET
@@ -75,6 +86,8 @@ class TestWaylandServerThread : public base::Thread,
 
   // Initializes and returns WpPresentation.
   MockWpPresentation* EnsureWpPresentation();
+  // Initializes and returns SurfaceAugmenter.
+  TestSurfaceAugmenter* EnsureSurfaceAugmenter();
 
   template <typename T>
   T* GetObject(uint32_t id) {
@@ -95,6 +108,9 @@ class TestWaylandServerThread : public base::Thread,
   TestSeat* seat() { return &seat_; }
   MockXdgShell* xdg_shell() { return &xdg_shell_; }
   TestOutput* output() { return &output_; }
+  TestZcrTextInputExtensionV1* text_input_extension_v1() {
+    return &zcr_text_input_extension_v1_;
+  }
   TestZwpTextInputManagerV1* text_input_manager_v1() {
     return &zwp_text_input_manager_v1_;
   }
@@ -110,12 +126,17 @@ class TestWaylandServerThread : public base::Thread,
     return primary_selection_device_manager_.get();
   }
 
+  TestWpPointerGestures& wp_pointer_gestures() { return wp_pointer_gestures_; }
+
   void set_output_delegate(OutputDelegate* delegate) {
     output_delegate_ = delegate;
   }
 
+  wl_client* client() const { return client_; }
+
  private:
   void SetupOutputs();
+  bool SetupPrimarySelectionManager(PrimarySelectionProtocol protocol);
   void DoPause();
 
   std::unique_ptr<base::MessagePump> CreateMessagePump();
@@ -132,18 +153,28 @@ class TestWaylandServerThread : public base::Thread,
   base::WaitableEvent resume_event_;
 
   // Represent Wayland global objects
-  TestCompositor compositor_;
+  // Compositor version is selected dynamically by server config but version is
+  // actually set on construction thus both compositor version objects appear
+  // here.
+  // TODO(crbug.com/1315587): Refactor this pattern when required.
+  TestCompositor compositor_v4_;
+  TestCompositor compositor_v3_;
   TestSubCompositor sub_compositor_;
   TestViewporter viewporter_;
+  TestAlphaCompositing alpha_compositing_;
   TestDataDeviceManager data_device_manager_;
   TestOutput output_;
+  TestOverlayPrioritizer overlay_prioritizer_;
+  TestSurfaceAugmenter surface_augmenter_;
   TestSeat seat_;
   MockXdgShell xdg_shell_;
   MockZxdgShellV6 zxdg_shell_v6_;
+  TestZcrTextInputExtensionV1 zcr_text_input_extension_v1_;
   TestZwpTextInputManagerV1 zwp_text_input_manager_v1_;
   TestZwpLinuxExplicitSynchronizationV1 zwp_linux_explicit_synchronization_v1_;
   MockZwpLinuxDmabufV1 zwp_linux_dmabuf_v1_;
   MockWpPresentation wp_presentation_;
+  TestWpPointerGestures wp_pointer_gestures_;
   std::unique_ptr<TestSelectionDeviceManager> primary_selection_device_manager_;
 
   std::vector<std::unique_ptr<GlobalObject>> globals_;
@@ -151,8 +182,6 @@ class TestWaylandServerThread : public base::Thread,
   base::MessagePumpLibevent::FdWatchController controller_;
 
   OutputDelegate* output_delegate_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(TestWaylandServerThread);
 };
 
 class TestWaylandServerThread::OutputDelegate {

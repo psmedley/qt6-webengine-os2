@@ -9,14 +9,17 @@
 #include "base/command_line.h"
 #include "base/json/json_reader.h"
 #include "base/json/values_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "chrome/browser/extensions/extension_api_unittest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
+#include "chrome/test/base/testing_profile_manager.h"
+#include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/test/web_contents_tester.h"
 #include "extensions/browser/api_test_utils.h"
@@ -109,7 +112,7 @@ struct ExtensionRequestData {
 void VerifyPendingList(const std::map<ExtensionId, ExtensionRequestData>&
                            expected_pending_requests,
                        Profile* profile) {
-  const base::DictionaryValue* actual_pending_requests =
+  const base::Value* actual_pending_requests =
       profile->GetPrefs()->GetDictionary(prefs::kCloudExtensionRequestIds);
   ASSERT_EQ(expected_pending_requests.size(),
             actual_pending_requests->DictSize());
@@ -154,6 +157,11 @@ class WebstorePrivateExtensionInstallRequestBase : public ExtensionApiUnittest {
       : ExtensionApiUnittest(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
+  WebstorePrivateExtensionInstallRequestBase(
+      const WebstorePrivateExtensionInstallRequestBase&) = delete;
+  WebstorePrivateExtensionInstallRequestBase& operator=(
+      const WebstorePrivateExtensionInstallRequestBase&) = delete;
+
   std::string GenerateArgs(const char* id) {
     return base::StringPrintf(R"(["%s"])", id);
   }
@@ -171,9 +179,6 @@ class WebstorePrivateExtensionInstallRequestBase : public ExtensionApiUnittest {
     ASSERT_TRUE(actual_response->is_string());
     EXPECT_EQ(ToString(expected_response), actual_response->GetString());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(WebstorePrivateExtensionInstallRequestBase);
 };
 
 class WebstorePrivateGetExtensionStatusTest
@@ -387,20 +392,20 @@ class WebstorePrivateBeginInstallWithManifest3Test
   }
 
   void VerifyUserCancelledFunctionResult(ExtensionFunction* function) {
-    const base::Value* result = nullptr;
-    ASSERT_TRUE(function->GetResultList() &&
-                function->GetResultList()->Get(0, &result));
-    EXPECT_EQ("user_cancelled", result->GetString());
+    ASSERT_TRUE(function->GetResultList());
+    const base::Value& result =
+        function->GetResultList()->GetListDeprecated()[0];
+    EXPECT_EQ("user_cancelled", result.GetString());
     EXPECT_EQ(kWebstoreUserCancelledError, function->GetError());
   }
 
   void VerifyBlockedByPolicyFunctionResult(
       WebstorePrivateBeginInstallWithManifest3Function* function,
       const std::u16string& expected_blocked_message) {
-    const base::Value* result;
-    ASSERT_TRUE(function->GetResultList() &&
-                function->GetResultList()->Get(0, &result));
-    EXPECT_EQ("blocked_by_policy", result->GetString());
+    ASSERT_TRUE(function->GetResultList());
+    const base::Value& result =
+        function->GetResultList()->GetListDeprecated()[0];
+    EXPECT_EQ("blocked_by_policy", result.GetString());
     EXPECT_EQ(kWebstoreBlockByPolicy, function->GetError());
     EXPECT_EQ(expected_blocked_message,
               function->GetBlockedByPolicyErrorMessageForTesting());
@@ -413,7 +418,7 @@ class WebstorePrivateBeginInstallWithManifest3Test
   ExtensionService* extension_service() { return service_; }
 
  private:
-  ExtensionService* service_ = nullptr;
+  raw_ptr<ExtensionService> service_ = nullptr;
 };
 
 TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
@@ -650,10 +655,44 @@ TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
 
   std::unique_ptr<base::Value> response = RunFunctionAndReturnValue(
       function.get(), GenerateArgs(kExtensionId, kExtensionManifest));
-  // The API returns empty string when extension is installed successfully.
+  // The API returns an empty string on success.
   ASSERT_TRUE(response);
   ASSERT_TRUE(response->is_string());
   EXPECT_EQ(std::string(), response->GetString());
+}
+
+TEST_F(WebstorePrivateBeginInstallWithManifest3Test,
+       ProfileDeletedBeforeCompleteInstall) {
+  const std::string profile_name = "deleted_before_complete_install";
+  TestingProfile* const test_profile =
+      profile_manager()->CreateTestingProfile(profile_name);
+  ASSERT_TRUE(test_profile);
+  // There should be no pending approvals.
+  EXPECT_EQ(WebstorePrivateApi::GetPendingApprovalsCountForTesting(), 0);
+  {
+    std::unique_ptr<content::WebContents> web_contents =
+        content::WebContentsTester::CreateTestWebContents(test_profile,
+                                                          nullptr);
+    auto function = base::MakeRefCounted<
+        WebstorePrivateBeginInstallWithManifest3Function>();
+    function->SetRenderFrameHost(web_contents->GetMainFrame());
+    ScopedTestDialogAutoConfirm auto_confirm(
+        ScopedTestDialogAutoConfirm::ACCEPT);
+
+    function->set_extension(extension());
+    auto response = api_test_utils::RunFunctionAndReturnSingleResult(
+        function.get(), GenerateArgs(kExtensionId, kExtensionManifest),
+        test_profile);
+    // The API returns an empty string on success.
+    ASSERT_TRUE(response);
+    ASSERT_TRUE(response->is_string());
+    EXPECT_EQ(response->GetString(), "");
+    // Running the function creates a pending approval.
+    EXPECT_EQ(WebstorePrivateApi::GetPendingApprovalsCountForTesting(), 1);
+  }
+  // Deleting the Profile should remove the pending approval.
+  profile_manager()->DeleteTestingProfile(profile_name);
+  EXPECT_EQ(WebstorePrivateApi::GetPendingApprovalsCountForTesting(), 0);
 }
 
 struct FrictionDialogTestCase {
@@ -725,8 +764,9 @@ TEST_P(WebstorePrivateBeginInstallWithManifest3FrictionDialogTest,
 
   if (test_case.esb_user) {
     // Enable Enhanced Protection
-    safe_browsing::SetSafeBrowsingState(profile()->GetPrefs(),
-                                        safe_browsing::ENHANCED_PROTECTION);
+    safe_browsing::SetSafeBrowsingState(
+        profile()->GetPrefs(),
+        safe_browsing::SafeBrowsingState::ENHANCED_PROTECTION);
   }
   extension_service()->Init();
 

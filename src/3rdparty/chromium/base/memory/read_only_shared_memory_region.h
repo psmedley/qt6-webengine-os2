@@ -5,9 +5,12 @@
 #ifndef BASE_MEMORY_READ_ONLY_SHARED_MEMORY_REGION_H_
 #define BASE_MEMORY_READ_ONLY_SHARED_MEMORY_REGION_H_
 
-#include "base/macros.h"
+#include "base/base_export.h"
+#include "base/check.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/shared_memory_mapping.h"
+
+#include <stdint.h>
 
 namespace base {
 
@@ -56,6 +59,10 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
   ReadOnlySharedMemoryRegion(ReadOnlySharedMemoryRegion&&);
   ReadOnlySharedMemoryRegion& operator=(ReadOnlySharedMemoryRegion&&);
 
+  ReadOnlySharedMemoryRegion(const ReadOnlySharedMemoryRegion&) = delete;
+  ReadOnlySharedMemoryRegion& operator=(const ReadOnlySharedMemoryRegion&) =
+      delete;
+
   // Destructor closes shared memory region if valid.
   // All created mappings will remain valid.
   ~ReadOnlySharedMemoryRegion();
@@ -77,7 +84,7 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
   // starting with the given |offset|. |offset| must be aligned to value of
   // |SysInfo::VMAllocationGranularity()|. Returns an invalid mapping if
   // requested bytes are out of the region limits.
-  ReadOnlySharedMemoryMapping MapAt(off_t offset, size_t size) const;
+  ReadOnlySharedMemoryMapping MapAt(uint64_t offset, size_t size) const;
 
   // Whether the underlying platform handle is valid.
   bool IsValid() const;
@@ -96,7 +103,7 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
 
   // Returns a platform shared memory handle. |this| remains the owner of the
   // handle.
-  subtle::PlatformSharedMemoryRegion::PlatformHandle GetPlatformHandle() const {
+  subtle::PlatformSharedMemoryHandle GetPlatformHandle() const {
     DCHECK(IsValid());
     return handle_.GetPlatformHandle();
   }
@@ -112,8 +119,6 @@ class BASE_EXPORT ReadOnlySharedMemoryRegion {
   static CreateFunction* create_hook_;
 
   subtle::PlatformSharedMemoryRegion handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(ReadOnlySharedMemoryRegion);
 };
 
 // Helper struct for return value of ReadOnlySharedMemoryRegion::Create().

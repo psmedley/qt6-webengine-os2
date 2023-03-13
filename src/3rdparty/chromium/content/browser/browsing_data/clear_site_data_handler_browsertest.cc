@@ -329,7 +329,7 @@ class ClearSiteDataHandlerBrowserTest : public ContentBrowserTest {
 // may or may not send the header, so there are 8 configurations to test.
 
 // Crashes on Win only. https://crbug.com/741189
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_RedirectNavigation DISABLED_RedirectNavigation
 #else
 #define MAYBE_RedirectNavigation RedirectNavigation
@@ -367,7 +367,7 @@ IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest,
         NavigateToURL(shell(), urls[0], urls[2] /* expected_commit_url */));
 
     // We reached the end of the redirect chain.
-    EXPECT_EQ(urls[2], shell()->web_contents()->GetURL());
+    EXPECT_EQ(urls[2], shell()->web_contents()->GetLastCommittedURL());
 
     delegate()->VerifyAndClearExpectations();
   }
@@ -378,7 +378,7 @@ IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest,
 // chain may or may not send the header, so there are 8 configurations to test.
 
 // Crashes on Win only. https://crbug.com/741189
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_RedirectResourceLoad DISABLED_RedirectResourceLoad
 #else
 #define MAYBE_RedirectResourceLoad RedirectResourceLoad
@@ -572,7 +572,7 @@ IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest, ServiceWorker) {
 // if credentials are allowed in that fetch.
 
 // Crashes on Win only. https://crbug.com/741189
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_Credentials DISABLED_Credentials
 #else
 #define MAYBE_Credentials Credentials
@@ -825,7 +825,7 @@ IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest, ClosedTab) {
 }
 
 // Tests that sending Clear-Site-Data during a service worker installation
-// doesn't fail. (see crbug.com/898465)
+// results in the service worker not installed. (see crbug.com/898465)
 IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest,
                        ClearSiteDataDuringServiceWorkerInstall) {
   GURL url = embedded_test_server()->GetURL("127.0.0.1", "/");
@@ -834,6 +834,14 @@ IN_PROC_BROWSER_TEST_F(ClearSiteDataHandlerBrowserTest,
   delegate()->ExpectClearSiteDataCall(url::Origin::Create(url), false, true,
                                       false);
   SetClearSiteDataHeader("\"storage\"");
+  EXPECT_FALSE(RunScriptAndGetBool("installServiceWorker()"));
+  delegate()->VerifyAndClearExpectations();
+  EXPECT_FALSE(RunScriptAndGetBool("hasServiceWorker()"));
+
+  // Install the service worker again without CSD header to verify that
+  // future network requests are not broken and the service worker
+  // installs correctly.
+  SetClearSiteDataHeader("");
   EXPECT_TRUE(RunScriptAndGetBool("installServiceWorker()"));
   delegate()->VerifyAndClearExpectations();
   EXPECT_TRUE(RunScriptAndGetBool("hasServiceWorker()"));

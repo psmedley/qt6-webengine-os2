@@ -13,6 +13,8 @@
 #include "chrome/browser/extensions/api/proxy/proxy_api_constants.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_prefs.h"
+#include "net/base/proxy_server.h"
+#include "net/base/proxy_string_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -80,7 +82,7 @@ TEST(ExtensionProxyApiHelpers, GetProxyModeFromExtensionPref) {
   bool bad_message = false;
 
   // Test positive case.
-  proxy_config.SetString(
+  proxy_config.SetStringKey(
       keys::kProxyConfigMode,
       ProxyPrefs::ProxyModeToString(ProxyPrefs::MODE_DIRECT));
   ASSERT_TRUE(GetProxyModeFromExtensionPref(&proxy_config, &mode, &error,
@@ -90,7 +92,7 @@ TEST(ExtensionProxyApiHelpers, GetProxyModeFromExtensionPref) {
   EXPECT_FALSE(bad_message);
 
   // Test negative case.
-  proxy_config.SetString(keys::kProxyConfigMode, "foobar");
+  proxy_config.SetStringKey(keys::kProxyConfigMode, "foobar");
   EXPECT_FALSE(GetProxyModeFromExtensionPref(&proxy_config, &mode, &error,
                                              &bad_message));
   EXPECT_TRUE(bad_message);
@@ -105,7 +107,7 @@ TEST(ExtensionProxyApiHelpers, GetPacUrlFromExtensionPref) {
   bool bad_message = false;
 
   base::DictionaryValue proxy_config;
-  proxy_config.SetString(
+  proxy_config.SetStringKey(
       keys::kProxyConfigMode,
       ProxyPrefs::ProxyModeToString(ProxyPrefs::MODE_PAC_SCRIPT));
 
@@ -136,7 +138,7 @@ TEST(ExtensionProxyApiHelpers, GetPacDataFromExtensionPref) {
   bool bad_message = false;
 
   base::DictionaryValue proxy_config;
-  proxy_config.SetString(
+  proxy_config.SetStringKey(
       keys::kProxyConfigMode,
       ProxyPrefs::ProxyModeToString(ProxyPrefs::MODE_PAC_SCRIPT));
 
@@ -165,7 +167,7 @@ TEST(ExtensionProxyApiHelpers, GetProxyRulesStringFromExtensionPref) {
   bool bad_message = false;
 
   base::DictionaryValue proxy_config;
-  proxy_config.SetString(
+  proxy_config.SetStringKey(
       keys::kProxyConfigMode,
       ProxyPrefs::ProxyModeToString(ProxyPrefs::MODE_FIXED_SERVERS));
 
@@ -196,7 +198,7 @@ TEST(ExtensionProxyApiHelpers, GetBypassListFromExtensionPref) {
   bool bad_message = false;
 
   base::DictionaryValue proxy_config;
-  proxy_config.SetString(
+  proxy_config.SetStringKey(
       keys::kProxyConfigMode,
       ProxyPrefs::ProxyModeToString(ProxyPrefs::MODE_FIXED_SERVERS));
 
@@ -276,33 +278,36 @@ TEST(ExtensionProxyApiHelpers, GetProxyServer) {
   bool bad_message = false;
 
   // Test simplest case, no schema nor port specified --> defaults are used.
-  proxy_server_dict.SetString(keys::kProxyConfigRuleHost, "proxy_server");
+  proxy_server_dict.SetStringKey(keys::kProxyConfigRuleHost, "proxy_server");
   ASSERT_TRUE(
       GetProxyServer(&proxy_server_dict, net::ProxyServer::SCHEME_HTTP,
                      &created, &error, &bad_message));
-  EXPECT_EQ("PROXY proxy_server:80", created.ToPacString());
+  EXPECT_EQ("PROXY proxy_server:80",
+            net::ProxyServerToPacResultElement(created));
   EXPECT_FALSE(bad_message);
 
   // Test complete case.
-  proxy_server_dict.SetString(keys::kProxyConfigRuleScheme, "socks4");
-  proxy_server_dict.SetInteger(keys::kProxyConfigRulePort, 1234);
+  proxy_server_dict.SetStringKey(keys::kProxyConfigRuleScheme, "socks4");
+  proxy_server_dict.SetIntKey(keys::kProxyConfigRulePort, 1234);
   ASSERT_TRUE(
         GetProxyServer(&proxy_server_dict, net::ProxyServer::SCHEME_HTTP,
                        &created, &error, &bad_message));
-  EXPECT_EQ("SOCKS proxy_server:1234", created.ToPacString());
+  EXPECT_EQ("SOCKS proxy_server:1234",
+            net::ProxyServerToPacResultElement(created));
   EXPECT_FALSE(bad_message);
 }
 
 TEST(ExtensionProxyApiHelpers, JoinUrlList) {
   bool bad_message = false;
-  base::ListValue list;
-  list.AppendString("s1");
-  list.AppendString("s2");
-  list.AppendString("s3");
+  base::Value list(base::Value::Type::LIST);
+  list.Append("s1");
+  list.Append("s2");
+  list.Append("s3");
 
   std::string out;
   std::string error;
-  ASSERT_TRUE(JoinUrlList(&list, ";", &out, &error, &bad_message));
+  ASSERT_TRUE(
+      JoinUrlList(list.GetListDeprecated(), ";", &out, &error, &bad_message));
   EXPECT_EQ("s1;s2;s3", out);
   EXPECT_FALSE(bad_message);
 }
@@ -367,8 +372,8 @@ TEST(ExtensionProxyApiHelpers, CreatePacScriptDictWithUrl) {
   ASSERT_TRUE(extension_pref.get());
 
   std::unique_ptr<base::DictionaryValue> expected(new base::DictionaryValue);
-  expected->SetString(keys::kProxyConfigPacScriptUrl, kSamplePacScriptUrl);
-  expected->SetBoolean(keys::kProxyConfigPacScriptMandatory, false);
+  expected->SetStringKey(keys::kProxyConfigPacScriptUrl, kSamplePacScriptUrl);
+  expected->SetBoolKey(keys::kProxyConfigPacScriptMandatory, false);
 
   EXPECT_EQ(*expected, *extension_pref);
 }
@@ -382,17 +387,17 @@ TEST(ExtensionProxyApiHelpers, CreatePacScriptDictWidthData) {
   ASSERT_TRUE(extension_pref.get());
 
   std::unique_ptr<base::DictionaryValue> expected(new base::DictionaryValue);
-  expected->SetString(keys::kProxyConfigPacScriptData, kSamplePacScript);
-  expected->SetBoolean(keys::kProxyConfigPacScriptMandatory, false);
+  expected->SetStringKey(keys::kProxyConfigPacScriptData, kSamplePacScript);
+  expected->SetBoolKey(keys::kProxyConfigPacScriptMandatory, false);
 
   EXPECT_EQ(*expected, *extension_pref);
 }
 
 TEST(ExtensionProxyApiHelpers, TokenizeToStringList) {
   base::ListValue expected;
-  expected.AppendString("s1");
-  expected.AppendString("s2");
-  expected.AppendString("s3");
+  expected.Append("s1");
+  expected.Append("s2");
+  expected.Append("s3");
 
   std::unique_ptr<base::ListValue> out(TokenizeToStringList("s1;s2;s3", ";"));
   EXPECT_EQ(expected, *out);

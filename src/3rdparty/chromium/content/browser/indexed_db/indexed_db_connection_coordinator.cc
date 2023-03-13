@@ -9,12 +9,13 @@
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "components/services/storage/indexed_db/locks/leveled_lock_manager.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scope.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scopes.h"
-#include "components/services/storage/indexed_db/scopes/scopes_lock_manager.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_factory.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_transaction.h"
@@ -62,6 +63,9 @@ class IndexedDBConnectionCoordinator::ConnectionRequest {
         connection_coordinator_(connection_coordinator),
         tasks_available_callback_(std::move(tasks_available_callback)) {}
 
+  ConnectionRequest(const ConnectionRequest&) = delete;
+  ConnectionRequest& operator=(const ConnectionRequest&) = delete;
+
   virtual ~ConnectionRequest() {}
 
   // Called when the request makes it to the front of the queue. The state()
@@ -106,17 +110,14 @@ class IndexedDBConnectionCoordinator::ConnectionRequest {
 
   IndexedDBStorageKeyStateHandle storage_key_state_handle_;
   // This is safe because IndexedDBDatabase owns this object.
-  IndexedDBDatabase* db_;
+  raw_ptr<IndexedDBDatabase> db_;
 
   // Rawptr safe because IndexedDBConnectionCoordinator owns this object.
-  IndexedDBConnectionCoordinator* connection_coordinator_;
+  raw_ptr<IndexedDBConnectionCoordinator> connection_coordinator_;
 
   TasksAvailableCallback tasks_available_callback_;
 
   leveldb::Status saved_leveldb_status_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ConnectionRequest);
 };
 
 class IndexedDBConnectionCoordinator::OpenRequest
@@ -134,6 +135,9 @@ class IndexedDBConnectionCoordinator::OpenRequest
         pending_(std::move(pending_connection)) {
     db_->metadata_.was_cold_open = pending_->was_cold_open;
   }
+
+  OpenRequest(const OpenRequest&) = delete;
+  OpenRequest& operator=(const OpenRequest&) = delete;
 
   // Note: the |tasks_available_callback_| is NOT called here because the state
   // is checked after this method.
@@ -210,9 +214,9 @@ class IndexedDBConnectionCoordinator::OpenRequest
     DCHECK_GT(new_version, old_version);
 
     if (!has_connections) {
-      std::vector<ScopesLockManager::ScopeLockRequest> lock_requests = {
+      std::vector<LeveledLockManager::LeveledLockRequest> lock_requests = {
           {kDatabaseRangeLockLevel, GetDatabaseLockRange(db_->metadata_.id),
-           ScopesLockManager::LockType::kExclusive}};
+           LeveledLockManager::LockType::kExclusive}};
       state_ = RequestState::kPendingLocks;
       db_->lock_manager_->AcquireLocks(
           std::move(lock_requests), lock_receiver_.weak_factory.GetWeakPtr(),
@@ -257,9 +261,9 @@ class IndexedDBConnectionCoordinator::OpenRequest
 
   void OnNoConnections() override {
     DCHECK(state_ == RequestState::kPendingNoConnections);
-    std::vector<ScopesLockManager::ScopeLockRequest> lock_requests = {
+    std::vector<LeveledLockManager::LeveledLockRequest> lock_requests = {
         {kDatabaseRangeLockLevel, GetDatabaseLockRange(db_->metadata().id),
-         ScopesLockManager::LockType::kExclusive}};
+         LeveledLockManager::LockType::kExclusive}};
     state_ = RequestState::kPendingLocks;
     db_->lock_manager_->AcquireLocks(
         std::move(lock_requests), lock_receiver_.weak_factory.GetWeakPtr(),
@@ -364,7 +368,7 @@ class IndexedDBConnectionCoordinator::OpenRequest
   }
 
  private:
-  ScopesLocksHolder lock_receiver_;
+  LeveledLockHolder lock_receiver_;
 
   std::unique_ptr<IndexedDBPendingConnection> pending_;
 
@@ -374,10 +378,9 @@ class IndexedDBConnectionCoordinator::OpenRequest
 
   // This raw pointer is stored solely for comparison to the connection in
   // OnConnectionClosed. It is not guaranteed to be pointing to a live object.
-  IndexedDBConnection* connection_ptr_for_close_comparision_ = nullptr;
+  raw_ptr<IndexedDBConnection> connection_ptr_for_close_comparision_ = nullptr;
 
   base::WeakPtrFactory<OpenRequest> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(OpenRequest);
 };
 
 class IndexedDBConnectionCoordinator::DeleteRequest
@@ -396,12 +399,15 @@ class IndexedDBConnectionCoordinator::DeleteRequest
         callbacks_(callbacks),
         on_database_deleted_(std::move(on_database_deleted)) {}
 
+  DeleteRequest(const DeleteRequest&) = delete;
+  DeleteRequest& operator=(const DeleteRequest&) = delete;
+
   void Perform(bool has_connections) override {
     if (!has_connections) {
       // No connections, so delete immediately.
-      std::vector<ScopesLockManager::ScopeLockRequest> lock_requests = {
+      std::vector<LeveledLockManager::LeveledLockRequest> lock_requests = {
           {kDatabaseRangeLockLevel, GetDatabaseLockRange(db_->metadata().id),
-           ScopesLockManager::LockType::kExclusive}};
+           LeveledLockManager::LockType::kExclusive}};
       state_ = RequestState::kPendingLocks;
       db_->lock_manager_->AcquireLocks(
           std::move(lock_requests), lock_receiver_.AsWeakPtr(),
@@ -428,9 +434,9 @@ class IndexedDBConnectionCoordinator::DeleteRequest
 
   void OnNoConnections() override {
     DCHECK(state_ == RequestState::kPendingNoConnections);
-    std::vector<ScopesLockManager::ScopeLockRequest> lock_requests = {
+    std::vector<LeveledLockManager::LeveledLockRequest> lock_requests = {
         {kDatabaseRangeLockLevel, GetDatabaseLockRange(db_->metadata().id),
-         ScopesLockManager::LockType::kExclusive}};
+         LeveledLockManager::LockType::kExclusive}};
     state_ = RequestState::kPendingLocks;
     db_->lock_manager_->AcquireLocks(
         std::move(lock_requests), lock_receiver_.AsWeakPtr(),
@@ -505,12 +511,11 @@ class IndexedDBConnectionCoordinator::DeleteRequest
   }
 
  private:
-  ScopesLocksHolder lock_receiver_;
+  LeveledLockHolder lock_receiver_;
   scoped_refptr<IndexedDBCallbacks> callbacks_;
   base::OnceClosure on_database_deleted_;
 
   base::WeakPtrFactory<DeleteRequest> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(DeleteRequest);
 };
 
 IndexedDBConnectionCoordinator::IndexedDBConnectionCoordinator(

@@ -27,7 +27,6 @@ from profile_chrome import chrome_startup_tracing_agent
 
 
 def _CreateOptionParser():
-  # TODO(rhuckleberry): Update description when adding script functionality.
   parser = optparse.OptionParser(description='Record Perfetto tracing profiles '
                                  'from Android browsers startup. See '
                                  'http://dev.chromium.org'
@@ -46,8 +45,8 @@ def _CreateOptionParser():
 
 
 def _SetupFlags(options):
-  flag_utils.SetupProfilingCategories(options)
   flag_utils.SetupLogging(options.verbosity)
+  flag_utils.SetupProfilingCategories(options)
 
 
 def main():
@@ -59,7 +58,7 @@ def main():
   # Run Tracing
   trace_file = None
   if options.platform.lower() == 'android':
-    # TODO(rhuckleberry): Fix manual tracing. Setting flag --time=0 stalls and fails
+    # TODO(crbug/1239748): Fix manual tracing. Setting flag --time=0 stalls and fails
     # to download the collected trace.
     trace_file = adb_profile_chrome_startup.ProfileChrome(options)
   else:
@@ -77,7 +76,15 @@ def main():
     symbolize_trace.SymbolizeTrace(trace_file=trace_file, options=options)
 
   if options.view:
-    display_in_browser.DisplayInBrowser(trace_file, options.trace_format)
+    trace = options.output_file
+    if not trace or not os.path.isfile(trace):
+      trace = trace_file
+
+    if trace and os.path.isfile(trace):
+      display_in_browser.DisplayInBrowser(trace, options.trace_format)
+    else:
+      flag_utils.GetTraceLogger().warning(
+          'Trace is not found, so not opening in browser.')
 
 if __name__ == '__main__':
   sys.exit(main())

@@ -28,20 +28,19 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* eslint-disable rulesdir/no_underscored_properties */
-
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as Protocol from '../../generated/protocol.js';
 import * as Bindings from '../../models/bindings/bindings.js';
+import * as SourceMapScopes from '../../models/source_map_scopes/source_map_scopes.js';
 import * as LinearMemoryInspector from '../../ui/components/linear_memory_inspector/linear_memory_inspector.js';
 import * as ObjectUI from '../../ui/legacy/components/object_ui/object_ui.js';
 import * as Components from '../../ui/legacy/components/utils/utils.js';
 import * as UI from '../../ui/legacy/legacy.js';
 
-import {resolveScopeChain, resolveScopeInObject, resolveThisObject} from './SourceMapNamesResolver.js';
+import scopeChainSidebarPaneStyles from './scopeChainSidebarPane.css.js';
 
 const UIStrings = {
   /**
@@ -87,23 +86,25 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 let scopeChainSidebarPaneInstance: ScopeChainSidebarPane;
 
 export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextFlavorListener.ContextFlavorListener {
-  _treeOutline: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline;
-  _expandController: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeExpandController;
-  _linkifier: Components.Linkifier.Linkifier;
-  _infoElement: HTMLDivElement;
+  private readonly treeOutline: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline;
+  private readonly expandController: ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeExpandController;
+  private readonly linkifier: Components.Linkifier.Linkifier;
+  private infoElement: HTMLDivElement;
+  #scopesScript: SDK.Script.Script|null = null;
+
   private constructor() {
     super(true);
-    this.registerRequiredCSS('panels/sources/scopeChainSidebarPane.css');
-    this._treeOutline = new ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline();
-    this._treeOutline.registerRequiredCSS('panels/sources/scopeChainSidebarPane.css');
-    this._treeOutline.setShowSelectionOnKeyboardFocus(/* show */ true);
-    this._expandController =
-        new ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeExpandController(this._treeOutline);
-    this._linkifier = new Components.Linkifier.Linkifier();
-    this._infoElement = document.createElement('div');
-    this._infoElement.className = 'gray-info-message';
-    this._infoElement.tabIndex = -1;
-    this._update();
+
+    this.treeOutline = new ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeOutline();
+
+    this.treeOutline.setShowSelectionOnKeyboardFocus(/* show */ true);
+    this.expandController =
+        new ObjectUI.ObjectPropertiesSection.ObjectPropertiesSectionsTreeExpandController(this.treeOutline);
+    this.linkifier = new Components.Linkifier.Linkifier();
+    this.infoElement = document.createElement('div');
+    this.infoElement.className = 'gray-info-message';
+    this.infoElement.tabIndex = -1;
+    void this.update();
   }
 
   static instance(): ScopeChainSidebarPane {
@@ -114,7 +115,7 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
   }
 
   flavorChanged(_object: Object|null): void {
-    this._update();
+    void this.update();
   }
 
   focus(): void {
@@ -123,61 +124,93 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
     }
 
     if (UI.Context.Context.instance().flavor(SDK.DebuggerModel.DebuggerPausedDetails)) {
-      this._treeOutline.forceSelect();
+      this.treeOutline.forceSelect();
     }
   }
 
-  async _update(): Promise<void> {
+  private sourceMapAttached(
+      event: Common.EventTarget.EventTargetEvent<{client: SDK.Script.Script, sourceMap: SDK.SourceMap.SourceMap}>):
+      void {
+    if (event.data.client === this.#scopesScript) {
+      void this.update();
+    }
+  }
+
+  private setScopeSourceMapSubscription(callFrame: SDK.DebuggerModel.CallFrame|null): void {
+    const oldScript = this.#scopesScript;
+    this.#scopesScript = callFrame?.script ?? null;
+
+    // Shortcut for the case when we are listening to the same model.
+    if (oldScript?.debuggerModel === this.#scopesScript?.debuggerModel) {
+      return;
+    }
+
+    if (oldScript) {
+      oldScript.debuggerModel.sourceMapManager().removeEventListener(
+          SDK.SourceMapManager.Events.SourceMapAttached, this.sourceMapAttached, this);
+    }
+
+    if (this.#scopesScript) {
+      this.#scopesScript.debuggerModel.sourceMapManager().addEventListener(
+          SDK.SourceMapManager.Events.SourceMapAttached, this.sourceMapAttached, this);
+    }
+  }
+
+  private async update(): Promise<void> {
     // The `resolveThisObject(callFrame)` and `resolveScopeChain(callFrame)` calls
     // below may take a while to complete, so indicate to the user that something
     // is happening (see https://crbug.com/1162416).
-    this._infoElement.textContent = i18nString(UIStrings.loading);
+    this.infoElement.textContent = i18nString(UIStrings.loading);
     this.contentElement.removeChildren();
-    this.contentElement.appendChild(this._infoElement);
+    this.contentElement.appendChild(this.infoElement);
 
-    this._linkifier.reset();
+    this.linkifier.reset();
 
     const callFrame = UI.Context.Context.instance().flavor(SDK.DebuggerModel.CallFrame);
-    const [thisObject, scopeChain] = await Promise.all([resolveThisObject(callFrame), resolveScopeChain(callFrame)]);
+    this.setScopeSourceMapSubscription(callFrame);
+    const [thisObject, scopeChain] = await Promise.all([
+      SourceMapScopes.NamesResolver.resolveThisObject(callFrame),
+      SourceMapScopes.NamesResolver.resolveScopeChain(callFrame),
+    ]);
     // By now the developer might have moved on, and we don't want to show stale
     // scope information, so check again that we're still on the same CallFrame.
     if (callFrame === UI.Context.Context.instance().flavor(SDK.DebuggerModel.CallFrame)) {
       const details = UI.Context.Context.instance().flavor(SDK.DebuggerModel.DebuggerPausedDetails);
-      this._treeOutline.removeChildren();
+      this.treeOutline.removeChildren();
 
       if (!details || !callFrame || !scopeChain) {
-        this._infoElement.textContent = i18nString(UIStrings.notPaused);
+        this.infoElement.textContent = i18nString(UIStrings.notPaused);
         return;
       }
 
       this.contentElement.removeChildren();
-      this.contentElement.appendChild(this._treeOutline.element);
+      this.contentElement.appendChild(this.treeOutline.element);
       let foundLocalScope = false;
       for (let i = 0; i < scopeChain.length; ++i) {
         const scope = scopeChain[i];
-        const extraProperties = this._extraPropertiesForScope(scope, details, callFrame, thisObject, i === 0);
+        const extraProperties = this.extraPropertiesForScope(scope, details, callFrame, thisObject, i === 0);
 
         if (scope.type() === Protocol.Debugger.ScopeType.Local) {
           foundLocalScope = true;
         }
 
-        const section = this._createScopeSectionTreeElement(scope, extraProperties);
+        const section = this.createScopeSectionTreeElement(scope, extraProperties);
         if (scope.type() === Protocol.Debugger.ScopeType.Global) {
           section.collapse();
         } else if (!foundLocalScope || scope.type() === Protocol.Debugger.ScopeType.Local) {
           section.expand();
         }
 
-        this._treeOutline.appendChild(section);
+        this.treeOutline.appendChild(section);
         if (i === 0) {
           section.select(/* omitFocus */ true);
         }
       }
-      this._sidebarPaneUpdatedForTest();
+      this.sidebarPaneUpdatedForTest();
     }
   }
 
-  _createScopeSectionTreeElement(
+  private createScopeSectionTreeElement(
       scope: SDK.DebuggerModel.ScopeChainEntry,
       extraProperties: SDK.RemoteObject.RemoteObjectProperty[]): ObjectUI.ObjectPropertiesSection.RootElement {
     let emptyPlaceholder: Common.UIString.LocalizedString|null = null;
@@ -213,17 +246,17 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
     titleElement.createChild('div', 'scope-chain-sidebar-pane-section-title').textContent = title;
 
     const section = new ObjectUI.ObjectPropertiesSection.RootElement(
-        resolveScopeInObject(scope), this._linkifier, emptyPlaceholder,
+        SourceMapScopes.NamesResolver.resolveScopeInObject(scope), this.linkifier, emptyPlaceholder,
         ObjectUI.ObjectPropertiesSection.ObjectPropertiesMode.All, extraProperties);
     section.title = titleElement;
     section.listItemElement.classList.add('scope-chain-sidebar-pane-section');
     section.listItemElement.setAttribute('aria-label', title);
-    this._expandController.watchSection(title + (subtitle ? ':' + subtitle : ''), section);
+    this.expandController.watchSection(title + (subtitle ? ':' + subtitle : ''), section);
 
     return section;
   }
 
-  _extraPropertiesForScope(
+  private extraPropertiesForScope(
       scope: SDK.DebuggerModel.ScopeChainEntry, details: SDK.DebuggerModel.DebuggerPausedDetails,
       callFrame: SDK.DebuggerModel.CallFrame, thisObject: SDK.RemoteObject.RemoteObject|null,
       isFirstScope: boolean): SDK.RemoteObject.RemoteObjectProperty[] {
@@ -254,7 +287,12 @@ export class ScopeChainSidebarPane extends UI.Widget.VBox implements UI.ContextF
     return extraProperties;
   }
 
-  _sidebarPaneUpdatedForTest(): void {
+  private sidebarPaneUpdatedForTest(): void {
+  }
+  wasShown(): void {
+    super.wasShown();
+    this.treeOutline.registerCSSFiles([scopeChainSidebarPaneStyles]);
+    this.registerCSSFiles([scopeChainSidebarPaneStyles]);
   }
 }
 
@@ -272,7 +310,7 @@ export class OpenLinearMemoryInspector extends UI.Widget.VBox implements UI.Cont
     return openLinearMemoryInspectorInstance;
   }
 
-  _isMemoryObjectProperty(obj: SDK.RemoteObject.RemoteObject): boolean {
+  private isMemoryObjectProperty(obj: SDK.RemoteObject.RemoteObject): boolean {
     const isWasmMemory = obj.type === 'object' && obj.subtype &&
         LinearMemoryInspector.LinearMemoryInspectorController.ACCEPTED_MEMORY_TYPES.includes(obj.subtype);
     if (isWasmMemory) {
@@ -280,8 +318,7 @@ export class OpenLinearMemoryInspector extends UI.Widget.VBox implements UI.Cont
     }
 
     if (obj instanceof Bindings.DebuggerLanguagePlugins.ValueNode) {
-      const valueNode = /** @type {!Bindings.DebuggerLanguagePlugins.ValueNode} */ obj;
-      return valueNode.inspectableAddress !== undefined;
+      return obj.inspectableAddress !== undefined;
     }
 
     return false;
@@ -289,21 +326,21 @@ export class OpenLinearMemoryInspector extends UI.Widget.VBox implements UI.Cont
 
   appendApplicableItems(event: Event, contextMenu: UI.ContextMenu.ContextMenu, target: Object): void {
     if (target instanceof ObjectUI.ObjectPropertiesSection.ObjectPropertyTreeElement) {
-      if (target.property && target.property.value && this._isMemoryObjectProperty(target.property.value)) {
+      if (target.property && target.property.value && this.isMemoryObjectProperty(target.property.value)) {
         contextMenu.debugSection().appendItem(
             i18nString(UIStrings.revealInMemoryInspectorPanel),
-            this._openMemoryInspector.bind(this, target.property.value));
+            this.openMemoryInspector.bind(this, target.property.value));
       }
     }
   }
 
-  async _openMemoryInspector(obj: SDK.RemoteObject.RemoteObject): Promise<void> {
+  private async openMemoryInspector(obj: SDK.RemoteObject.RemoteObject): Promise<void> {
     const controller = LinearMemoryInspector.LinearMemoryInspectorController.LinearMemoryInspectorController.instance();
     let address = 0;
     let memoryObj: SDK.RemoteObject.RemoteObject = obj;
 
     if (obj instanceof Bindings.DebuggerLanguagePlugins.ValueNode) {
-      const valueNode = /** @type {!Bindings.DebuggerLanguagePlugins.ValueNode} */ obj;
+      const valueNode = obj;
       address = valueNode.inspectableAddress || 0;
       const callFrame = valueNode.callFrame;
       const response = await obj.debuggerModel().agent.invoke_evaluateOnCallFrame({
@@ -319,6 +356,6 @@ export class OpenLinearMemoryInspector extends UI.Widget.VBox implements UI.Cont
       memoryObj = runtimeModel.createRemoteObject(response.result);
     }
     Host.userMetrics.linearMemoryInspectorRevealedFrom(Host.UserMetrics.LinearMemoryInspectorRevealedFrom.ContextMenu);
-    controller.openInspectorView(memoryObj, address);
+    void controller.openInspectorView(memoryObj, address);
   }
 }

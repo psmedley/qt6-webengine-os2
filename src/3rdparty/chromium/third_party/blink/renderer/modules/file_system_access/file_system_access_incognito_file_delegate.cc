@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/modules/file_system_access/file_system_access_incognito_file_delegate.h"
 
-#include "base/callback_helpers.h"
 #include "base/files/file.h"
 #include "base/files/file_error_or.h"
 #include "base/memory/scoped_refptr.h"
@@ -16,10 +15,12 @@
 #include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/file_system_access/file_system_access_file_delegate.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
-#include "third_party/blink/renderer/platform/wtf/cross_thread_copier.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_mojo.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 #include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace blink {
@@ -63,10 +64,9 @@ void WriteDataToProducer(
   // the duration of the write.
   producer_raw->Write(
       std::move(data_source),
-      WTF::Bind(base::DoNothing::Once<
-                    std::unique_ptr<mojo::DataPipeProducer>,
-                    scoped_refptr<base::RefCountedData<Vector<uint8_t>>>,
-                    MojoResult>(),
+      WTF::Bind([](std::unique_ptr<mojo::DataPipeProducer>,
+                   scoped_refptr<base::RefCountedData<Vector<uint8_t>>>,
+                   MojoResult) {},
                 std::move(producer), std::move(data)));
 }
 
@@ -155,6 +155,7 @@ base::FileErrorOr<int> FileSystemAccessIncognitoFileDelegate::Write(
 
 void FileSystemAccessIncognitoFileDelegate::GetLength(
     base::OnceCallback<void(base::FileErrorOr<int64_t>)> callback) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   mojo_ptr_->GetLength(WTF::Bind(
       [](base::OnceCallback<void(base::FileErrorOr<int64_t>)> callback,
          base::File::Error file_error, uint64_t length) {
@@ -166,7 +167,7 @@ void FileSystemAccessIncognitoFileDelegate::GetLength(
 
 void FileSystemAccessIncognitoFileDelegate::SetLength(
     int64_t length,
-    base::OnceCallback<void(bool)> callback) {
+    base::OnceCallback<void(base::File::Error)> callback) {
   DCHECK(task_runner_->RunsTasksInCurrentSequence());
   if (length < 0) {
     // This method is expected to finish asynchronously, so post a task to the
@@ -193,9 +194,9 @@ void FileSystemAccessIncognitoFileDelegate::Flush(
 }
 
 void FileSystemAccessIncognitoFileDelegate::Close(base::OnceClosure callback) {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   mojo_ptr_.reset();
 
-  DCHECK(task_runner_->RunsTasksInCurrentSequence());
   task_runner_->PostTask(FROM_HERE, std::move(callback));
 }
 

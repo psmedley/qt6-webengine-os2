@@ -26,8 +26,7 @@ namespace media {
 
 class MEDIA_EXPORT MediaFoundationCdmFactory final : public CdmFactory {
  public:
-  MediaFoundationCdmFactory(std::unique_ptr<CdmAuxiliaryHelper> helper,
-                            const base::FilePath& user_data_dir);
+  MediaFoundationCdmFactory(std::unique_ptr<CdmAuxiliaryHelper> helper);
   MediaFoundationCdmFactory(const MediaFoundationCdmFactory&) = delete;
   MediaFoundationCdmFactory& operator=(const MediaFoundationCdmFactory&) =
       delete;
@@ -42,8 +41,7 @@ class MEDIA_EXPORT MediaFoundationCdmFactory final : public CdmFactory {
       CreateCdmFactoryCB create_cdm_factory_cb);
 
   // CdmFactory implementation.
-  void Create(const std::string& key_system,
-              const CdmConfig& cdm_config,
+  void Create(const CdmConfig& cdm_config,
               const SessionMessageCB& session_message_cb,
               const SessionClosedCB& session_closed_cb,
               const SessionKeysChangeCB& session_keys_change_cb,
@@ -55,14 +53,13 @@ class MEDIA_EXPORT MediaFoundationCdmFactory final : public CdmFactory {
   using IsTypeSupportedResultCB = base::OnceCallback<void(bool is_supported)>;
 
   void OnCdmOriginIdObtained(
-      const std::string& key_system,
       const CdmConfig& cdm_config,
       const SessionMessageCB& session_message_cb,
       const SessionClosedCB& session_closed_cb,
       const SessionKeysChangeCB& session_keys_change_cb,
       const SessionExpirationUpdateCB& session_expiration_update_cb,
       CdmCreatedCB cdm_created_cb,
-      const std::unique_ptr<CdmPreferenceData> cdm_preference_data);
+      const std::unique_ptr<MediaFoundationCdmData> media_foundation_cdm_data);
 
   HRESULT GetCdmFactory(
       const std::string& key_system,
@@ -73,25 +70,25 @@ class MEDIA_EXPORT MediaFoundationCdmFactory final : public CdmFactory {
                        IsTypeSupportedResultCB is_type_supported_result_cb);
 
   void StoreClientToken(const std::vector<uint8_t>& client_token);
+  void OnCdmEvent(CdmEvent event);
 
   HRESULT CreateMfCdmInternal(
-      const std::string& key_system,
       const CdmConfig& cdm_config,
       const base::UnguessableToken& cdm_origin_id,
       const absl::optional<std::vector<uint8_t>>& cdm_client_token,
+      const base::FilePath& cdm_store_path_root,
       Microsoft::WRL::ComPtr<IMFContentDecryptionModule>& mf_cdm);
 
   // Same as `CreateMfCdmInternal()`, but returns the HRESULT in out parameter
   // so we can bind it to a repeating callback using weak pointer.
-  void CreateMfCdm(const std::string& key_system,
-                   const CdmConfig& cdm_config,
+  void CreateMfCdm(const CdmConfig& cdm_config,
                    const base::UnguessableToken& cdm_origin_id,
                    const absl::optional<std::vector<uint8_t>>& cdm_client_token,
+                   const base::FilePath& cdm_store_path_root,
                    HRESULT& hresult,
                    Microsoft::WRL::ComPtr<IMFContentDecryptionModule>& mf_cdm);
 
   std::unique_ptr<CdmAuxiliaryHelper> helper_;
-  base::FilePath user_data_dir_;
 
   // CDM origin crash key used in crash reporting.
   crash_reporter::ScopedCrashKeyString cdm_origin_crash_key_;

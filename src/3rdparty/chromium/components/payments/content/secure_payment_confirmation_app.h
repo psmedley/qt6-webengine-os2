@@ -22,9 +22,9 @@
 
 class SkBitmap;
 
-namespace autofill {
+namespace webauthn {
 class InternalAuthenticator;
-}  // namespace autofill
+}  // namespace webauthn
 
 namespace content {
 class RenderFrameHost;
@@ -58,7 +58,7 @@ class SecurePaymentConfirmationApp : public PaymentApp,
       const url::Origin& merchant_origin,
       base::WeakPtr<PaymentRequestSpec> spec,
       mojom::SecurePaymentConfirmationRequestPtr request,
-      std::unique_ptr<autofill::InternalAuthenticator> authenticator);
+      std::unique_ptr<webauthn::InternalAuthenticator> authenticator);
   ~SecurePaymentConfirmationApp() override;
 
   SecurePaymentConfirmationApp(const SecurePaymentConfirmationApp& other) =
@@ -103,7 +103,8 @@ class SecurePaymentConfirmationApp : public PaymentApp,
   void OnGetAssertion(
       base::WeakPtr<Delegate> delegate,
       blink::mojom::AuthenticatorStatus status,
-      blink::mojom::GetAssertionAuthenticatorResponsePtr response);
+      blink::mojom::GetAssertionAuthenticatorResponsePtr response,
+      blink::mojom::WebAuthnDOMExceptionDetailsPtr dom_exception_details);
 
   // Used only for comparison with the RenderFrameHost pointer in
   // RenderFrameDeleted() method.
@@ -116,7 +117,7 @@ class SecurePaymentConfirmationApp : public PaymentApp,
   const url::Origin merchant_origin_;
   const base::WeakPtr<PaymentRequestSpec> spec_;
   const mojom::SecurePaymentConfirmationRequestPtr request_;
-  std::unique_ptr<autofill::InternalAuthenticator> authenticator_;
+  std::unique_ptr<webauthn::InternalAuthenticator> authenticator_;
   std::string challenge_;
   blink::mojom::GetAssertionAuthenticatorResponsePtr response_;
 

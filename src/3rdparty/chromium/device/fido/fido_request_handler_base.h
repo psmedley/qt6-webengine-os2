@@ -17,7 +17,7 @@
 #include "base/check.h"
 #include "base/component_export.h"
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_piece_forward.h"
 #include "build/build_config.h"
@@ -32,7 +32,7 @@ namespace device {
 class BleAdapterManager;
 class FidoAuthenticator;
 class FidoDiscoveryFactory;
-class PublicKeyCredentialUserEntity;
+class DiscoverableCredentialMetadata;
 struct TransportAvailabilityCallbackReadiness;
 
 // Base class that handles authenticator discovery/removal. Its lifetime is
@@ -78,7 +78,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
     // a GetAssertion request. Not all platform authenticators report this, so
     // the set might be empty even if
     // |has_recognized_platform_authenticator_credential| is true.
-    std::vector<PublicKeyCredentialUserEntity>
+    std::vector<DiscoverableCredentialMetadata>
         recognized_platform_authenticator_credentials;
 
     bool is_ble_powered = false;
@@ -189,6 +189,15 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
     virtual void OnRetryUserVerification(int attempts) = 0;
   };
 
+  // ScopedAlwaysAllowBLECalls allows BLE API calls to always be made, even if
+  // they would be disabled on macOS because Chromium was not launched with
+  // self-responsibility.
+  class COMPONENT_EXPORT(DEVICE_FIDO) ScopedAlwaysAllowBLECalls {
+   public:
+    ScopedAlwaysAllowBLECalls();
+    ~ScopedAlwaysAllowBLECalls();
+  };
+
   FidoRequestHandlerBase();
 
   // The |available_transports| should be the intersection of transports
@@ -196,6 +205,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
   FidoRequestHandlerBase(
       FidoDiscoveryFactory* fido_discovery_factory,
       const base::flat_set<FidoTransportProtocol>& available_transports);
+
+  FidoRequestHandlerBase(const FidoRequestHandlerBase&) = delete;
+  FidoRequestHandlerBase& operator=(const FidoRequestHandlerBase&) = delete;
+
   ~FidoRequestHandlerBase() override;
 
   // Triggers DispatchRequest() if |active_authenticators_| hold
@@ -248,7 +261,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
   // Authenticators that return a response in less than this time are likely to
   // have done so without interaction from the user.
   static constexpr base::TimeDelta kMinExpectedAuthenticatorResponseTime =
-      base::TimeDelta::FromMilliseconds(300);
+      base::Milliseconds(300);
 
   // Subclasses implement this method to dispatch their request onto the given
   // FidoAuthenticator. The FidoAuthenticator is owned by this
@@ -294,7 +307,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
   // platform authenticator whether it has responsive discoverable credentials
   // and whether it has responsive credentials at all.
   void OnHavePlatformCredentialStatus(
-      std::vector<PublicKeyCredentialUserEntity> user_entities,
+      std::vector<DiscoverableCredentialMetadata> user_entities,
       bool have_credential);
 
  private:
@@ -312,7 +325,7 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
 
   AuthenticatorMap active_authenticators_;
   std::vector<std::unique_ptr<FidoDiscoveryBase>> discoveries_;
-  Observer* observer_ = nullptr;
+  raw_ptr<Observer> observer_ = nullptr;
   TransportAvailabilityInfo transport_availability_info_;
   std::unique_ptr<BleAdapterManager> bluetooth_adapter_manager_;
 
@@ -327,7 +340,6 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoRequestHandlerBase
   bool internal_authenticator_found_ = false;
 
   base::WeakPtrFactory<FidoRequestHandlerBase> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(FidoRequestHandlerBase);
 };
 
 }  // namespace device

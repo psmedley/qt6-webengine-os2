@@ -16,13 +16,11 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "build/build_config.h"
@@ -45,7 +43,7 @@
 #include "services/network/public/mojom/content_security_policy.mojom.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
@@ -83,6 +81,10 @@ content::WebUIDataSource* CreateNaClUIHTMLSource() {
 class NaClDomHandler : public WebUIMessageHandler {
  public:
   NaClDomHandler();
+
+  NaClDomHandler(const NaClDomHandler&) = delete;
+  NaClDomHandler& operator=(const NaClDomHandler&) = delete;
+
   ~NaClDomHandler() override;
 
   // WebUIMessageHandler implementation.
@@ -137,8 +139,6 @@ class NaClDomHandler : public WebUIMessageHandler {
   std::string pnacl_version_string_;
 
   base::WeakPtrFactory<NaClDomHandler> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NaClDomHandler);
 };
 
 NaClDomHandler::NaClDomHandler()
@@ -150,7 +150,7 @@ NaClDomHandler::NaClDomHandler()
 NaClDomHandler::~NaClDomHandler() = default;
 
 void NaClDomHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "requestNaClInfo",
       base::BindRepeating(&NaClDomHandler::HandleRequestNaClInfo,
                           base::Unretained(this)));
@@ -164,8 +164,8 @@ void AddPair(base::ListValue* list,
              const std::u16string& key,
              const std::u16string& value) {
   std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
-  results->SetString("key", key);
-  results->SetString("value", value);
+  results->SetStringKey("key", key);
+  results->SetStringKey("value", value);
   list->Append(std::move(results));
 }
 
@@ -195,7 +195,7 @@ void NaClDomHandler::AddOperatingSystemInfo(base::ListValue* list) {
   // TODO(jvoung): refactor this to share the extra windows labeling
   // with about:flash, or something.
   std::string os_label = version_info::GetOSType();
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   base::win::OSInfo* os = base::win::OSInfo::GetInstance();
   switch (os->version()) {
     case base::win::Version::XP:
@@ -295,8 +295,8 @@ void NaClDomHandler::AddNaClInfo(base::ListValue* list) {
 
 void NaClDomHandler::HandleRequestNaClInfo(const base::ListValue* args) {
   CHECK(callback_id_.empty());
-  CHECK_EQ(1U, args->GetSize());
-  callback_id_ = args->GetList()[0].GetString();
+  CHECK_EQ(1U, args->GetListDeprecated().size());
+  callback_id_ = args->GetListDeprecated()[0].GetString();
 
   if (!has_plugin_info_) {
     PluginService::GetInstance()->GetPlugins(base::BindOnce(
@@ -352,8 +352,10 @@ void CheckVersion(const base::FilePath& pnacl_path, std::string* version) {
 
   // Now try to get the field. This may leave version empty if the
   // the "get" fails (no key, or wrong type).
-  static_cast<base::DictionaryValue*>(root.get())->GetStringASCII(
-      "pnacl-version", version);
+  if (const std::string* ptr = root->FindStringKey("pnacl-version")) {
+    if (base::IsStringASCII(*ptr))
+      *version = *ptr;
+  }
 }
 
 bool CheckPathAndVersion(std::string* version) {

@@ -30,6 +30,10 @@ AX_BASE_EXPORT bool HasPresentationalChildren(const ax::mojom::Role role);
 // Returns true if the given role is an alert or alert-dialog type.
 AX_BASE_EXPORT bool IsAlert(const ax::mojom::Role role);
 
+// Returns true if the given role is a candidate to be labeled with a classname
+// of TextView on Android.
+AX_BASE_EXPORT bool IsAndroidTextViewCandidate(const ax::mojom::Role role);
+
 // Returns true if the provided role belongs to a native or an ARIA button.
 AX_BASE_EXPORT bool IsButton(const ax::mojom::Role role);
 
@@ -52,8 +56,16 @@ AX_BASE_EXPORT bool IsCellOrTableHeader(const ax::mojom::Role role);
 // so that users will know that they could activate them if they so choose.
 AX_BASE_EXPORT bool IsClickable(const ax::mojom::Role role);
 
+// Returns true if the provided role is any of the checkbox-related roles.
+AX_BASE_EXPORT bool IsCheckBox(ax::mojom::Role role);
+
 // Returns true if the provided role is any of the combobox-related roles.
 AX_BASE_EXPORT bool IsComboBox(ax::mojom::Role role);
+
+// Returns true if the provided role is a container that can hold the choices
+// for a combobox. For example, a dialog could pop up a list of choices for a
+// user, and so a dialog is a potential combobox container.
+AX_BASE_EXPORT bool IsComboBoxContainer(const ax::mojom::Role role);
 
 // Returns true if the provided role belongs to a container with selectable
 // children.
@@ -66,6 +78,9 @@ AX_BASE_EXPORT bool IsControl(const ax::mojom::Role role);
 // Returns true if the provided role is a control on the Android platform.
 AX_BASE_EXPORT bool IsControlOnAndroid(const ax::mojom::Role role,
                                        bool isFocusable);
+
+// Returns true for an <input> used for a date or time.
+AX_BASE_EXPORT bool IsDateOrTimeInput(const ax::mojom::Role role);
 
 // Returns true if the provided role represents a dialog.
 AX_BASE_EXPORT bool IsDialog(const ax::mojom::Role role);
@@ -185,7 +200,13 @@ AX_BASE_EXPORT bool IsTableColumn(ax::mojom::Role role);
 // Returns true if the provided role belongs to a table header.
 AX_BASE_EXPORT bool IsTableHeader(ax::mojom::Role role);
 
+// Returns true if the provided role belongs to an item that could be contained
+// in a table-like container. For example, a cell or a column header.
+AX_BASE_EXPORT bool IsTableItem(ax::mojom::Role role);
+
 // Returns true if the provided role belongs to a table, a grid or a treegrid.
+// On Android this also returns true for the roles: lists, list boxes,
+// trees, description lists and directories.
 AX_BASE_EXPORT bool IsTableLike(const ax::mojom::Role role);
 
 // Returns true if the provided role belongs to a table or grid row, and the
@@ -200,6 +221,13 @@ AX_BASE_EXPORT bool IsText(ax::mojom::Role role);
 // <input> or <textarea>.
 AX_BASE_EXPORT bool IsTextField(ax::mojom::Role role);
 
+// Returns true if the provided role fits the description of a UIA embedded
+// objects. See the method definition for more details.
+AX_BASE_EXPORT bool IsUIAEmbeddedObject(ax::mojom::Role role);
+
+// Returns true if the provided role represents a window.
+AX_BASE_EXPORT bool IsWindow(const ax::mojom::Role role);
+
 // Returns true if the node should be read only by default
 AX_BASE_EXPORT bool ShouldHaveReadonlyStateByDefault(
     const ax::mojom::Role role);
@@ -212,6 +240,10 @@ AX_BASE_EXPORT bool SupportsHierarchicalLevel(const ax::mojom::Role role);
 
 // Returns true if the provided role can have an orientation.
 AX_BASE_EXPORT bool SupportsOrientation(const ax::mojom::Role role);
+
+// Returns true if the provided role can have the required attribute,
+// e.g. <div contenteditable aria-required></div> or <input required>
+AX_BASE_EXPORT bool SupportsRequired(const ax::mojom::Role role);
 
 // Returns true if the provided role supports toggle.
 AX_BASE_EXPORT bool SupportsToggle(const ax::mojom::Role role);

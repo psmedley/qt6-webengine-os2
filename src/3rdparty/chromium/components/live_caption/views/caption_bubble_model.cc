@@ -4,6 +4,8 @@
 
 #include "components/live_caption/views/caption_bubble_model.h"
 
+#include "base/callback_forward.h"
+#include "components/live_caption/caption_bubble_context.h"
 #include "components/live_caption/views/caption_bubble.h"
 
 namespace {
@@ -14,11 +16,10 @@ constexpr int kMaxLines = 9;
 
 namespace captions {
 
-CaptionBubbleModel::CaptionBubbleModel(
-    const absl::optional<gfx::Rect>& context_bounds_in_screen,
-    base::RepeatingClosure activate_context_callback)
-    : context_bounds_in_screen_(context_bounds_in_screen),
-      activate_context_callback_(activate_context_callback) {}
+CaptionBubbleModel::CaptionBubbleModel(CaptionBubbleContext* context)
+    : context_(context) {
+  DCHECK(context_);
+}
 
 CaptionBubbleModel::~CaptionBubbleModel() {
   if (observer_)
@@ -31,7 +32,10 @@ void CaptionBubbleModel::SetObserver(CaptionBubble* observer) {
   observer_ = observer;
   if (observer_) {
     observer_->OnTextChanged();
-    observer_->OnErrorChanged();
+    observer_->OnErrorChanged(
+        CaptionBubbleErrorType::GENERIC, base::RepeatingClosure(),
+        base::BindRepeating(
+            [](CaptionBubbleErrorType error_type, bool checked) {}));
   }
 }
 
@@ -50,7 +54,10 @@ void CaptionBubbleModel::SetPartialText(const std::string& partial_text) {
   if (has_error_) {
     has_error_ = false;
     if (observer_)
-      observer_->OnErrorChanged();
+      observer_->OnErrorChanged(
+          CaptionBubbleErrorType::GENERIC, base::RepeatingClosure(),
+          base::BindRepeating(
+              [](CaptionBubbleErrorType error_type, bool checked) {}));
   }
 }
 
@@ -64,10 +71,15 @@ void CaptionBubbleModel::Open() {
   OnTextChanged();
 }
 
-void CaptionBubbleModel::OnError() {
+void CaptionBubbleModel::OnError(
+    CaptionBubbleErrorType error_type,
+    OnErrorClickedCallback error_clicked_callback,
+    OnDoNotShowAgainClickedCallback error_silenced_callback) {
   has_error_ = true;
+  error_type_ = error_type;
   if (observer_)
-    observer_->OnErrorChanged();
+    observer_->OnErrorChanged(error_type, std::move(error_clicked_callback),
+                              std::move(error_silenced_callback));
 }
 
 void CaptionBubbleModel::ClearText() {
@@ -78,19 +90,7 @@ void CaptionBubbleModel::ClearText() {
 
 void CaptionBubbleModel::CommitPartialText() {
   final_text_ += partial_text_;
-
-  // If the first character of partial text isn't a space, add a space before
-  // appending it to final text. There is no need to alert the observer because
-  // the text itself has not changed, just its representation, and there is no
-  // need to render a trailing space.
-  // TODO(crbug.com/1055150): This feature is launching for English first.
-  // Make sure spacing is correct for all languages.
-  if (partial_text_.size() > 0 &&
-      partial_text_.compare(partial_text_.size() - 1, 1, " ") != 0) {
-    final_text_ += " ";
-  }
   partial_text_.clear();
-
   if (!observer_)
     return;
 
@@ -103,15 +103,6 @@ void CaptionBubbleModel::CommitPartialText() {
     final_text_.erase(0, truncate_index);
     OnTextChanged();
   }
-}
-
-bool CaptionBubbleModel::IsContextActivatable() {
-  return activate_context_callback_ != base::NullCallback();
-}
-
-void CaptionBubbleModel::ActivateContext() {
-  DCHECK(IsContextActivatable());
-  activate_context_callback_.Run();
 }
 
 }  // namespace captions

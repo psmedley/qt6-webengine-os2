@@ -24,8 +24,8 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/memory_mapped_file.h"
-#include "base/macros.h"
 #include "base/strings/string_piece.h"
+#include "build/build_config.h"
 #include "components/safe_browsing/content/renderer/phishing_classifier/scorer.h"
 #include "components/safe_browsing/core/common/proto/client_model.pb.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
@@ -46,15 +46,11 @@ class ProtobufModelScorer : public Scorer {
 
   double ComputeScore(const FeatureMap& features) const override;
 
-  void GetMatchingVisualTargets(
-      const SkBitmap& bitmap,
-      std::unique_ptr<ClientPhishingRequest> request,
-      base::OnceCallback<void(std::unique_ptr<ClientPhishingRequest>)> callback)
-      const override;
-
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
   void ApplyVisualTfLiteModel(
       const SkBitmap& bitmap,
       base::OnceCallback<void(std::vector<double>)> callback) const override;
+#endif
 
   int model_version() const override;
   base::RepeatingCallback<bool(uint32_t)> find_page_word_callback()

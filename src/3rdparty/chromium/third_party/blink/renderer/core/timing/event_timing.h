@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
@@ -16,7 +17,7 @@ namespace blink {
 class Event;
 
 // Event timing collects and records the event start time, processing start time
-// and processing end time of long-latency events, providing a tool to evalute
+// and processing end time of long-latency events, providing a tool to evaluate
 // input latency.
 // See also: https://github.com/wicg/event-timing
 class CORE_EXPORT EventTiming final {

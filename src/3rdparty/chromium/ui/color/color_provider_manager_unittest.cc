@@ -9,6 +9,7 @@
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/color/color_mixer.h"
 #include "ui/color/color_provider.h"
+#include "ui/color/color_recipe.h"
 #include "ui/color/color_test_ids.h"
 #include "ui/gfx/color_palette.h"
 
@@ -29,7 +30,9 @@ class ColorProviderManagerTest : public testing::Test {
 ColorProvider* GetLightNormalColorProvider() {
   return ColorProviderManager::GetForTesting().GetColorProviderFor(
       {ColorProviderManager::ColorMode::kLight,
-       ColorProviderManager::ContrastMode::kNormal});
+       ColorProviderManager::ContrastMode::kNormal,
+       ColorProviderManager::SystemTheme::kDefault,
+       ColorProviderManager::FrameType::kChromium, nullptr});
 }
 
 }  // namespace
@@ -38,22 +41,17 @@ ColorProvider* GetLightNormalColorProvider() {
 TEST_F(ColorProviderManagerTest, Persistence) {
   ColorProvider* provider = GetLightNormalColorProvider();
   ASSERT_NE(nullptr, provider);
-  EXPECT_EQ(gfx::kPlaceholderColor, provider->GetColor(kColorTest0));
-  provider->AddMixer().AddSet({kColorSetTest0, {{kColorTest0, SK_ColorGREEN}}});
-  EXPECT_EQ(SK_ColorGREEN,
-            GetLightNormalColorProvider()->GetColor(kColorTest0));
+  EXPECT_EQ(provider, GetLightNormalColorProvider());
 }
 
 // Verifies that the initializer is called for each newly created color
 // provider.
 TEST_F(ColorProviderManagerTest, SetInitializer) {
   ColorProviderManager::GetForTesting().AppendColorProviderInitializer(
-      base::BindRepeating([](ColorProvider* provider,
-                             ColorProviderManager::ColorMode,
-                             ColorProviderManager::ContrastMode) {
-        provider->AddMixer().AddSet(
-            {kColorSetTest0, {{kColorTest0, SK_ColorBLUE}}});
-      }));
+      base::BindRepeating(
+          [](ColorProvider* provider, const ColorProviderManager::Key&) {
+            provider->AddMixer()[kColorTest0] = {SK_ColorBLUE};
+          }));
 
   ColorProvider* provider = GetLightNormalColorProvider();
   ASSERT_NE(nullptr, provider);
@@ -63,9 +61,14 @@ TEST_F(ColorProviderManagerTest, SetInitializer) {
 // Verifies resetting the manager clears the provider. This is useful to keep
 // unit tests isolated from each other.
 TEST_F(ColorProviderManagerTest, Reset) {
+  ColorProviderManager::GetForTesting().AppendColorProviderInitializer(
+      base::BindRepeating(
+          [](ColorProvider* provider, const ColorProviderManager::Key&) {
+            provider->AddMixer()[kColorTest0] = {SK_ColorBLUE};
+          }));
   ColorProvider* provider = GetLightNormalColorProvider();
   ASSERT_NE(nullptr, provider);
-  provider->AddMixer().AddSet({kColorSetTest0, {{kColorTest0, SK_ColorGREEN}}});
+  EXPECT_EQ(SK_ColorBLUE, provider->GetColor(kColorTest0));
   ColorProviderManager::ResetForTesting();
   EXPECT_EQ(gfx::kPlaceholderColor,
             GetLightNormalColorProvider()->GetColor(kColorTest0));

@@ -6,6 +6,7 @@
  */
 #include "bench/Benchmark.h"
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColorSpace.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkString.h"
 #include "include/core/SkVertices.h"
@@ -128,16 +129,16 @@ protected:
         for (int i = 0; i < loops; i++) {
             switch (fVertexMode) {
                 case kNone_VertexMode:
-                    canvas->drawPatch(fCubics, nullptr, nullptr, fPaint);
+                    canvas->drawPatch(fCubics, nullptr, nullptr, SkBlendMode::kModulate, fPaint);
                     break;
                 case kColors_VertexMode:
-                    canvas->drawPatch(fCubics, fColors, nullptr, fPaint);
+                    canvas->drawPatch(fCubics, fColors, nullptr, SkBlendMode::kModulate, fPaint);
                     break;
                 case kTexCoords_VertexMode:
-                    canvas->drawPatch(fCubics, nullptr, fTexCoords, fPaint);
+                    canvas->drawPatch(fCubics, nullptr, fTexCoords, SkBlendMode::kModulate, fPaint);
                     break;
                 case kBoth_VertexMode:
-                    canvas->drawPatch(fCubics, fColors, fTexCoords, fPaint);
+                    canvas->drawPatch(fCubics, fColors, fTexCoords, SkBlendMode::kModulate, fPaint);
                     break;
                 default:
                     break;

@@ -11,10 +11,10 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,21 +22,26 @@
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
 #include "absl/strings/str_replace.h"
+#include "absl/strings/string_view.h"
+#include "absl/types/optional.h"
 #include "api/array_view.h"
 #include "api/crypto_params.h"
 #include "api/jsep_session_description.h"
 #include "api/media_types.h"
 #include "api/rtp_parameters.h"
-#include "api/rtp_transceiver_interface.h"
+#include "api/rtp_transceiver_direction.h"
 #include "media/base/codec.h"
 #include "media/base/media_constants.h"
+#include "media/base/rid_description.h"
 #include "media/base/stream_params.h"
 #include "p2p/base/p2p_constants.h"
 #include "p2p/base/port.h"
 #include "p2p/base/transport_description.h"
 #include "p2p/base/transport_info.h"
+#include "pc/media_protocol_names.h"
 #include "pc/media_session.h"
 #include "pc/session_description.h"
+#include "pc/simulcast_description.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/message_digest.h"
 #include "rtc_base/socket_address.h"
@@ -966,7 +971,7 @@ static void ReplaceDirection(RtpTransceiverDirection direction,
       break;
     case RtpTransceiverDirection::kStopped:
     default:
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
       new_direction = "a=sendrecv";
       break;
   }
@@ -1602,7 +1607,7 @@ class WebRtcSdpTest : public ::testing::Test {
     } else if (mline_index == 1) {
       content_name = kVideoContentName;
     } else {
-      RTC_NOTREACHED();
+      RTC_DCHECK_NOTREACHED();
     }
     TransportInfo transport_info(content_name,
                                  TransportDescription(ufrag, pwd));
@@ -2778,7 +2783,7 @@ TEST_F(WebRtcSdpTest, DeserializeCandidate) {
 }
 
 // This test verifies the deserialization of candidate-attribute
-// as per RFC 5245. Candiate-attribute will be of the format
+// as per RFC 5245. Candidate-attribute will be of the format
 // candidate:<blah>. This format will be used when candidates
 // are trickled.
 TEST_F(WebRtcSdpTest, DeserializeRawCandidateAttribute) {
@@ -3675,7 +3680,7 @@ TEST_F(WebRtcSdpTest, SerializeDtlsSetupAttribute) {
   EXPECT_EQ(sdp_with_dtlssetup, message);
 }
 
-TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttribute) {
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributeActpass) {
   JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
   std::string sdp_with_dtlssetup = kSdpFullString;
   InjectAfter(kSessionTime, "a=setup:actpass\r\n", &sdp_with_dtlssetup);
@@ -3688,6 +3693,37 @@ TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttribute) {
   const cricket::TransportInfo* vtinfo =
       desc->GetTransportInfoByName("video_content_name");
   EXPECT_EQ(cricket::CONNECTIONROLE_ACTPASS,
+            vtinfo->description.connection_role);
+}
+
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributeActive) {
+  JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
+  std::string sdp_with_dtlssetup = kSdpFullString;
+  InjectAfter(kSessionTime, "a=setup:active\r\n", &sdp_with_dtlssetup);
+  EXPECT_TRUE(SdpDeserialize(sdp_with_dtlssetup, &jdesc_with_dtlssetup));
+  cricket::SessionDescription* desc = jdesc_with_dtlssetup.description();
+  const cricket::TransportInfo* atinfo =
+      desc->GetTransportInfoByName("audio_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_ACTIVE,
+            atinfo->description.connection_role);
+  const cricket::TransportInfo* vtinfo =
+      desc->GetTransportInfoByName("video_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_ACTIVE,
+            vtinfo->description.connection_role);
+}
+TEST_F(WebRtcSdpTest, DeserializeDtlsSetupAttributePassive) {
+  JsepSessionDescription jdesc_with_dtlssetup(kDummyType);
+  std::string sdp_with_dtlssetup = kSdpFullString;
+  InjectAfter(kSessionTime, "a=setup:passive\r\n", &sdp_with_dtlssetup);
+  EXPECT_TRUE(SdpDeserialize(sdp_with_dtlssetup, &jdesc_with_dtlssetup));
+  cricket::SessionDescription* desc = jdesc_with_dtlssetup.description();
+  const cricket::TransportInfo* atinfo =
+      desc->GetTransportInfoByName("audio_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
+            atinfo->description.connection_role);
+  const cricket::TransportInfo* vtinfo =
+      desc->GetTransportInfoByName("video_content_name");
+  EXPECT_EQ(cricket::CONNECTIONROLE_PASSIVE,
             vtinfo->description.connection_role);
 }
 
@@ -4662,4 +4698,16 @@ TEST_F(WebRtcSdpTest, IllegalMidCharacterValue) {
   // [ is an illegal token value.
   Replace("a=mid:", "a=mid:[]", &sdp);
   ExpectParseFailure(std::string(sdp), "a=mid:[]");
+}
+
+TEST_F(WebRtcSdpTest, MaxChannels) {
+  std::string sdp =
+      "v=0\r\n"
+      "o=- 11 22 IN IP4 127.0.0.1\r\n"
+      "s=-\r\n"
+      "t=0 0\r\n"
+      "m=audio 49232 RTP/AVP 108\r\n"
+      "a=rtpmap:108 ISAC/16000/512\r\n";
+
+  ExpectParseFailure(sdp, "a=rtpmap:108 ISAC/16000/512");
 }

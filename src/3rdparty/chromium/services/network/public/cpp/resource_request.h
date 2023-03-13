@@ -18,6 +18,7 @@
 #include "net/cookies/site_for_cookies.h"
 #include "net/filter/source_stream.h"
 #include "net/http/http_request_headers.h"
+#include "net/log/net_log_source.h"
 #include "net/url_request/referrer_policy.h"
 #include "services/network/public/cpp/optional_trust_token_params.h"
 #include "services/network/public/cpp/resource_request_body.h"
@@ -27,6 +28,7 @@
 #include "services/network/public/mojom/cors.mojom-shared.h"
 #include "services/network/public/mojom/devtools_observer.mojom-forward.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
+#include "services/network/public/mojom/ip_address_space.mojom-shared.h"
 #include "services/network/public/mojom/referrer_policy.mojom-shared.h"
 #include "services/network/public/mojom/trust_tokens.mojom.h"
 #include "services/network/public/mojom/url_loader_network_service_observer.mojom.h"
@@ -55,7 +57,7 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
     TrustedParams(const TrustedParams& params);
     TrustedParams& operator=(const TrustedParams& other);
 
-    bool EqualsForTesting(const TrustedParams& trusted_params) const;
+    bool EqualsForTesting(const TrustedParams& other) const;
 
     net::IsolationInfo isolation_info;
     bool disable_secure_dns = false;
@@ -132,10 +134,10 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   net::HttpRequestHeaders headers;
   net::HttpRequestHeaders cors_exempt_headers;
   int load_flags = 0;
+  // Note: kMainFrame is used only for outermost main frames, i.e. fenced
+  // frames are considered a kSubframe for ResourceType.
   int resource_type = 0;
   net::RequestPriority priority = net::IDLE;
-  bool should_reset_appcache = false;
-  bool is_external_request = false;
   mojom::CorsPreflightPolicy cors_preflight_policy =
       mojom::CorsPreflightPolicy::kConsiderPreflight;
   bool originated_from_service_worker = false;
@@ -154,7 +156,7 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   bool enable_load_timing = false;
   bool enable_upload_progress = false;
   bool do_not_prompt_for_login = false;
-  bool is_main_frame = false;
+  bool is_outermost_main_frame = false;
   int transition_type = 0;
   int previews_state = 0;
   bool upgrade_if_insecure = false;
@@ -181,6 +183,10 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   // decoding any non-listed stream types.
   absl::optional<std::vector<net::SourceStream::SourceType>>
       devtools_accepted_stream_types;
+  absl::optional<net::NetLogSource> net_log_create_info;
+  absl::optional<net::NetLogSource> net_log_reference_info;
+  mojom::IPAddressSpace target_ip_address_space =
+      mojom::IPAddressSpace::kUnknown;
 };
 
 // This does not accept |kDefault| referrer policy.

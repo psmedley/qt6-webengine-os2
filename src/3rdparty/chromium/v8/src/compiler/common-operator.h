@@ -32,6 +32,13 @@ class Operator;
 class Type;
 class Node;
 
+// The semantics of IrOpcode::kBranch changes throughout the pipeline, and in
+// particular is not the same before SimplifiedLowering (JS semantics) and after
+// (machine branch semantics). Some passes are applied both before and after
+// SimplifiedLowering, and use the BranchSemantics enum to know how branches
+// should be treated.
+enum class BranchSemantics { kJS, kMachine };
+
 // Prediction hint for branches.
 enum class BranchHint : uint8_t { kNone, kTrue, kFalse };
 
@@ -51,20 +58,6 @@ inline size_t hash_value(BranchHint hint) { return static_cast<size_t>(hint); }
 
 V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, BranchHint);
 
-enum class IsSafetyCheck : uint8_t {
-  kCriticalSafetyCheck,
-  kSafetyCheck,
-  kNoSafetyCheck
-};
-
-// Get the more critical safety check of the two arguments.
-IsSafetyCheck CombineSafetyChecks(IsSafetyCheck, IsSafetyCheck);
-
-V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, IsSafetyCheck);
-inline size_t hash_value(IsSafetyCheck is_safety_check) {
-  return static_cast<size_t>(is_safety_check);
-}
-
 enum class TrapId : uint32_t {
 #define DEF_ENUM(Name, ...) k##Name,
   FOREACH_WASM_TRAPREASON(DEF_ENUM)
@@ -78,24 +71,6 @@ std::ostream& operator<<(std::ostream&, TrapId trap_id);
 
 TrapId TrapIdOf(const Operator* const op);
 
-struct BranchOperatorInfo {
-  BranchHint hint;
-  IsSafetyCheck is_safety_check;
-};
-
-inline size_t hash_value(const BranchOperatorInfo& info) {
-  return base::hash_combine(info.hint, info.is_safety_check);
-}
-
-V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, BranchOperatorInfo);
-
-inline bool operator==(const BranchOperatorInfo& a,
-                       const BranchOperatorInfo& b) {
-  return a.hint == b.hint && a.is_safety_check == b.is_safety_check;
-}
-
-V8_EXPORT_PRIVATE const BranchOperatorInfo& BranchOperatorInfoOf(
-    const Operator* const) V8_WARN_UNUSED_RESULT;
 V8_EXPORT_PRIVATE BranchHint BranchHintOf(const Operator* const)
     V8_WARN_UNUSED_RESULT;
 
@@ -105,24 +80,15 @@ int ValueInputCountOfReturn(Operator const* const op);
 // Parameters for the {Deoptimize} operator.
 class DeoptimizeParameters final {
  public:
-  DeoptimizeParameters(DeoptimizeKind kind, DeoptimizeReason reason,
-                       FeedbackSource const& feedback,
-                       IsSafetyCheck is_safety_check)
-      : kind_(kind),
-        reason_(reason),
-        feedback_(feedback),
-        is_safety_check_(is_safety_check) {}
+  DeoptimizeParameters(DeoptimizeReason reason, FeedbackSource const& feedback)
+      : reason_(reason), feedback_(feedback) {}
 
-  DeoptimizeKind kind() const { return kind_; }
   DeoptimizeReason reason() const { return reason_; }
   const FeedbackSource& feedback() const { return feedback_; }
-  IsSafetyCheck is_safety_check() const { return is_safety_check_; }
 
  private:
-  DeoptimizeKind const kind_;
   DeoptimizeReason const reason_;
   FeedbackSource const feedback_;
-  IsSafetyCheck is_safety_check_;
 };
 
 bool operator==(DeoptimizeParameters, DeoptimizeParameters);
@@ -134,8 +100,6 @@ std::ostream& operator<<(std::ostream&, DeoptimizeParameters p);
 
 DeoptimizeParameters const& DeoptimizeParametersOf(Operator const* const)
     V8_WARN_UNUSED_RESULT;
-
-IsSafetyCheck IsSafetyCheckOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 class SelectParameters final {
  public:
@@ -460,6 +424,33 @@ const StringConstantBase* StringConstantBaseOf(const Operator* op)
 
 const char* StaticAssertSourceOf(const Operator* op);
 
+class SLVerifierHintParameters final {
+ public:
+  explicit SLVerifierHintParameters(const Operator* semantics,
+                                    base::Optional<Type> override_output_type)
+      : semantics_(semantics), override_output_type_(override_output_type) {}
+
+  const Operator* semantics() const { return semantics_; }
+  const base::Optional<Type>& override_output_type() const {
+    return override_output_type_;
+  }
+
+ private:
+  const Operator* semantics_;
+  base::Optional<Type> override_output_type_;
+};
+
+V8_EXPORT_PRIVATE bool operator==(const SLVerifierHintParameters& p1,
+                                  const SLVerifierHintParameters& p2);
+
+size_t hash_value(const SLVerifierHintParameters& p);
+
+V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream& out,
+                                           const SLVerifierHintParameters& p);
+
+V8_EXPORT_PRIVATE const SLVerifierHintParameters& SLVerifierHintParametersOf(
+    const Operator* op) V8_WARN_UNUSED_RESULT;
+
 // Interface for building common operators that can be used at any level of IR,
 // including JavaScript, mid-level, and low-level.
 class V8_EXPORT_PRIVATE CommonOperatorBuilder final
@@ -478,9 +469,14 @@ class V8_EXPORT_PRIVATE CommonOperatorBuilder final
   const Operator* DeadValue(MachineRepresentation rep);
   const Operator* Unreachable();
   const Operator* StaticAssert(const char* source);
+  // SLVerifierHint is used only during SimplifiedLowering. It may be introduced
+  // during lowering to provide additional hints for the verifier. These nodes
+  // are removed at the end of SimplifiedLowering after verification.
+  const Operator* SLVerifierHint(
+      const Operator* semantics,
+      const base::Optional<Type>& override_output_type);
   const Operator* End(size_t control_input_count);
-  const Operator* Branch(BranchHint = BranchHint::kNone,
-                         IsSafetyCheck = IsSafetyCheck::kSafetyCheck);
+  const Operator* Branch(BranchHint = BranchHint::kNone);
   const Operator* IfTrue();
   const Operator* IfFalse();
   const Operator* IfSuccess();
@@ -490,20 +486,12 @@ class V8_EXPORT_PRIVATE CommonOperatorBuilder final
                           BranchHint hint = BranchHint::kNone);
   const Operator* IfDefault(BranchHint hint = BranchHint::kNone);
   const Operator* Throw();
-  const Operator* Deoptimize(DeoptimizeKind kind, DeoptimizeReason reason,
+  const Operator* Deoptimize(DeoptimizeReason reason,
                              FeedbackSource const& feedback);
-  const Operator* DeoptimizeIf(
-      DeoptimizeKind kind, DeoptimizeReason reason,
-      FeedbackSource const& feedback,
-      IsSafetyCheck is_safety_check = IsSafetyCheck::kSafetyCheck);
-  const Operator* DeoptimizeUnless(
-      DeoptimizeKind kind, DeoptimizeReason reason,
-      FeedbackSource const& feedback,
-      IsSafetyCheck is_safety_check = IsSafetyCheck::kSafetyCheck);
-  // DynamicCheckMapsWithDeoptUnless will call the dynamic map check builtin if
-  // the condition is false, which may then either deoptimize or resume
-  // execution.
-  const Operator* DynamicCheckMapsWithDeoptUnless(bool is_inlined_frame_state);
+  const Operator* DeoptimizeIf(DeoptimizeReason reason,
+                               FeedbackSource const& feedback);
+  const Operator* DeoptimizeUnless(DeoptimizeReason reason,
+                                   FeedbackSource const& feedback);
   const Operator* TrapIf(TrapId trap_id);
   const Operator* TrapUnless(TrapId trap_id);
   const Operator* Return(int value_input_count = 1);
@@ -576,9 +564,6 @@ class V8_EXPORT_PRIVATE CommonOperatorBuilder final
       Handle<SharedFunctionInfo> shared_info,
       const wasm::FunctionSig* signature);
 #endif  // V8_ENABLE_WEBASSEMBLY
-
-  const Operator* MarkAsSafetyCheck(const Operator* op,
-                                    IsSafetyCheck safety_check);
 
   const Operator* DelayedStringConstant(const StringConstantBase* str);
 
@@ -769,27 +754,6 @@ class StartNode final : public CommonNodeWrapperBase {
     return node()->op()->ValueOutputCount() - 1;
   }
   int LastOutputIndex() const { return ContextOutputIndex(); }
-};
-
-class DynamicCheckMapsWithDeoptUnlessNode final : public CommonNodeWrapperBase {
- public:
-  explicit constexpr DynamicCheckMapsWithDeoptUnlessNode(Node* node)
-      : CommonNodeWrapperBase(node) {
-    DCHECK_EQ(IrOpcode::kDynamicCheckMapsWithDeoptUnless, node->opcode());
-  }
-
-#define INPUTS(V)                   \
-  V(Condition, condition, 0, BoolT) \
-  V(Slot, slot, 1, IntPtrT)         \
-  V(Map, map, 2, Map)               \
-  V(Handler, handler, 3, Object)    \
-  V(FeedbackVector, feedback_vector, 4, FeedbackVector)
-  INPUTS(DEFINE_INPUT_ACCESSORS)
-#undef INPUTS
-
-  FrameState frame_state() {
-    return FrameState{NodeProperties::GetValueInput(node(), 5)};
-  }
 };
 
 #undef DEFINE_INPUT_ACCESSORS

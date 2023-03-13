@@ -5,9 +5,9 @@
 #ifndef BASE_POWER_MONITOR_POWER_MONITOR_H_
 #define BASE_POWER_MONITOR_POWER_MONITOR_H_
 
+#include <memory>
+
 #include "base/base_export.h"
-#include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/no_destructor.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/power_monitor/power_observer.h"
@@ -30,6 +30,9 @@ class BASE_EXPORT PowerMonitor {
   // - no other PowerMonitor methods may be called on any thread while calling
   // Initialize(). |source| must not be nullptr.
   static void Initialize(std::unique_ptr<PowerMonitorSource> source);
+
+  PowerMonitor(const PowerMonitor&) = delete;
+  PowerMonitor& operator=(const PowerMonitor&) = delete;
 
   // Returns true if Initialize() has been called. Safe to call on any thread,
   // but must not be called while Initialize() or ShutdownForTesting() is being
@@ -79,13 +82,13 @@ class BASE_EXPORT PowerMonitor {
   static void SetCurrentThermalState(
       PowerThermalObserver::DeviceThermalState state);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Read and return the current remaining battery capacity (microampere-hours).
   // Only supported with a device power source (i.e. not in child processes in
   // Chrome) and on devices with Android >= Lollipop as well as a power supply
   // that supports this counter. Returns 0 if unsupported.
   static int GetRemainingBatteryCapacity();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // Uninitializes the PowerMonitor. Should be called at the end of any unit
   // test that mocks out the PowerMonitor, to avoid affecting subsequent tests.
@@ -107,6 +110,7 @@ class BASE_EXPORT PowerMonitor {
   static void NotifyResume();
   static void NotifyThermalStateChange(
       PowerThermalObserver::DeviceThermalState new_state);
+  static void NotifySpeedLimitChange(int speed_limit);
 
   static PowerMonitor* GetInstance();
 
@@ -119,6 +123,8 @@ class BASE_EXPORT PowerMonitor {
   PowerThermalObserver::DeviceThermalState power_thermal_state_
       GUARDED_BY(power_thermal_state_lock_) =
           PowerThermalObserver::DeviceThermalState::kUnknown;
+  int speed_limit_ GUARDED_BY(power_thermal_state_lock_) =
+      PowerThermalObserver::kSpeedLimitMax;
   Lock power_thermal_state_lock_;
 
   scoped_refptr<ObserverListThreadSafe<PowerStateObserver>>
@@ -128,8 +134,6 @@ class BASE_EXPORT PowerMonitor {
   scoped_refptr<ObserverListThreadSafe<PowerThermalObserver>>
       thermal_state_observers_;
   std::unique_ptr<PowerMonitorSource> source_;
-
-  DISALLOW_COPY_AND_ASSIGN(PowerMonitor);
 };
 
 }  // namespace base

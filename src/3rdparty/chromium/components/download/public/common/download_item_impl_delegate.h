@@ -11,7 +11,6 @@
 
 #include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_item_rename_handler.h"
@@ -37,6 +36,10 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
   using ShouldOpenDownloadCallback = base::OnceCallback<void(bool)>;
 
   DownloadItemImplDelegate();
+
+  DownloadItemImplDelegate(const DownloadItemImplDelegate&) = delete;
+  DownloadItemImplDelegate& operator=(const DownloadItemImplDelegate&) = delete;
+
   virtual ~DownloadItemImplDelegate();
 
   // Used for catching use-after-free errors.
@@ -49,6 +52,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
       DownloadDangerType danger_type,
       DownloadItem::MixedContentStatus mixed_content_status,
       const base::FilePath& intermediate_path,
+      const base::FilePath& display_name,
       absl::optional<DownloadSchedule> download_schedule,
       DownloadInterruptReason interrupt_reason)>;
   // Request determination of the download target from the delegate.
@@ -93,7 +97,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
   // Called when an interrupted download is resumed.
   virtual void ResumeInterruptedDownload(
       std::unique_ptr<DownloadUrlParameters> params,
-      const GURL& site_url);
+      const std::string& serialized_embedder_data);
 
   // Update the persistent store with our information.
   virtual void UpdatePersistence(DownloadItemImpl* download);
@@ -136,8 +140,6 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImplDelegate {
  private:
   // For "Outlives attached DownloadItemImpl" invariant assertion.
   int count_;
-
-  DISALLOW_COPY_AND_ASSIGN(DownloadItemImplDelegate);
 };
 
 }  // namespace download

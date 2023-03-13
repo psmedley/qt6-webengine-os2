@@ -273,7 +273,8 @@ LIBGAV1_ALWAYS_INLINE void Transpose8x4To4x8(const int16x8_t in[4],
 
 //------------------------------------------------------------------------------
 template <int store_width, int store_count>
-LIBGAV1_ALWAYS_INLINE void StoreDst(int16_t* dst, int32_t stride, int32_t idx,
+LIBGAV1_ALWAYS_INLINE void StoreDst(int16_t* LIBGAV1_RESTRICT dst,
+                                    int32_t stride, int32_t idx,
                                     const int16x8_t* const s) {
   assert(store_count % 4 == 0);
   assert(store_width == 8 || store_width == 16);
@@ -297,8 +298,8 @@ LIBGAV1_ALWAYS_INLINE void StoreDst(int16_t* dst, int32_t stride, int32_t idx,
 }
 
 template <int load_width, int load_count>
-LIBGAV1_ALWAYS_INLINE void LoadSrc(const int16_t* src, int32_t stride,
-                                   int32_t idx, int16x8_t* x) {
+LIBGAV1_ALWAYS_INLINE void LoadSrc(const int16_t* LIBGAV1_RESTRICT src,
+                                   int32_t stride, int32_t idx, int16x8_t* x) {
   assert(load_count % 4 == 0);
   assert(load_width == 8 || load_width == 16);
   // NOTE: It is expected that the compiler will unroll these loops.
@@ -388,6 +389,33 @@ LIBGAV1_ALWAYS_INLINE void ButterflyRotation_FirstIsZero(int16x8_t* a,
                                                          int16x8_t* b,
                                                          const int angle,
                                                          const bool flip) {
+#if defined(__ARM_FEATURE_QRDMX) && defined(__aarch64__) && \
+    defined(__clang__)  // ARM v8.1-A
+  // Clang optimizes vqrdmulhq_n_s16 and vqsubq_s16 (in HadamardRotation) into
+  // vqrdmlshq_s16 resulting in an "off by one" error. For now, do not use
+  // vqrdmulhq_n_s16().
+  const int16_t cos128 = Cos128(angle);
+  const int16_t sin128 = Sin128(angle);
+  const int32x4_t x0 = vmull_n_s16(vget_low_s16(*b), -sin128);
+  const int32x4_t y0 = vmull_n_s16(vget_low_s16(*b), cos128);
+  const int16x4_t x1 = vqrshrn_n_s32(x0, 12);
+  const int16x4_t y1 = vqrshrn_n_s32(y0, 12);
+
+  const int32x4_t x0_hi = vmull_n_s16(vget_high_s16(*b), -sin128);
+  const int32x4_t y0_hi = vmull_n_s16(vget_high_s16(*b), cos128);
+  const int16x4_t x1_hi = vqrshrn_n_s32(x0_hi, 12);
+  const int16x4_t y1_hi = vqrshrn_n_s32(y0_hi, 12);
+
+  const int16x8_t x = vcombine_s16(x1, x1_hi);
+  const int16x8_t y = vcombine_s16(y1, y1_hi);
+  if (flip) {
+    *a = y;
+    *b = x;
+  } else {
+    *a = x;
+    *b = y;
+  }
+#else
   const int16_t cos128 = Cos128(angle);
   const int16_t sin128 = Sin128(angle);
   // For this function, the max value returned by Sin128() is 4091, which fits
@@ -403,12 +431,40 @@ LIBGAV1_ALWAYS_INLINE void ButterflyRotation_FirstIsZero(int16x8_t* a,
     *a = x;
     *b = y;
   }
+#endif
 }
 
 LIBGAV1_ALWAYS_INLINE void ButterflyRotation_SecondIsZero(int16x8_t* a,
                                                           int16x8_t* b,
                                                           const int angle,
                                                           const bool flip) {
+#if defined(__ARM_FEATURE_QRDMX) && defined(__aarch64__) && \
+    defined(__clang__)  // ARM v8.1-A
+  // Clang optimizes vqrdmulhq_n_s16 and vqsubq_s16 (in HadamardRotation) into
+  // vqrdmlshq_s16 resulting in an "off by one" error. For now, do not use
+  // vqrdmulhq_n_s16().
+  const int16_t cos128 = Cos128(angle);
+  const int16_t sin128 = Sin128(angle);
+  const int32x4_t x0 = vmull_n_s16(vget_low_s16(*a), cos128);
+  const int32x4_t y0 = vmull_n_s16(vget_low_s16(*a), sin128);
+  const int16x4_t x1 = vqrshrn_n_s32(x0, 12);
+  const int16x4_t y1 = vqrshrn_n_s32(y0, 12);
+
+  const int32x4_t x0_hi = vmull_n_s16(vget_high_s16(*a), cos128);
+  const int32x4_t y0_hi = vmull_n_s16(vget_high_s16(*a), sin128);
+  const int16x4_t x1_hi = vqrshrn_n_s32(x0_hi, 12);
+  const int16x4_t y1_hi = vqrshrn_n_s32(y0_hi, 12);
+
+  const int16x8_t x = vcombine_s16(x1, x1_hi);
+  const int16x8_t y = vcombine_s16(y1, y1_hi);
+  if (flip) {
+    *a = y;
+    *b = x;
+  } else {
+    *a = x;
+    *b = y;
+  }
+#else
   const int16_t cos128 = Cos128(angle);
   const int16_t sin128 = Sin128(angle);
   const int16x8_t x = vqrdmulhq_n_s16(*a, cos128 << 3);
@@ -420,6 +476,7 @@ LIBGAV1_ALWAYS_INLINE void ButterflyRotation_SecondIsZero(int16x8_t* a,
     *a = x;
     *b = y;
   }
+#endif
 }
 
 LIBGAV1_ALWAYS_INLINE void HadamardRotation(int16x8_t* a, int16x8_t* b,

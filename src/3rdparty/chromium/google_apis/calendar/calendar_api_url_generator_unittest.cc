@@ -4,6 +4,7 @@
 
 #include "google_apis/calendar/calendar_api_url_generator.h"
 
+#include "base/time/time.h"
 #include "third_party/googletest/src/googletest/include/gtest/gtest.h"
 
 namespace google_apis {
@@ -26,8 +27,10 @@ TEST(CalendarApiUrlGeneratorTest, GetEventListUrl) {
   EXPECT_EQ(
       "https://www.googleapis.com/calendar/v3/calendars/primary/"
       "events?timeMin=2021-06-13T18%3A00%3A00.000Z"
-      "&timeMax=2021-06-16T18%3A00%3A00.000Z",
-      url_generator_.GetCalendarEventListUrl(start, end).spec());
+      "&timeMax=2021-06-16T18%3A00%3A00.000Z"
+      "&singleEvents=true",
+      url_generator_.GetCalendarEventListUrl(start, end, /*single_events=*/true)
+          .spec());
 }
 
 }  // namespace calendar

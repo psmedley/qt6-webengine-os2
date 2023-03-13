@@ -7,6 +7,7 @@
 #include <jni.h>
 #include <stdio.h>
 
+#include <stddef.h>
 #include <map>
 #include <memory>
 #include <string>
@@ -29,12 +30,13 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/sequence_checker.h"
 #include "base/strings/strcat.h"
-#include "base/task/post_task.h"
+#include "base/strings/string_util.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "components/component_updater/android/component_loader_policy_forward.h"
+#include "components/component_updater/android/components_info_holder.h"
 #include "components/component_updater/android/embedded_component_loader_jni_headers/ComponentLoaderPolicyBridge_jni.h"
 #include "components/update_client/utils.h"
 
@@ -42,14 +44,6 @@ namespace component_updater {
 namespace {
 
 constexpr char kManifestFileName[] = "manifest.json";
-
-// TODO(crbug.com/1180964) move to base/file_util.h
-bool ReadFdToString(int fd, std::string* contents) {
-  base::ScopedFILE file_stream(fdopen(fd, "r"));
-  return file_stream.get()
-             ? base::ReadStreamToString(file_stream.get(), contents)
-             : false;
-}
 
 std::unique_ptr<base::DictionaryValue> ReadManifest(
     const std::string& manifest_content) {
@@ -64,10 +58,11 @@ std::unique_ptr<base::DictionaryValue> ReadManifest(
 
 std::unique_ptr<base::DictionaryValue> ReadManifestFromFd(int fd) {
   std::string content;
-  if (!ReadFdToString(fd, &content)) {
-    return nullptr;
-  }
-  return ReadManifest(content);
+  base::ScopedFILE file_stream(
+      base::FileToFILE(base::File(std::move(fd)), "r"));
+  return base::ReadStreamToString(file_stream.get(), &content)
+             ? ReadManifest(content)
+             : nullptr;
 }
 
 void RecordComponentLoadStatusHistogram(const std::string& suffix,
@@ -147,12 +142,15 @@ void AndroidComponentLoaderPolicy::ComponentLoadFailed(JNIEnv* env,
   delete this;
 }
 
-base::android::ScopedJavaLocalRef<jstring>
-AndroidComponentLoaderPolicy::GetComponentId(JNIEnv* env) {
+std::string AndroidComponentLoaderPolicy::GetComponentId() const {
   std::vector<uint8_t> hash;
   loader_policy_->GetHash(&hash);
-  return base::android::ConvertUTF8ToJavaString(
-      env, update_client::GetCrxIdFromPublicKeyHash(hash));
+  return update_client::GetCrxIdFromPublicKeyHash(hash);
+}
+
+base::android::ScopedJavaLocalRef<jstring>
+AndroidComponentLoaderPolicy::GetComponentId(JNIEnv* env) {
+  return base::android::ConvertUTF8ToJavaString(env, GetComponentId());
 }
 
 void AndroidComponentLoaderPolicy::NotifyNewVersion(
@@ -165,7 +163,10 @@ void AndroidComponentLoaderPolicy::NotifyNewVersion(
     return;
   }
   std::string version_ascii;
-  manifest->GetStringASCII("version", &version_ascii);
+  if (const std::string* ptr = manifest->FindStringKey("version")) {
+    if (base::IsStringASCII(*ptr))
+      version_ascii = *ptr;
+  }
   base::Version version(version_ascii);
   if (!version.IsValid()) {
     ComponentLoadFailedInternal(ComponentLoadResult::kInvalidVersion);
@@ -174,6 +175,7 @@ void AndroidComponentLoaderPolicy::NotifyNewVersion(
 
   RecordComponentLoadStatusHistogram(loader_policy_->GetMetricsSuffix(),
                                      ComponentLoadResult::kComponentLoaded);
+  ComponentsInfoHolder::GetInstance()->AddComponent(GetComponentId(), version);
   loader_policy_->ComponentLoaded(version, fd_map, std::move(manifest));
 }
 

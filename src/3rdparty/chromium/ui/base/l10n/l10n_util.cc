@@ -13,7 +13,6 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/i18n/file_util_icu.h"
 #include "base/i18n/message_formatter.h"
@@ -37,7 +36,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/locale_utils.h"
 #include "ui/base/l10n/l10n_util_android.h"
 #endif
@@ -46,10 +45,10 @@
 #include <glib.h>
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/logging.h"
 #include "ui/base/l10n/l10n_util_win.h"
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 namespace {
 
@@ -326,7 +325,7 @@ bool HasStringsForLocale(const std::string& locale,
 // if "foo bar" is RTL. So this function prepends the necessary RLM in such
 // cases.
 void AdjustParagraphDirectionality(std::u16string* paragraph) {
-#if defined(OS_POSIX) && !defined(OS_APPLE) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ANDROID)
   if (base::i18n::IsRTL() &&
       base::i18n::StringContainsStrongRTLChars(*paragraph)) {
     paragraph->insert(0, 1, char16_t{base::i18n::kRightToLeftMark});
@@ -410,7 +409,7 @@ bool CheckAndResolveLocale(const std::string& locale,
     // Spanish locale).
     if (base::LowerCaseEqualsASCII(lang, "es") &&
         !base::LowerCaseEqualsASCII(region, "es")) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
       // iOS uses a different name for es-419 (es-MX).
       tmp_locale.append("-MX");
 #else
@@ -475,7 +474,7 @@ bool CheckAndResolveLocale(const std::string& locale,
   return CheckAndResolveLocale(locale, resolved_locale, /*perform_io=*/true);
 }
 
-#if defined(OS_APPLE) && !defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_APPLE) && !defined(TOOLKIT_QT)
 std::string GetApplicationLocaleInternalMac(const std::string& pref_locale) {
   // Use any override (Cocoa for the browser), otherwise use the preference
   // passed to the function.
@@ -492,7 +491,7 @@ std::string GetApplicationLocaleInternalMac(const std::string& pref_locale) {
 }
 #endif
 
-#if !defined(OS_APPLE) || defined(TOOLKIT_QT)
+#if !BUILDFLAG(IS_APPLE) || defined(TOOLKIT_QT)
 std::string GetApplicationLocaleInternalNonMac(const std::string& pref_locale) {
   std::string resolved_locale;
   std::vector<std::string> candidates;
@@ -502,7 +501,7 @@ std::string GetApplicationLocaleInternalNonMac(const std::string& pref_locale) {
   // to renderer and plugin processes so they know what language the parent
   // process decided to use.
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // First, try the preference value.
   if (!pref_locale.empty())
     candidates.push_back(base::i18n::GetCanonicalLocale(pref_locale));
@@ -518,7 +517,7 @@ std::string GetApplicationLocaleInternalNonMac(const std::string& pref_locale) {
     // If no override was set, defer to ICU
     candidates.push_back(base::i18n::GetConfiguredLocale());
   }
-#elif defined(OS_ANDROID)
+#elif BUILDFLAG(IS_ANDROID)
   // Try pref_locale first.
   if (!pref_locale.empty())
     candidates.push_back(base::i18n::GetCanonicalLocale(pref_locale));
@@ -543,7 +542,7 @@ std::string GetApplicationLocaleInternalNonMac(const std::string& pref_locale) {
   // and linux systems without glib.
   if (!pref_locale.empty())
     candidates.push_back(pref_locale);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
   std::vector<std::string>::const_iterator i = candidates.begin();
   for (; i != candidates.end(); ++i) {
@@ -559,10 +558,10 @@ std::string GetApplicationLocaleInternalNonMac(const std::string& pref_locale) {
 
   return std::string();
 }
-#endif  // !defined(OS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE)
 
 std::string GetApplicationLocaleInternal(const std::string& pref_locale) {
-#if defined(OS_APPLE) && !defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_APPLE) && !defined(TOOLKIT_QT)
   return GetApplicationLocaleInternalMac(pref_locale);
 #else
   return GetApplicationLocaleInternalNonMac(pref_locale);
@@ -624,12 +623,12 @@ std::u16string GetDisplayNameForLocale(const std::string& locale,
   }
 #endif  // defined(ENABLE_PSEUDOLOCALES)
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // Use the Foundation API to get the localized display name, removing the need
   // for the ICU data file to include this data.
   display_name = GetDisplayNameForLocale(locale_code, display_locale);
 #else
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Use Java API to get locale display name so that we can remove most of
   // the lang data from icu data to reduce binary size, except for zh-Hans and
   // zh-Hant because the current Android Java API doesn't support scripts.
@@ -638,7 +637,7 @@ std::u16string GetDisplayNameForLocale(const std::string& locale,
   if (!base::StartsWith(locale_code, "zh-Han", base::CompareCase::SENSITIVE)) {
     display_name = GetDisplayNameForLocale(locale_code, display_locale);
   } else
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
   {
     UErrorCode error = U_ZERO_ERROR;
     const int kBufferSize = 1024;
@@ -659,7 +658,7 @@ std::u16string GetDisplayNameForLocale(const std::string& locale,
     DCHECK(U_SUCCESS(error));
     display_name.resize(actual_size);
   }
-#endif  // defined(OS_IOS)
+#endif  // BUILDFLAG(IS_IOS)
 
   // Add directional markup so parentheses are properly placed.
   if (is_for_ui && base::i18n::IsRTL())
@@ -938,26 +937,46 @@ const std::vector<std::string>& GetAvailableICULocales() {
   return g_available_locales.Get();
 }
 
-const std::vector<std::string>& GetLocalesWithStrings() {
+bool IsUserFacingUILocale(const std::string& locale) {
+  std::string resolved_locale;
+  // As there are many callers of IsUserFacingUILocale and
+  // GetUserFacingUILocaleList from threads where I/O is prohibited, do not
+  // perform I/O here.
+  if (!l10n_util::CheckAndResolveLocale(locale, &resolved_locale,
+                                        /*perform_io=*/false)) {
+    return false;
+  }
+
+  // Locales that have strings on disk should always be shown to the user.
+  if (resolved_locale == locale) {
+    return true;
+  }
+
+  const std::string& language = l10n_util::GetLanguage(locale);
+
+  // Chinese locales (other than the ones that have strings on disk) should not
+  // be shown.
+  if (base::LowerCaseEqualsASCII(language, "zh")) {
+    return false;
+  }
+
+  // Norwegian (no) should not be shown as it does not specify a written form.
+  // Users can select Norwegian Bokmål (nb) or Norwegian Nynorsk (nn) instead.
+  if (base::LowerCaseEqualsASCII(language, "no")) {
+    return false;
+  }
+
+  return true;
+}
+
+const std::vector<std::string>& GetUserFacingUILocaleList() {
   static base::NoDestructor<std::vector<std::string>> available_locales([] {
     std::vector<std::string> locales;
     for (const char* accept_language : kAcceptLanguageList) {
       std::string locale(accept_language);
-      std::string resolved_locale;
-
-      // As there are many callers of GetLocalesWithStrings from threads where
-      // I/O is prohibited, we cannot perform I/O here.
-      if (!l10n_util::CheckAndResolveLocale(locale, &resolved_locale,
-                                            /*perform_io=*/false))
-        continue;
-
-      // We shouldn't show the user any other Chinese locales other than the
-      // ones that we have strings for (i.e. when resolved_locale == locale).
-      if (resolved_locale != locale &&
-          base::LowerCaseEqualsASCII(l10n_util::GetLanguage(locale), "zh"))
-        continue;
-
-      locales.push_back(locale);
+      if (IsUserFacingUILocale(locale)) {
+        locales.push_back(locale);
+      }
     }
     return locales;
   }());
@@ -1006,7 +1025,7 @@ const char* const* GetAcceptLanguageListForTesting() {
 }
 
 size_t GetAcceptLanguageListSizeForTesting() {
-  return base::size(kAcceptLanguageList);
+  return std::size(kAcceptLanguageList);
 }
 
 const char* const* GetPlatformLocalesForTesting() {
@@ -1014,7 +1033,7 @@ const char* const* GetPlatformLocalesForTesting() {
 }
 
 size_t GetPlatformLocalesSizeForTesting() {
-  return base::size(kPlatformLocales);
+  return std::size(kPlatformLocales);
 }
 
 }  // namespace l10n_util

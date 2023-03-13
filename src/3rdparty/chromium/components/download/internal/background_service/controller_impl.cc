@@ -12,6 +12,7 @@
 #include "base/callback_helpers.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_usage_estimator.h"
@@ -22,9 +23,11 @@
 #include "components/download/internal/background_service/entry_utils.h"
 #include "components/download/internal/background_service/file_monitor.h"
 #include "components/download/internal/background_service/log_sink.h"
+#include "components/download/internal/background_service/logger_impl.h"
 #include "components/download/internal/background_service/model.h"
 #include "components/download/internal/background_service/scheduler/scheduler.h"
 #include "components/download/internal/background_service/stats.h"
+#include "components/download/network/download_http_utils.h"
 #include "components/download/public/background_service/client.h"
 #include "components/download/public/background_service/download_metadata.h"
 #include "components/download/public/background_service/navigation_monitor.h"
@@ -105,7 +108,8 @@ Model::EntryList GetRunnableEntries(const Model::EntryList& list) {
 }  // namespace
 
 ControllerImpl::ControllerImpl(
-    Configuration* config,
+    std::unique_ptr<Configuration> config,
+    std::unique_ptr<Logger> logger,
     LogSink* log_sink,
     std::unique_ptr<ClientSet> clients,
     std::unique_ptr<DownloadDriver> driver,
@@ -116,9 +120,11 @@ ControllerImpl::ControllerImpl(
     std::unique_ptr<TaskScheduler> task_scheduler,
     std::unique_ptr<FileMonitor> file_monitor,
     const base::FilePath& download_file_dir)
-    : config_(config),
+    : download_file_dir_(download_file_dir),
+      config_(std::move(config)),
+      service_config_(config_.get()),
+      logger_(std::move(logger)),
       log_sink_(log_sink),
-      download_file_dir_(download_file_dir),
       clients_(std::move(clients)),
       driver_(std::move(driver)),
       model_(std::move(model)),
@@ -159,6 +165,24 @@ void ControllerImpl::Initialize(base::OnceClosure callback) {
   navigation_monitor_->SetObserver(this);
 }
 
+const ServiceConfig& ControllerImpl::GetConfig() {
+  return service_config_;
+}
+
+BackgroundDownloadService::ServiceStatus ControllerImpl::GetStatus() {
+  switch (GetState()) {
+    case Controller::State::CREATED:       // Intentional fallthrough.
+    case Controller::State::INITIALIZING:  // Intentional fallthrough.
+    case Controller::State::RECOVERING:
+      return BackgroundDownloadService::ServiceStatus::STARTING_UP;
+    case Controller::State::READY:
+      return BackgroundDownloadService::ServiceStatus::READY;
+    case Controller::State::UNAVAILABLE:  // Intentional fallthrough.
+    default:
+      return BackgroundDownloadService::ServiceStatus::UNAVAILABLE;
+  }
+}
+
 Controller::State ControllerImpl::GetState() {
   return controller_state_;
 }
@@ -169,6 +193,12 @@ void ControllerImpl::StartDownload(DownloadParams params) {
 
   // TODO(dtrainor): Validate all input parameters.
   DCHECK_LE(base::Time::Now(), params.scheduling_params.cancel_time);
+  if (!ValidateRequestHeaders(params.request_params.request_headers)) {
+    HandleStartDownloadResponse(params.client, params.guid,
+                                DownloadParams::StartResult::INTERNAL_ERROR,
+                                std::move(params.callback));
+    return;
+  }
 
   if (controller_state_ != State::READY) {
     HandleStartDownloadResponse(params.client, params.guid,
@@ -342,6 +372,10 @@ bool ControllerImpl::OnStopScheduledTask(DownloadTaskType task_type) {
   HandleTaskFinished(task_type, false,
                      stats::ScheduledTaskStatus::CANCELLED_ON_STOP);
   return false;
+}
+
+Logger* ControllerImpl::GetLogger() {
+  return logger_.get();
 }
 
 void ControllerImpl::OnCompleteCleanupTask() {
@@ -1052,7 +1086,12 @@ void ControllerImpl::OnDownloadReadyToStart(
     return;
   }
 
-  DCHECK(!driver_->Find(guid).has_value());
+  auto driver_entry = driver_->Find(guid);
+  if (driver_entry.has_value()) {
+    DVLOG(1) << "Download already exists.";
+    return;
+  }
+
   driver_->Start(entry->request_params, entry->guid, entry->target_file_path,
                  post_body,
                  net::NetworkTrafficAnnotationTag(entry->traffic_annotation));
@@ -1147,7 +1186,11 @@ void ControllerImpl::HandleCompleteDownload(CompletionType type,
   auto driver_entry = driver_->Find(guid);
   uint64_t file_size =
       driver_entry.has_value() ? driver_entry->bytes_downloaded : 0;
-  stats::LogDownloadCompletion(type, file_size);
+  stats::LogDownloadCompletion(entry->client, type, file_size);
+  LOG(WARNING) << "Background download complete, client: "
+               << static_cast<int>(entry->client)
+               << ", completion type: " << static_cast<int>(type)
+               << ", file size:" << file_size;
 
   if (type == CompletionType::SUCCEED) {
     DCHECK(driver_entry.has_value());
@@ -1159,6 +1202,7 @@ void ControllerImpl::HandleCompleteDownload(CompletionType type,
                                    entry->url_chain, entry->response_headers);
     completion_info.blob_handle = driver_entry->blob_handle;
     completion_info.hash256 = driver_entry->hash256;
+    completion_info.custom_data = entry->custom_data;
 
     entry->last_cleanup_check_time = driver_entry->completion_time;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -1171,6 +1215,7 @@ void ControllerImpl::HandleCompleteDownload(CompletionType type,
     CompletionInfo completion_info;
     completion_info.url_chain = entry->url_chain;
     completion_info.response_headers = entry->response_headers;
+    completion_info.custom_data = entry->custom_data;
 
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
@@ -1277,7 +1322,7 @@ void ControllerImpl::ActivateMoreDownloads() {
   uint32_t paused_count = entries_states[Entry::State::PAUSED];
   uint32_t active_count = entries_states[Entry::State::ACTIVE];
 
-  while (CanActivateMoreDownloads(config_, active_count, paused_count)) {
+  while (CanActivateMoreDownloads(config_.get(), active_count, paused_count)) {
     Entry* next = scheduler_->Next(
         model_->PeekEntries(), device_status_listener_->CurrentDeviceStatus());
     if (!next)

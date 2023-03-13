@@ -33,6 +33,7 @@
 #include "services/network/public/cpp/is_potentially_trustworthy.h"
 #include "third_party/blink/public/common/security_context/insecure_request_policy.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -45,8 +46,9 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
@@ -281,6 +283,11 @@ FormSubmission* FormSubmission::Create(HTMLFormElement* form,
                                            ? document.BaseTarget()
                                            : copied_attributes.Target();
 
+  if (copied_attributes.Method() != FormSubmission::kPostMethod &&
+      !action_url.ProtocolIsJavaScript()) {
+    action_url.SetQuery(form_data->FlattenToString());
+  }
+
   std::unique_ptr<ResourceRequest> resource_request =
       std::make_unique<ResourceRequest>(action_url);
   ClientNavigationReason reason = ClientNavigationReason::kFormSubmissionGet;
@@ -353,13 +360,6 @@ void FormSubmission::Trace(Visitor* visitor) const {
 }
 
 void FormSubmission::Navigate() {
-  KURL request_url = action_;
-  if (method_ != FormSubmission::kPostMethod &&
-      !action_.ProtocolIsJavaScript()) {
-    request_url.SetQuery(form_data_->FlattenToString());
-  }
-  resource_request_->SetUrl(request_url);
-
   FrameLoadRequest frame_request(origin_window_.Get(), *resource_request_);
   frame_request.SetNavigationPolicy(navigation_policy_);
   frame_request.SetClientRedirectReason(reason_);

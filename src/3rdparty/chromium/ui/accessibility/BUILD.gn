@@ -62,6 +62,7 @@ jumbo_component("ax_base") {
     "ax_mode.h",
     "ax_node_data.cc",
     "ax_node_data.h",
+    "ax_node_id_forward.h",
     "ax_relative_bounds.cc",
     "ax_relative_bounds.h",
     "ax_role_properties.cc",
@@ -149,9 +150,13 @@ jumbo_component("accessibility") {
     "ax_tree_serializer.cc",
     "ax_tree_serializer.h",
     "ax_tree_source.h",
+    "ax_tree_source_annotator.h",
     "ax_tree_source_checker.h",
+    "ax_tree_source_observer.h",
     "null_ax_action_target.cc",
     "null_ax_action_target.h",
+    "test_ax_tree_manager.cc",
+    "test_ax_tree_manager.h",
   ]
 
   deps = [
@@ -183,6 +188,11 @@ jumbo_component("accessibility") {
     ]
   }
 
+  if (is_fuchsia) {
+    public_deps +=
+        [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.accessibility.semantics" ]
+  }
+
   if (use_aura) {
     sources += [
       "aura/aura_window_properties.cc",
@@ -209,8 +219,6 @@ static_library("test_support") {
   sources = [
     "test_ax_node_helper.cc",
     "test_ax_node_helper.h",
-    "test_ax_tree_manager.cc",
-    "test_ax_tree_manager.h",
     "tree_generator.cc",
     "tree_generator.h",
   ]
@@ -228,6 +236,7 @@ static_library("test_support") {
 test("accessibility_unittests") {
   testonly = true
   sources = [
+    "ax_computed_node_data_unittest.cc",
     "ax_enum_util_unittest.cc",
     "ax_event_generator_unittest.cc",
     "ax_generated_tree_unittest.cc",
@@ -277,6 +286,23 @@ test("accessibility_unittests") {
     "//ui/accessibility/mojom",
     "//ui/gfx:test_support",
   ]
+
+  data_deps = [ "//testing/buildbot/filters:accessibility_unittests_filters" ]
+
+  if (is_fuchsia) {
+    sources += [
+      "platform/fuchsia/accessibility_bridge_fuchsia_unittest.cc",
+      "platform/fuchsia/semantic_provider_unittest.cc",
+    ]
+
+    deps += [
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.accessibility.semantics",
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.math",
+      "//third_party/fuchsia-sdk/sdk/pkg/inspect",
+      "//third_party/fuchsia-sdk/sdk/pkg/scenic_cpp",
+      "//third_party/fuchsia-sdk/sdk/pkg/sys_cpp",
+    ]
+  }
 
   if (has_native_accessibility) {
     # This test depends heavily on NativeViewAccessible, which is only

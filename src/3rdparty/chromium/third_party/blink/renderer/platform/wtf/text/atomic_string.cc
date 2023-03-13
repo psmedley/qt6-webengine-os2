@@ -50,6 +50,12 @@ AtomicString::AtomicString(const UChar* chars)
           chars,
           chars ? LengthOfNullTerminatedString(chars) : 0)) {}
 
+scoped_refptr<StringImpl> AtomicString::AddSlowCase(
+    scoped_refptr<StringImpl>&& string) {
+  DCHECK(!string->IsAtomic());
+  return AtomicStringTable::Instance().Add(std::move(string));
+}
+
 scoped_refptr<StringImpl> AtomicString::AddSlowCase(StringImpl* string) {
   DCHECK(!string->IsAtomic());
   return AtomicStringTable::Instance().Add(string);
@@ -72,14 +78,18 @@ AtomicString AtomicString::FromUTF8(const char* chars) {
   return AtomicString(AtomicStringTable::Instance().AddUTF8(chars, nullptr));
 }
 
-AtomicString AtomicString::LowerASCII() const {
-  StringImpl* impl = Impl();
-  if (UNLIKELY(!impl))
-    return *this;
+AtomicString AtomicString::LowerASCII(AtomicString source) {
+  if (LIKELY(source.IsLowerASCII()))
+    return source;
+  StringImpl* impl = source.Impl();
+  // if impl is null, then IsLowerASCII() should have returned true.
+  DCHECK(impl);
   scoped_refptr<StringImpl> new_impl = impl->LowerASCII();
-  if (LIKELY(new_impl == impl))
-    return *this;
   return AtomicString(String(std::move(new_impl)));
+}
+
+AtomicString AtomicString::LowerASCII() const {
+  return AtomicString::LowerASCII(*this);
 }
 
 AtomicString AtomicString::UpperASCII() const {

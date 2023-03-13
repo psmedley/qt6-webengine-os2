@@ -59,7 +59,6 @@ class AudioSendStream : public AudioSender {
     // https://w3c.github.io/webrtc-stats/#dom-rtcmediastreamtrackstats-totalaudioenergy
     double total_input_energy = 0.0;
     double total_input_duration = 0.0;
-    bool typing_noise_detected = false;
 
     ANAStats ana_statistics;
     AudioProcessingStats apm_statistics;
@@ -140,6 +139,7 @@ class AudioSendStream : public AudioSender {
       SdpAudioFormat format;
       bool nack_enabled = false;
       bool transport_cc_enabled = false;
+      bool enable_non_sender_rtt = false;
       absl::optional<int> cng_payload_type;
       absl::optional<int> red_payload_type;
       // If unset, use the encoder's default target bitrate.

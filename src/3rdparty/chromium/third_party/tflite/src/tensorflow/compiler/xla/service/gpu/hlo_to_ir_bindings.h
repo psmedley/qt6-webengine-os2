@@ -16,16 +16,12 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_GPU_HLO_TO_IR_BINDINGS_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_GPU_HLO_TO_IR_BINDINGS_H_
 
-#include <unordered_map>
-
 #include "absl/container/flat_hash_map.h"
 #include "absl/types/span.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
 #include "tensorflow/compiler/xla/map_util.h"
-#include "tensorflow/compiler/xla/service/buffer_assignment.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/alias_analysis.h"
 #include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
 
 namespace xla {
@@ -35,15 +31,9 @@ namespace gpu {
 // values that represent their addresses.
 class HloToIrBindings {
  public:
-  HloToIrBindings(const HloModule& module,
-                  const BufferAssignment* buffer_assignment,
-                  llvm::IRBuilder<>* b, llvm::Module* llvm_module,
+  HloToIrBindings(llvm::IRBuilder<>* b, llvm::Module* llvm_module,
                   bool is_nested)
-      : buffer_assignment_(buffer_assignment),
-        is_nested_(is_nested),
-        b_(b),
-        module_(llvm_module),
-        alias_analysis_(module, *buffer_assignment_, &b_->getContext()) {}
+      : is_nested_(is_nested), b_(b), module_(llvm_module) {}
 
   void EmitBasePointersForHlos(
       absl::Span<const HloInstruction* const> io_hlos,
@@ -88,7 +78,7 @@ class HloToIrBindings {
                               const HloInstruction& consumer,
                               const ShapeIndex& shape_index = {});
 
-  string ToString() const;
+  std::string ToString() const;
 
  private:
   // Emits IR to resolve (possibly) recursive GetTupleElement instructions.
@@ -99,8 +89,6 @@ class HloToIrBindings {
   llvm::Value* GetTypedIrValue(const HloInstruction& hlo,
                                ShapeIndexView shape_index,
                                llvm::Value* ir_value);
-
-  const BufferAssignment* buffer_assignment_;
 
   const bool is_nested_;
 
@@ -116,9 +104,11 @@ class HloToIrBindings {
 
   // The address of the memory block that contains all temporary buffers.
   llvm::Value* temp_buffer_base_ = nullptr;
-
-  llvm_ir::AliasAnalysis alias_analysis_;
 };
+
+// Converts `ir_value` with type i8* to a typed LLVM Value* based on `shape`.
+llvm::Value* CastToTypedValue(const Shape& shape, llvm::Value* ir_value,
+                              llvm::IRBuilder<>* b);
 
 }  // namespace gpu
 }  // namespace xla

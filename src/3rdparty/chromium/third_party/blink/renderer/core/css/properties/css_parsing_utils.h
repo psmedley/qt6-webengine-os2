@@ -18,8 +18,8 @@
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/frame/web_feature_forward.h"
 #include "third_party/blink/renderer/core/style/grid_area.h"
-#include "third_party/blink/renderer/platform/geometry/length.h"  // For ValueRange
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 
 namespace blink {
 
@@ -48,8 +48,14 @@ enum class AllowTextValue { kAllow, kForbid };
 enum class AllowPathValue { kAllow, kForbid };
 enum class DefaultFill { kFill, kNoFill };
 enum class ParsingStyle { kLegacy, kNotLegacy };
-enum class TrackListType { kGridTemplate, kGridTemplateNoRepeat, kGridAuto };
+enum class TrackListType {
+  kGridAuto,
+  kGridTemplate,
+  kGridTemplateNoRepeat,
+  kGridTemplateSubgrid
+};
 enum class UnitlessQuirk { kAllow, kForbid };
+enum class AllowedColorKeywords { kAllowSystemColor, kNoSystemColor };
 
 using ConsumeAnimationItemValue = CSSValue* (*)(CSSPropertyID,
                                                 CSSParserTokenRange&,
@@ -67,6 +73,12 @@ bool ConsumeSlashIncludingWhitespace(CSSParserTokenRange&);
 // consumeFunction expects the range starts with a FunctionToken.
 CSSParserTokenRange ConsumeFunction(CSSParserTokenRange&);
 
+// https://drafts.csswg.org/css-syntax/#typedef-any-value
+//
+// Consumes component values until it reaches a token that is not allowed
+// for <any-value>.
+CORE_EXPORT bool ConsumeAnyValue(CSSParserTokenRange&);
+
 CSSPrimitiveValue* ConsumeInteger(
     CSSParserTokenRange&,
     const CSSParserContext&,
@@ -80,46 +92,50 @@ bool ConsumeNumberRaw(CSSParserTokenRange&,
                       double& result);
 CSSPrimitiveValue* ConsumeNumber(CSSParserTokenRange&,
                                  const CSSParserContext&,
-                                 ValueRange);
+                                 CSSPrimitiveValue::ValueRange);
 CSSPrimitiveValue* ConsumeLength(CSSParserTokenRange&,
                                  const CSSParserContext&,
-                                 ValueRange,
+                                 CSSPrimitiveValue::ValueRange,
                                  UnitlessQuirk = UnitlessQuirk::kForbid);
 CSSPrimitiveValue* ConsumePercent(CSSParserTokenRange&,
                                   const CSSParserContext&,
-                                  ValueRange);
+                                  CSSPrimitiveValue::ValueRange);
 
 // Any percentages are converted to numbers.
 CSSPrimitiveValue* ConsumeNumberOrPercent(CSSParserTokenRange&,
                                           const CSSParserContext&,
-                                          ValueRange);
+                                          CSSPrimitiveValue::ValueRange);
 
 CSSPrimitiveValue* ConsumeAlphaValue(CSSParserTokenRange&,
                                      const CSSParserContext&);
 CSSPrimitiveValue* ConsumeLengthOrPercent(
     CSSParserTokenRange&,
     const CSSParserContext&,
-    ValueRange,
+    CSSPrimitiveValue::ValueRange,
     UnitlessQuirk = UnitlessQuirk::kForbid);
-CSSPrimitiveValue* ConsumeSVGGeometryPropertyLength(CSSParserTokenRange&,
-                                                    const CSSParserContext&,
-                                                    ValueRange);
+CSSPrimitiveValue* ConsumeSVGGeometryPropertyLength(
+    CSSParserTokenRange&,
+    const CSSParserContext&,
+    CSSPrimitiveValue::ValueRange);
 
-CSSPrimitiveValue* ConsumeAngle(
+CORE_EXPORT CSSPrimitiveValue* ConsumeAngle(
     CSSParserTokenRange&,
     const CSSParserContext&,
     absl::optional<WebFeature> unitless_zero_feature);
-CSSPrimitiveValue* ConsumeAngle(
+CORE_EXPORT CSSPrimitiveValue* ConsumeAngle(
     CSSParserTokenRange&,
     const CSSParserContext&,
     absl::optional<WebFeature> unitless_zero_feature,
     double minimum_value,
     double maximum_value);
+CSSPrimitiveValue* ConsumeHue(CSSParserTokenRange&,
+                              const CSSParserContext&,
+                              absl::optional<WebFeature> unitless_zero_feature);
 CSSPrimitiveValue* ConsumeTime(CSSParserTokenRange&,
                                const CSSParserContext&,
-                               ValueRange);
+                               CSSPrimitiveValue::ValueRange);
 CSSPrimitiveValue* ConsumeResolution(CSSParserTokenRange&);
-
+CSSValue* ConsumeRatio(CSSParserTokenRange&, const CSSParserContext&);
 CSSIdentifierValue* ConsumeIdent(CSSParserTokenRange&);
 CSSIdentifierValue* ConsumeIdentRange(CSSParserTokenRange&,
                                       CSSValueID lower,
@@ -131,6 +147,8 @@ CSSIdentifierValue* ConsumeIdent(CSSParserTokenRange&);
 
 CSSCustomIdentValue* ConsumeCustomIdent(CSSParserTokenRange&,
                                         const CSSParserContext&);
+CSSCustomIdentValue* ConsumeDashedIdent(CSSParserTokenRange&,
+                                        const CSSParserContext&);
 CSSStringValue* ConsumeString(CSSParserTokenRange&);
 StringView ConsumeUrlAsStringView(CSSParserTokenRange&,
                                   const CSSParserContext&);
@@ -139,9 +157,11 @@ cssvalue::CSSURIValue* ConsumeUrl(CSSParserTokenRange&,
 CSSValue* ConsumeSelectorFunction(CSSParserTokenRange&);
 CORE_EXPORT CSSValue* ConsumeIdSelector(CSSParserTokenRange&);
 
-CSSValue* ConsumeColor(CSSParserTokenRange&,
-                       const CSSParserContext&,
-                       bool accept_quirky_colors = false);
+CORE_EXPORT CSSValue* ConsumeColor(CSSParserTokenRange&,
+                                   const CSSParserContext&,
+                                   bool accept_quirky_colors = false,
+                                   AllowedColorKeywords allowed_keywords =
+                                       AllowedColorKeywords::kAllowSystemColor);
 
 CSSValue* ConsumeLineWidth(CSSParserTokenRange&,
                            const CSSParserContext&,
@@ -177,6 +197,16 @@ CSSValue* ConsumeImage(
 CSSValue* ConsumeImageOrNone(CSSParserTokenRange&, const CSSParserContext&);
 
 CSSValue* ConsumeAxis(CSSParserTokenRange&, const CSSParserContext& context);
+
+// Old syntax: auto | <length>
+CSSValue* ConsumeIntrinsicSizeLonghandOld(CSSParserTokenRange&,
+                                          const CSSParserContext&);
+// New syntax: none | <length> | auto && <length>
+CSSValue* ConsumeIntrinsicSizeLonghandNew(CSSParserTokenRange&,
+                                          const CSSParserContext&);
+// Picks between Old and New based on RuntimeEnabledFeatures
+CSSValue* ConsumeIntrinsicSizeLonghand(CSSParserTokenRange&,
+                                       const CSSParserContext&);
 
 CSSIdentifierValue* ConsumeShapeBox(CSSParserTokenRange&);
 
@@ -239,6 +269,7 @@ CORE_EXPORT bool IsCSSWideKeyword(StringView);
 bool IsRevertKeyword(StringView);
 bool IsDefaultKeyword(StringView);
 bool IsHashIdentifier(const CSSParserToken&);
+CORE_EXPORT bool IsDashedIdent(const CSSParserToken&);
 
 // This function returns false for CSS-wide keywords, 'default', and any
 // template parameters provided.
@@ -368,7 +399,8 @@ CSSValueList* ConsumeFontFamily(CSSParserTokenRange&);
 CSSValue* ConsumeGenericFamily(CSSParserTokenRange&);
 CSSValue* ConsumeFamilyName(CSSParserTokenRange&);
 String ConcatenateFamilyName(CSSParserTokenRange&);
-CSSIdentifierValue* ConsumeFontStretchKeywordOnly(CSSParserTokenRange&);
+CSSIdentifierValue* ConsumeFontStretchKeywordOnly(CSSParserTokenRange&,
+                                                  const CSSParserContext&);
 CSSValue* ConsumeFontStretch(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeFontStyle(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeFontWeight(CSSParserTokenRange&, const CSSParserContext&);
@@ -396,9 +428,9 @@ bool ConsumeGridItemPositionShorthand(bool important,
 bool ConsumeGridTemplateShorthand(bool important,
                                   CSSParserTokenRange&,
                                   const CSSParserContext&,
-                                  CSSValue*& template_rows,
-                                  CSSValue*& template_columns,
-                                  CSSValue*& template_areas);
+                                  const CSSValue*& template_rows,
+                                  const CSSValue*& template_columns,
+                                  const CSSValue*& template_areas);
 
 // The fragmentation spec says that page-break-(after|before|inside) are to be
 // treated as shorthands for their break-(after|before|inside) counterparts.
@@ -453,6 +485,8 @@ CSSValue* ConsumeBorderWidth(CSSParserTokenRange&,
 CSSValue* ConsumeSVGPaint(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ParseSpacing(CSSParserTokenRange&, const CSSParserContext&);
 
+CSSValue* ConsumeSingleContainerName(CSSParserTokenRange&,
+                                     const CSSParserContext&);
 CSSValue* ConsumeContainerName(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumeContainerType(CSSParserTokenRange&);
 
@@ -534,7 +568,33 @@ CSSValue* ConsumePositionLonghand(CSSParserTokenRange& range,
     return CSSNumericLiteralValue::Create(
         percent, CSSPrimitiveValue::UnitType::kPercentage);
   }
-  return ConsumeLengthOrPercent(range, context, kValueRangeAll);
+  return ConsumeLengthOrPercent(range, context,
+                                CSSPrimitiveValue::ValueRange::kAll);
+}
+
+inline bool AtIdent(const CSSParserToken& token, const char* ident) {
+  return token.GetType() == kIdentToken &&
+         EqualIgnoringASCIICase(token.Value(), ident);
+}
+
+template <typename T>
+bool ConsumeIfIdent(T& range_or_stream, const char* ident) {
+  if (!AtIdent(range_or_stream.Peek(), ident))
+    return false;
+  range_or_stream.ConsumeIncludingWhitespace();
+  return true;
+}
+
+inline bool AtDelimiter(const CSSParserToken& token, UChar c) {
+  return token.GetType() == kDelimiterToken && token.Delimiter() == c;
+}
+
+template <typename T>
+bool ConsumeIfDelimiter(T& range_or_stream, UChar c) {
+  if (!AtDelimiter(range_or_stream.Peek(), c))
+    return false;
+  range_or_stream.ConsumeIncludingWhitespace();
+  return true;
 }
 
 }  // namespace css_parsing_utils

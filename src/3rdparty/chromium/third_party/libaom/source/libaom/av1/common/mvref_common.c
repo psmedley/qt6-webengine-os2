@@ -838,9 +838,7 @@ void av1_find_best_ref_mvs(int allow_hp, int_mv *mvlist, int_mv *nearest_mv,
 void av1_setup_frame_buf_refs(AV1_COMMON *cm) {
   cm->cur_frame->order_hint = cm->current_frame.order_hint;
   cm->cur_frame->display_order_hint = cm->current_frame.display_order_hint;
-#if CONFIG_FRAME_PARALLEL_ENCODE
   cm->cur_frame->pyramid_level = cm->current_frame.pyramid_level;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   MV_REFERENCE_FRAME ref_frame;
   for (ref_frame = LAST_FRAME; ref_frame <= ALTREF_FRAME; ++ref_frame) {
     const RefCntBuffer *const buf = get_ref_frame_buf(cm, ref_frame);
@@ -982,8 +980,8 @@ static int motion_field_projection(AV1_COMMON *cm,
   return 1;
 }
 
-// cm->ref_frame_side is calculated here, and will be used in av1_copy_frame_
-// mvs() to affect how mvs are copied.
+// cm->ref_frame_side is calculated here, and will be used in
+// av1_copy_frame_mvs() to affect how mvs are copied.
 void av1_calculate_ref_frame_side(AV1_COMMON *cm) {
   const OrderHintInfo *const order_hint_info = &cm->seq_params->order_hint_info;
 

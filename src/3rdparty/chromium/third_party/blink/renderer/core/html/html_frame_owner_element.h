@@ -22,7 +22,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_FRAME_OWNER_ELEMENT_H_
 
 #include "services/network/public/mojom/trust_tokens.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/frame/frame_owner_element_type.mojom-blink.h"
+#include "third_party/blink/public/common/frame/frame_owner_element_type.h"
 #include "third_party/blink/public/mojom/scroll/scrollbar_mode.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -32,7 +32,8 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/permissions_policy/permissions_policy_parser.h"
 #include "third_party/blink/renderer/core/scroll/scroll_types.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
@@ -44,6 +45,7 @@ class Frame;
 class LayoutEmbeddedContent;
 class LazyLoadFrameObserver;
 class WebPluginContainerImpl;
+class ResourceRequestHead;
 
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
                                           public FrameOwner {
@@ -64,7 +66,7 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // is, to remove it from the layout as if it did not exist.
   virtual void SetCollapsed(bool) {}
 
-  virtual mojom::blink::FrameOwnerElementType OwnerType() const = 0;
+  virtual FrameOwnerElementType OwnerType() const = 0;
 
   Document* getSVGDocument(ExceptionState&) const;
 
@@ -129,6 +131,10 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // Element overrides:
   bool IsAdRelated() const override;
 
+  // If the iframe is lazy-loaded, initiate its load, and return true if such
+  // a load was initiated.
+  bool LoadImmediatelyIfLazy();
+
   void Trace(Visitor*) const override;
 
  protected:
@@ -180,6 +186,9 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
  protected:
   bool is_swapping_frames() const { return is_swapping_frames_; }
 
+  // Checks that the number of frames on the page are within the current limit.
+  bool IsCurrentlyWithinFrameLimit() const;
+
  private:
   // Intentionally private to prevent redundant checks when the type is
   // already HTMLFrameOwnerElement.
@@ -189,6 +198,12 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   void SetIsSwappingFrames(bool is_swapping) override {
     is_swapping_frames_ = is_swapping;
   }
+
+  // Check if the frame should be lazy-loaded and apply when conditions are
+  // passed. Return true when lazy-load is applied.
+  bool LazyLoadIfPossible(const KURL&,
+                          const ResourceRequestHead&,
+                          WebFrameLoadType frame_load_type);
 
   virtual network::mojom::ReferrerPolicy ReferrerPolicyAttribute() {
     return network::mojom::ReferrerPolicy::kDefault;

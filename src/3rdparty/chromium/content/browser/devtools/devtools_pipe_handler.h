@@ -7,7 +7,6 @@
 
 #include "base/callback.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/devtools_agent_host_client.h"
 
@@ -19,6 +18,10 @@ class PipeWriterBase;
 class DevToolsPipeHandler : public DevToolsAgentHostClient {
  public:
   explicit DevToolsPipeHandler(base::OnceClosure on_disconnect);
+
+  DevToolsPipeHandler(const DevToolsPipeHandler&) = delete;
+  DevToolsPipeHandler& operator=(const DevToolsPipeHandler&) = delete;
+
   ~DevToolsPipeHandler() override;
 
   void HandleMessage(std::vector<uint8_t> message);
@@ -30,6 +33,7 @@ class DevToolsPipeHandler : public DevToolsAgentHostClient {
   void AgentHostClosed(DevToolsAgentHost* agent_host) override;
   bool UsesBinaryProtocol() override;
   bool AllowUnsafeOperations() override;
+  std::string GetTypeForMetrics() override;
 
   void Shutdown();
 
@@ -51,8 +55,6 @@ class DevToolsPipeHandler : public DevToolsAgentHostClient {
   int write_fd_;
   bool shutting_down_ = false;
   base::WeakPtrFactory<DevToolsPipeHandler> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(DevToolsPipeHandler);
 };
 
 }  // namespace content

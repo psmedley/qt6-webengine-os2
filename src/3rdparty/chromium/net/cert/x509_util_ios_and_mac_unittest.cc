@@ -4,13 +4,14 @@
 
 #include "net/cert/x509_util_ios_and_mac.h"
 
+#include "build/build_config.h"
 #include "net/cert/x509_certificate.h"
 #include "net/cert/x509_util.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/test_data_directory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #include "net/cert/x509_util_ios.h"
 #else
 #include "net/cert/x509_util_mac.h"
@@ -82,7 +83,7 @@ TEST(X509UtilTest, CreateSecCertificateArrayForX509CertificateErrors) {
   ASSERT_TRUE(ok_cert);
 
   std::vector<bssl::UniquePtr<CRYPTO_BUFFER>> intermediates;
-  intermediates.push_back(std::move(bad_cert));
+  intermediates.push_back(bssl::UpRef(bad_cert));
   intermediates.push_back(bssl::UpRef(ok_cert2->cert_buffer()));
   scoped_refptr<X509Certificate> cert_with_intermediates(
       X509Certificate::CreateFromBuffer(bssl::UpRef(ok_cert->cert_buffer()),
@@ -90,25 +91,46 @@ TEST(X509UtilTest, CreateSecCertificateArrayForX509CertificateErrors) {
   ASSERT_TRUE(cert_with_intermediates);
   EXPECT_EQ(2U, cert_with_intermediates->intermediate_buffers().size());
 
-  // Normal CreateSecCertificateArrayForX509Certificate fails with invalid
-  // certs in chain.
-  EXPECT_FALSE(CreateSecCertificateArrayForX509Certificate(
-      cert_with_intermediates.get()));
-
   // With InvalidIntermediateBehavior::kIgnore, invalid intermediate certs
   // should be silently dropped.
   base::ScopedCFTypeRef<CFMutableArrayRef> sec_certs(
       CreateSecCertificateArrayForX509Certificate(
           cert_with_intermediates.get(), InvalidIntermediateBehavior::kIgnore));
   ASSERT_TRUE(sec_certs);
-  ASSERT_EQ(2, CFArrayGetCount(sec_certs.get()));
-  for (int i = 0; i < 2; ++i)
+  for (int i = 0; i < CFArrayGetCount(sec_certs.get()); ++i)
     ASSERT_TRUE(CFArrayGetValueAtIndex(sec_certs.get(), i));
 
-  EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert->cert_buffer()),
-            BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 0)));
-  EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert2->cert_buffer()),
-            BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 1)));
+  if (CFArrayGetCount(sec_certs.get()) == 2) {
+    EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert->cert_buffer()),
+              BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 0)));
+    EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert2->cert_buffer()),
+              BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 1)));
+
+    // Normal CreateSecCertificateArrayForX509Certificate should fail with
+    // invalid certs in chain.
+    EXPECT_FALSE(CreateSecCertificateArrayForX509Certificate(
+        cert_with_intermediates.get()));
+  } else if (CFArrayGetCount(sec_certs.get()) == 3) {
+    // On older macOS versions that do lazy parsing of SecCertificates, the
+    // invalid certificate may be accepted, which is okay. The test is just
+    // verifying that *if* creating a SecCertificate from one of the
+    // intermediates fails, that cert is ignored and the other certs are still
+    // returned.
+    EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert->cert_buffer()),
+              BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 0)));
+    EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(bad_cert.get()),
+              BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 1)));
+    EXPECT_EQ(x509_util::CryptoBufferAsStringPiece(ok_cert2->cert_buffer()),
+              BytesForSecCert(CFArrayGetValueAtIndex(sec_certs.get(), 2)));
+
+    // Normal CreateSecCertificateArrayForX509Certificate should also
+    // succeed in this case.
+    EXPECT_TRUE(CreateSecCertificateArrayForX509Certificate(
+        cert_with_intermediates.get()));
+  } else {
+    ADD_FAILURE() << "CFArrayGetCount(sec_certs.get()) = "
+                  << CFArrayGetCount(sec_certs.get());
+  }
 }
 
 TEST(X509UtilTest,

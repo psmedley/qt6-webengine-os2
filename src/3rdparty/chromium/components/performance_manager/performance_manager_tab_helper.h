@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "components/performance_manager/public/mojom/coordination_unit.mojom-forward.h"
@@ -43,6 +43,10 @@ class PerformanceManagerTabHelper
     virtual void OnPerformanceManagerTabHelperDestroying(
         content::WebContents*) = 0;
   };
+
+  PerformanceManagerTabHelper(const PerformanceManagerTabHelper&) = delete;
+  PerformanceManagerTabHelper& operator=(const PerformanceManagerTabHelper&) =
+      delete;
 
   ~PerformanceManagerTabHelper() override;
 
@@ -116,6 +120,8 @@ class PerformanceManagerTabHelper
   friend class content::WebContentsUserData<PerformanceManagerTabHelper>;
   friend class PerformanceManagerRegistryImpl;
   friend class WebContentsProxyImpl;
+  FRIEND_TEST_ALL_PREFIXES(PerformanceManagerFencedFrameBrowserTest,
+                           FencedFrameDoesNotHaveParentFrameNode);
 
   explicit PerformanceManagerTabHelper(content::WebContents* web_contents);
 
@@ -133,17 +139,16 @@ class PerformanceManagerTabHelper
     // The actual page node.
     std::unique_ptr<PageNodeImpl> page_node;
 
-    // The frame tree node ID of the main frame of this page. This is the
-    // primary sort key for the page, as it remains constant over the lifetime
-    // of the page. It allows an abitrary RFH to be mapped to the appropriate
+    // The frame tree node ID of the main frame of this PageNode. This is the
+    // primary sort key for the PageNode, as it remains constant over its
+    // lifetime.  It allows an abitrary RFH to be mapped to the appropriate
     // page via RFH::GetMainFrame()->GetFrameTreeNodeId().
-    // TODO(crbug.com/1211368): This is not true, for two reasons. Until MPArch
-    // support is finished, the "main frame" of a page can change (for instance
-    // when a prerendered frame is activated). And even with MPArch, the frame
-    // tree node ID of a perendered frame changes when it's activated.
-    // Fortunately `main_frame_tree_node_id` is currently only used as a DCHECK
-    // that pages are not added twice to the `pages_` set. Make `pages_` a
-    // simple list, or a set keyed on something else.
+    // TODO(crbug.com/1211368): This is not true under MPArch, because the
+    // frame tree node ID of a prerendered RFH changes when it's activated.
+    // (Also, until PM's MPArch support is finished, the "main" FrameNode for a
+    // PageNode can change.) Fortunately `main_frame_tree_node_id` is currently
+    // only used as a DCHECK that pages are not added twice to the `pages_`
+    // set. Make `pages_` a simple list, or a set keyed on something else.
     int main_frame_tree_node_id = 0;
 
     // The UKM source ID for this page.
@@ -192,20 +197,18 @@ class PerformanceManagerTabHelper
   base::flat_set<std::unique_ptr<PageData>, PageDataComparator> pages_;
 
   // Tracks the primary page associated with this WebContents.
-  PageData* primary_page_ = nullptr;
+  raw_ptr<PageData> primary_page_ = nullptr;
 
   // Maps from RenderFrameHost to the associated PM node. This is a single
   // map across all pages associated with this WebContents.
   std::map<content::RenderFrameHost*, std::unique_ptr<FrameNodeImpl>> frames_;
 
-  DestructionObserver* destruction_observer_ = nullptr;
+  raw_ptr<DestructionObserver> destruction_observer_ = nullptr;
   base::ObserverList<Observer, true, false> observers_;
 
   WEB_CONTENTS_USER_DATA_KEY_DECL();
 
   base::WeakPtrFactory<PerformanceManagerTabHelper> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(PerformanceManagerTabHelper);
 };
 
 }  // namespace performance_manager

@@ -91,7 +91,7 @@ void MaybeLogProbeClusterCreated(RtcEventLog* event_log,
 }  // namespace
 
 ProbeControllerConfig::ProbeControllerConfig(
-    const WebRtcKeyValueConfig* key_value_config)
+    const FieldTrialsView* key_value_config)
     : first_exponential_probe_scale("p1", 3.0),
       second_exponential_probe_scale("p2", 6.0),
       further_exponential_probe_scale("step_size", 2),
@@ -127,7 +127,7 @@ ProbeControllerConfig::ProbeControllerConfig(const ProbeControllerConfig&) =
     default;
 ProbeControllerConfig::~ProbeControllerConfig() = default;
 
-ProbeController::ProbeController(const WebRtcKeyValueConfig* key_value_config,
+ProbeController::ProbeController(const FieldTrialsView* key_value_config,
                                  RtcEventLog* event_log)
     : enable_periodic_alr_probing_(false),
       in_rapid_recovery_experiment_(absl::StartsWith(
@@ -225,7 +225,7 @@ std::vector<ProbeClusterConfig> ProbeController::OnMaxTotalAllocatedBitrate(
         probes.push_back(second_probe_rate.bps());
     }
     return InitiateProbing(at_time_ms, probes,
-                           config_.allocation_allow_further_probing);
+                           config_.allocation_allow_further_probing.Get());
   }
   max_total_allocated_bitrate_ = max_total_allocated_bitrate;
   return std::vector<ProbeClusterConfig>();

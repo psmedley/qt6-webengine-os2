@@ -12,7 +12,7 @@ g.test('createQuerySet')
     `
 Tests that creating query set shouldn't be valid without the required feature enabled.
 - createQuerySet
-  - type {occlusion, pipeline-statistics, timestamp}
+  - type {occlusion, timestamp}
   - x= {pipeline statistics, timestamp} query {enable, disable}
 
 TODO: This test should expect *synchronous* exceptions, not validation errors, per
@@ -22,17 +22,13 @@ As of this writing, the spec needs to be fixed as well.
   )
   .params(u =>
     u
-      .combine('type', ['occlusion', 'pipeline-statistics', 'timestamp'] as const)
-      .combine('pipelineStatisticsQueryEnable', [false, true])
+      .combine('type', ['occlusion', 'timestamp'] as const)
       .combine('timestampQueryEnable', [false, true])
   )
   .fn(async t => {
-    const { type, pipelineStatisticsQueryEnable, timestampQueryEnable } = t.params;
+    const { type, timestampQueryEnable } = t.params;
 
     const requiredFeatures: GPUFeatureName[] = [];
-    if (pipelineStatisticsQueryEnable) {
-      requiredFeatures.push('pipeline-statistics-query');
-    }
     if (timestampQueryEnable) {
       requiredFeatures.push('timestamp-query');
     }
@@ -40,13 +36,9 @@ As of this writing, the spec needs to be fixed as well.
     await t.selectDeviceOrSkipTestCase({ requiredFeatures });
 
     const count = 1;
-    const pipelineStatistics =
-      type === 'pipeline-statistics' ? (['clipper-invocations'] as const) : ([] as const);
-    const shouldError =
-      (type === 'pipeline-statistics' && !pipelineStatisticsQueryEnable) ||
-      (type === 'timestamp' && !timestampQueryEnable);
+    const shouldError = type === 'timestamp' && !timestampQueryEnable;
 
     t.expectValidationError(() => {
-      t.device.createQuerySet({ type, count, pipelineStatistics });
+      t.device.createQuerySet({ type, count });
     }, shouldError);
   });

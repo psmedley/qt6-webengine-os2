@@ -10,17 +10,16 @@
 #include "base/bind.h"
 #include "base/containers/contains.h"
 #include "base/location.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/no_destructor.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
+#include "base/values.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/webui/shared_resources_data_source.h"
 #include "content/browser/webui/url_data_source_impl.h"
@@ -78,6 +77,10 @@ URLDataManagerBackend::URLDataManagerBackend() : next_request_id_(0) {
   // Add a shared data source for chrome://resources.
   AddDataSource(
       static_cast<WebUIDataSourceImpl*>(CreateSharedResourcesDataSource()));
+
+  // Add a shared data source for chrome-untrusted://resources.
+  AddDataSource(static_cast<WebUIDataSourceImpl*>(
+      CreateUntrustedSharedResourcesDataSource()));
 }
 
 URLDataManagerBackend::~URLDataManagerBackend() = default;
@@ -106,7 +109,7 @@ void URLDataManagerBackend::AddDataSource(URLDataSourceImpl* source) {
 
 void URLDataManagerBackend::UpdateWebUIDataSource(
     const std::string& source_name,
-    const base::DictionaryValue& update) {
+    const base::Value::Dict& update) {
   auto it = data_sources_.find(source_name);
   if (it == data_sources_.end() || !it->second->IsWebUIDataSourceImpl()) {
     NOTREACHED();
@@ -120,7 +123,7 @@ URLDataSourceImpl* URLDataManagerBackend::GetDataSourceFromURL(
     const GURL& url) {
   // chrome-untrusted:// sources keys are of the form "chrome-untrusted://host".
   if (url.scheme() == kChromeUIUntrustedScheme) {
-    auto i = data_sources_.find(url.GetOrigin().spec());
+    auto i = data_sources_.find(url.DeprecatedGetOriginAsURL().spec());
     if (i == data_sources_.end())
       return nullptr;
     return i->second.get();
@@ -166,7 +169,9 @@ scoped_refptr<net::HttpResponseHeaders> URLDataManagerBackend::GetHeaders(
         network::mojom::CSPDirectiveName::ChildSrc,
         network::mojom::CSPDirectiveName::ConnectSrc,
         network::mojom::CSPDirectiveName::DefaultSrc,
+        network::mojom::CSPDirectiveName::FencedFrameSrc,
         network::mojom::CSPDirectiveName::FormAction,
+        network::mojom::CSPDirectiveName::FontSrc,
         network::mojom::CSPDirectiveName::FrameSrc,
         network::mojom::CSPDirectiveName::ImgSrc,
         network::mojom::CSPDirectiveName::MediaSrc,

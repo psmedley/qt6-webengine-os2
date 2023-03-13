@@ -28,10 +28,9 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* eslint-disable rulesdir/no_underscored_properties */
-
 import * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import * as Settings from '../components/settings/settings.js';
 
 import * as ARIAUtils from './ARIAUtils.js';
 import {InspectorView} from './InspectorView.js';
@@ -111,6 +110,7 @@ const createSettingSelect = function(
         select.selectedIndex = i;
       }
     }
+    select.disabled = setting.disabled();
   }
 
   function selectChanged(): void {
@@ -143,11 +143,11 @@ export const bindCheckbox = function(inputElement: Element, setting: Common.Sett
 
 export const createCustomSetting = function(name: string, element: Element): Element {
   const p = document.createElement('p');
-  const fieldsetElement = p.createChild('fieldset');
-  const label = fieldsetElement.createChild('label');
+  p.classList.add('settings-select');
+  const label = p.createChild('label');
   label.textContent = name;
   ARIAUtils.bindLabelToControl(label, element);
-  fieldsetElement.appendChild(element);
+  p.appendChild(element);
   return p;
 };
 
@@ -155,8 +155,11 @@ export const createControlForSetting = function(setting: Common.Settings.Setting
     null {
       const uiTitle = setting.title();
       switch (setting.type()) {
-        case Common.Settings.SettingType.BOOLEAN:
-          return createSettingCheckbox(uiTitle, (setting as Common.Settings.Setting<boolean>));
+        case Common.Settings.SettingType.BOOLEAN: {
+          const component = new Settings.SettingCheckbox.SettingCheckbox();
+          component.data = {setting: setting as Common.Settings.Setting<boolean>};
+          return component;
+        }
         case Common.Settings.SettingType.ENUM:
           if (Array.isArray(setting.options())) {
             return createSettingSelect(uiTitle, setting.options(), setting.reloadRequired(), setting, subtitle);

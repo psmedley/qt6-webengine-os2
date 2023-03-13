@@ -2,25 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-import * as Common from '../../core/common/common.js';
+import type * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as UI from '../../ui/legacy/legacy.js';
+import * as ThemeSupport from '../../ui/legacy/theme_support/theme_support.js';
 
 import {DeviceModeWrapper} from './DeviceModeWrapper.js';
+import type {Bounds} from './InspectedPagePlaceholder.js';
 import {Events, InspectedPagePlaceholder} from './InspectedPagePlaceholder.js';
 
 let appInstance: AdvancedApp;
-
-interface Event {
-  data: {
-    to: string,
-    from: string,
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-  };
-}
 
 export class AdvancedApp implements Common.App.App {
   private rootSplitWidget!: UI.SplitWidget.SplitWidget;
@@ -73,8 +64,8 @@ export class AdvancedApp implements Common.App.App {
     this.inspectedPagePlaceholder.update();
   }
 
-  private openToolboxWindow(event: Event): void {
-    if ((event.data.to as string) !== UI.DockController.State.Undocked) {
+  private openToolboxWindow(event: Common.EventTarget.EventTargetEvent<UI.DockController.ChangeEvent>): void {
+    if (event.data.to !== UI.DockController.DockState.UNDOCKED) {
       return;
     }
 
@@ -87,8 +78,11 @@ export class AdvancedApp implements Common.App.App {
   }
 
   deviceModeEmulationFrameLoaded(toolboxDocument: Document): void {
-    UI.UIUtils.initializeUIUtils(
-        toolboxDocument, Common.Settings.Settings.instance().createSetting('uiTheme', 'default'));
+    ThemeSupport.ThemeSupport.instance().applyTheme(toolboxDocument);
+    ThemeSupport.ThemeSupport.instance().addEventListener(ThemeSupport.ThemeChangeEvent.eventName, () => {
+      ThemeSupport.ThemeSupport.instance().applyTheme(toolboxDocument);
+    });
+    UI.UIUtils.initializeUIUtils(toolboxDocument);
     UI.UIUtils.installComponentRootStyles((toolboxDocument.body as Element));
     UI.ContextMenu.ContextMenu.installHandler(toolboxDocument);
 
@@ -106,8 +100,8 @@ export class AdvancedApp implements Common.App.App {
     }
   }
 
-  private onBeforeDockSideChange(event: Event): void {
-    if (event.data.to === UI.DockController.State.Undocked && this.toolboxRootView) {
+  private onBeforeDockSideChange(event: Common.EventTarget.EventTargetEvent<UI.DockController.ChangeEvent>): void {
+    if (event.data.to === UI.DockController.DockState.UNDOCKED && this.toolboxRootView) {
       // Hide inspectorView and force layout to mimic the undocked state.
       this.rootSplitWidget.hideSidebar();
       this.inspectedPagePlaceholder.update();
@@ -116,13 +110,16 @@ export class AdvancedApp implements Common.App.App {
     this.changingDockSide = true;
   }
 
-  private onDockSideChange(event?: Event): void {
+  private onDockSideChange(event?: Common.EventTarget.EventTargetEvent<UI.DockController.ChangeEvent>): void {
     this.updateDeviceModeView();
 
     const toDockSide = event ? event.data.to : UI.DockController.DockController.instance().dockSide();
-    if (toDockSide === UI.DockController.State.Undocked) {
+    if (toDockSide === undefined) {
+      throw new Error('Got onDockSideChange event with unexpected undefined for dockSide()');
+    }
+    if (toDockSide === UI.DockController.DockState.UNDOCKED) {
       this.updateForUndocked();
-    } else if (this.toolboxRootView && event && event.data.from === UI.DockController.State.Undocked) {
+    } else if (this.toolboxRootView && event && event.data.from === UI.DockController.DockState.UNDOCKED) {
       // Don't update yet for smooth transition.
       this.rootSplitWidget.hideSidebar();
     } else {
@@ -130,31 +127,30 @@ export class AdvancedApp implements Common.App.App {
     }
   }
 
-  private onAfterDockSideChange(event: Event): void {
+  private onAfterDockSideChange(event: Common.EventTarget.EventTargetEvent<UI.DockController.ChangeEvent>): void {
     // We may get here on the first dock side change while loading without BeforeDockSideChange.
     if (!this.changingDockSide) {
       return;
     }
-    if ((event.data.from as string) === UI.DockController.State.Undocked) {
-      this.updateForDocked((event.data.to as string));
+    if (event.data.from && event.data.from === UI.DockController.DockState.UNDOCKED) {
+      this.updateForDocked(event.data.to);
     }
     this.changingDockSide = false;
     this.inspectedPagePlaceholder.update();
   }
 
-  private updateForDocked(dockSide: string): void {
+  private updateForDocked(dockSide: UI.DockController.DockState): void {
     const resizerElement = (this.rootSplitWidget.resizerElement() as HTMLElement);
-    resizerElement.style.transform = dockSide === UI.DockController.State.DockedToRight ?
+    resizerElement.style.transform = dockSide === UI.DockController.DockState.RIGHT ?
         'translateX(2px)' :
-        dockSide === UI.DockController.State.DockedToLeft ? 'translateX(-2px)' : '';
+        dockSide === UI.DockController.DockState.LEFT ? 'translateX(-2px)' : '';
     this.rootSplitWidget.setVertical(
-        dockSide === UI.DockController.State.DockedToRight || dockSide === UI.DockController.State.DockedToLeft);
+        dockSide === UI.DockController.DockState.RIGHT || dockSide === UI.DockController.DockState.LEFT);
     this.rootSplitWidget.setSecondIsSidebar(
-        dockSide === UI.DockController.State.DockedToRight || dockSide === UI.DockController.State.DockedToBottom);
+        dockSide === UI.DockController.DockState.RIGHT || dockSide === UI.DockController.DockState.BOTTOM);
     this.rootSplitWidget.toggleResizer(this.rootSplitWidget.resizerElement(), true);
     this.rootSplitWidget.toggleResizer(
-        UI.InspectorView.InspectorView.instance().topResizerElement(),
-        dockSide === UI.DockController.State.DockedToBottom);
+        UI.InspectorView.InspectorView.instance().topResizerElement(), dockSide === UI.DockController.DockState.BOTTOM);
     this.rootSplitWidget.showBoth();
   }
 
@@ -165,10 +161,10 @@ export class AdvancedApp implements Common.App.App {
   }
 
   private isDocked(): boolean {
-    return UI.DockController.DockController.instance().dockSide() !== UI.DockController.State.Undocked;
+    return UI.DockController.DockController.instance().dockSide() !== UI.DockController.DockState.UNDOCKED;
   }
 
-  private onSetInspectedPageBounds(event: Event): void {
+  private onSetInspectedPageBounds(event: Common.EventTarget.EventTargetEvent<Bounds>): void {
     if (this.changingDockSide) {
       return;
     }

@@ -6,7 +6,6 @@
 
 #include "core/fpdfapi/render/cpdf_imagecacheentry.h"
 
-#include <memory>
 #include <utility>
 
 #include "core/fpdfapi/page/cpdf_dib.h"
@@ -19,22 +18,6 @@
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderstatus.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
-#include "third_party/base/check.h"
-#include "third_party/base/numerics/safe_conversions.h"
-
-namespace {
-
-uint32_t GetEstimatedImageSize(const RetainPtr<CFX_DIBBase>& pDIB) {
-  if (!pDIB || !pDIB->GetBuffer())
-    return 0;
-
-  int height = pDIB->GetHeight();
-  DCHECK(pdfium::base::IsValueInRangeForNumericType<uint32_t>(height));
-  return static_cast<uint32_t>(height) * pDIB->GetPitch() +
-         pDIB->GetRequiredPaletteSize() * 4;
-}
-
-}  // namespace
 
 CPDF_ImageCacheEntry::CPDF_ImageCacheEntry(CPDF_Document* pDoc,
                                            const RetainPtr<CPDF_Image>& pImage)
@@ -65,10 +48,10 @@ CPDF_DIB::LoadState CPDF_ImageCacheEntry::StartGetCachedBitmap(
     return CPDF_DIB::LoadState::kSuccess;
   }
 
-  m_pCurBitmap = pdfium::MakeRetain<CPDF_DIB>();
+  m_pCurBitmap =
+      pdfium::MakeRetain<CPDF_DIB>(m_pDocument.Get(), m_pImage->GetStream());
   CPDF_DIB::LoadState ret = m_pCurBitmap.As<CPDF_DIB>()->StartLoadDIBBase(
-      m_pDocument.Get(), m_pImage->GetStream(), true,
-      pRenderStatus->GetFormResource(), pPageResources, bStdCS,
+      true, pRenderStatus->GetFormResource(), pPageResources, bStdCS,
       pRenderStatus->GetGroupFamily(), pRenderStatus->GetLoadMask());
   if (ret == CPDF_DIB::LoadState::kContinue)
     return CPDF_DIB::LoadState::kContinue;
@@ -102,13 +85,13 @@ void CPDF_ImageCacheEntry::ContinueGetCachedBitmap(
   CPDF_PageRenderCache* pPageRenderCache = pContext->GetPageCache();
   m_dwTimeCount = pPageRenderCache->GetTimeCount();
   if (m_pCurBitmap->GetPitch() * m_pCurBitmap->GetHeight() < kHugeImageSize) {
-    m_pCachedBitmap = m_pCurBitmap->Clone(nullptr);
+    m_pCachedBitmap = m_pCurBitmap->Realize();
     m_pCurBitmap.Reset();
   } else {
     m_pCachedBitmap = m_pCurBitmap;
   }
   if (m_pCurMask) {
-    m_pCachedMask = m_pCurMask->Clone(nullptr);
+    m_pCachedMask = m_pCurMask->Realize();
     m_pCurMask.Reset();
   }
   m_pCurBitmap = m_pCachedBitmap;
@@ -117,6 +100,9 @@ void CPDF_ImageCacheEntry::ContinueGetCachedBitmap(
 }
 
 void CPDF_ImageCacheEntry::CalcSize() {
-  m_dwCacheSize = GetEstimatedImageSize(m_pCachedBitmap) +
-                  GetEstimatedImageSize(m_pCachedMask);
+  m_dwCacheSize = 0;
+  if (m_pCachedBitmap)
+    m_dwCacheSize += m_pCachedBitmap->GetEstimatedImageMemoryBurden();
+  if (m_pCachedMask)
+    m_dwCacheSize += m_pCachedMask->GetEstimatedImageMemoryBurden();
 }

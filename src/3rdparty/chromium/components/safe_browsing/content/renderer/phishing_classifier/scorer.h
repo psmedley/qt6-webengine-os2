@@ -24,10 +24,11 @@
 #include "base/callback.h"
 #include "base/files/file.h"
 #include "base/files/memory_mapped_file.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
+#include "build/build_config.h"
+#include "components/optimization_guide/machine_learning_tflite_buildflags.h"
 #include "components/safe_browsing/core/common/proto/client_model.pb.h"
 #include "components/safe_browsing/core/common/proto/csd.pb.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -67,22 +68,14 @@ class Scorer {
   // (range is inclusive on both ends).
   virtual double ComputeScore(const FeatureMap& features) const = 0;
 
-  // This method matches the given |bitmap| against the visual model. It
-  // modifies |request| appropriately, and returns the new request. This expects
-  // to be called on the renderer main thread, but will perform scoring
-  // asynchronously on a worker thread.
-  virtual void GetMatchingVisualTargets(
-      const SkBitmap& bitmap,
-      std::unique_ptr<ClientPhishingRequest> request,
-      base::OnceCallback<void(std::unique_ptr<ClientPhishingRequest>)> callback)
-      const = 0;
-
+#if BUILDFLAG(BUILD_WITH_TFLITE_LIB)
   // This method applies the TfLite visual model to the given bitmap. It
   // asynchronously returns the list of scores for each category, in the same
   // order as `tflite_thresholds()`.
   virtual void ApplyVisualTfLiteModel(
       const SkBitmap& bitmap,
       base::OnceCallback<void(std::vector<double>)> callback) const = 0;
+#endif
 
   // Returns the version number of the loaded client model.
   virtual int model_version() const = 0;
@@ -131,12 +124,16 @@ class Scorer {
   // [0.0,1.0].
   static double LogOdds2Prob(double log_odds);
 
-  // Apply the tflite model to the bitmap, and return scores.
-  static std::vector<double> ApplyVisualTfLiteModelHelper(
+  // Apply the tflite model to the bitmap. The scores are returned by running
+  // `callback` on the provided `callback_task_runner`. This is expected to be
+  // run on a helper thread.
+  static void ApplyVisualTfLiteModelHelper(
       const SkBitmap& bitmap,
       int input_width,
       int input_height,
-      const std::string& model_data);
+      const std::string& model_data,
+      scoped_refptr<base::SequencedTaskRunner> callback_task_runner,
+      base::OnceCallback<void(std::vector<double>)> callback);
 
   base::MemoryMappedFile visual_tflite_model_;
   base::WeakPtrFactory<Scorer> weak_ptr_factory_{this};

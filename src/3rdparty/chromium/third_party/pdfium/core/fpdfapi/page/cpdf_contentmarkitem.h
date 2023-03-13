@@ -7,7 +7,7 @@
 #ifndef CORE_FPDFAPI_PAGE_CPDF_CONTENTMARKITEM_H_
 #define CORE_FPDFAPI_PAGE_CPDF_CONTENTMARKITEM_H_
 
-#include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/bytestring.h"
 #include "core/fxcrt/retain_ptr.h"
 
 class CPDF_Dictionary;
@@ -24,7 +24,6 @@ class CPDF_ContentMarkItem final : public Retainable {
   const CPDF_Dictionary* GetParam() const;
   CPDF_Dictionary* GetParam();
   const ByteString& GetPropertyName() const { return m_PropertyName; }
-  bool HasMCID() const;
 
   void SetDirectDict(RetainPtr<CPDF_Dictionary> pDict);
   void SetPropertiesHolder(CPDF_Dictionary* pHolder,

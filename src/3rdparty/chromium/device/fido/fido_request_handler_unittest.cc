@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/memory/raw_ptr.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/task_environment.h"
@@ -27,9 +28,9 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "device/fido/win/fake_webauthn_api.h"
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 using ::testing::_;
 
@@ -72,6 +73,10 @@ class TestObserver : public FidoRequestHandlerBase::Observer {
       FidoRequestHandlerBase::TransportAvailabilityInfo>;
 
   TestObserver() = default;
+
+  TestObserver(const TestObserver&) = delete;
+  TestObserver& operator=(const TestObserver&) = delete;
+
   ~TestObserver() override = default;
 
   FidoRequestHandlerBase::TransportAvailabilityInfo
@@ -126,8 +131,6 @@ class TestObserver : public FidoRequestHandlerBase::Observer {
  private:
   TransportAvailabilityNotificationReceiver
       transport_availability_notification_receiver_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestObserver);
 };
 
 // Fake FidoTask implementation that sends an empty byte array to the device
@@ -314,7 +317,7 @@ class FidoRequestHandlerTest : public ::testing::Test {
       base::test::TaskEnvironment::TimeSource::MOCK_TIME};
   test::FakeFidoDiscoveryFactory fake_discovery_factory_;
   scoped_refptr<::testing::NiceMock<MockBluetoothAdapter>> mock_adapter_;
-  test::FakeFidoDiscovery* discovery_;
+  raw_ptr<test::FakeFidoDiscovery> discovery_;
   FakeHandlerCallbackReceiver cb_;
 };
 
@@ -412,7 +415,7 @@ TEST_F(FidoRequestHandlerTest, TestRequestWithMultipleSuccessResponses) {
   EXPECT_CALL(*device0, GetId()).WillRepeatedly(testing::Return("device0"));
   device0->ExpectRequestAndRespondWith(std::vector<uint8_t>(),
                                        CreateFakeSuccessDeviceResponse(),
-                                       base::TimeDelta::FromMicroseconds(1));
+                                       base::Microseconds(1));
 
   // Represents a device that returns a success response after a longer time
   // delay.
@@ -423,7 +426,7 @@ TEST_F(FidoRequestHandlerTest, TestRequestWithMultipleSuccessResponses) {
   EXPECT_CALL(*device1, GetId()).WillRepeatedly(testing::Return("device1"));
   device1->ExpectRequestAndRespondWith(std::vector<uint8_t>(),
                                        CreateFakeSuccessDeviceResponse(),
-                                       base::TimeDelta::FromMicroseconds(10));
+                                       base::Microseconds(10));
   // Cancel command is invoked after receiving response from |device0|.
   EXPECT_CALL(*device1, Cancel(_));
 
@@ -468,7 +471,7 @@ TEST_F(FidoRequestHandlerTest, TestRequestWithMultipleFailureResponses) {
       .WillRepeatedly(testing::Return(std::string()));
   device1->ExpectRequestAndRespondWith(std::vector<uint8_t>(),
                                        CreateFakeUserPresenceVerifiedError(),
-                                       base::TimeDelta::FromMicroseconds(1));
+                                       base::Microseconds(1));
 
   // Represents a device that returns an UP verified failure response after a
   // big time delay.
@@ -481,7 +484,7 @@ TEST_F(FidoRequestHandlerTest, TestRequestWithMultipleFailureResponses) {
       .WillRepeatedly(testing::Return(std::string()));
   device2->ExpectRequestAndRespondWith(std::vector<uint8_t>(),
                                        CreateFakeDeviceProcesssingError(),
-                                       base::TimeDelta::FromMicroseconds(10));
+                                       base::Microseconds(10));
   EXPECT_CALL(*device2, Cancel(_));
 
   discovery()->AddDevice(std::move(device0));
@@ -506,7 +509,7 @@ TEST_F(FidoRequestHandlerTest,
   device0->SetDeviceTransport(FidoTransportProtocol::kInternal);
   device0->ExpectRequestAndRespondWith(std::vector<uint8_t>(),
                                        CreateFakeOperationDeniedError(),
-                                       base::TimeDelta::FromMicroseconds(10));
+                                       base::Microseconds(10));
 
   ForgeNextHidDiscovery();
   auto* platform_discovery =
@@ -615,7 +618,7 @@ TEST_F(FidoRequestHandlerTest,
       {FidoTransportProtocol::kUsbHumanInterfaceDevice});
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST_F(FidoRequestHandlerTest, TransportAvailabilityOfWindowsAuthenticator) {
   FakeWinWebAuthnApi api;
   fake_discovery_factory_.set_win_webauthn_api(&api);
@@ -647,6 +650,6 @@ TEST_F(FidoRequestHandlerTest, TransportAvailabilityOfWindowsAuthenticator) {
               api_available ? "WinWebAuthnApiAuthenticator" : "");
   }
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace device

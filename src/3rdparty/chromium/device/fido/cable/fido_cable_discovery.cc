@@ -30,9 +30,16 @@
 #include "device/fido/features.h"
 #include "device/fido/fido_parsing_utils.h"
 
+#if BUILDFLAG(IS_MAC)
+#include "device/fido/mac/util.h"
+#endif
+
 namespace device {
 
 namespace {
+
+// Client name for logging in BLE scanning.
+constexpr char kScanClientName[] = "FIDO";
 
 // Construct advertisement data with different formats depending on client's
 // operating system. Ideally, we advertise EIDs as part of Service Data, but
@@ -44,13 +51,13 @@ std::unique_ptr<BluetoothAdvertisement::Data> ConstructAdvertisementData(
   auto advertisement_data = std::make_unique<BluetoothAdvertisement::Data>(
       BluetoothAdvertisement::AdvertisementType::ADVERTISEMENT_TYPE_BROADCAST);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   auto list = std::make_unique<BluetoothAdvertisement::UUIDList>();
   list->emplace_back(kGoogleCableUUID16);
   list->emplace_back(fido_parsing_utils::ConvertBytesToUuid(client_eid));
   advertisement_data->set_service_uuids(std::move(list));
 
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   // References:
   // https://www.bluetooth.com/specifications/assigned-numbers/company-identifiers
   // go/google-ble-manufacturer-data-format
@@ -77,7 +84,7 @@ std::unique_ptr<BluetoothAdvertisement::Data> ConstructAdvertisementData(
                              std::move(manufacturer_data_value));
   advertisement_data->set_manufacturer_data(std::move(manufacturer_data));
 
-#elif defined(OS_LINUX) || defined(OS_CHROMEOS)
+#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Reference:
   // https://github.com/arnar/fido-2-specs/blob/fido-client-to-authenticator-protocol.bs#L4314
   static constexpr uint8_t kCableFlags = 0x20;
@@ -157,7 +164,7 @@ FidoCableDiscovery::FidoCableDiscovery(
 // Windows currently does not support multiple EIDs, thus we ignore any extra
 // discovery data.
 // TODO(https://crbug.com/837088): Add support for multiple EIDs on Windows.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   if (discovery_data_.size() > 1u) {
     FIDO_LOG(ERROR) << "discovery_data_.size()=" << discovery_data_.size()
                     << ", trimming to 1.";
@@ -265,6 +272,29 @@ void FidoCableDiscovery::OnGetAdapter(scoped_refptr<BluetoothAdapter> adapter) {
     OnSetPowered();
   }
 
+#if BUILDFLAG(IS_MAC)
+  // TODO(crbug.com/1314404): turn this into a user-visible UI if we believe
+  // that it's a good signal.
+
+  switch (fido::mac::ProcessIsSigned()) {
+    case fido::mac::CodeSigningState::kUnknown:
+      FIDO_LOG(DEBUG) << "Cannot determine whether build is signed. Assuming "
+                         "Bluetooth permission is granted.";
+      break;
+
+    case fido::mac::CodeSigningState::kSigned:
+      FIDO_LOG(DEBUG) << "Bluetooth authorized: "
+                      << (adapter_->GetOsPermissionStatus() !=
+                          BluetoothAdapter::PermissionStatus::kDenied);
+      break;
+
+    case fido::mac::CodeSigningState::kNotSigned:
+      FIDO_LOG(DEBUG)
+          << "Build not signed. Assuming Bluetooth permission is granted.";
+      break;
+  }
+#endif
+
   // FidoCableDiscovery blocks its transport availability callback on the
   // DiscoveryStarted() calls of all instantiated discoveries. Hence, this call
   // must not be put behind the BLE adapter getting powered on (which is
@@ -331,7 +361,7 @@ void FidoCableDiscovery::AdapterPoweredChanged(BluetoothAdapter* adapter,
     return;
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, the power-on event appears to race against initialization of
   // the adapter, such that one of the WinRT API calls inside
   // BluetoothAdapter::StartDiscoverySessionWithFilter() can fail with "Device
@@ -342,10 +372,10 @@ void FidoCableDiscovery::AdapterPoweredChanged(BluetoothAdapter* adapter,
       FROM_HERE,
       base::BindOnce(&FidoCableDiscovery::StartCableDiscovery,
                      weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(500));
+      base::Milliseconds(500));
 #else
   StartCableDiscovery();
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 }
 
 void FidoCableDiscovery::AdapterDiscoveringChanged(BluetoothAdapter* adapter,
@@ -381,6 +411,7 @@ void FidoCableDiscovery::StartCableDiscovery() {
   adapter()->StartDiscoverySessionWithFilter(
       std::make_unique<BluetoothDiscoveryFilter>(
           BluetoothTransport::BLUETOOTH_TRANSPORT_LE),
+      kScanClientName,
       base::BindOnce(&FidoCableDiscovery::OnStartDiscoverySession,
                      weak_factory_.GetWeakPtr()),
       base::BindOnce(&FidoCableDiscovery::OnStartDiscoverySessionError,
@@ -401,7 +432,7 @@ void FidoCableDiscovery::OnStartDiscoverySession(
       FROM_HERE,
       base::BindOnce(&FidoCableDiscovery::StartAdvertisement,
                      weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(500));
+      base::Milliseconds(500));
 }
 
 void FidoCableDiscovery::OnStartDiscoverySessionError() {
@@ -499,7 +530,7 @@ void FidoCableDiscovery::CableDeviceFound(BluetoothAdapter* adapter,
   RecordCableV1DiscoveryEventOnce(
       CableV1DiscoveryEvent::kFirstCableDeviceFound);
 
-#if defined(OS_CHROMEOS) || defined(OS_LINUX)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
   // Speed up GATT service discovery on ChromeOS/BlueZ.
   // SetConnectionLatency() is NOTIMPLEMENTED() on other platforms.
   device->SetConnectionLatency(BluetoothDevice::CONNECTION_LATENCY_LOW,
@@ -507,7 +538,7 @@ void FidoCableDiscovery::CableDeviceFound(BluetoothAdapter* adapter,
                                  FIDO_LOG(ERROR)
                                      << "SetConnectionLatency() failed";
                                }));
-#endif  // defined(OS_CHROMEOS) || defined(OS_LINUX)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX)
 
   auto cable_device =
       std::make_unique<FidoCableDevice>(adapter, device_address);

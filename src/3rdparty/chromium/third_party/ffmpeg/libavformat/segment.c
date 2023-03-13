@@ -24,6 +24,8 @@
  * @url{http://tools.ietf.org/id/draft-pantos-http-live-streaming}
  */
 
+#include "config_components.h"
+
 #include <float.h>
 #include <time.h>
 
@@ -158,6 +160,7 @@ static int segment_mux_init(AVFormatContext *s)
     av_dict_copy(&oc->metadata, s->metadata, 0);
     oc->opaque             = s->opaque;
     oc->io_close           = s->io_close;
+    oc->io_close2          = s->io_close2;
     oc->io_open            = s->io_open;
     oc->flags              = s->flags;
 
@@ -569,7 +572,7 @@ static int open_null_ctx(AVIOContext **ctx)
     uint8_t *buf = av_malloc(buf_size);
     if (!buf)
         return AVERROR(ENOMEM);
-    *ctx = avio_alloc_context(buf, buf_size, AVIO_FLAG_WRITE, NULL, NULL, NULL, NULL);
+    *ctx = avio_alloc_context(buf, buf_size, 1, NULL, NULL, NULL, NULL);
     if (!*ctx) {
         av_free(buf);
         return AVERROR(ENOMEM);
@@ -952,7 +955,9 @@ calc_times:
                            seg->initial_offset || seg->reset_timestamps || seg->avf->oformat->interleave_packet);
 
 fail:
-    if (pkt->stream_index == seg->reference_stream_index) {
+    /* Use st->index here as the packet returned from ff_write_chained()
+     * is blank if interleaving has been used. */
+    if (st->index == seg->reference_stream_index) {
         seg->frame_count++;
         seg->segment_frame_count++;
     }
@@ -982,17 +987,19 @@ static int seg_write_trailer(struct AVFormatContext *s)
     return ret;
 }
 
-static int seg_check_bitstream(struct AVFormatContext *s, const AVPacket *pkt)
+static int seg_check_bitstream(AVFormatContext *s, AVStream *st,
+                               const AVPacket *pkt)
 {
     SegmentContext *seg = s->priv_data;
     AVFormatContext *oc = seg->avf;
     if (oc->oformat->check_bitstream) {
-        int ret = oc->oformat->check_bitstream(oc, pkt);
+        AVStream *const ost = oc->streams[st->index];
+        int ret = oc->oformat->check_bitstream(oc, ost, pkt);
         if (ret == 1) {
-            AVStream *st = s->streams[pkt->stream_index];
-            AVStream *ost = oc->streams[pkt->stream_index];
-            st->internal->bsfc = ost->internal->bsfc;
-            ost->internal->bsfc = NULL;
+            FFStream *const  sti = ffstream(st);
+            FFStream *const osti = ffstream(ost);
+             sti->bsfc = osti->bsfc;
+            osti->bsfc = NULL;
         }
         return ret;
     }

@@ -294,6 +294,11 @@ static int tonemap_vaapi_filter_frame(AVFilterLink *inlink, AVFrame *input_frame
     if (err < 0)
         goto fail;
 
+    if (vpp_ctx->nb_filter_buffers) {
+        params.filters = &vpp_ctx->filter_buffers[0];
+        params.num_filters = vpp_ctx->nb_filter_buffers;
+    }
+
     err = ff_vaapi_vpp_render_picture(avctx, &params, output_frame);
     if (err < 0)
         goto fail;
@@ -391,7 +396,6 @@ static const AVFilterPad tonemap_vaapi_inputs[] = {
         .filter_frame = &tonemap_vaapi_filter_frame,
         .config_props = &ff_vaapi_vpp_config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad tonemap_vaapi_outputs[] = {
@@ -400,7 +404,6 @@ static const AVFilterPad tonemap_vaapi_outputs[] = {
         .type = AVMEDIA_TYPE_VIDEO,
         .config_props = &ff_vaapi_vpp_config_output,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_tonemap_vaapi = {
@@ -409,9 +412,9 @@ const AVFilter ff_vf_tonemap_vaapi = {
     .priv_size      = sizeof(HDRVAAPIContext),
     .init           = &tonemap_vaapi_init,
     .uninit         = &ff_vaapi_vpp_ctx_uninit,
-    .query_formats  = &ff_vaapi_vpp_query_formats,
-    .inputs         = tonemap_vaapi_inputs,
-    .outputs        = tonemap_vaapi_outputs,
+    FILTER_INPUTS(tonemap_vaapi_inputs),
+    FILTER_OUTPUTS(tonemap_vaapi_outputs),
+    FILTER_QUERY_FUNC(&ff_vaapi_vpp_query_formats),
     .priv_class     = &tonemap_vaapi_class,
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

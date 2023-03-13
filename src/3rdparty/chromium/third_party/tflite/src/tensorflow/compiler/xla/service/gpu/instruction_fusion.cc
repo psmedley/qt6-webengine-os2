@@ -29,57 +29,78 @@ limitations under the License.
 namespace xla {
 namespace gpu {
 
+namespace {
+bool ElementIsF32OrF16(const Shape& shape) {
+  PrimitiveType type = shape.element_type();
+  return type == F32 || type == F16;
+}
+}  // namespace
+
 /*static*/ bool GpuInstructionFusion::IsExpensive(
     const HloInstruction& instruction) {
-  // We say that floating-point division is cheap on the GPU.
-  if (instruction.opcode() == HloOpcode::kDivide &&
-      ShapeUtil::ElementIsFloating(instruction.shape())) {
-    return false;
+  // We say that some floating-point math ops are cheap on the GPU. Unlike other
+  // intrinsics that can be expanded into many instructions, Div and Rsqrt are
+  // lowered into single hardware instructions.
+  switch (instruction.opcode()) {
+    case HloOpcode::kDivide:
+    case HloOpcode::kRsqrt:
+    case HloOpcode::kExp:
+      if (ElementIsF32OrF16(instruction.shape())) {
+        return false;
+      }
+      break;
+    default:
+      break;
   }
   return InstructionFusion::IsExpensive(instruction);
 }
 
-bool GpuInstructionFusion::ShouldFuseInexpensiveChecks(HloInstruction* consumer,
-                                                       int64 operand_index) {
+FusionDecision GpuInstructionFusion::ShouldFuseInexpensiveChecks(
+    HloInstruction* consumer, int64_t operand_index) {
   HloInstruction* producer = consumer->mutable_operand(operand_index);
 
   // Output fusions are not currently supported on GPUs.
   if (producer->opcode() == HloOpcode::kFusion) {
-    return false;
+    return "the producer is a fusion";
   }
   // Cost condition: not fuse (simple, expensive producers) and (consumers who
   // reuse operand elements).
-  if (producer->opcode() != HloOpcode::kFusion &&
-      consumer->ReusesOperandElements(operand_index) &&
-      is_expensive(*producer)) {
-    return false;
+  if (producer->opcode() != HloOpcode::kFusion && is_expensive(*producer) &&
+      ReusesOperandElements(consumer, operand_index)) {
+    return "the producer is expensive, and the consumer reuses inputs";
   }
 
-  if (!IsProducerConsumerFusible(*producer, *consumer) ||
-      !InstructionFusion::ShouldFuse(consumer, operand_index)) {
-    return false;
+  if (NoFusionPossible fusible =
+          !IsProducerConsumerFusible(*producer, *consumer)) {
+    return !fusible;
   }
-  return true;
+  if (NoFusionPossible fusible =
+          !InstructionFusion::ShouldFuse(consumer, operand_index)) {
+    return !fusible;
+  }
+  return {};
 }
 
-bool GpuInstructionFusion::ShouldFuse(HloInstruction* consumer,
-                                      int64 operand_index) {
-  if (!ShouldFuseInexpensiveChecks(consumer, operand_index)) {
-    VLOG(5) << "Not fusing inexpensive checks of operand " << operand_index
-            << " of " << consumer->ToString();
-    return false;
+FusionDecision GpuInstructionFusion::ShouldFuse(HloInstruction* consumer,
+                                                int64_t operand_index) {
+  if (NoFusionPossible fusible =
+          !ShouldFuseInexpensiveChecks(consumer, operand_index)) {
+    return !fusible;
   }
+
   auto producer = consumer->operand(operand_index);
 
   // The following checks are potentially expensive.
-  if (FusionWouldBeTooLarge(*consumer, *producer)) {
-    VLOG(5) << "Fusion of (" << producer->ToString() << ") into ("
-            << consumer->ToString() << ") would be too large";
-    return false;
+  if (NoFusionPossible too_large =
+          !FusionFitsInBudget(*consumer, *producer,
+                              /*is_consumer_producer_fusion=*/true)) {
+    return !too_large;
   }
+
   if (consumer->opcode() != HloOpcode::kFusion) {
-    return true;
+    return {};
   }
+
   // Also check that our emitter can handle the fusion node. We currently can
   // have exponential time/memory requirements for emitting certain fusion
   // kernels, in which case we don't want to fuse.
@@ -92,13 +113,10 @@ bool GpuInstructionFusion::ShouldFuse(HloInstruction* consumer,
     fusion_node_evaluations_.emplace(consumer,
                                      FusionNodeIndexingEvaluation(consumer));
   }
-  return !fusion_node_evaluations_.at(consumer).AverageCodeDuplicationTooHigh(
-      producer);
-}
-
-bool GpuInstructionFusion::ShouldFuseIntoMultiOutput(HloInstruction* consumer,
-                                                     int64 operand_index) {
-  return false;
+  if (fusion_node_evaluations_.at(consumer).CodeDuplicationTooHigh(producer)) {
+    return "the fusion would result in an overly large code duplication";
+  }
+  return {};
 }
 
 HloInstruction::FusionKind GpuInstructionFusion::ChooseKind(

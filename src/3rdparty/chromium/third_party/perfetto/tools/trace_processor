@@ -27,7 +27,7 @@ exec python3 - "$@" <<'#'EOF
 TOOL_NAME = 'trace_processor_shell'
 
 # BEGIN_SECTION_GENERATED_BY(roll-prebuilts)
-# Revision: 387c10f55b96e95f96ec9248c3af28772bccfff0
+# Revision: v25.0
 PERFETTO_PREBUILT_MANIFEST = [{
     'tool':
         'trace_processor_shell',
@@ -36,14 +36,30 @@ PERFETTO_PREBUILT_MANIFEST = [{
     'file_name':
         'trace_processor_shell',
     'file_size':
-        7038736,
+        7302832,
     'url':
-        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/387c10f55b96e95f96ec9248c3af28772bccfff0/mac-amd64/trace_processor_shell',
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/mac-amd64/trace_processor_shell',
     'sha256':
-        '2d5d054d64af5c2b0f5649bbe653bb5d71a2b8465fc69d00d52abb818a093f83',
+        'edc841a7f6769959f3b03f1e93dcd263d30864dc3e1fc4e3fcdbe4e44e19b02a',
     'platform':
         'darwin',
     'machine': ['x86_64']
+}, {
+    'tool':
+        'trace_processor_shell',
+    'arch':
+        'mac-arm64',
+    'file_name':
+        'trace_processor_shell',
+    'file_size':
+        6393768,
+    'url':
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/mac-arm64/trace_processor_shell',
+    'sha256':
+        '9f768e35d85501d18f09b0313c037a34f3306663d504f31e4874b1b3b20a00d6',
+    'platform':
+        'darwin',
+    'machine': ['arm64']
 }, {
     'tool':
         'trace_processor_shell',
@@ -52,11 +68,11 @@ PERFETTO_PREBUILT_MANIFEST = [{
     'file_name':
         'trace_processor_shell.exe',
     'file_size':
-        6671872,
+        6942720,
     'url':
-        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/387c10f55b96e95f96ec9248c3af28772bccfff0/windows-amd64/trace_processor_shell.exe',
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/windows-amd64/trace_processor_shell.exe',
     'sha256':
-        'f1438f5731b97770e4f80a6fbeb04841ed1ad6738dc15defeb69395e889581c6',
+        'c7118d820f720ca99acc9ef736f553cb0ba01d034e8f61b83f44d857f76058ce',
     'platform':
         'win32',
     'machine': ['amd64']
@@ -68,11 +84,11 @@ PERFETTO_PREBUILT_MANIFEST = [{
     'file_name':
         'trace_processor_shell',
     'file_size':
-        7386768,
+        7824920,
     'url':
-        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/387c10f55b96e95f96ec9248c3af28772bccfff0/linux-amd64/trace_processor_shell',
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/linux-amd64/trace_processor_shell',
     'sha256':
-        '643e9b4bbea808434b4630522241f9306d17f4669b8ccb3cf9a52d61b3871f5d',
+        '77ec0f9dbec36079d83f2843372446c354d04e7971c1f159c465d4e8e78a3d4d',
     'platform':
         'linux',
     'machine': ['x86_64']
@@ -84,11 +100,11 @@ PERFETTO_PREBUILT_MANIFEST = [{
     'file_name':
         'trace_processor_shell',
     'file_size':
-        4640056,
+        5076040,
     'url':
-        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/387c10f55b96e95f96ec9248c3af28772bccfff0/linux-arm/trace_processor_shell',
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/linux-arm/trace_processor_shell',
     'sha256':
-        '6118b0b863a9c9f04ea368fbec6aa6f482ccabb5abd7e8b94b31483bdb0f9d56',
+        '7290ef3bda83736d0076e49bab5524294906bc8d1785ccef876ba8bd490e62b9',
     'platform':
         'linux',
     'machine': ['armv6l', 'armv7l', 'armv8l']
@@ -100,11 +116,11 @@ PERFETTO_PREBUILT_MANIFEST = [{
     'file_name':
         'trace_processor_shell',
     'file_size':
-        6171712,
+        7055416,
     'url':
-        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/387c10f55b96e95f96ec9248c3af28772bccfff0/linux-arm64/trace_processor_shell',
+        'https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v25.0/linux-arm64/trace_processor_shell',
     'sha256':
-        'c1ed98c6104fb57b6452b1a01c3b8d8b9f25593eb85590f58de0efc8cf3c423d',
+        'b3d91b69a4152419bc3de2df3aeaef400d829e4a87e5c5cb985af0b56f319279',
     'platform':
         'linux',
     'machine': ['aarch64']

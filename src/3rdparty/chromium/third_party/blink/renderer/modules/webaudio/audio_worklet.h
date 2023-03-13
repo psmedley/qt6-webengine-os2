@@ -5,10 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_WORKLET_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBAUDIO_AUDIO_WORKLET_H_
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/core/workers/worklet.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
@@ -24,6 +23,10 @@ class MODULES_EXPORT AudioWorklet final : public Worklet {
 
  public:
   explicit AudioWorklet(BaseAudioContext*);
+
+  AudioWorklet(const AudioWorklet&) = delete;
+  AudioWorklet& operator=(const AudioWorklet&) = delete;
+
   ~AudioWorklet() override = default;
 
   void CreateProcessor(scoped_refptr<AudioWorkletHandler>,
@@ -61,8 +64,6 @@ class MODULES_EXPORT AudioWorklet final : public Worklet {
   bool worklet_started_ = false;
 
   Member<BaseAudioContext> context_;
-
-  DISALLOW_COPY_AND_ASSIGN(AudioWorklet);
 };
 
 }  // namespace blink

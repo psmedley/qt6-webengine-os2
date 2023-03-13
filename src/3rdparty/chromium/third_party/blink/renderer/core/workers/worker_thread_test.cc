@@ -317,7 +317,7 @@ TEST_F(WorkerThreadTest, SyncTerminate_ImmediatelyAfterStart) {
 }
 
 TEST_F(WorkerThreadTest, AsyncTerminate_WhileTaskIsRunning) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCallsForWorkerForciblyTerminated();
@@ -353,7 +353,7 @@ TEST_F(WorkerThreadTest, SyncTerminate_WhileTaskIsRunning) {
 
 TEST_F(WorkerThreadTest,
        AsyncTerminateAndThenSyncTerminate_WhileTaskIsRunning) {
-  SetForcibleTerminationDelay(base::TimeDelta::FromMilliseconds(10));
+  SetForcibleTerminationDelay(base::Milliseconds(10));
 
   ExpectReportingCallsForWorkerForciblyTerminated();
   StartWithSourceCodeNotToFinish();
@@ -373,7 +373,7 @@ TEST_F(WorkerThreadTest,
 }
 
 TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   EXPECT_CALL(*reporting_proxy_, DidCreateWorkerGlobalScope(_)).Times(1);
@@ -386,13 +386,15 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
           "fake global scope name", "fake user agent", UserAgentMetadata(),
           nullptr /* web_worker_fetch_context */,
           Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
+          Vector<network::mojom::blink::ContentSecurityPolicyPtr>(),
           network::mojom::ReferrerPolicy::kDefault, security_origin_.get(),
           false /* starter_secure_context */,
           CalculateHttpsState(security_origin_.get()),
           MakeGarbageCollected<WorkerClients>(),
           nullptr /* content_settings_client */,
           network::mojom::IPAddressSpace::kLocal,
-          nullptr /* originTrialToken */, base::UnguessableToken::Create(),
+          nullptr /* inherited_trial_features */,
+          base::UnguessableToken::Create(),
           std::make_unique<WorkerSettings>(std::make_unique<Settings>().get()),
           mojom::blink::V8CacheOptions::kDefault,
           nullptr /* worklet_module_responses_map */);
@@ -445,7 +447,7 @@ TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunningOnInitialization) {
 }
 
 TEST_F(WorkerThreadTest, Terminate_WhileDebuggerTaskIsRunning) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCalls();
@@ -518,7 +520,7 @@ TEST_F(WorkerThreadTest, DISABLED_TerminateWorkerWhileChildIsLoading) {
 
 // Tests terminating a worker when debugger is paused.
 TEST_F(WorkerThreadTest, MAYBE_TerminateWhileWorkerPausedByDebugger) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCallsForWorkerForciblyTerminated();
@@ -539,7 +541,7 @@ TEST_F(WorkerThreadTest, MAYBE_TerminateWhileWorkerPausedByDebugger) {
 }
 
 TEST_F(WorkerThreadTest, MAYBE_TerminateFrozenScript) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCallsForWorkerForciblyTerminated();
@@ -553,7 +555,7 @@ TEST_F(WorkerThreadTest, MAYBE_TerminateFrozenScript) {
                           CrossThreadUnretained(&child_waitable)));
 
   // Freeze() enters a nested event loop where the kInternalTest should run.
-  worker_thread_->Freeze();
+  worker_thread_->Freeze(false /* is_in_back_forward_cache */);
   child_waitable.Wait();
 
   // Terminate() schedules a forcible termination task.
@@ -567,7 +569,7 @@ TEST_F(WorkerThreadTest, MAYBE_TerminateFrozenScript) {
 }
 
 TEST_F(WorkerThreadTest, MAYBE_NestedPauseFreeze) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCallsForWorkerForciblyTerminated();
@@ -582,7 +584,7 @@ TEST_F(WorkerThreadTest, MAYBE_NestedPauseFreeze) {
 
   // Pause() enters a nested event loop where the kInternalTest should run.
   worker_thread_->Pause();
-  worker_thread_->Freeze();
+  worker_thread_->Freeze(false /* is_in_back_forward_cache */);
   child_waitable.Wait();
 
   // Resume Freeze.
@@ -606,7 +608,7 @@ TEST_F(WorkerThreadTest, MAYBE_NestedPauseFreeze) {
 }
 
 TEST_F(WorkerThreadTest, MAYBE_NestedPauseFreezeNoInterrupts) {
-  constexpr base::TimeDelta kDelay = base::TimeDelta::FromMilliseconds(10);
+  constexpr base::TimeDelta kDelay = base::Milliseconds(10);
   SetForcibleTerminationDelay(kDelay);
 
   ExpectReportingCalls();
@@ -627,7 +629,7 @@ TEST_F(WorkerThreadTest, MAYBE_NestedPauseFreezeNoInterrupts) {
 
   // Pause() enters a nested event loop where the kInternalTest should run.
   worker_thread_->Pause();
-  worker_thread_->Freeze();
+  worker_thread_->Freeze(false /* is_in_back_forward_cache */);
   child_waitable2.Wait();
 
   // Resume for Freeze.

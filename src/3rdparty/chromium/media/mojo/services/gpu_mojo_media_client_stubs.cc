@@ -18,6 +18,7 @@ absl::optional<SupportedVideoDecoderConfigs>
 GetPlatformSupportedVideoDecoderConfigs(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
     gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info,
     base::OnceCallback<SupportedVideoDecoderConfigs()> get_vda_configs) {
   return {};
 }
@@ -34,7 +35,8 @@ std::unique_ptr<CdmFactory> CreatePlatformCdmFactory(
 
 VideoDecoderType GetPlatformDecoderImplementationType(
     gpu::GpuDriverBugWorkarounds gpu_workarounds,
-    gpu::GpuPreferences gpu_preferences) {
+    gpu::GpuPreferences gpu_preferences,
+    const gpu::GPUInfo& gpu_info) {
   return VideoDecoderType::kUnknown;
 }
 

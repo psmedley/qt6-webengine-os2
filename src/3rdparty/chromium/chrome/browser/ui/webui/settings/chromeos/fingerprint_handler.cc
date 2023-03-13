@@ -41,13 +41,12 @@ std::unique_ptr<base::DictionaryValue> GetFingerprintsInfo(
   DCHECK_LE(static_cast<int>(fingerprints_list.size()),
             kMaxAllowedFingerprints);
   for (auto& fingerprint_name: fingerprints_list) {
-    std::unique_ptr<base::Value> str =
-        std::make_unique<base::Value>(fingerprint_name);
+    base::Value str(fingerprint_name);
     fingerprints.Append(std::move(str));
   }
 
   response->SetKey("fingerprintsList", std::move(fingerprints));
-  response->SetBoolean("isMaxed", static_cast<int>(fingerprints_list.size()) >=
+  response->SetBoolKey("isMaxed", static_cast<int>(fingerprints_list.size()) >=
                                       kMaxAllowedFingerprints);
   return response;
 }
@@ -125,42 +124,27 @@ void FingerprintHandler::OnEnrollScanDone(device::mojom::ScanResult scan_result,
           << ", enroll_session_complete=" << enroll_session_complete
           << ", percent_complete=" << percent_complete;
   auto scan_attempt = std::make_unique<base::DictionaryValue>();
-  scan_attempt->SetInteger("result", static_cast<int>(scan_result));
-  scan_attempt->SetBoolean("isComplete", enroll_session_complete);
-  scan_attempt->SetInteger("percentComplete", percent_complete);
+  scan_attempt->SetIntKey("result", static_cast<int>(scan_result));
+  scan_attempt->SetBoolKey("isComplete", enroll_session_complete);
+  scan_attempt->SetIntKey("percentComplete", percent_complete);
 
   FireWebUIListener("on-fingerprint-scan-received", *scan_attempt);
 }
 
 void FingerprintHandler::OnAuthScanDone(
-    device::mojom::ScanResult scan_result,
+    const device::mojom::FingerprintMessagePtr msg,
     const base::flat_map<std::string, std::vector<std::string>>& matches) {
-  VLOG(1) << "Receive fingerprint auth scan result. scan_result="
-          << scan_result;
-  if (SessionManager::Get()->session_state() == SessionState::LOCKED)
-    return;
-
-  // When the user touches the sensor, highlight the label(s) that finger is
-  // associated with, if it is registered with this user.
-  auto it = matches.find(user_id_);
-  if (it == matches.end() || it->second.size() < 1)
-    return;
-
-  base::ListValue fingerprint_ids;
-
-  for (const std::string& matched_path : it->second) {
-    auto path_it = std::find(fingerprints_paths_.begin(),
-                             fingerprints_paths_.end(), matched_path);
-    DCHECK(path_it != fingerprints_paths_.end());
-    fingerprint_ids.Append(
-        static_cast<int>(path_it - fingerprints_paths_.begin()));
+  switch (msg->which()) {
+    case device::mojom::FingerprintMessage::Tag::kScanResult:
+      VLOG(1) << "Receive fingerprint auth scan result. scan_result="
+              << msg->get_scan_result();
+      return;
+    case device::mojom::FingerprintMessage::Tag::kFingerprintError:
+      VLOG(1) << "Receive fingerprint auth error. error="
+              << msg->get_fingerprint_error();
+      return;
   }
-
-  auto fingerprint_attempt = std::make_unique<base::DictionaryValue>();
-  fingerprint_attempt->SetInteger("result", static_cast<int>(scan_result));
-  fingerprint_attempt->SetKey("indexes", std::move(fingerprint_ids));
-
-  FireWebUIListener("on-fingerprint-attempt-received", *fingerprint_attempt);
+  NOTREACHED();
 }
 
 void FingerprintHandler::OnSessionFailed() {
@@ -175,10 +159,9 @@ void FingerprintHandler::OnSessionStateChanged() {
 }
 
 void FingerprintHandler::HandleGetFingerprintsList(
-    const base::ListValue* args) {
-  CHECK_EQ(1U, args->GetSize());
-  std::string callback_id;
-  CHECK(args->GetString(0, &callback_id));
+    const base::Value::List& args) {
+  CHECK_EQ(1U, args.size());
+  const std::string& callback_id = args[0].GetString();
 
   AllowJavascript();
   fp_service_->GetRecordsForUser(
@@ -205,10 +188,10 @@ void FingerprintHandler::OnGetFingerprintsList(
   ResolveJavascriptCallback(base::Value(callback_id), *fingerprint_info);
 }
 
-void FingerprintHandler::HandleGetNumFingerprints(const base::ListValue* args) {
-  CHECK_EQ(1U, args->GetSize());
-  std::string callback_id;
-  CHECK(args->GetString(0, &callback_id));
+void FingerprintHandler::HandleGetNumFingerprints(
+    const base::Value::List& args) {
+  CHECK_EQ(1U, args.size());
+  const std::string& callback_id = args[0].GetString();
 
   int fingerprints_num =
       profile_->GetPrefs()->GetInteger(prefs::kQuickUnlockFingerprintRecord);
@@ -218,11 +201,10 @@ void FingerprintHandler::HandleGetNumFingerprints(const base::ListValue* args) {
                             base::Value(fingerprints_num));
 }
 
-void FingerprintHandler::HandleStartEnroll(const base::ListValue* args) {
+void FingerprintHandler::HandleStartEnroll(const base::Value::List& args) {
   AllowJavascript();
 
-  std::string auth_token;
-  CHECK(args->GetString(0, &auth_token));
+  const std::string& auth_token = args[0].GetString();
 
   // Auth token expiration will trigger password prompt.
   // Silently fail if auth token is incorrect.
@@ -246,7 +228,7 @@ void FingerprintHandler::HandleStartEnroll(const base::ListValue* args) {
 }
 
 void FingerprintHandler::HandleCancelCurrentEnroll(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   fp_service_->CancelCurrentEnrollSession(
       base::BindOnce(&FingerprintHandler::OnCancelCurrentEnrollSession,
@@ -258,12 +240,14 @@ void FingerprintHandler::OnCancelCurrentEnrollSession(bool success) {
     LOG(ERROR) << "Failed to cancel current fingerprint enroll session.";
 }
 
-void FingerprintHandler::HandleGetEnrollmentLabel(const base::ListValue* args) {
-  const auto& list = args->GetList();
+void FingerprintHandler::HandleGetEnrollmentLabel(
+    const base::Value::List& args) {
+  const auto& list = args;
   CHECK_EQ(2U, list.size());
   std::string callback_id = list[0].GetString();
   int index = list[1].GetInt();
-  DCHECK_LT(index, static_cast<int>(fingerprints_labels_.size()));
+  CHECK_GE(index, 0);
+  CHECK_LT(index, static_cast<int>(fingerprints_paths_.size()));
 
   AllowJavascript();
   fp_service_->RequestRecordLabel(
@@ -277,12 +261,13 @@ void FingerprintHandler::OnRequestRecordLabel(const std::string& callback_id,
   ResolveJavascriptCallback(base::Value(callback_id), base::Value(label));
 }
 
-void FingerprintHandler::HandleRemoveEnrollment(const base::ListValue* args) {
-  const auto& list = args->GetList();
+void FingerprintHandler::HandleRemoveEnrollment(const base::Value::List& args) {
+  const auto& list = args;
   CHECK_EQ(2U, list.size());
   std::string callback_id = list[0].GetString();
   int index = list[1].GetInt();
-  DCHECK_LT(index, static_cast<int>(fingerprints_paths_.size()));
+  CHECK_GE(index, 0);
+  CHECK_LT(index, static_cast<int>(fingerprints_paths_.size()));
 
   AllowJavascript();
   fp_service_->RemoveRecord(
@@ -299,12 +284,15 @@ void FingerprintHandler::OnRemoveRecord(const std::string& callback_id,
 }
 
 void FingerprintHandler::HandleChangeEnrollmentLabel(
-    const base::ListValue* args) {
-  const auto& list = args->GetList();
+    const base::Value::List& args) {
+  const auto& list = args;
   CHECK_EQ(3U, list.size());
 
   std::string callback_id = list[0].GetString();
   int index = list[1].GetInt();
+  CHECK_GE(index, 0);
+  CHECK_LT(index, static_cast<int>(fingerprints_paths_.size()));
+
   std::string new_label = list[2].GetString();
 
   AllowJavascript();
@@ -322,13 +310,13 @@ void FingerprintHandler::OnSetRecordLabel(const std::string& callback_id,
 }
 
 void FingerprintHandler::HandleStartAuthentication(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   fp_service_->StartAuthSession();
 }
 
 void FingerprintHandler::HandleEndCurrentAuthentication(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
   fp_service_->EndCurrentAuthSession(
       base::BindOnce(&FingerprintHandler::OnEndCurrentAuthSession,

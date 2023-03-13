@@ -16,8 +16,9 @@
 #include "base/callback_forward.h"
 #include "base/component_export.h"
 #include "base/files/file.h"
+#include "base/files/file_error_or.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/sequence_checker.h"
 #include "base/timer/timer.h"
@@ -29,9 +30,13 @@
 #include "storage/browser/file_system/sandbox_file_system_backend_delegate.h"
 #include "storage/common/file_system/file_system_types.h"
 
+namespace blink {
+class StorageKey;
+}  // namespace blink
+
 namespace url {
 class Origin;
-}
+}  // namespace url
 
 namespace storage {
 
@@ -64,45 +69,59 @@ class SpecialStoragePolicy;
 //
 // This class must be deleted on the FILE thread, because that's where
 // DropDatabases needs to be called.
+//
+// TODO(https://crbug.com/1248104): This class will eventually use Storage
+// Buckets instead of LevelDB. Thus, the below functions were converted from
+// url::Origin to blink::StorageKey to prepare for Storage Partitioning of the
+// FileSystem APIs. However, it is important to note that, until the refactor to
+// use Storage Buckets, the LevelDB structure above is still used, and the
+// entries are still keyed per-origin (achieved by storage_key.origin()) and
+// per-type. Going forward, comments will refer to the DB as "origin database"
+// or the directory as "origin directory", but the origin will come from a
+// larger StorageKey object.
 class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
     : public FileSystemFileUtil {
  public:
-  // Origin enumerator interface.
+  // StorageKey enumerator interface.
   // An instance of this interface is assumed to be called on the file thread.
-  class AbstractOriginEnumerator {
+  class AbstractStorageKeyEnumerator {
    public:
-    virtual ~AbstractOriginEnumerator() = default;
+    virtual ~AbstractStorageKeyEnumerator() = default;
 
-    // Returns the next origin.  Returns absl::nullopt if there are no more
-    // origins.
-    virtual absl::optional<url::Origin> Next() = 0;
+    // Returns the next StorageKey. Returns absl::nullopt if there are no more
+    // StorageKeys.
+    virtual absl::optional<blink::StorageKey> Next() = 0;
 
     // Returns the current origin's information.
-    // |type_string| must be ascii string.
+    // `type_string` must be ascii string.
     virtual bool HasTypeDirectory(const std::string& type_string) const = 0;
   };
 
   using GetTypeStringForURLCallback =
       base::RepeatingCallback<std::string(const FileSystemURL&)>;
 
-  // |get_type_string_for_url| is user-defined callback that should return
+  // `get_type_string_for_url` is user-defined callback that should return
   // a type string for the given FileSystemURL.  The type string is used
   // to provide per-type isolation in the sandboxed filesystem directory.
   //
-  // |known_type_strings| are known type string names that this file system
+  // `known_type_strings` are known type string names that this file system
   // should care about.
   // This info is used to determine whether we could delete the entire
-  // origin directory or not in DeleteDirectoryForOriginAndType. If no directory
-  // for any known type exists the origin directory may get deleted when
-  // one origin/type pair is deleted.
-  //
+  // origin directory or not in DeleteDirectoryForStorageKeyAndType. If no
+  // directory for any known type exists the origin directory may get
+  // deleted when one StorageKey/type pair is deleted.
   ObfuscatedFileUtil(scoped_refptr<SpecialStoragePolicy> special_storage_policy,
                      const base::FilePath& file_system_directory,
+                     const base::FilePath& bucket_base_path,
                      leveldb::Env* env_override,
                      GetTypeStringForURLCallback get_type_string_for_url,
                      const std::set<std::string>& known_type_strings,
                      SandboxFileSystemBackendDelegate* sandbox_delegate,
                      bool is_incognito);
+
+  ObfuscatedFileUtil(const ObfuscatedFileUtil&) = delete;
+  ObfuscatedFileUtil& operator=(const ObfuscatedFileUtil&) = delete;
+
   ~ObfuscatedFileUtil() override;
 
   // FileSystemFileUtil overrides.
@@ -137,7 +156,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
   base::File::Error CopyOrMoveFile(FileSystemOperationContext* context,
                                    const FileSystemURL& src_url,
                                    const FileSystemURL& dest_url,
-                                   CopyOrMoveOption option,
+                                   CopyOrMoveOptionSet options,
                                    bool copy) override;
   base::File::Error CopyInForeignFile(FileSystemOperationContext* context,
                                       const base::FilePath& src_file_path,
@@ -152,42 +171,43 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
                                 base::File::Info* file_info,
                                 base::FilePath* platform_path) override;
 
-  // Returns true if the directory |url| is empty.
+  // Returns true if the directory `url` is empty.
   bool IsDirectoryEmpty(FileSystemOperationContext* context,
                         const FileSystemURL& url);
 
-  // Gets the topmost directory specific to this origin and type.  This will
+  // Gets the topmost directory specific to this StorageKey and type.  This will
   // contain both the directory database's files and all the backing file
   // subdirectories.
-  // Returns the topmost origin directory if |type_string| is empty.
+  // Returns the topmost origin directory if `type_string` is empty.
   // Returns an empty path if the directory is undefined.
   // If the directory is defined, it will be returned, even if
   // there is a file system error (e.g. the directory doesn't exist on disk and
-  // |create| is false). Callers should always check |error_code| to make sure
+  // `create` is false). Callers should always check `error_code` to make sure
   // the returned path is usable.
-  base::FilePath GetDirectoryForOriginAndType(const url::Origin& origin,
-                                              const std::string& type_string,
-                                              bool create,
-                                              base::File::Error* error_code);
+  base::FilePath GetDirectoryForStorageKeyAndType(
+      const blink::StorageKey& storage_key,
+      const std::string& type_string,
+      bool create,
+      base::File::Error* error_code);
 
-  // Deletes the topmost directory specific to this origin and type.  This will
-  // delete its directory database.
-  // Deletes the topmost origin directory if |type_string| is empty.
-  bool DeleteDirectoryForOriginAndType(const url::Origin& origin,
-                                       const std::string& type_string);
+  // Deletes the topmost directory specific to this StorageKey and type.  This
+  // will delete its directory database. Deletes the topmost origin
+  // directory if `type_string` is empty.
+  bool DeleteDirectoryForStorageKeyAndType(const blink::StorageKey& storage_key,
+                                           const std::string& type_string);
 
-  // Frees resources used by an origin's filesystem.
-  void CloseFileSystemForOriginAndType(const url::Origin& origin,
-                                       const std::string& type_string);
+  // Frees resources used by a StorageKey's filesystem.
+  void CloseFileSystemForStorageKeyAndType(const blink::StorageKey& storage_key,
+                                           const std::string& type_string);
 
   // This method and all methods of its returned class must be called only on
   // the FILE thread.  The caller is responsible for deleting the returned
   // object.
-  std::unique_ptr<AbstractOriginEnumerator> CreateOriginEnumerator();
+  std::unique_ptr<AbstractStorageKeyEnumerator> CreateStorageKeyEnumerator();
 
   // Deletes a directory database from the database list in the ObfuscatedFSFU
   // and destroys the database on the disk.
-  void DestroyDirectoryDatabase(const url::Origin& origin,
+  void DestroyDirectoryDatabase(const blink::StorageKey& storage_key,
                                 const std::string& type_string);
 
   // Computes a cost for storing a given file in the obfuscated FSFU.
@@ -218,12 +238,12 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
   static std::unique_ptr<ObfuscatedFileUtil> CreateForTesting(
       scoped_refptr<SpecialStoragePolicy> special_storage_policy,
       const base::FilePath& file_system_directory,
+      const base::FilePath& bucket_base_path,
       leveldb::Env* env_override,
       bool is_incognito);
 
-  base::FilePath GetDirectoryForURL(const FileSystemURL& url,
-                                    bool create,
-                                    base::File::Error* error_code);
+  base::FileErrorOr<base::FilePath> GetDirectoryForURL(const FileSystemURL& url,
+                                                       bool create);
 
   // This just calls get_type_string_for_url_ callback that is given in ctor.
   std::string CallGetTypeStringForURL(const FileSystemURL& url);
@@ -237,7 +257,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
                                         base::FilePath* platform_file_path);
 
   // Creates a new file, both the underlying backing file and the entry in the
-  // database.  |dest_file_info| is an in-out parameter.  Supply the name and
+  // database.  `dest_file_info` is an in-out parameter.  Supply the name and
   // parent_id; data_path is ignored.  On success, data_path will
   // always be set to the relative path [from the root of the type-specific
   // filesystem directory] of a NEW backing file.  Returns the new file.
@@ -247,8 +267,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
                                int file_flags);
 
   // The same as CreateAndOpenFile except that a file is not returned and if a
-  // path is provided in |source_path|, it will be used as a source from which
-  // to COPY data. If |foreign_source| is true, the source file is considered
+  // path is provided in `source_path`, it will be used as a source from which
+  // to COPY data. If `foreign_source` is true, the source file is considered
   // from another (on disk) file system and its path is considered not
   // obfuscated.
   base::File::Error CreateFile(FileSystemOperationContext* context,
@@ -257,7 +277,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
                                const FileSystemURL& dest_url,
                                FileInfo* dest_file_info);
 
-  // Updates |db| and |dest_file_info| at the end of creating a new file.
+  // Updates `db` and `dest_file_info` at the end of creating a new file.
   base::File::Error CommitCreateFile(const base::FilePath& root,
                                      const base::FilePath& local_path,
                                      SandboxDirectoryDatabase* db,
@@ -269,30 +289,38 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
   base::FilePath DataPathToLocalPath(const FileSystemURL& url,
                                      const base::FilePath& data_file_path);
 
-  std::string GetDirectoryDatabaseKey(const url::Origin& origin,
+  std::string GetDirectoryDatabaseKey(const blink::StorageKey& storage_key,
                                       const std::string& type_string);
 
-  // This returns nullptr if |create| flag is false and a filesystem does not
-  // exist for the given |url|.
-  // For read operations |create| should be false.
+  // This returns nullptr if `create` flag is false and a filesystem does not
+  // exist for the given `url`.
+  // For read operations `create` should be false.
   SandboxDirectoryDatabase* GetDirectoryDatabase(const FileSystemURL& url,
                                                  bool create);
 
-  // Gets the topmost directory specific to this origin.  This will
+  // Gets the topmost directory specific to this StorageKey.  This will
   // contain both the filesystem type subdirectories.
-  base::FilePath GetDirectoryForOrigin(const url::Origin& origin,
-                                       bool create,
-                                       base::File::Error* error_code);
+  base::FilePath GetDirectoryForStorageKey(const blink::StorageKey& storage_key,
+                                           bool create,
+                                           base::File::Error* error_code);
+
+  // Returns a valid file path to the directory corresponding to the specified
+  // non-default `bucket` and `file_type.` Will return a FileError if an invalid
+  // file path is found.
+  base::FileErrorOr<base::FilePath> GetDirectoryWithBucket(
+      bool create,
+      BucketLocator bucket,
+      std::string file_type);
 
   void InvalidateUsageCache(FileSystemOperationContext* context,
-                            const url::Origin& origin,
+                            const blink::StorageKey& storage_key,
                             FileSystemType type);
 
   void MarkUsed();
   void DropDatabases();
 
-  // Initializes the origin database. |origin_hint| may be used as a hint
-  // for initializing database if it's not empty.
+  // Initializes the origin/type database. `origin_hint` may be used as a
+  // hint for initializing database if it's not empty.
   bool InitOriginDatabase(const url::Origin& origin_hint, bool create);
 
   base::File::Error GenerateNewLocalPath(SandboxDirectoryDatabase* db,
@@ -305,7 +333,7 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
                                   const FileSystemURL& url,
                                   int file_flags);
 
-  bool HasIsolatedStorage(const url::Origin& origin);
+  bool HasIsolatedStorage(const blink::StorageKey& storage_key);
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -313,7 +341,8 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
   std::unique_ptr<SandboxOriginDatabaseInterface> origin_database_;
   scoped_refptr<SpecialStoragePolicy> special_storage_policy_;
   base::FilePath file_system_directory_;
-  leveldb::Env* env_override_;
+  base::FilePath bucket_base_path_;
+  raw_ptr<leveldb::Env> env_override_;
   bool is_incognito_;
 
   // Used to delete database after a certain period of inactivity.
@@ -325,11 +354,9 @@ class COMPONENT_EXPORT(STORAGE_BROWSER) ObfuscatedFileUtil
   std::set<std::string> known_type_strings_;
 
   // Not owned.
-  SandboxFileSystemBackendDelegate* sandbox_delegate_;
+  raw_ptr<SandboxFileSystemBackendDelegate> sandbox_delegate_;
 
   std::unique_ptr<ObfuscatedFileUtilDelegate> delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(ObfuscatedFileUtil);
 };
 
 }  // namespace storage

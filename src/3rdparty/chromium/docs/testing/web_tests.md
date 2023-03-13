@@ -19,6 +19,10 @@ web tests and are located at
 Tests that should work across browsers go there. Other directories are for
 Chrome-specific tests only.
 
+Note: if you are looking for a guide for the Web Platform Test, you should read
+["Web platform tests"](./web_platform_tests.md) (WPT). This document does not
+cover WPT specific features/behaviors.
+
 [TOC]
 
 ## Running Web Tests
@@ -47,15 +51,15 @@ examined by the OS crash reporter. This may cause other failures like timeouts
 where they normally don't occur.
 
 ```bash
-strip ./xcodebuild/{Debug,Release}/content_shell.app/Contents/MacOS/content_shell
+strip ./out/Default/Content\ Shell.app/Contents/MacOS/Content\ Shell
 ```
 
 ### Running the Tests
 
 The test runner script is in `third_party/blink/tools/run_web_tests.py`.
 
-To specify which build directory to use (e.g. out/Default, out/Release,
-out/Debug) you should pass the `-t` or `--target` parameter. For example, to
+To specify which build directory to use (e.g. out/Default, etc.)
+you should pass the `-t` or `--target` parameter. For example, to
 use the build in `out/Default`, use:
 
 ```bash
@@ -170,8 +174,7 @@ to see a full list of options. A few of the most useful options are below:
 | `--debug`                   | Run the debug build of the test shell (default is release). Equivalent to `-t Debug` |
 | `--nocheck-sys-deps`        | Don't check system dependencies; this allows faster iteration. |
 | `--verbose`                 |	Produce more verbose output, including a list of tests that pass. |
-| `--reset-results`           |	Overwrite the current baselines (`-expected.{png|txt|wav}` files) with actual results, or create new baselines if there are no existing baselines. |
-| `--renderer-startup-dialog` | Bring up a modal dialog before running the test, useful for attaching a debugger. |
+| `--reset-results`           |	Overwrite the current baselines (`-expected.{png`&#124;`txt`&#124;`wav}` files) with actual results, or create new baselines if there are no existing baselines. |
 | `--fully-parallel`          | Run tests in parallel using as many child processes as the system has cores. |
 | `--driver-logging`          | Print C++ logs (LOG(WARNING), etc).  |
 
@@ -209,7 +212,7 @@ on this.
 
 There are two ways to run web tests with additional command-line arguments:
 
-### `--flag-specific` or `--additional-driver-flag`:
+### --flag-specific or --additional-driver-flag:
 
 ```bash
 # Actually we prefer --flag-specific in some cases. See below for details.
@@ -242,17 +245,24 @@ the name is too long or when we need to match multiple additional args:
   "args": ["--blocking-repaint", "--another-flag"]
 }
 ```
-  
+
 `web_tests/FlagSpecificConfig` is preferred when you need multiple flags,
 or the flag is long.
 
 With the config, you can use `--flag-specific=short-name` as a shortcut
 of `--additional-driver-flag=--blocking-repaint --additional-driver-flag=--another-flag`.
-  
+
 `--additional-driver-flags` still works with `web_tests/FlagSpecificConfig`.
 For example, when at least `--additional-driver-flag=--blocking-repaint` and
 `--additional-driver-flag=--another-flag` are specified, `short-name` will
 be used as name of the flag specific expectation file and the baseline directory.
+
+*** note
+[BUILD.gn](../../BUILD.gn) assumes flag-specific builders always runs on linux bots, so
+flag-specific test expectations and baselines are only downloaded to linux bots.
+If you need run flag-specific builders on other platforms, please update
+BUILD.gn to download flag-specific related data to that platform.
+***
 
 ### Virtual test suites
 
@@ -268,6 +278,7 @@ repainting using the following virtual test suite:
 ```json
 {
   "prefix": "blocking_repaint",
+  "platforms": ["Linux", "Mac", "Win"],
   "bases": ["compositing", "fast/repaint"],
   "args": ["--blocking-repaint"]
 }
@@ -278,6 +289,13 @@ This will create new "virtual" tests of the form
 `virtual/blocking_repaint/fast/repaint/...` which correspond to the files
 under `web_tests/compositing` and `web_tests/fast/repaint`, respectively,
 and pass `--blocking-repaint` to `content_shell` when they are run.
+
+Note that you can run the tests with the following command line:
+
+```bash
+third_party/blink/tools/run_web_tests.py virtual/blocking_repaint/compositing \
+  virtual/blocking_repaint/fast/repaint
+```
 
 These virtual tests exist in addition to the original `compositing/...` and
 `fast/repaint/...` tests. They can have their own expectations in
@@ -292,6 +310,10 @@ entry for the virtual test.
 
 This will also let any real tests under `web_tests/virtual/blocking_repaint`
 directory run with the `--blocking-repaint` flag.
+
+The "platforms" configuration can be used to skip tests on some platforms. If
+a virtual test suites uses more than 5% of total test time, we should consider
+to skip the test suites on some platforms.
 
 The "prefix" value should be unique. Multiple directories with the same flags
 should be listed in the same "bases" list. The "bases" list can be empty,
@@ -438,6 +460,12 @@ tips for finding the problem.
 
 ### Debugging HTTP Tests
 
+Note: HTTP Tests mean tests under `web_tests/http/tests/`,
+which is a subset of WebKit Layout Tests originated suite.
+If you want to debug WPT's HTTP behavior, you should read
+["Web platform tests"](./web_platform_tests.md) instead.
+
+
 To run the server manually to reproduce/debug a failure:
 
 ```bash
@@ -487,7 +515,7 @@ machine?
 
 * Do one of the following:
     * Option A) Run from the `chromium/src` folder:
-      `third_party/blink/tools/run_web_tests.py --additional-driver-flag='--remote-debugging-port=9222' --additional-driver-flag='--debug-devtools' --time-out-ms=6000000`
+      `third_party/blink/tools/run_web_tests.py --additional-driver-flag='--remote-debugging-port=9222' --additional-driver-flag='--debug-devtools' --timeout-ms=6000000`
     * Option B) If you need to debug an http/tests/inspector test, start httpd
       as described above. Then, run content_shell:
       `out/Default/content_shell --remote-debugging-port=9222 --additional-driver-flag='--debug-devtools' --run-web-tests http://127.0.0.1:8000/path/to/test.html`

@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "components/page_info/android/page_info_controller_android.h"
+#include <string>
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
@@ -14,7 +15,7 @@
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/page_info/android/jni_headers/PageInfoController_jni.h"
 #include "components/page_info/android/page_info_client.h"
-#include "components/page_info/features.h"
+#include "components/page_info/core/features.h"
 #include "components/page_info/page_info.h"
 #include "components/page_info/page_info_ui.h"
 #include "components/security_state/core/security_state.h"
@@ -38,6 +39,12 @@ static jlong JNI_PageInfoController_Init(
   content::WebContents* web_contents =
       content::WebContents::FromJavaWebContents(java_web_contents);
 
+  // Important to use GetVisibleEntry to match what's showing in the omnibox.
+  content::NavigationEntry* nav_entry =
+      web_contents->GetController().GetVisibleEntry();
+  if (!nav_entry || nav_entry->IsInitialEntry())
+    return 0;
+
   return reinterpret_cast<intptr_t>(
       new PageInfoControllerAndroid(env, obj, web_contents));
 }
@@ -46,11 +53,8 @@ PageInfoControllerAndroid::PageInfoControllerAndroid(
     JNIEnv* env,
     jobject java_page_info_pop,
     content::WebContents* web_contents) {
-  // Important to use GetVisibleEntry to match what's showing in the omnibox.
   content::NavigationEntry* nav_entry =
       web_contents->GetController().GetVisibleEntry();
-  if (nav_entry == NULL)
-    return;
 
   url_ = nav_entry->GetURL();
   web_contents_ = web_contents;
@@ -62,10 +66,10 @@ PageInfoControllerAndroid::PageInfoControllerAndroid(
   presenter_ = std::make_unique<PageInfo>(
       page_info_client->CreatePageInfoDelegate(web_contents), web_contents,
       nav_entry->GetURL());
-  presenter_->InitializeUiState(this);
+  presenter_->InitializeUiState(this, base::DoNothing());
 }
 
-PageInfoControllerAndroid::~PageInfoControllerAndroid() {}
+PageInfoControllerAndroid::~PageInfoControllerAndroid() = default;
 
 void PageInfoControllerAndroid::Destroy(JNIEnv* env,
                                         const JavaParamRef<jobject>& obj) {
@@ -78,6 +82,13 @@ void PageInfoControllerAndroid::RecordPageInfoAction(
     jint action) {
   presenter_->RecordPageInfoAction(
       static_cast<PageInfo::PageInfoAction>(action));
+}
+
+void PageInfoControllerAndroid::SetAboutThisSiteShown(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj,
+    jboolean was_about_this_site_shown) {
+  presenter_->SetAboutThisSiteShown(was_about_this_site_shown);
 }
 
 void PageInfoControllerAndroid::UpdatePermissions(
@@ -161,10 +172,13 @@ void PageInfoControllerAndroid::SetPermissionInfo(
     if (base::Contains(user_specified_settings_to_display, permission)) {
       std::u16string setting_title =
           PageInfoUI::PermissionTypeToUIString(permission);
+      std::u16string setting_title_mid_sentence =
+          PageInfoUI::PermissionTypeToUIStringMidSentence(permission);
 
       Java_PageInfoController_addPermissionSection(
           env, controller_jobject_,
           ConvertUTF16ToJavaString(env, setting_title),
+          ConvertUTF16ToJavaString(env, setting_title_mid_sentence),
           static_cast<jint>(permission),
           static_cast<jint>(user_specified_settings_to_display[permission]));
     }
@@ -177,6 +191,7 @@ void PageInfoControllerAndroid::SetPermissionInfo(
 
     Java_PageInfoController_addPermissionSection(
         env, controller_jobject_, ConvertUTF16ToJavaString(env, object_title),
+        ConvertUTF16ToJavaString(env, object_title),
         static_cast<jint>(chosen_object->ui_info.content_settings_type),
         static_cast<jint>(CONTENT_SETTING_ALLOW));
   }
@@ -216,4 +231,18 @@ absl::optional<ContentSetting> PageInfoControllerAndroid::GetSettingToDisplay(
   // subpage directly from the permissions returned from this controller.
 
   return absl::optional<ContentSetting>();
+}
+
+void PageInfoControllerAndroid::SetAdPersonalizationInfo(
+    const AdPersonalizationInfo& info) {
+  // Fledge is not available on Android.
+  DCHECK(!info.has_joined_user_to_interest_group);
+  JNIEnv* env = base::android::AttachCurrentThread();
+  std::vector<std::u16string> topic_names;
+  for (const auto& topic : info.accessed_topics) {
+    topic_names.push_back(topic.GetLocalizedRepresentation());
+  }
+  Java_PageInfoController_updateTopicsDisplay(
+      env, controller_jobject_,
+      base::android::ToJavaArrayOfStrings(env, topic_names));
 }

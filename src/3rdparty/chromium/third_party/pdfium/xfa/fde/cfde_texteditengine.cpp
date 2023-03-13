@@ -13,6 +13,7 @@
 #include "core/fxge/text_char_pos.h"
 #include "third_party/base/check.h"
 #include "third_party/base/notreached.h"
+#include "third_party/base/numerics/safe_conversions.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fde/cfde_wordbreak_data.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
@@ -666,13 +667,13 @@ void CFDE_TextEditEngine::EnableMultiLine(bool val) {
   if (is_multiline_ == val)
     return;
 
-  is_multiline_ = true;
-
-  uint32_t style = text_break_.GetLayoutStyles();
+  is_multiline_ = val;
+  Mask<CFGAS_Break::LayoutStyle> style = text_break_.GetLayoutStyles();
   if (is_multiline_)
-    style &= ~FX_LAYOUTSTYLE_SingleLine;
+    style.Clear(CFGAS_Break::LayoutStyle::kSingleLine);
   else
-    style |= FX_LAYOUTSTYLE_SingleLine;
+    style |= CFGAS_Break::LayoutStyle::kSingleLine;
+
   text_break_.SetLayoutStyles(style);
   is_dirty_ = true;
 }
@@ -693,12 +694,12 @@ void CFDE_TextEditEngine::SetCombText(bool enable) {
 
   is_comb_text_ = enable;
 
-  uint32_t style = text_break_.GetLayoutStyles();
+  Mask<CFGAS_Break::LayoutStyle> style = text_break_.GetLayoutStyles();
   if (enable) {
-    style |= FX_LAYOUTSTYLE_CombText;
+    style |= CFGAS_Break::LayoutStyle::kCombText;
     SetCombTextWidth();
   } else {
-    style &= ~FX_LAYOUTSTYLE_CombText;
+    style.Clear(CFGAS_Break::LayoutStyle::kCombText);
   }
   text_break_.SetLayoutStyles(style);
   is_dirty_ = true;
@@ -947,7 +948,7 @@ size_t CFDE_TextEditEngine::GetIndexForPoint(const CFX_PointF& point) {
       // move the cursor after it.
       bool closer_to_left =
           (point.x - rects[i].left < rects[i].right() - point.x);
-      int caret_pos = (closer_to_left ? i : i + 1);
+      size_t caret_pos = closer_to_left ? i : i + 1;
       size_t pos = start_it->nStart + caret_pos;
       if (pos >= text_length_)
         return text_length_;
@@ -1069,7 +1070,8 @@ void CFDE_TextEditEngine::RebuildPieces() {
       txtEdtPiece.rtPiece.top = current_line_start;
       txtEdtPiece.rtPiece.width = piece->m_iWidth / 20000.0f;
       txtEdtPiece.rtPiece.height = line_spacing_;
-      txtEdtPiece.nStart = current_piece_start;
+      txtEdtPiece.nStart =
+          pdfium::base::checked_cast<int32_t>(current_piece_start);
       txtEdtPiece.nCount = piece->GetLength();
       txtEdtPiece.nBidiLevel = piece->m_iBidiLevel;
       txtEdtPiece.dwCharStyles = piece->m_dwCharStyles;
@@ -1204,10 +1206,8 @@ wchar_t CFDE_TextEditEngine::Iterator::GetChar() const {
 }
 
 void CFDE_TextEditEngine::Iterator::SetAt(size_t nIndex) {
-  if (static_cast<size_t>(nIndex) >= engine_->GetLength())
-    current_position_ = engine_->GetLength();
-  else
-    current_position_ = nIndex;
+  nIndex = std::min(nIndex, engine_->GetLength());
+  current_position_ = pdfium::base::checked_cast<int32_t>(nIndex);
 }
 
 bool CFDE_TextEditEngine::Iterator::IsEOF(bool bPrev) const {

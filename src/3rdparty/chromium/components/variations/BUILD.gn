@@ -16,7 +16,7 @@ if (is_android) {
   import("//build/config/android/rules.gni")
 }
 
-large_variation_key_size_enabled = is_chromecast
+large_variation_key_size_enabled = is_chromecast || is_chromeos_lacros
 
 buildflag_header("buildflags") {
   header = "buildflags.h"
@@ -46,6 +46,8 @@ component("variations") {
     "client_filterable_state.h",
     "entropy_provider.cc",
     "entropy_provider.h",
+    "fake_crash.cc",
+    "fake_crash.h",
     "hashing.cc",
     "hashing.h",
     "metrics.cc",
@@ -128,6 +130,7 @@ component("variations") {
     "//build:chromeos_buildflags",
     "//components/crash/core/common:crash_key",
     "//components/prefs",
+    "//components/version_info",
     "//crypto",
     "//third_party/protobuf:protobuf_lite",
     "//third_party/zlib/google:compression_utils",
@@ -188,6 +191,9 @@ static_library("test_support") {
     "field_trial_config:field_trial_config",
     "proto",
     "//base/test:test_support",
+    "//components/metrics",
+    "//components/prefs:prefs",
+    "//components/variations/service:constants",
     "//third_party/zlib/google:compression_utils",
   ]
 }
@@ -212,6 +218,7 @@ source_set("unit_tests") {
     "variations_seed_processor_unittest.cc",
     "variations_seed_simulator_unittest.cc",
     "variations_seed_store_unittest.cc",
+    "variations_test_utils_unittest.cc",
   ]
 
   if (is_android || is_ios) {
@@ -226,7 +233,9 @@ source_set("unit_tests") {
   # build returns the crash keys in the unit-test, not the "variations"
   # target. The test verifies the keys in the "variations" target, not the
   # test. As such, it fails in component builds.
-  if (!is_component_build) {
+  # TODO(crbug.com/1186718): Enable this unittest for is_fuchsia when crash keys
+  # are supported on Fuchsia.
+  if (!is_component_build && !is_fuchsia) {
     sources += [ "variations_crash_keys_unittest.cc" ]
   }
 

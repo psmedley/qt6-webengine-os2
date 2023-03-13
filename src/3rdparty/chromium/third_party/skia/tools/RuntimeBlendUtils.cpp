@@ -8,12 +8,13 @@
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkRefCnt.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "tools/RuntimeBlendUtils.h"
 
 sk_sp<SkBlender> GetRuntimeBlendForBlendMode(SkBlendMode mode) {
     static auto result = SkRuntimeEffect::MakeForBlender(SkString(R"(
         uniform blender b;
         half4 main(half4 src, half4 dst) {
-            return sample(b, src, dst);
+            return b.eval(src, dst);
         }
     )"));
 

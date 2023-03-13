@@ -10,6 +10,7 @@
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/strings/abseil_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -20,10 +21,10 @@
 #include "net/quic/quic_chromium_client_session.h"
 #include "net/quic/quic_http_utils.h"
 #include "net/spdy/spdy_log_util.h"
-#include "net/third_party/quiche/src/quic/core/http/quic_spdy_session.h"
-#include "net/third_party/quiche/src/quic/core/http/spdy_utils.h"
-#include "net/third_party/quiche/src/quic/core/quic_utils.h"
-#include "net/third_party/quiche/src/quic/core/quic_write_blocked_list.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/quic_spdy_session.h"
+#include "net/third_party/quiche/src/quiche/quic/core/http/spdy_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_write_blocked_list.h"
 
 namespace net {
 namespace {
@@ -38,7 +39,7 @@ class ScopedBoolSaver {
   ~ScopedBoolSaver() { *var_ = old_val_; }
 
  private:
-  bool* var_;
+  raw_ptr<bool> var_;
   bool old_val_;
 };
 }  // namespace
@@ -232,7 +233,7 @@ int QuicChromiumClientStream::Handle::ReadTrailingHeaders(
 int QuicChromiumClientStream::Handle::WriteHeaders(
     spdy::Http2HeaderBlock header_block,
     bool fin,
-    quic::QuicReferenceCountedPointer<quic::QuicAckListenerInterface>
+    quiche::QuicheReferenceCountedPointer<quic::QuicAckListenerInterface>
         ack_notifier_delegate) {
   if (!stream_)
     return 0;
@@ -461,10 +462,9 @@ QuicChromiumClientStream::QuicChromiumClientStream(
 QuicChromiumClientStream::QuicChromiumClientStream(
     quic::PendingStream* pending,
     quic::QuicSpdyClientSessionBase* session,
-    quic::StreamType type,
     const NetLogWithSource& net_log,
     const NetworkTrafficAnnotationTag& traffic_annotation)
-    : quic::QuicSpdyStream(pending, session, type),
+    : quic::QuicSpdyStream(pending, session),
       net_log_(net_log),
       handle_(nullptr),
       initial_headers_sent_(false),
@@ -610,7 +610,7 @@ void QuicChromiumClientStream::OnCanWrite() {
 size_t QuicChromiumClientStream::WriteHeaders(
     spdy::Http2HeaderBlock header_block,
     bool fin,
-    quic::QuicReferenceCountedPointer<quic::QuicAckListenerInterface>
+    quiche::QuicheReferenceCountedPointer<quic::QuicAckListenerInterface>
         ack_listener) {
   if (!session()->OneRttKeysAvailable()) {
     auto entry = header_block.find(":method");
@@ -736,7 +736,10 @@ void QuicChromiumClientStream::NotifyHandleOfTrailingHeadersAvailable() {
   if (!trailers_decompressed())
     return;
 
-  DCHECK(headers_delivered_);
+  // Notify only after the handle reads initial headers.
+  if (!headers_delivered_)
+    return;
+
   // Post an async task to notify handle of the FIN flag.
   NotifyHandleOfDataAvailableLater();
   handle_->OnTrailingHeadersAvailable();

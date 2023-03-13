@@ -86,8 +86,6 @@
       <xsd:attribute name="key_frame"     type="xsd:int"    use="required"/>
       <xsd:attribute name="pts"           type="xsd:long" />
       <xsd:attribute name="pts_time"      type="xsd:float"/>
-      <xsd:attribute name="pkt_pts"       type="xsd:long" />
-      <xsd:attribute name="pkt_pts_time"  type="xsd:float"/>
       <xsd:attribute name="pkt_dts"       type="xsd:long" />
       <xsd:attribute name="pkt_dts_time"  type="xsd:float"/>
       <xsd:attribute name="best_effort_timestamp"      type="xsd:long" />
@@ -217,6 +215,7 @@
       <xsd:attribute name="codec_tag"        type="xsd:string" use="required"/>
       <xsd:attribute name="codec_tag_string" type="xsd:string" use="required"/>
       <xsd:attribute name="extradata"        type="xsd:string" />
+      <xsd:attribute name="extradata_size"   type="xsd:int"    />
       <xsd:attribute name="extradata_hash"   type="xsd:string" />
 
       <!-- video attributes -->
@@ -225,6 +224,7 @@
       <xsd:attribute name="coded_width"          type="xsd:int"/>
       <xsd:attribute name="coded_height"         type="xsd:int"/>
       <xsd:attribute name="closed_captions"      type="xsd:boolean"/>
+      <xsd:attribute name="film_grain"           type="xsd:boolean"/>
       <xsd:attribute name="has_b_frames"         type="xsd:int"/>
       <xsd:attribute name="sample_aspect_ratio"  type="xsd:string"/>
       <xsd:attribute name="display_aspect_ratio" type="xsd:string"/>
@@ -270,10 +270,6 @@
       <xsd:attribute name="program_id"           type="xsd:int"    use="required"/>
       <xsd:attribute name="program_num"          type="xsd:int"    use="required"/>
       <xsd:attribute name="nb_streams"           type="xsd:int"    use="required"/>
-      <xsd:attribute name="start_time"           type="xsd:float"/>
-      <xsd:attribute name="start_pts"            type="xsd:long"/>
-      <xsd:attribute name="end_time"             type="xsd:float"/>
-      <xsd:attribute name="end_pts"              type="xsd:long"/>
       <xsd:attribute name="pmt_pid"              type="xsd:int"    use="required"/>
       <xsd:attribute name="pcr_pid"              type="xsd:int"    use="required"/>
     </xsd:complexType>

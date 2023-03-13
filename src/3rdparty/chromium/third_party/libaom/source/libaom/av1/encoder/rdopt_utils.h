@@ -230,12 +230,29 @@ static const MODE_DEFINITION av1_mode_defs[MAX_MODES] = {
   { D45_PRED, { INTRA_FRAME, NONE_FRAME } },
 };
 
+// Number of winner modes allowed for different values of the speed feature
+// multi_winner_mode_type.
+static const int winner_mode_count_allowed[MULTI_WINNER_MODE_LEVELS] = {
+  1,  // MULTI_WINNER_MODE_OFF
+  2,  // MULTI_WINNER_MODE_FAST
+  3   // MULTI_WINNER_MODE_DEFAULT
+};
+
 static AOM_INLINE void restore_dst_buf(MACROBLOCKD *xd, const BUFFER_SET dst,
                                        const int num_planes) {
   for (int i = 0; i < num_planes; i++) {
     xd->plane[i].dst.buf = dst.plane[i];
     xd->plane[i].dst.stride = dst.stride[i];
   }
+}
+
+static AOM_INLINE void swap_dst_buf(MACROBLOCKD *xd,
+                                    const BUFFER_SET *dst_bufs[2],
+                                    int num_planes) {
+  const BUFFER_SET *buf0 = dst_bufs[0];
+  dst_bufs[0] = dst_bufs[1];
+  dst_bufs[1] = buf0;
+  restore_dst_buf(xd, *dst_bufs[0], num_planes);
 }
 
 /* clang-format on */
@@ -266,7 +283,8 @@ get_prediction_mode_idx(PREDICTION_MODE this_mode, MV_REFERENCE_FRAME ref_frame,
     return single_inter_to_mode_idx[this_mode - SINGLE_INTER_MODE_START]
                                    [ref_frame];
   }
-  if (this_mode >= COMP_INTER_MODE_START && this_mode < COMP_INTER_MODE_END) {
+  if (this_mode >= COMP_INTER_MODE_START && this_mode < COMP_INTER_MODE_END &&
+      second_ref_frame != NONE_FRAME) {
     assert((ref_frame > INTRA_FRAME) && (ref_frame <= ALTREF_FRAME));
     assert((second_ref_frame > INTRA_FRAME) &&
            (second_ref_frame <= ALTREF_FRAME));
@@ -379,14 +397,22 @@ static TX_MODE select_tx_mode(
 }
 // Checks the conditions to enable winner mode processing
 static INLINE int is_winner_mode_processing_enabled(
-    const struct AV1_COMP *cpi, MB_MODE_INFO *const mbmi,
-    const PREDICTION_MODE best_mode) {
+    const struct AV1_COMP *cpi, const MACROBLOCK *const x,
+    MB_MODE_INFO *const mbmi, const PREDICTION_MODE best_mode) {
   const SPEED_FEATURES *sf = &cpi->sf;
+
+  // Disable winner mode processing for blocks with low source variance.
+  // The aggressiveness of this pruning logic reduces as qindex increases.
+  // The threshold decreases linearly from 64 as qindex varies from 0 to 255.
+  if (sf->winner_mode_sf.prune_winner_mode_processing_using_src_var) {
+    const unsigned int src_var_thresh = 64 - 48 * x->qindex / (MAXQ + 1);
+    if (x->source_variance < src_var_thresh) return 0;
+  }
 
   // TODO(any): Move block independent condition checks to frame level
   if (is_inter_block(mbmi)) {
     if (is_inter_mode(best_mode) &&
-        (sf->tx_sf.tx_type_search.fast_inter_tx_type_search != 0) &&
+        (sf->tx_sf.tx_type_search.fast_inter_tx_type_prob_thresh != INT_MAX) &&
         !cpi->oxcf.txfm_cfg.use_inter_dct_only)
       return 1;
   } else {
@@ -444,6 +470,14 @@ static INLINE void set_tx_type_prune(const SPEED_FEATURES *sf,
 static INLINE void set_tx_domain_dist_params(
     const WinnerModeParams *winner_mode_params, TxfmSearchParams *txfm_params,
     int enable_winner_mode_for_tx_domain_dist, int is_winner_mode) {
+  if (txfm_params->use_qm_dist_metric) {
+    // QM-weighted PSNR is computed in transform space, so we need to forcibly
+    // enable the use of tx domain distortion.
+    txfm_params->use_transform_domain_distortion = 1;
+    txfm_params->tx_domain_dist_threshold = 0;
+    return;
+  }
+
   if (!enable_winner_mode_for_tx_domain_dist) {
     txfm_params->use_transform_domain_distortion =
         winner_mode_params->use_transform_domain_distortion[DEFAULT_EVAL];
@@ -473,11 +507,13 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
   const SPEED_FEATURES *sf = &cpi->sf;
   const WinnerModeParams *winner_mode_params = &cpi->winner_mode_params;
   TxfmSearchParams *txfm_params = &x->txfm_search_params;
-  TxfmSearchInfo *txfm_info = &x->txfm_search_info;
+
+  txfm_params->use_qm_dist_metric =
+      cpi->oxcf.tune_cfg.dist_metric == AOM_DIST_METRIC_QM_PSNR;
 
   switch (mode_eval_type) {
     case DEFAULT_EVAL:
-      txfm_params->use_default_inter_tx_type = 0;
+      txfm_params->default_inter_tx_type_prob_thresh = INT_MAX;
       txfm_params->use_default_intra_tx_type = 0;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[DEFAULT_EVAL];
@@ -499,8 +535,8 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
       txfm_params->use_default_intra_tx_type =
           (cpi->sf.tx_sf.tx_type_search.fast_intra_tx_type_search ||
            cpi->oxcf.txfm_cfg.use_intra_default_tx_only);
-      txfm_params->use_default_inter_tx_type =
-          cpi->sf.tx_sf.tx_type_search.fast_inter_tx_type_search;
+      txfm_params->default_inter_tx_type_prob_thresh =
+          cpi->sf.tx_sf.tx_type_search.fast_inter_tx_type_prob_thresh;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[MODE_EVAL];
       txfm_params->predict_dc_level =
@@ -526,7 +562,7 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
                         0);
       break;
     case WINNER_MODE_EVAL:
-      txfm_params->use_default_inter_tx_type = 0;
+      txfm_params->default_inter_tx_type_prob_thresh = INT_MAX;
       txfm_params->use_default_intra_tx_type = 0;
       txfm_params->skip_txfm_level =
           winner_mode_params->skip_txfm_level[WINNER_MODE_EVAL];
@@ -552,14 +588,7 @@ static INLINE void set_mode_eval_params(const struct AV1_COMP *cpi,
       set_tx_type_prune(sf, txfm_params,
                         sf->tx_sf.tx_type_search.winner_mode_tx_type_pruning,
                         1);
-
-      // Reset hash state for winner mode processing. Winner mode and subsequent
-      // transform/mode evaluations (palette/IntraBC) cann't reuse old data as
-      // the decisions would have been sub-optimal
-      // TODO(any): Move the evaluation of palette/IntraBC modes before winner
-      // mode is processed and clean-up the code below
-      reset_hash_records(txfm_info, cpi->sf.tx_sf.use_inter_txb_hash);
-
+      reset_mb_rd_record(x->txfm_search_info.mb_rd_record);
       break;
     default: assert(0);
   }
@@ -609,12 +638,7 @@ static INLINE void store_winner_mode_stats(
   // mode in Inter frames. Clean-up the following code, once support is added
   if (!frame_is_intra_only(cm) && is_palette_mode) return;
 
-  int max_winner_mode_count = frame_is_intra_only(cm)
-                                  ? MAX_WINNER_MODE_COUNT_INTRA
-                                  : MAX_WINNER_MODE_COUNT_INTER;
-  max_winner_mode_count = (multi_winner_mode_type == MULTI_WINNER_MODE_FAST)
-                              ? AOMMIN(max_winner_mode_count, 2)
-                              : max_winner_mode_count;
+  int max_winner_mode_count = winner_mode_count_allowed[multi_winner_mode_type];
   assert(x->winner_mode_count >= 0 &&
          x->winner_mode_count <= max_winner_mode_count);
 
@@ -679,6 +703,18 @@ unsigned int av1_high_get_sby_perpixel_variance(const struct AV1_COMP *cpi,
 
 static INLINE int is_mode_intra(PREDICTION_MODE mode) {
   return mode < INTRA_MODE_END;
+}
+
+// This function will copy usable ref_mv_stack[ref_frame][4] and
+// weight[ref_frame][4] information from ref_mv_stack[ref_frame][8] and
+// weight[ref_frame][8].
+static INLINE void av1_copy_usable_ref_mv_stack_and_weight(
+    const MACROBLOCKD *xd, MB_MODE_INFO_EXT *const mbmi_ext,
+    MV_REFERENCE_FRAME ref_frame) {
+  memcpy(mbmi_ext->weight[ref_frame], xd->weight[ref_frame],
+         USABLE_REF_MV_STACK_SIZE * sizeof(xd->weight[0][0]));
+  memcpy(mbmi_ext->ref_mv_stack[ref_frame], xd->ref_mv_stack[ref_frame],
+         USABLE_REF_MV_STACK_SIZE * sizeof(xd->ref_mv_stack[0][0]));
 }
 
 #ifdef __cplusplus

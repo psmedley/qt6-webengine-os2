@@ -38,7 +38,6 @@ namespace blink {
 class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
  public:
   String ExtraDefaultStyleSheet() override;
-  String ExtraQuirksStyleSheet() override;
 
   Color PlatformActiveSelectionBackgroundColor(
       mojom::blink::ColorScheme color_scheme) const override;
@@ -49,7 +48,7 @@ class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
   Color PlatformInactiveSelectionForegroundColor(
       mojom::blink::ColorScheme color_scheme) const override;
 
-  IntSize SliderTickSize() const override;
+  gfx::Size SliderTickSize() const override;
   int SliderTickOffsetFromTrackCenter() const override;
   void AdjustSliderThumbSize(ComputedStyle&) const override;
 
@@ -68,7 +67,6 @@ class CORE_EXPORT LayoutThemeDefault : public LayoutTheme {
                           Color inactive_foreground_color) override;
   Color PlatformFocusRingColor() const override;
 
-  void AdjustSearchFieldStyle(ComputedStyle&) const override;
   void AdjustSearchFieldCancelButtonStyle(ComputedStyle&) const override;
 
   // MenuList refers to an unstyled menulist (meaning a menulist without

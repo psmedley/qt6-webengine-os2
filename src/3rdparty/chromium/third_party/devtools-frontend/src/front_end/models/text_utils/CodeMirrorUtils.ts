@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Google Inc. All rights reserved.
+ * Copyright (C) 2022 Google Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are
@@ -28,95 +28,26 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+import * as CodeMirror from '../../third_party/codemirror.next/codemirror.next.js';
+type Tokenizer =
+    (line: string, callback: (value: string, style: string|null) => void) => void;
 
-import type * as CodeMirrorModule from '../../third_party/codemirror/codemirror-legacy.js'; // eslint-disable-line @typescript-eslint/no-unused-vars
+export function createCssTokenizer(): Tokenizer {
+    async function tokenize(
+        line: string, callback: (value: string, style: string|null) => void): Promise<void> {
+        const streamParser = await CodeMirror.cssStreamParser();
+        const stream = new CodeMirror.StringStream();
+        stream.string = line;
 
-import * as TextRange from './TextRange.js';
-import type * as TextUtils from './TextUtils.js';
-
-export function toPos(range: TextRange.TextRange): {
-  start: any,
-  end: any,
-} {
-  return {
-    start: new CodeMirror.Pos(range.startLine, range.startColumn),
-    end: new CodeMirror.Pos(range.endLine, range.endColumn),
-  };
-}
-
-export function toRange(start: any, end: any): TextRange.TextRange {
-  return new TextRange.TextRange(start.line, start.ch, end.line, end.ch);
-}
-
-export function changeObjectToEditOperation(changeObject: any): {
-  oldRange: TextRange.TextRange,
-  newRange: TextRange.TextRange,
-} {
-  const oldRange = toRange(changeObject.from, changeObject.to);
-  const newRange = oldRange.clone();
-  const linesAdded = changeObject.text.length;
-  if (linesAdded === 0) {
-    newRange.endLine = newRange.startLine;
-    newRange.endColumn = newRange.startColumn;
-  } else if (linesAdded === 1) {
-    newRange.endLine = newRange.startLine;
-    newRange.endColumn = newRange.startColumn + changeObject.text[0].length;
-  } else {
-    newRange.endLine = newRange.startLine + linesAdded - 1;
-    newRange.endColumn = changeObject.text[linesAdded - 1].length;
-  }
-  return {oldRange: oldRange, newRange: newRange};
-}
-
-export function pullLines(codeMirror: typeof CodeMirror, linesCount: number): string[] {
-  const lines: string[] = [];
-  // @ts-expect-error CodeMirror types do not specify eachLine.
-  codeMirror.eachLine(0, linesCount, onLineHandle);
-  return lines;
-
-  function onLineHandle(lineHandle: {
-    text: string,
-  }): void {
-    lines.push(lineHandle.text);
-  }
-}
-
-let tokenizerFactoryInstance: TokenizerFactory;
-
-export type Tokenizer =
-    (line: string, callback: (value: string, style: string|null, start: number, end: number) => void) => void;
-
-export class TokenizerFactory implements TextUtils.TokenizerFactory {
-  static instance(opts: {forceNew: boolean|null} = {forceNew: null}): TokenizerFactory {
-    const {forceNew} = opts;
-    if (!tokenizerFactoryInstance || forceNew) {
-      tokenizerFactoryInstance = new TokenizerFactory();
-    }
-
-    return tokenizerFactoryInstance;
-  }
-
-  // https://crbug.com/1151919 * = CodeMirror.Mode
-  getMode(mimeType: string): any {
-    return CodeMirror.getMode({indentUnit: 2}, mimeType);
-  }
-
-  // https://crbug.com/1151919 * = CodeMirror.Mode
-  createTokenizer(mimeType: string, mode?: any): Tokenizer {
-    const cmMode = mode || CodeMirror.getMode({indentUnit: 2}, mimeType);
-    const state = CodeMirror.startState(cmMode);
-
-    function tokenize(
-        line: string, callback: (value: string, style: string|null, start: number, end: number) => void): void {
-      const stream = new CodeMirror.StringStream(line);
-      while (!stream.eol()) {
-        const style = cmMode.token(stream, state);
-        const value = stream.current();
-        callback(value, style, stream.start, stream.start + value.length);
-        stream.start = stream.pos;
-      }
+        const startState = streamParser.startState();
+        let lastPos = stream.pos;
+        while (!stream.eol()) {
+            const token = streamParser.token(stream, startState);
+            const segment = stream.current().substring(lastPos, stream.pos);
+            callback(segment, token);
+            lastPos = stream.pos;
+        }
     }
     return tokenize;
-  }
 }
+

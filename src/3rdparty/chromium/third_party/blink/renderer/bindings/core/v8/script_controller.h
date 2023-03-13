@@ -33,11 +33,10 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
@@ -60,6 +59,10 @@ class CORE_EXPORT ScriptController final
   ScriptController(LocalDOMWindow& window,
                    LocalWindowProxyManager& window_proxy_manager)
       : window_(&window), window_proxy_manager_(&window_proxy_manager) {}
+
+  ScriptController(const ScriptController&) = delete;
+  ScriptController& operator=(const ScriptController&) = delete;
+
   void Trace(Visitor*) const;
 
   // This returns an initialized window proxy. (If the window proxy is not
@@ -119,8 +122,6 @@ class CORE_EXPORT ScriptController final
 
   const Member<LocalDOMWindow> window_;
   const Member<LocalWindowProxyManager> window_proxy_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScriptController);
 };
 
 }  // namespace blink

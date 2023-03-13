@@ -11,8 +11,10 @@ import {
   kUncompressedTextureFormats,
   kRegularTextureFormats,
   textureDimensionAndFormatCompatible,
+  kLimitInfo,
+  viewCompatible,
 } from '../../capability_info.js';
-import { DefaultLimits, GPUConst } from '../../constants.js';
+import { GPUConst } from '../../constants.js';
 import { maxMipLevelCount } from '../../util/texture/base.js';
 
 import { ValidationTest } from './validation_test.js';
@@ -74,7 +76,7 @@ g.test('zero_size')
       mipLevelCount,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success = zeroArgument === 'none';
@@ -103,7 +105,7 @@ g.test('dimension_type_and_format_compatibility')
       size: [info.blockWidth, info.blockHeight, 1],
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     t.expectValidationError(() => {
@@ -121,29 +123,44 @@ g.test('mipLevelCount,format')
       .combine('dimension', [undefined, ...kTextureDimensions])
       .beginSubcases()
       .combine('format', kTextureFormats)
-      .combine('mipLevelCount', [1, 3, 6, 7])
+      .combine('mipLevelCount', [1, 2, 3, 6, 7])
       // Filter out incompatible dimension type and format combinations.
       .filter(({ dimension, format }) => textureDimensionAndFormatCompatible(dimension, format))
+      .combine('largestDimension', [0, 1, 2])
+      .unless(({ dimension, largestDimension }) => dimension === '1d' && largestDimension > 0)
   )
   .fn(async t => {
-    const { dimension, format, mipLevelCount } = t.params;
+    const { dimension, format, mipLevelCount, largestDimension } = t.params;
     const info = kTextureFormatInfo[format];
     await t.selectDeviceOrSkipTestCase(info.feature);
 
-    // Note that compressed formats are not valid for 1D. They have already been filtered out for 1D in this test.
-    // So there is no dilemma about size.width equals 1 vs size.width % info.blockHeight equals 0 for 1D compressed formats.
-    const size = dimension === '1d' ? [32, 1, 1] : [32, 32, 1];
-    assert(32 % info.blockWidth === 0 && 32 % info.blockHeight === 0);
+    // Compute dimensions such that the dimensions are in range [17, 32] and aligned with the
+    // format block size so that there will be exactly 6 mip levels.
+    const kTargetMipLevelCount = 5;
+    const kTargetLargeSize = (1 << kTargetMipLevelCount) - 1;
+    const largeSize = [
+      Math.floor(kTargetLargeSize / info.blockWidth) * info.blockWidth,
+      Math.floor(kTargetLargeSize / info.blockHeight) * info.blockHeight,
+      kTargetLargeSize,
+    ];
+    assert(17 <= largeSize[0] && largeSize[0] <= 32);
+    assert(17 <= largeSize[1] && largeSize[1] <= 32);
+
+    // Note that compressed formats are not valid for 1D. They have already been filtered out for 1D
+    // in this test. So there is no dilemma about size.width equals 1 vs
+    // size.width % info.blockHeight equals 0 for 1D compressed formats.
+    const size = [info.blockWidth, info.blockHeight, 1];
+    size[largestDimension] = largeSize[largestDimension];
 
     const descriptor = {
       size,
       mipLevelCount,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
-    const success = mipLevelCount <= 6;
+    const success = mipLevelCount <= maxMipLevelCount(descriptor);
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -194,7 +211,7 @@ g.test('mipLevelCount,bound_check')
       mipLevelCount: 0,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const mipLevelCount = maxMipLevelCount(descriptor);
@@ -214,7 +231,7 @@ g.test('mipLevelCount,bound_check,bigger_than_integer_bit_width')
       size: [32, 32],
       mipLevelCount: 100,
       format: 'rgba8unorm' as const,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     t.expectValidationError(() => {
@@ -236,13 +253,14 @@ g.test('sampleCount,various_sampleCount_with_all_formats')
   .fn(async t => {
     const { dimension, sampleCount, format } = t.params;
     await t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
+    const { blockWidth, blockHeight } = kTextureFormatInfo[format];
 
     const descriptor = {
-      size: [32, 32, 1],
+      size: [32 * blockWidth, 32 * blockHeight, 1],
       sampleCount,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
@@ -257,7 +275,7 @@ g.test('sampleCount,valid_sampleCount_with_other_parameter_varies')
   .desc(
     `Test texture creation with valid sample count when dimensions, arrayLayerCount, mipLevelCount, format, and usage varies.
      Texture can be single sample (sampleCount is 1) or multi-sample (sampleCount is 4).
-     Multisample texture requires that 1) its dimension is 2d or undefined, 2) its format supports multisample, 3) its mipLevelCount and arrayLayerCount are 1, 4) its usage doesn't include STORAGE.`
+     Multisample texture requires that 1) its dimension is 2d or undefined, 2) its format supports multisample, 3) its mipLevelCount and arrayLayerCount are 1, 4) its usage doesn't include STORAGE_BINDING.`
   )
   .params(u =>
     u
@@ -274,24 +292,28 @@ g.test('sampleCount,valid_sampleCount_with_other_parameter_varies')
       .combine('usage', kTextureUsages)
       // Filter out incompatible dimension type and format combinations.
       .filter(({ dimension, format }) => textureDimensionAndFormatCompatible(dimension, format))
-      .unless(({ usage, format }) => {
+      .unless(({ sampleCount, usage, format, mipLevelCount, dimension }) => {
         const info = kTextureFormatInfo[format];
         return (
-          ((usage & GPUConst.TextureUsage.RENDER_ATTACHMENT) !== 0 && !info.renderable) ||
-          ((usage & GPUConst.TextureUsage.STORAGE) !== 0 && !info.storage)
+          ((usage & GPUConst.TextureUsage.RENDER_ATTACHMENT) !== 0 &&
+            (!info.renderable || dimension !== '2d')) ||
+          ((usage & GPUConst.TextureUsage.STORAGE_BINDING) !== 0 && !info.storage) ||
+          (mipLevelCount !== 1 && dimension === '1d') ||
+          (sampleCount > 1 && !info.multisample)
         );
       })
   )
   .fn(async t => {
     const { dimension, sampleCount, format, mipLevelCount, arrayLayerCount, usage } = t.params;
     await t.selectDeviceOrSkipTestCase(kTextureFormatInfo[format].feature);
+    const { blockWidth, blockHeight } = kTextureFormatInfo[format];
 
     const size =
       dimension === '1d'
-        ? [32, 1, 1]
+        ? [32 * blockWidth, 1 * blockHeight, 1]
         : dimension === '2d' || dimension === undefined
-        ? [32, 32, arrayLayerCount]
-        : [32, 32, 32];
+        ? [32 * blockWidth, 32 * blockHeight, arrayLayerCount]
+        : [32 * blockWidth, 32 * blockHeight, 32];
     const descriptor = {
       size,
       mipLevelCount,
@@ -308,7 +330,7 @@ g.test('sampleCount,valid_sampleCount_with_other_parameter_varies')
         kTextureFormatInfo[format].multisample &&
         mipLevelCount === 1 &&
         arrayLayerCount === 1 &&
-        (usage & GPUConst.TextureUsage.STORAGE) === 0);
+        (usage & GPUConst.TextureUsage.STORAGE_BINDING) === 0);
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -337,7 +359,7 @@ g.test('texture_size,default_value_and_smallest_size,uncompressed_format')
       size,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     t.device.createTexture(descriptor);
@@ -375,7 +397,7 @@ g.test('texture_size,default_value_and_smallest_size,compressed_format')
       size,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     t.expectValidationError(() => {
@@ -387,12 +409,12 @@ g.test('texture_size,1d_texture')
   .desc(`Test texture size requirement for 1D texture`)
   .paramsSubcasesOnly(u =>
     u //
-      // Compressed textures are invalid for 1D.
-      .combine('format', kUncompressedTextureFormats)
+      // Compressed and depth-stencil textures are invalid for 1D.
+      .combine('format', kRegularTextureFormats)
       .combine('width', [
-        DefaultLimits.maxTextureDimension1D - 1,
-        DefaultLimits.maxTextureDimension1D,
-        DefaultLimits.maxTextureDimension1D + 1,
+        kLimitInfo.maxTextureDimension1D.default - 1,
+        kLimitInfo.maxTextureDimension1D.default,
+        kLimitInfo.maxTextureDimension1D.default + 1,
       ])
       .combine('height', [1, 2])
       .combine('depthOrArrayLayers', [1, 2])
@@ -405,11 +427,11 @@ g.test('texture_size,1d_texture')
       size: [width, height, depthOrArrayLayers],
       dimension: '1d' as const,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
-      width <= DefaultLimits.maxTextureDimension1D && height === 1 && depthOrArrayLayers === 1;
+      width <= kLimitInfo.maxTextureDimension1D.default && height === 1 && depthOrArrayLayers === 1;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -424,17 +446,17 @@ g.test('texture_size,2d_texture,uncompressed_format')
       .combine('format', kUncompressedTextureFormats)
       .combine('size', [
         // Test the bound of width
-        [DefaultLimits.maxTextureDimension2D - 1, 1, 1],
-        [DefaultLimits.maxTextureDimension2D, 1, 1],
-        [DefaultLimits.maxTextureDimension2D + 1, 1, 1],
+        [kLimitInfo.maxTextureDimension2D.default - 1, 1, 1],
+        [kLimitInfo.maxTextureDimension2D.default, 1, 1],
+        [kLimitInfo.maxTextureDimension2D.default + 1, 1, 1],
         // Test the bound of height
-        [1, DefaultLimits.maxTextureDimension2D - 1, 1],
-        [1, DefaultLimits.maxTextureDimension2D, 1],
-        [1, DefaultLimits.maxTextureDimension2D + 1, 1],
+        [1, kLimitInfo.maxTextureDimension2D.default - 1, 1],
+        [1, kLimitInfo.maxTextureDimension2D.default, 1],
+        [1, kLimitInfo.maxTextureDimension2D.default + 1, 1],
         // Test the bound of array layers
-        [1, 1, DefaultLimits.maxTextureArrayLayers - 1],
-        [1, 1, DefaultLimits.maxTextureArrayLayers],
-        [1, 1, DefaultLimits.maxTextureArrayLayers + 1],
+        [1, 1, kLimitInfo.maxTextureArrayLayers.default - 1],
+        [1, 1, kLimitInfo.maxTextureArrayLayers.default],
+        [1, 1, kLimitInfo.maxTextureArrayLayers.default + 1],
       ])
   )
   .fn(async t => {
@@ -445,13 +467,13 @@ g.test('texture_size,2d_texture,uncompressed_format')
       size,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
-      size[0] <= DefaultLimits.maxTextureDimension2D &&
-      size[1] <= DefaultLimits.maxTextureDimension2D &&
-      size[2] <= DefaultLimits.maxTextureArrayLayers;
+      size[0] <= kLimitInfo.maxTextureDimension2D.default &&
+      size[1] <= kLimitInfo.maxTextureDimension2D.default &&
+      size[2] <= kLimitInfo.maxTextureArrayLayers.default;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -468,36 +490,36 @@ g.test('texture_size,2d_texture,compressed_format')
         const { blockWidth, blockHeight } = kTextureFormatInfo[p.format];
         return [
           // Test the bound of width
-          [DefaultLimits.maxTextureDimension2D - 1, 1, 1],
-          [DefaultLimits.maxTextureDimension2D - blockWidth, 1, 1],
-          [DefaultLimits.maxTextureDimension2D - blockWidth, blockHeight, 1],
-          [DefaultLimits.maxTextureDimension2D, 1, 1],
-          [DefaultLimits.maxTextureDimension2D, blockHeight, 1],
-          [DefaultLimits.maxTextureDimension2D + 1, 1, 1],
-          [DefaultLimits.maxTextureDimension2D + blockWidth, 1, 1],
-          [DefaultLimits.maxTextureDimension2D + blockWidth, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension2D.default - 1, 1, 1],
+          [kLimitInfo.maxTextureDimension2D.default - blockWidth, 1, 1],
+          [kLimitInfo.maxTextureDimension2D.default - blockWidth, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension2D.default, 1, 1],
+          [kLimitInfo.maxTextureDimension2D.default, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension2D.default + 1, 1, 1],
+          [kLimitInfo.maxTextureDimension2D.default + blockWidth, 1, 1],
+          [kLimitInfo.maxTextureDimension2D.default + blockWidth, blockHeight, 1],
           // Test the bound of height
-          [1, DefaultLimits.maxTextureDimension2D - 1, 1],
-          [1, DefaultLimits.maxTextureDimension2D - blockHeight, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension2D - blockHeight, 1],
-          [1, DefaultLimits.maxTextureDimension2D, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension2D, 1],
-          [1, DefaultLimits.maxTextureDimension2D + 1, 1],
-          [1, DefaultLimits.maxTextureDimension2D + blockWidth, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension2D + blockHeight, 1],
+          [1, kLimitInfo.maxTextureDimension2D.default - 1, 1],
+          [1, kLimitInfo.maxTextureDimension2D.default - blockHeight, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension2D.default - blockHeight, 1],
+          [1, kLimitInfo.maxTextureDimension2D.default, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension2D.default, 1],
+          [1, kLimitInfo.maxTextureDimension2D.default + 1, 1],
+          [1, kLimitInfo.maxTextureDimension2D.default + blockWidth, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension2D.default + blockHeight, 1],
           // Test the bound of array layers
-          [1, 1, DefaultLimits.maxTextureArrayLayers - 1],
-          [blockWidth, 1, DefaultLimits.maxTextureArrayLayers - 1],
-          [1, blockHeight, DefaultLimits.maxTextureArrayLayers - 1],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureArrayLayers - 1],
-          [1, 1, DefaultLimits.maxTextureArrayLayers],
-          [blockWidth, 1, DefaultLimits.maxTextureArrayLayers],
-          [1, blockHeight, DefaultLimits.maxTextureArrayLayers],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureArrayLayers],
-          [1, 1, DefaultLimits.maxTextureArrayLayers + 1],
-          [blockWidth, 1, DefaultLimits.maxTextureArrayLayers + 1],
-          [1, blockHeight, DefaultLimits.maxTextureArrayLayers + 1],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureArrayLayers + 1],
+          [1, 1, kLimitInfo.maxTextureArrayLayers.default - 1],
+          [blockWidth, 1, kLimitInfo.maxTextureArrayLayers.default - 1],
+          [1, blockHeight, kLimitInfo.maxTextureArrayLayers.default - 1],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureArrayLayers.default - 1],
+          [1, 1, kLimitInfo.maxTextureArrayLayers.default],
+          [blockWidth, 1, kLimitInfo.maxTextureArrayLayers.default],
+          [1, blockHeight, kLimitInfo.maxTextureArrayLayers.default],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureArrayLayers.default],
+          [1, 1, kLimitInfo.maxTextureArrayLayers.default + 1],
+          [blockWidth, 1, kLimitInfo.maxTextureArrayLayers.default + 1],
+          [1, blockHeight, kLimitInfo.maxTextureArrayLayers.default + 1],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureArrayLayers.default + 1],
         ];
       })
   )
@@ -506,24 +528,19 @@ g.test('texture_size,2d_texture,compressed_format')
     const info = kTextureFormatInfo[format];
     await t.selectDeviceOrSkipTestCase(info.feature);
 
-    assert(
-      DefaultLimits.maxTextureDimension2D % info.blockWidth === 0 &&
-        DefaultLimits.maxTextureDimension2D % info.blockHeight === 0
-    );
-
     const descriptor: GPUTextureDescriptor = {
       size,
       dimension,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
       size[0] % info.blockWidth === 0 &&
       size[1] % info.blockHeight === 0 &&
-      size[0] <= DefaultLimits.maxTextureDimension2D &&
-      size[1] <= DefaultLimits.maxTextureDimension2D &&
-      size[2] <= DefaultLimits.maxTextureArrayLayers;
+      size[0] <= kLimitInfo.maxTextureDimension2D.default &&
+      size[1] <= kLimitInfo.maxTextureDimension2D.default &&
+      size[2] <= kLimitInfo.maxTextureArrayLayers.default;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -539,17 +556,17 @@ g.test('texture_size,3d_texture,uncompressed_format')
       .combine('format', kRegularTextureFormats)
       .combine('size', [
         // Test the bound of width
-        [DefaultLimits.maxTextureDimension3D - 1, 1, 1],
-        [DefaultLimits.maxTextureDimension3D, 1, 1],
-        [DefaultLimits.maxTextureDimension3D + 1, 1, 1],
+        [kLimitInfo.maxTextureDimension3D.default - 1, 1, 1],
+        [kLimitInfo.maxTextureDimension3D.default, 1, 1],
+        [kLimitInfo.maxTextureDimension3D.default + 1, 1, 1],
         // Test the bound of height
-        [1, DefaultLimits.maxTextureDimension3D - 1, 1],
-        [1, DefaultLimits.maxTextureDimension3D, 1],
-        [1, DefaultLimits.maxTextureDimension3D + 1, 1],
+        [1, kLimitInfo.maxTextureDimension3D.default - 1, 1],
+        [1, kLimitInfo.maxTextureDimension3D.default, 1],
+        [1, kLimitInfo.maxTextureDimension3D.default + 1, 1],
         // Test the bound of depth
-        [1, 1, DefaultLimits.maxTextureDimension3D - 1],
-        [1, 1, DefaultLimits.maxTextureDimension3D],
-        [1, 1, DefaultLimits.maxTextureDimension3D + 1],
+        [1, 1, kLimitInfo.maxTextureDimension3D.default - 1],
+        [1, 1, kLimitInfo.maxTextureDimension3D.default],
+        [1, 1, kLimitInfo.maxTextureDimension3D.default + 1],
       ])
   )
   .fn(async t => {
@@ -560,13 +577,13 @@ g.test('texture_size,3d_texture,uncompressed_format')
       size,
       dimension: '3d' as const,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
-      size[0] <= DefaultLimits.maxTextureDimension3D &&
-      size[1] <= DefaultLimits.maxTextureDimension3D &&
-      size[2] <= DefaultLimits.maxTextureDimension3D;
+      size[0] <= kLimitInfo.maxTextureDimension3D.default &&
+      size[1] <= kLimitInfo.maxTextureDimension3D.default &&
+      size[2] <= kLimitInfo.maxTextureDimension3D.default;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -582,36 +599,36 @@ g.test('texture_size,3d_texture,compressed_format')
         const { blockWidth, blockHeight } = kTextureFormatInfo[p.format];
         return [
           // Test the bound of width
-          [DefaultLimits.maxTextureDimension3D - 1, 1, 1],
-          [DefaultLimits.maxTextureDimension3D - blockWidth, 1, 1],
-          [DefaultLimits.maxTextureDimension3D - blockWidth, blockHeight, 1],
-          [DefaultLimits.maxTextureDimension3D, 1, 1],
-          [DefaultLimits.maxTextureDimension3D, blockHeight, 1],
-          [DefaultLimits.maxTextureDimension3D + 1, 1, 1],
-          [DefaultLimits.maxTextureDimension3D + blockWidth, 1, 1],
-          [DefaultLimits.maxTextureDimension3D + blockWidth, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension3D.default - 1, 1, 1],
+          [kLimitInfo.maxTextureDimension3D.default - blockWidth, 1, 1],
+          [kLimitInfo.maxTextureDimension3D.default - blockWidth, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension3D.default, 1, 1],
+          [kLimitInfo.maxTextureDimension3D.default, blockHeight, 1],
+          [kLimitInfo.maxTextureDimension3D.default + 1, 1, 1],
+          [kLimitInfo.maxTextureDimension3D.default + blockWidth, 1, 1],
+          [kLimitInfo.maxTextureDimension3D.default + blockWidth, blockHeight, 1],
           // Test the bound of height
-          [1, DefaultLimits.maxTextureDimension3D - 1, 1],
-          [1, DefaultLimits.maxTextureDimension3D - blockHeight, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension3D - blockHeight, 1],
-          [1, DefaultLimits.maxTextureDimension3D, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension3D, 1],
-          [1, DefaultLimits.maxTextureDimension3D + 1, 1],
-          [1, DefaultLimits.maxTextureDimension3D + blockWidth, 1],
-          [blockWidth, DefaultLimits.maxTextureDimension3D + blockHeight, 1],
+          [1, kLimitInfo.maxTextureDimension3D.default - 1, 1],
+          [1, kLimitInfo.maxTextureDimension3D.default - blockHeight, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension3D.default - blockHeight, 1],
+          [1, kLimitInfo.maxTextureDimension3D.default, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension3D.default, 1],
+          [1, kLimitInfo.maxTextureDimension3D.default + 1, 1],
+          [1, kLimitInfo.maxTextureDimension3D.default + blockWidth, 1],
+          [blockWidth, kLimitInfo.maxTextureDimension3D.default + blockHeight, 1],
           // Test the bound of depth
-          [1, 1, DefaultLimits.maxTextureDimension3D - 1],
-          [blockWidth, 1, DefaultLimits.maxTextureDimension3D - 1],
-          [1, blockHeight, DefaultLimits.maxTextureDimension3D - 1],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureDimension3D - 1],
-          [1, 1, DefaultLimits.maxTextureDimension3D],
-          [blockWidth, 1, DefaultLimits.maxTextureDimension3D],
-          [1, blockHeight, DefaultLimits.maxTextureDimension3D],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureDimension3D],
-          [1, 1, DefaultLimits.maxTextureDimension3D + 1],
-          [blockWidth, 1, DefaultLimits.maxTextureDimension3D + 1],
-          [1, blockHeight, DefaultLimits.maxTextureDimension3D + 1],
-          [blockWidth, blockHeight, DefaultLimits.maxTextureDimension3D + 1],
+          [1, 1, kLimitInfo.maxTextureDimension3D.default - 1],
+          [blockWidth, 1, kLimitInfo.maxTextureDimension3D.default - 1],
+          [1, blockHeight, kLimitInfo.maxTextureDimension3D.default - 1],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureDimension3D.default - 1],
+          [1, 1, kLimitInfo.maxTextureDimension3D.default],
+          [blockWidth, 1, kLimitInfo.maxTextureDimension3D.default],
+          [1, blockHeight, kLimitInfo.maxTextureDimension3D.default],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureDimension3D.default],
+          [1, 1, kLimitInfo.maxTextureDimension3D.default + 1],
+          [blockWidth, 1, kLimitInfo.maxTextureDimension3D.default + 1],
+          [1, blockHeight, kLimitInfo.maxTextureDimension3D.default + 1],
+          [blockWidth, blockHeight, kLimitInfo.maxTextureDimension3D.default + 1],
         ];
       })
   )
@@ -625,23 +642,23 @@ g.test('texture_size,3d_texture,compressed_format')
     await t.selectDeviceOrSkipTestCase(info.feature);
 
     assert(
-      DefaultLimits.maxTextureDimension3D % info.blockWidth === 0 &&
-        DefaultLimits.maxTextureDimension3D % info.blockHeight === 0
+      kLimitInfo.maxTextureDimension3D.default % info.blockWidth === 0 &&
+        kLimitInfo.maxTextureDimension3D.default % info.blockHeight === 0
     );
 
     const descriptor: GPUTextureDescriptor = {
       size,
       dimension: '3d' as const,
       format,
-      usage: GPUTextureUsage.SAMPLED,
+      usage: GPUTextureUsage.TEXTURE_BINDING,
     };
 
     const success =
       size[0] % info.blockWidth === 0 &&
       size[1] % info.blockHeight === 0 &&
-      size[0] <= DefaultLimits.maxTextureDimension3D &&
-      size[1] <= DefaultLimits.maxTextureDimension3D &&
-      size[2] <= DefaultLimits.maxTextureDimension3D;
+      size[0] <= kLimitInfo.maxTextureDimension3D.default &&
+      size[1] <= kLimitInfo.maxTextureDimension3D.default &&
+      size[2] <= kLimitInfo.maxTextureDimension3D.default;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
@@ -678,13 +695,63 @@ g.test('texture_usage')
     };
 
     let success = true;
+    const appliedDimension = dimension ?? '2d';
     // Note that we unconditionally test copy usages for all formats. We don't check copySrc/copyDst in kTextureFormatInfo in capability_info.js
     // if (!info.copySrc && (usage & GPUTextureUsage.COPY_SRC) !== 0) success = false;
     // if (!info.copyDst && (usage & GPUTextureUsage.COPY_DST) !== 0) success = false;
-    if (!info.storage && (usage & GPUTextureUsage.STORAGE) !== 0) success = false;
-    if (!info.renderable && (usage & GPUTextureUsage.RENDER_ATTACHMENT) !== 0) success = false;
+    if (!info.storage && (usage & GPUTextureUsage.STORAGE_BINDING) !== 0) success = false;
+    if (
+      (!info.renderable || appliedDimension !== '2d') &&
+      (usage & GPUTextureUsage.RENDER_ATTACHMENT) !== 0
+    )
+      success = false;
 
     t.expectValidationError(() => {
       t.device.createTexture(descriptor);
     }, !success);
+  });
+
+g.test('viewFormats')
+  .desc(
+    `Test creating a texture with viewFormats list for all {texture format}x{view format}. Only compatible view formats should be valid.`
+  )
+  .params(u =>
+    u.combine('format', kTextureFormats).beginSubcases().combine('viewFormat', kTextureFormats)
+  )
+  .fn(async t => {
+    const { format, viewFormat } = t.params;
+    await t.selectDeviceForTextureFormatOrSkipTestCase([format, viewFormat]);
+    const { blockWidth, blockHeight } = kTextureFormatInfo[format];
+
+    const compatible = viewCompatible(format, viewFormat);
+
+    // Test the viewFormat in the list.
+    t.expectValidationError(() => {
+      t.device.createTexture({
+        format,
+        size: [blockWidth, blockHeight],
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+        viewFormats: [viewFormat],
+      });
+    }, !compatible);
+
+    // Test the viewFormat and the texture format in the list.
+    t.expectValidationError(() => {
+      t.device.createTexture({
+        format,
+        size: [blockWidth, blockHeight],
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+        viewFormats: [viewFormat, format],
+      });
+    }, !compatible);
+
+    // Test the viewFormat multiple times in the list.
+    t.expectValidationError(() => {
+      t.device.createTexture({
+        format,
+        size: [blockWidth, blockHeight],
+        usage: GPUTextureUsage.TEXTURE_BINDING,
+        viewFormats: [viewFormat, viewFormat],
+      });
+    }, !compatible);
   });

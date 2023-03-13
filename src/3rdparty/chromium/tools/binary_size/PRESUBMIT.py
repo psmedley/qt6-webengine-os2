@@ -13,7 +13,8 @@ USE_PYTHON3 = True
 
 def CommonChecks(input_api, output_api):
   output = []
-  output.extend(input_api.canned_checks.RunPylint(input_api, output_api))
+  output.extend(
+      input_api.canned_checks.RunPylint(input_api, output_api, version='2.6'))
   py_tests = input_api.canned_checks.GetUnitTestsRecursively(
       input_api,
       output_api,
@@ -21,9 +22,14 @@ def CommonChecks(input_api, output_api):
       files_to_check=[r'.+_test\.py$'],
       files_to_skip=[],
       run_on_python2=False,
-      run_on_python3=True)
+      run_on_python3=True,
+      skip_shebang_check=True)
 
   output.extend(input_api.RunTests(py_tests, False))
+  output.extend(
+      input_api.canned_checks.CheckPatchFormatted(input_api,
+                                                  output_api,
+                                                  check_js=True))
 
   if input_api.is_committing:
     output.extend(input_api.canned_checks.PanProjectChecks(input_api,

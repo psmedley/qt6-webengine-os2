@@ -49,18 +49,18 @@ void PrintersToValues(const PrinterList& printer_list,
                       base::ListValue* printers) {
   for (const PrinterBasicInfo& printer : printer_list) {
     auto printer_info = std::make_unique<base::DictionaryValue>();
-    printer_info->SetString(kSettingDeviceName, printer.printer_name);
+    printer_info->SetStringKey(kSettingDeviceName, printer.printer_name);
 
-    printer_info->SetString(kSettingPrinterName, printer.display_name);
-    printer_info->SetString(kSettingPrinterDescription,
-                            printer.printer_description);
+    printer_info->SetStringKey(kSettingPrinterName, printer.display_name);
+    printer_info->SetStringKey(kSettingPrinterDescription,
+                               printer.printer_description);
 
     base::DictionaryValue options;
     for (const auto& opt_it : printer.options)
-      options.SetString(opt_it.first, opt_it.second);
+      options.SetStringPath(opt_it.first, opt_it.second);
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-    printer_info->SetBoolean(
+    printer_info->SetBoolKey(
         kCUPSEnterprisePrinter,
         base::Contains(printer.options, kCUPSEnterprisePrinter) &&
             printer.options.at(kCUPSEnterprisePrinter) == kValueTrue);
@@ -101,8 +101,8 @@ bool VendorCapabilityInvalid(const base::Value& val) {
     return true;
   const base::Value* options_list =
       select_cap->FindKeyOfType(kOptionKey, base::Value::Type::LIST);
-  if (!options_list || options_list->GetList().empty() ||
-      GetFilteredList(options_list, ValueIsNull).GetList().empty()) {
+  if (!options_list || options_list->GetListDeprecated().empty() ||
+      GetFilteredList(options_list, ValueIsNull).GetListDeprecated().empty()) {
     return true;
   }
   return false;
@@ -138,12 +138,12 @@ base::Value ValidateCddForPrintPreview(base::Value cdd) {
     bool is_vendor_capability = key == kVendorCapabilityKey;
     list_value->EraseListValueIf(is_vendor_capability ? VendorCapabilityInvalid
                                                       : ValueIsNull);
-    if (list_value->GetList().empty())  // leave out empty lists.
+    if (list_value->GetListDeprecated().empty())  // leave out empty lists.
       continue;
 
     if (is_vendor_capability) {
       // Need to also filter the individual capability lists.
-      for (auto& vendor_option : list_value->GetList()) {
+      for (auto& vendor_option : list_value->GetListDeprecated()) {
         if (*vendor_option.FindStringKey(kTypeKey) != kSelectString)
           continue;
 
@@ -176,14 +176,14 @@ void ConvertPrinterListForCallback(
   base::ListValue printers;
   PrintersToValues(printer_list, &printers);
 
-  VLOG(1) << "Enumerate printers finished, found " << printers.GetSize()
-          << " printers";
-  if (!printers.GetList().empty())
+  VLOG(1) << "Enumerate printers finished, found "
+          << printers.GetListDeprecated().size() << " printers";
+  if (!printers.GetListDeprecated().empty())
     callback.Run(printers);
   std::move(done_callback).Run();
 }
 
-void StartLocalPrint(base::Value job_settings,
+void StartLocalPrint(base::Value::Dict job_settings,
                      scoped_refptr<base::RefCountedMemory> print_data,
                      content::WebContents* preview_web_contents,
                      PrinterHandler::PrintCallback callback) {
@@ -200,8 +200,8 @@ void StartLocalPrint(base::Value job_settings,
     return;
   }
 
-  if (job_settings.FindBoolKey(kSettingShowSystemDialog).value_or(false) ||
-      job_settings.FindBoolKey(kSettingOpenPDFInPreview).value_or(false)) {
+  if (job_settings.FindBool(kSettingShowSystemDialog).value_or(false) ||
+      job_settings.FindBool(kSettingOpenPDFInPreview).value_or(false)) {
     // Run the callback early, or the modal dialogs will prevent the preview
     // from closing until they do.
     std::move(callback).Run(base::Value());
@@ -212,16 +212,16 @@ void StartLocalPrint(base::Value job_settings,
       preview_web_contents->GetMainFrame(), std::move(callback));
 }
 
-bool ParseSettings(const base::Value& settings,
+bool ParseSettings(const base::Value::Dict& settings,
                    std::string* out_destination_id,
                    std::string* out_capabilities,
                    gfx::Size* out_page_size,
                    base::Value* out_ticket) {
-  const std::string* ticket_opt = settings.FindStringKey(kSettingTicket);
+  const std::string* ticket_opt = settings.FindString(kSettingTicket);
   const std::string* capabilities_opt =
-      settings.FindStringKey(kSettingCapabilities);
-  out_page_size->SetSize(settings.FindIntKey(kSettingPageWidth).value_or(0),
-                         settings.FindIntKey(kSettingPageHeight).value_or(0));
+      settings.FindString(kSettingCapabilities);
+  out_page_size->SetSize(settings.FindInt(kSettingPageWidth).value_or(0),
+                         settings.FindInt(kSettingPageHeight).value_or(0));
   if (!ticket_opt || !capabilities_opt || out_page_size->IsEmpty()) {
     NOTREACHED();
     return false;
@@ -231,7 +231,7 @@ bool ParseSettings(const base::Value& settings,
   if (!ticket_value)
     return false;
 
-  *out_destination_id = *settings.FindStringKey(kSettingDeviceName);
+  *out_destination_id = *settings.FindString(kSettingDeviceName);
   *out_capabilities = *capabilities_opt;
   *out_ticket = std::move(*ticket_value);
   return true;

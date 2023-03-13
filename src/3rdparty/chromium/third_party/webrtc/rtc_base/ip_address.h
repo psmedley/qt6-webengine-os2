@@ -16,9 +16,11 @@
 #include <netdb.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
+
+#include "absl/strings/string_view.h"
+#endif
 #if defined(WEBRTC_OS2)
 #include <libcx/net.h>
-#endif
 #endif
 #if defined(WEBRTC_WIN)
 #include <winsock2.h>
@@ -32,8 +34,8 @@
 #if defined(WEBRTC_WIN)
 #include "rtc_base/win32.h"
 #endif
+#include "absl/strings/string_view.h"
 #include "rtc_base/system/rtc_export.h"
-
 namespace rtc {
 
 enum IPv6AddressFlag {
@@ -168,8 +170,8 @@ class RTC_EXPORT InterfaceAddress : public IPAddress {
 };
 
 bool IPFromAddrInfo(struct addrinfo* info, IPAddress* out);
-RTC_EXPORT bool IPFromString(const std::string& str, IPAddress* out);
-RTC_EXPORT bool IPFromString(const std::string& str,
+RTC_EXPORT bool IPFromString(absl::string_view str, IPAddress* out);
+RTC_EXPORT bool IPFromString(absl::string_view str,
                              int flags,
                              InterfaceAddress* out);
 bool IPIsAny(const IPAddress& ip);

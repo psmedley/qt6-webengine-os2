@@ -18,11 +18,8 @@
 struct skcms_Matrix3x3;
 struct skcms_TransferFunction;
 class SkColorSpace;
+class SkM44;
 enum SkYUVColorSpace : int;
-
-namespace skia {
-class Matrix44;
-}  // namespace skia
 
 // These forward declarations are used to give IPC code friend access to private
 // fields of gfx::ColorSpace for the purpose of serialization and
@@ -40,6 +37,14 @@ struct StructTraits;
 // Used to serialize a gfx::ColorSpace through the GPU command buffer.
 struct _GLcolorSpace;
 
+namespace media {
+namespace stable {
+namespace mojom {
+class ColorSpaceDataView;
+}  // namespace mojom
+}  // namespace stable
+}  // namespace media
+
 namespace gfx {
 
 enum class ContentColorUsage : uint8_t;
@@ -55,6 +60,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
  public:
   enum class PrimaryID : uint8_t {
     INVALID,
+    // BT709 is also the primaries for SRGB.
     BT709,
     BT470M,
     BT470BG,
@@ -64,7 +70,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
     BT2020,
     SMPTEST428_1,
     SMPTEST431_2,
-    SMPTEST432_1,
+    P3,
     XYZ_D50,
     ADOBE_RGB,
     // Corresponds the the primaries of the "Generic RGB" profile used in the
@@ -94,15 +100,17 @@ class COLOR_SPACE_EXPORT ColorSpace {
     LOG_SQRT,
     IEC61966_2_4,
     BT1361_ECG,
-    IEC61966_2_1,
+    SRGB,
     BT2020_10,
     BT2020_12,
-    SMPTEST2084,
+    // Perceptual quantizer, also known as SMPTEST2084.
+    PQ,
     SMPTEST428_1,
-    ARIB_STD_B67,  // AKA hybrid-log gamma, HLG.
-    // The same as IEC61966_2_1 on the interval [0, 1], with the nonlinear
-    // segment continuing beyond 1 and point symmetry defining values below 0.
-    IEC61966_2_1_HDR,
+    // Hybrid-log gamma, also known as ARIB_STD_B67.
+    HLG,
+    // The same as SRGB on the interval [0, 1], with the nonlinear segment
+    // continuing beyond 1 and point symmetry defining values below 0.
+    SRGB_HDR,
     // The same as LINEAR but is defined for all real values.
     LINEAR_HDR,
     // A parametric transfer function defined by |transfer_params_|.
@@ -157,21 +165,22 @@ class COLOR_SPACE_EXPORT ColorSpace {
              MatrixID matrix,
              RangeID range,
              const skcms_Matrix3x3* custom_primary_matrix,
-             const skcms_TransferFunction* cunstom_transfer_fn);
+             const skcms_TransferFunction* cunstom_transfer_fn,
+             bool is_hdr = false);
 
-  explicit ColorSpace(const SkColorSpace& sk_color_space);
+  explicit ColorSpace(const SkColorSpace& sk_color_space, bool is_hdr = false);
 
   // Returns true if this is not the default-constructor object.
   bool IsValid() const;
 
   static constexpr ColorSpace CreateSRGB() {
-    return ColorSpace(PrimaryID::BT709, TransferID::IEC61966_2_1, MatrixID::RGB,
+    return ColorSpace(PrimaryID::BT709, TransferID::SRGB, MatrixID::RGB,
                       RangeID::FULL);
   }
 
   static constexpr ColorSpace CreateDisplayP3D65() {
-    return ColorSpace(PrimaryID::SMPTEST432_1, TransferID::IEC61966_2_1,
-                      MatrixID::RGB, RangeID::FULL);
+    return ColorSpace(PrimaryID::P3, TransferID::SRGB, MatrixID::RGB,
+                      RangeID::FULL);
   }
   static ColorSpace CreateCustom(const skcms_Matrix3x3& to_XYZD50,
                                  const skcms_TransferFunction& fn);
@@ -185,8 +194,8 @@ class COLOR_SPACE_EXPORT ColorSpace {
   // Extended sRGB matches sRGB for values in [0, 1], and extends the transfer
   // function to all real values.
   static constexpr ColorSpace CreateExtendedSRGB() {
-    return ColorSpace(PrimaryID::BT709, TransferID::IEC61966_2_1_HDR,
-                      MatrixID::RGB, RangeID::FULL);
+    return ColorSpace(PrimaryID::BT709, TransferID::SRGB_HDR, MatrixID::RGB,
+                      RangeID::FULL);
   }
 
   // scRGB uses the same primaries as sRGB but has a linear transfer function
@@ -200,7 +209,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
 
   // HDR10 uses BT.2020 primaries with SMPTE ST 2084 PQ transfer function.
   static constexpr ColorSpace CreateHDR10() {
-    return ColorSpace(PrimaryID::BT2020, TransferID::SMPTEST2084, MatrixID::RGB,
+    return ColorSpace(PrimaryID::BT2020, TransferID::PQ, MatrixID::RGB,
                       RangeID::FULL);
   }
   // Allows specifying a custom SDR white level.  Only used on Windows.
@@ -228,8 +237,8 @@ class COLOR_SPACE_EXPORT ColorSpace {
   static constexpr ColorSpace CreateJpeg() {
     // TODO(ccameron): Determine which primaries and transfer function were
     // intended here.
-    return ColorSpace(PrimaryID::BT709, TransferID::IEC61966_2_1,
-                      MatrixID::SMPTE170M, RangeID::FULL);
+    return ColorSpace(PrimaryID::BT709, TransferID::SRGB, MatrixID::SMPTE170M,
+                      RangeID::FULL);
   }
   static constexpr ColorSpace CreateREC601() {
     return ColorSpace(PrimaryID::SMPTE170M, TransferID::SMPTE170M,
@@ -250,12 +259,12 @@ class COLOR_SPACE_EXPORT ColorSpace {
   // sRGB's (1,1,1) maps to scRGB linear's (1,1,1) when the SDR white level is
   // set to 80 nits. On Mac and ChromeOS, sRGB's (1,1,1) maps to PQ's 100 nits.
   // Using a platform specific value here satisfies both constraints.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static constexpr float kDefaultScrgbLinearSdrWhiteLevel = 80.0f;
 #else
   static constexpr float kDefaultScrgbLinearSdrWhiteLevel =
       kDefaultSDRWhiteLevel;
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
   bool operator==(const ColorSpace& other) const;
   bool operator!=(const ColorSpace& other) const;
@@ -267,6 +276,9 @@ class COLOR_SPACE_EXPORT ColorSpace {
 
   // Returns true if the transfer function is an HDR one (SMPTE 2084, HLG, etc).
   bool IsHDR() const;
+
+  // Returns true if the transfer function is PQ or HLG.
+  bool IsPQOrHLG() const;
 
   // Returns true if the encoded values can be outside of the 0.0-1.0 range.
   bool FullRangeEncodedValues() const;
@@ -319,7 +331,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
   }
 
   void GetPrimaryMatrix(skcms_Matrix3x3* to_XYZD50) const;
-  void GetPrimaryMatrix(skia::Matrix44* to_XYZD50) const;
+  SkM44 GetPrimaryMatrix() const;
   bool GetTransferFunction(skcms_TransferFunction* fn) const;
   bool GetInverseTransferFunction(skcms_TransferFunction* fn) const;
 
@@ -334,11 +346,11 @@ class COLOR_SPACE_EXPORT ColorSpace {
 
   // Returns the transfer matrix for |bit_depth|. For most formats, this is the
   // RGB to YUV matrix.
-  void GetTransferMatrix(int bit_depth, skia::Matrix44* matrix) const;
+  SkM44 GetTransferMatrix(int bit_depth) const;
 
   // Returns the range adjust matrix that converts from |range_| to full range
   // for |bit_depth|.
-  void GetRangeAdjustMatrix(int bit_depth, skia::Matrix44* matrix) const;
+  SkM44 GetRangeAdjustMatrix(int bit_depth) const;
 
   // Returns the current primary ID.
   // Note: if SetCustomPrimaries() has been used, the primary ID returned
@@ -370,7 +382,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
   static bool GetTransferFunction(TransferID, skcms_TransferFunction* fn);
   static size_t TransferParamCount(TransferID);
 
-  void SetCustomTransferFunction(const skcms_TransferFunction& fn);
+  void SetCustomTransferFunction(const skcms_TransferFunction& fn, bool is_hdr);
   void SetCustomPrimaries(const skcms_Matrix3x3& to_XYZD50);
 
   PrimaryID primaries_ = PrimaryID::INVALID;
@@ -379,7 +391,7 @@ class COLOR_SPACE_EXPORT ColorSpace {
   RangeID range_ = RangeID::INVALID;
 
   // Only used if primaries_ is PrimaryID::CUSTOM.
-  float custom_primary_matrix_[9] = {0, 0, 0, 0, 0, 0, 0, 0};
+  float custom_primary_matrix_[9] = {0};
 
   // Parameters for the transfer function. The interpretation depends on
   // |transfer_|. Only TransferParamCount() of these parameters are used, all
@@ -387,10 +399,12 @@ class COLOR_SPACE_EXPORT ColorSpace {
   // - CUSTOM and CUSTOM_HDR: Entries A through G of the skcms_TransferFunction
   //   structure in alphabetical order.
   // - SMPTEST2084: SDR white point.
-  float transfer_params_[7] = {0, 0, 0, 0, 0, 0, 0};
+  float transfer_params_[7] = {0};
 
   friend struct IPC::ParamTraits<gfx::ColorSpace>;
   friend struct mojo::StructTraits<gfx::mojom::ColorSpaceDataView,
+                                   gfx::ColorSpace>;
+  friend struct mojo::StructTraits<media::stable::mojom::ColorSpaceDataView,
                                    gfx::ColorSpace>;
 };
 

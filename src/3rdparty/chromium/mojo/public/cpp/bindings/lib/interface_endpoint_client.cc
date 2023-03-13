@@ -6,18 +6,20 @@
 
 #include <stdint.h>
 
+#include <tuple>
+
 #include "base/bind.h"
-#include "base/bind_post_task.h"
 #include "base/check.h"
 #include "base/containers/contains.h"
 #include "base/containers/cxx20_erase.h"
-#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/synchronization/waitable_event.h"
+#include "base/task/bind_post_task.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/trace_event/typed_macros.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/interface_endpoint_controller.h"
@@ -26,6 +28,8 @@
 #include "mojo/public/cpp/bindings/sync_call_restrictions.h"
 #include "mojo/public/cpp/bindings/sync_event_watcher.h"
 #include "mojo/public/cpp/bindings/thread_safe_proxy.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
+#include "third_party/perfetto/protos/perfetto/trace/track_event/chrome_mojo_event_info.pbzero.h"
 
 namespace mojo {
 
@@ -158,7 +162,7 @@ class ThreadSafeInterfaceEndpointClientProxy : public ThreadSafeProxy {
     static void CallAcceptAndDeleteResponder(
         std::unique_ptr<MessageReceiver> responder,
         Message message) {
-      ignore_result(responder->Accept(&message));
+      std::ignore = responder->Accept(&message);
     }
 
     std::unique_ptr<MessageReceiver> responder_;
@@ -233,6 +237,10 @@ class ResponderThunk : public MessageReceiverWithStatus {
       : endpoint_client_(endpoint_client),
         accept_was_invoked_(false),
         task_runner_(std::move(runner)) {}
+
+  ResponderThunk(const ResponderThunk&) = delete;
+  ResponderThunk& operator=(const ResponderThunk&) = delete;
+
   ~ResponderThunk() override {
     if (!accept_was_invoked_) {
       // The Service handled a message that was expecting a response
@@ -301,17 +309,33 @@ class ResponderThunk : public MessageReceiverWithStatus {
   bool accept_was_invoked_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   ConnectionGroup::Ref connection_group_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResponderThunk);
 };
 
 }  // namespace
 
 // ----------------------------------------------------------------------------
 
+InterfaceEndpointClient::PendingAsyncResponse::PendingAsyncResponse(
+    uint32_t request_message_name,
+    std::unique_ptr<MessageReceiver> responder)
+    : request_message_name(request_message_name),
+      responder(std::move(responder)) {}
+
+InterfaceEndpointClient::PendingAsyncResponse::PendingAsyncResponse(
+    PendingAsyncResponse&&) = default;
+
+InterfaceEndpointClient::PendingAsyncResponse&
+InterfaceEndpointClient::PendingAsyncResponse::operator=(
+    PendingAsyncResponse&&) = default;
+
+InterfaceEndpointClient::PendingAsyncResponse::~PendingAsyncResponse() =
+    default;
+
 InterfaceEndpointClient::SyncResponseInfo::SyncResponseInfo(
+    uint32_t request_message_name,
     bool* in_response_received)
-    : response_received(in_response_received) {}
+    : request_message_name(request_message_name),
+      response_received(in_response_received) {}
 
 InterfaceEndpointClient::SyncResponseInfo::~SyncResponseInfo() {}
 
@@ -363,7 +387,9 @@ void ThreadSafeInterfaceEndpointClientProxy::SendMessageWithResponder(
   }
 
   // If the Remote is bound on another sequence, post the call.
-  const bool allow_interrupt = !message.has_flag(Message::kFlagNoInterrupt);
+  const bool allow_interrupt =
+      SyncCallRestrictions::AreSyncCallInterruptsEnabled() &&
+      !message.has_flag(Message::kFlagNoInterrupt);
   auto response = base::MakeRefCounted<SyncResponseInfo>();
   auto response_signaler = std::make_unique<SyncResponseSignaler>(response);
   task_runner_->PostTask(
@@ -393,7 +419,7 @@ void ThreadSafeInterfaceEndpointClientProxy::SendMessageWithResponder(
     SyncEventWatcher watcher(&response->event,
                              base::BindRepeating(set_flag, &signaled));
     const bool* stop_flags[] = {&signaled};
-    watcher.SyncWatch(stop_flags, base::size(stop_flags));
+    watcher.SyncWatch(stop_flags, std::size(stop_flags));
   } else {
     // Else we can wait on the event directly. It will only signal after our
     // reply has been processed or cancelled.
@@ -406,24 +432,28 @@ void ThreadSafeInterfaceEndpointClientProxy::SendMessageWithResponder(
   }
 
   if (response->received)
-    ignore_result(responder->Accept(&response->message));
+    std::ignore = responder->Accept(&response->message);
 }
 
 InterfaceEndpointClient::InterfaceEndpointClient(
     ScopedInterfaceEndpointHandle handle,
     MessageReceiverWithResponderStatus* receiver,
     std::unique_ptr<MessageReceiver> payload_validator,
-    bool expect_sync_requests,
+    base::span<const uint32_t> sync_method_ordinals,
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     uint32_t interface_version,
-    const char* interface_name)
-    : expect_sync_requests_(expect_sync_requests),
+    const char* interface_name,
+    MessageToStableIPCHashCallback ipc_hash_callback,
+    MessageToMethodNameCallback method_name_callback)
+    : sync_method_ordinals_(sync_method_ordinals),
       handle_(std::move(handle)),
       incoming_receiver_(receiver),
       dispatcher_(&thunk_),
       task_runner_(std::move(task_runner)),
       control_message_handler_(this, interface_version),
-      interface_name_(interface_name) {
+      interface_name_(interface_name),
+      ipc_hash_callback_(ipc_hash_callback),
+      method_name_callback_(method_name_callback) {
   DCHECK(handle_.is_valid());
   DETACH_FROM_SEQUENCE(sequence_checker_);
 
@@ -497,7 +527,7 @@ void InterfaceEndpointClient::RaiseError() {
 }
 
 void InterfaceEndpointClient::CloseWithReason(uint32_t custom_reason,
-                                              const std::string& description) {
+                                              base::StringPiece description) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   auto handle = PassHandle();
@@ -595,8 +625,11 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
   // message before calling |SendMessage()| below.
 #endif
 
+  const uint32_t message_name = message->name();
   const bool is_sync = message->has_flag(Message::kFlagIsSync);
-  const bool exclusive_wait = message->has_flag(Message::kFlagNoInterrupt);
+  const bool exclusive_wait =
+      message->has_flag(Message::kFlagNoInterrupt) ||
+      !SyncCallRestrictions::AreSyncCallInterruptsEnabled();
   if (!controller_->SendMessage(message))
     return false;
 
@@ -611,7 +644,8 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
       controller_->RegisterExternalSyncWaiter(request_id);
     }
     base::AutoLock lock(async_responders_lock_);
-    async_responders_[request_id] = std::move(responder);
+    async_responders_.emplace(
+        request_id, PendingAsyncResponse{message_name, std::move(responder)});
     return true;
   }
 
@@ -619,7 +653,8 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
 
   bool response_received = false;
   sync_responses_.insert(std::make_pair(
-      request_id, std::make_unique<SyncResponseInfo>(&response_received)));
+      request_id,
+      std::make_unique<SyncResponseInfo>(message_name, &response_received)));
 
   base::WeakPtr<InterfaceEndpointClient> weak_self =
       weak_ptr_factory_.GetWeakPtr();
@@ -633,7 +668,7 @@ bool InterfaceEndpointClient::SendMessageWithResponder(
     auto iter = sync_responses_.find(request_id);
     DCHECK_EQ(&response_received, iter->second->response_received);
     if (response_received) {
-      ignore_result(responder->Accept(&iter->second->response));
+      std::ignore = responder->Accept(&iter->second->response);
     } else {
       DVLOG(1) << "Mojo sync call returns without receiving a response. "
                << "Typcially it is because the interface has been "
@@ -797,13 +832,13 @@ void InterfaceEndpointClient::ResetFromAnotherSequenceUnsafe() {
 }
 
 void InterfaceEndpointClient::ForgetAsyncRequest(uint64_t request_id) {
-  std::unique_ptr<MessageReceiver> responder;
+  absl::optional<PendingAsyncResponse> response;
   {
     base::AutoLock lock(async_responders_lock_);
     auto it = async_responders_.find(request_id);
     if (it == async_responders_.end())
       return;
-    responder = std::move(it->second);
+    response = std::move(it->second);
     async_responders_.erase(it);
   }
 }
@@ -814,7 +849,8 @@ void InterfaceEndpointClient::InitControllerIfNecessary() {
 
   controller_ = handle_.group_controller()->AttachEndpointClient(handle_, this,
                                                                  task_runner_);
-  if (expect_sync_requests_ && task_runner_->RunsTasksInCurrentSequence())
+  if (!sync_method_ordinals_.empty() &&
+      task_runner_->RunsTasksInCurrentSequence())
     controller_->AllowWokenUpBySyncWatchOnSameThread();
 }
 
@@ -832,6 +868,21 @@ void InterfaceEndpointClient::OnAssociationEvent(
 }
 
 bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
+  TRACE_EVENT("toplevel",
+              perfetto::StaticString{method_name_callback_(*message)},
+              [&](perfetto::EventContext& ctx) {
+                auto* info = ctx.event()->set_chrome_mojo_event_info();
+                info->set_mojo_interface_tag(interface_name_);
+                info->set_ipc_hash(ipc_hash_callback_(*message));
+
+                static const uint8_t* flow_enabled =
+                    TRACE_EVENT_API_GET_CATEGORY_GROUP_ENABLED("toplevel.flow");
+                if (!*flow_enabled)
+                  return;
+
+                perfetto::Flow::Global(message->GetTraceId())(ctx);
+              });
+
   DCHECK_EQ(handle_.id(), message->interface_id());
 
   if (encountered_error_) {
@@ -869,6 +920,10 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
         return false;
 
       if (it->second) {
+        if (message->name() != it->second->request_message_name) {
+          return false;
+        }
+
         it->second->response = std::move(*message);
         *it->second->response_received = true;
         return true;
@@ -879,18 +934,22 @@ bool InterfaceEndpointClient::HandleValidatedMessage(Message* message) {
       sync_responses_.erase(it);
     }
 
-    std::unique_ptr<MessageReceiver> responder;
+    absl::optional<PendingAsyncResponse> pending_response;
     {
       base::AutoLock lock(async_responders_lock_);
       auto it = async_responders_.find(request_id);
       if (it == async_responders_.end())
         return false;
-      responder = std::move(it->second);
+      pending_response = std::move(it->second);
       async_responders_.erase(it);
     }
 
+    if (message->name() != pending_response->request_message_name) {
+      return false;
+    }
+
     internal::MessageDispatchContext dispatch_context(message);
-    return responder->Accept(message);
+    return pending_response->responder->Accept(message);
   } else {
     if (mojo::internal::ControlMessageHandler::IsControlMessage(message))
       return control_message_handler_.Accept(message);

@@ -46,7 +46,7 @@ BmpDecoder::Status BmpDecoder::ReadHeader(
   *components = ctx->m_Bmp.components();
   *pal_num = ctx->m_Bmp.pal_num();
   *palette = ctx->m_Bmp.palette();
-  pAttribute->m_wDPIUnit = FXCODEC_RESUNIT_METER;
+  pAttribute->m_wDPIUnit = CFX_DIBAttribute::kResUnitMeter;
   pAttribute->m_nXDPI = ctx->m_Bmp.dpi_x();
   pAttribute->m_nYDPI = ctx->m_Bmp.dpi_y();
   return Status::kSuccess;
@@ -66,8 +66,7 @@ FX_FILESIZE BmpDecoder::GetAvailInput(
 
 // static
 bool BmpDecoder::Input(ProgressiveDecoderIface::Context* pContext,
-                       RetainPtr<CFX_CodecMemory> codec_memory,
-                       CFX_DIBAttribute*) {
+                       RetainPtr<CFX_CodecMemory> codec_memory) {
   auto* ctx = static_cast<CFX_BmpContext*>(pContext);
   ctx->m_Bmp.SetInputBuffer(std::move(codec_memory));
   return true;

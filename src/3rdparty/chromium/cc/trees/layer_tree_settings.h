@@ -127,9 +127,6 @@ class CC_EXPORT LayerTreeSettings {
   // deadlines.
   bool wait_for_all_pipeline_stages_before_draw = false;
 
-  // Determines whether the zoom needs to be applied to the device scale factor.
-  bool use_zoom_for_dsf = false;
-
   // Determines whether mouse interactions on composited scrollbars are handled
   // on the compositor thread.
   bool compositor_threaded_scrollbar_scrolling = true;
@@ -198,6 +195,15 @@ class CC_EXPORT LayerTreeSettings {
   // LayerTreeHostSingleThreadClient::FrameSinksToThrottleUpdated() will be
   // called with candidates.
   bool enable_compositing_based_throttling = false;
+
+  // Whether it is a LayerTree for ui.
+  bool is_layer_tree_for_ui = false;
+
+  // Whether tile resources are dropped for hidden layers. In terms of code,
+  // this uses PictureLayerImpl::HasValidTilePriorities(), which may return true
+  // even if the layer is not drawn. For example, if the layer is occluded it is
+  // still considered drawn and will not be impacted by this feature.
+  bool release_tile_resources_for_hidden_layers = false;
 };
 
 class CC_EXPORT LayerListSettings : public LayerTreeSettings {

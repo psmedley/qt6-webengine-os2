@@ -5,10 +5,10 @@
 #ifndef NET_HTTP_HTTP_CACHE_WRITERS_H_
 #define NET_HTTP_HTTP_CACHE_WRITERS_H_
 
-#include <list>
 #include <map>
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_once_callback.h"
 #include "net/http/http_cache.h"
@@ -48,13 +48,17 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
     TransactionInfo& operator=(const TransactionInfo&);
     TransactionInfo(const TransactionInfo&);
 
-    PartialData* partial;
+    raw_ptr<PartialData> partial;
     bool truncated;
     HttpResponseInfo response_info;
   };
 
   // |cache| and |entry| must outlive this object.
   Writers(HttpCache* cache, HttpCache::ActiveEntry* entry);
+
+  Writers(const Writers&) = delete;
+  Writers& operator=(const Writers&) = delete;
+
   ~Writers();
 
   // Retrieves data from the network transaction associated with the Writers
@@ -232,10 +236,10 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   // True if only reading from network and not writing to cache.
   bool network_read_only_ = false;
 
-  HttpCache* cache_ = nullptr;
+  raw_ptr<HttpCache> cache_ = nullptr;
 
   // Owner of |this|.
-  ActiveEntry* entry_ = nullptr;
+  raw_ptr<ActiveEntry> entry_ = nullptr;
 
   std::unique_ptr<HttpTransaction> network_transaction_;
 
@@ -248,7 +252,7 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   // ::Read or writing to the entry and is waiting for the operation to be
   // completed. This is used to ensure there is at most one consumer of
   // network_transaction_ at a time.
-  Transaction* active_transaction_ = nullptr;
+  raw_ptr<Transaction> active_transaction_ = nullptr;
 
   // Transactions whose consumers have invoked Read, but another transaction is
   // currently the |active_transaction_|. After the network read and cache write
@@ -288,7 +292,6 @@ class NET_EXPORT_PRIVATE HttpCache::Writers {
   base::OnceClosure cache_callback_;  // Callback for cache_.
 
   base::WeakPtrFactory<Writers> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(Writers);
 };
 
 }  // namespace net

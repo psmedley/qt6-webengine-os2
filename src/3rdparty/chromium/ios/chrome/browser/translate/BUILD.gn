@@ -26,10 +26,10 @@ source_set("translate") {
     "translate_accept_languages_factory.cc",
     "translate_accept_languages_factory.h",
     "translate_infobar_tags.h",
-    "translate_ranker_factory.cc",
     "translate_ranker_factory.h",
-    "translate_ranker_metrics_provider.cc",
+    "translate_ranker_factory.mm",
     "translate_ranker_metrics_provider.h",
+    "translate_ranker_metrics_provider.mm",
     "translate_service_ios.h",
     "translate_service_ios.mm",
   ]
@@ -54,7 +54,6 @@ source_set("translate") {
     "//ios/chrome/browser/infobars",
     "//ios/chrome/browser/infobars:public",
     "//ios/chrome/browser/language",
-    "//ios/chrome/browser/ui/infobars:feature_flags",
     "//ios/chrome/browser/ui/util",
     "//ios/components/webui:url_constants",
     "//third_party/metrics_proto",
@@ -82,10 +81,11 @@ source_set("unit_tests") {
     "//components/translate/core/browser:test_support",
     "//components/translate/ios/browser",
     "//ios/chrome/browser",
-    "//ios/chrome/browser/web:test_support",
+    "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/web:web_internal",
     "//ios/chrome/common",
     "//ios/web/public",
+    "//ios/web/public/test:test",
     "//ios/web/public/test:util",
     "//skia",
     "//testing/gmock",
@@ -113,7 +113,6 @@ source_set("test_support") {
 }
 
 source_set("eg_app_support+eg2") {
-  defines = [ "CHROME_EARL_GREY_2" ]
   configs += [
     "//build/config/compiler:enable_arc",
     "//build/config/ios:xctest_config",
@@ -132,12 +131,12 @@ source_set("eg_app_support+eg2") {
     "//ios/chrome/browser/translate:translate",
     "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/fakes:fakes",
+    "//ios/web/public/js_messaging",
     "//net:net",
   ]
 }
 
 source_set("eg_test_support+eg2") {
-  defines = [ "CHROME_EARL_GREY_2" ]
   configs += [
     "//build/config/compiler:enable_arc",
     "//build/config/ios:xctest_config",

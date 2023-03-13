@@ -6,12 +6,15 @@
 #define COMPONENTS_FEED_CORE_V2_TYPES_H_
 
 #include <cstdint>
+#include <iosfwd>
 #include <string>
+#include <vector>
 
 #include "base/containers/flat_set.h"
 #include "base/time/time.h"
 #include "base/types/id_type.h"
 #include "base/values.h"
+#include "components/feed/core/proto/v2/wire/client_info.pb.h"
 #include "components/feed/core/proto/v2/wire/reliability_logging_enums.pb.h"
 #include "components/feed/core/v2/enums.h"
 #include "components/feed/core/v2/public/common_enums.h"
@@ -44,6 +47,8 @@ struct RequestMetadata {
   RequestMetadata(RequestMetadata&&);
   RequestMetadata& operator=(RequestMetadata&&);
 
+  feedwire::ClientInfo ToClientInfo() const;
+
   ChromeInfo chrome_info;
   std::string language_tag;
   std::string client_instance_id;
@@ -52,6 +57,8 @@ struct RequestMetadata {
   ContentOrder content_order = ContentOrder::kUnspecified;
   bool notice_card_acknowledged = false;
   bool autoplay_enabled = false;
+  int followed_from_web_page_menu_count = 0;
+  std::vector<std::string> acknowledged_notice_keys;
 };
 
 // Data internal to MetricsReporter which is persisted to Prefs.
@@ -123,6 +130,8 @@ class ContentIdSet {
   // `id` is unique enough given these are only `feedstore::Content` ids.
   base::flat_set<int64_t> content_ids_;
 };
+
+std::ostream& operator<<(std::ostream& s, const ContentIdSet& id_set);
 
 struct ContentStats {
   int card_count = 0;

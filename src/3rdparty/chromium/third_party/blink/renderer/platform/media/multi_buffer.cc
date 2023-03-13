@@ -112,7 +112,7 @@ void MultiBuffer::GlobalLRU::SchedulePrune() {
   if (Pruneable() && !background_pruning_pending_) {
     task_runner_->PostDelayedTask(
         FROM_HERE, base::BindOnce(&MultiBuffer::GlobalLRU::PruneTask, this),
-        base::TimeDelta::FromSeconds(kBlockPruneInterval));
+        base::Seconds(kBlockPruneInterval));
     background_pruning_pending_ = true;
   }
 }
@@ -507,7 +507,7 @@ void MultiBuffer::PinRange(const BlockId& from,
     return;
 
   auto range = pinned_.find(to - 1);
-  while (1) {
+  while (true) {
     DCHECK_GE(range.value(), 0);
     if (range.value() == 0 || range.value() == how_much) {
       bool pin = range.value() == how_much;

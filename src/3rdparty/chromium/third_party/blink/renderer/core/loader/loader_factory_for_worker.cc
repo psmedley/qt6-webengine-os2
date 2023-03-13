@@ -12,6 +12,7 @@
 #include "third_party/blink/public/mojom/frame/frame.mojom-blink.h"
 #include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
 #include "third_party/blink/public/platform/web_url_loader.h"
+#include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/public/platform/web_worker_fetch_context.h"
 #include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
@@ -99,12 +100,7 @@ std::unique_ptr<WebURLLoader> LoaderFactoryForWorker::CreateURLLoader(
 
 std::unique_ptr<WebCodeCacheLoader>
 LoaderFactoryForWorker::CreateCodeCacheLoader() {
-  if (global_scope_->IsWorkerGlobalScope()) {
-    return web_context_->CreateCodeCacheLoader(
-        global_scope_->GetCodeCacheHost());
-  }
-  // TODO(mythria): Get the CodeCacheHost corresponding to worklet global scope.
-  return web_context_->CreateCodeCacheLoader(nullptr);
+  return web_context_->CreateCodeCacheLoader(global_scope_->GetCodeCacheHost());
 }
 
 // TODO(altimin): This is used when creating a URLLoader, and

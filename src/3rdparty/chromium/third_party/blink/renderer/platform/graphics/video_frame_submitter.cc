@@ -9,8 +9,11 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/feature_list.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/threading/platform_thread.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/metrics/video_playback_roughness_reporter.h"
@@ -44,7 +47,7 @@ namespace {
 // FrameSinkId. This is used to aggregate Viz communication and substantially
 // reduce IPC traffic when many VideoFrameSubmitters are active within a frame.
 const base::Feature kUseVideoFrameSinkBundle{"UseVideoFrameSinkBundle",
-                                             base::FEATURE_DISABLED_BY_DEFAULT};
+                                             base::FEATURE_ENABLED_BY_DEFAULT};
 
 }  // namespace
 
@@ -56,21 +59,27 @@ const base::Feature kUseVideoFrameSinkBundle{"UseVideoFrameSinkBundle",
 class VideoFrameSubmitter::FrameSinkBundleProxy
     : public viz::mojom::blink::CompositorFrameSink {
  public:
-  FrameSinkBundleProxy(VideoFrameSinkBundle& bundle,
+  FrameSinkBundleProxy(base::WeakPtr<VideoFrameSinkBundle> bundle,
                        const viz::FrameSinkId& frame_sink_id)
-      : bundle_(bundle),
-        bundle_id_(bundle.bundle_id()),
+      : bundle_(std::move(bundle)),
+        bundle_id_(bundle_->bundle_id()),
         frame_sink_id_(frame_sink_id) {}
   FrameSinkBundleProxy(const FrameSinkBundleProxy&) = delete;
   FrameSinkBundleProxy& operator=(const FrameSinkBundleProxy&) = delete;
 
-  ~FrameSinkBundleProxy() override { bundle_.RemoveClient(frame_sink_id_); }
-
-  void OnContextLost() { bundle_.OnContextLost(bundle_id_); }
+  ~FrameSinkBundleProxy() override {
+    if (bundle_) {
+      bundle_->RemoveClient(frame_sink_id_);
+    }
+  }
 
   // viz::mojom::Blink::CompositorFrameSink:
   void SetNeedsBeginFrame(bool needs_begin_frame) override {
-    bundle_.SetNeedsBeginFrame(frame_sink_id_.sink_id(), needs_begin_frame);
+    if (!bundle_) {
+      return;
+    }
+
+    bundle_->SetNeedsBeginFrame(frame_sink_id_.sink_id(), needs_begin_frame);
   }
 
   // Not used by VideoFrameSubmitter.
@@ -81,9 +90,13 @@ class VideoFrameSubmitter::FrameSinkBundleProxy
       viz::CompositorFrame frame,
       absl::optional<viz::HitTestRegionList> hit_test_region_list,
       uint64_t submit_time) override {
-    bundle_.SubmitCompositorFrame(frame_sink_id_.sink_id(), local_surface_id,
-                                  std::move(frame),
-                                  std::move(hit_test_region_list), submit_time);
+    if (!bundle_) {
+      return;
+    }
+
+    bundle_->SubmitCompositorFrame(
+        frame_sink_id_.sink_id(), local_surface_id, std::move(frame),
+        std::move(hit_test_region_list), submit_time);
   }
 
   // Not used by VideoFrameSubmitter.
@@ -97,26 +110,44 @@ class VideoFrameSubmitter::FrameSinkBundleProxy
   }
 
   void DidNotProduceFrame(const viz::BeginFrameAck& ack) override {
-    bundle_.DidNotProduceFrame(frame_sink_id_.sink_id(), ack);
+    if (!bundle_) {
+      return;
+    }
+    bundle_->DidNotProduceFrame(frame_sink_id_.sink_id(), ack);
   }
 
   void DidAllocateSharedBitmap(base::ReadOnlySharedMemoryRegion region,
                                const gpu::Mailbox& id) override {
-    bundle_.DidAllocateSharedBitmap(frame_sink_id_.sink_id(), std::move(region),
-                                    id);
+    if (!bundle_) {
+      return;
+    }
+    bundle_->DidAllocateSharedBitmap(frame_sink_id_.sink_id(),
+                                     std::move(region), id);
   }
 
   void DidDeleteSharedBitmap(const gpu::Mailbox& id) override {
-    bundle_.DidDeleteSharedBitmap(frame_sink_id_.sink_id(), id);
+    if (!bundle_) {
+      return;
+    }
+    bundle_->DidDeleteSharedBitmap(frame_sink_id_.sink_id(), id);
   }
 
   void InitializeCompositorFrameSinkType(
       viz::mojom::blink::CompositorFrameSinkType type) override {
-    bundle_.InitializeCompositorFrameSinkType(frame_sink_id_.sink_id(), type);
+    if (!bundle_) {
+      return;
+    }
+    bundle_->InitializeCompositorFrameSinkType(frame_sink_id_.sink_id(), type);
   }
 
+#if BUILDFLAG(IS_ANDROID)
+  void SetThreadIds(const WTF::Vector<int32_t>& thread_ids) override {
+    bundle_->SetThreadIds(frame_sink_id_.sink_id(), thread_ids);
+  }
+#endif
+
  private:
-  VideoFrameSinkBundle& bundle_;
+  const base::WeakPtr<VideoFrameSinkBundle> bundle_;
   const viz::FrameSinkBundleId bundle_id_;
   const viz::FrameSinkId frame_sink_id_;
 };
@@ -125,11 +156,9 @@ VideoFrameSubmitter::VideoFrameSubmitter(
     WebContextProviderCallback context_provider_callback,
     cc::VideoPlaybackRoughnessReporter::ReportingCallback
         roughness_reporting_callback,
-    const viz::FrameSinkId& parent_frame_sink_id,
     std::unique_ptr<VideoFrameResourceProvider> resource_provider)
     : context_provider_callback_(context_provider_callback),
       resource_provider_(std::move(resource_provider)),
-      parent_frame_sink_id_(parent_frame_sink_id),
       roughness_reporter_(std::make_unique<cc::VideoPlaybackRoughnessReporter>(
           std::move(roughness_reporting_callback))),
       frame_trackers_(false, nullptr),
@@ -267,10 +296,7 @@ void VideoFrameSubmitter::OnContextLost() {
   // should be reset after `remote_frame_sink_`.
   compositor_frame_sink_ = nullptr;
   remote_frame_sink_.reset();
-  if (bundle_proxy_) {
-    bundle_proxy_->OnContextLost();
-    bundle_proxy_.reset();
-  }
+  bundle_proxy_.reset();
 
   context_provider_callback_.Run(
       context_provider_,
@@ -303,7 +329,7 @@ void VideoFrameSubmitter::OnBeginFrame(
       continue;
     auto& feedback =
         timing_details.find(frame_token)->value.presentation_feedback;
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
     // TODO: On Linux failure flag is unreliable, and perfectly rendered frames
     // are reported as failures all the time.
     bool presentation_failure = false;
@@ -414,39 +440,40 @@ void VideoFrameSubmitter::OnReceivedContextProvider(
     return;
   }
 
-  bool has_good_context = false;
-  while (!has_good_context) {
-    if (!context_provider) {
-      // Delay to retry getting the context_provider.
-      constexpr base::TimeDelta kGetContextProviderRetryTimeout =
-          base::TimeDelta::FromMilliseconds(150);
-
-      base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-          FROM_HERE,
-          base::BindOnce(
-              context_provider_callback_, context_provider_,
-              base::BindOnce(&VideoFrameSubmitter::OnReceivedContextProvider,
-                             weak_ptr_factory_.GetWeakPtr())),
-          kGetContextProviderRetryTimeout);
-      return;
-    }
-
-    // Note that |context_provider| is now null after the move, such that if we
-    // end up having !|has_good_context|, we will retry to obtain the
-    // context_provider.
-    context_provider_ = std::move(context_provider);
-    auto result = context_provider_->BindToCurrentThread();
-
-    has_good_context =
-        result == gpu::ContextResult::kSuccess &&
-        context_provider_->ContextGL()->GetGraphicsResetStatusKHR() ==
-            GL_NO_ERROR;
+  if (!MaybeAcceptContextProvider(std::move(context_provider))) {
+    constexpr base::TimeDelta kGetContextProviderRetryTimeout =
+        base::Milliseconds(150);
+    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+        FROM_HERE,
+        base::BindOnce(
+            context_provider_callback_, context_provider_,
+            base::BindOnce(&VideoFrameSubmitter::OnReceivedContextProvider,
+                           weak_ptr_factory_.GetWeakPtr())),
+        kGetContextProviderRetryTimeout);
+    return;
   }
+
   context_provider_->AddObserver(this);
   resource_provider_->Initialize(context_provider_.get(), nullptr);
 
   if (frame_sink_id_.is_valid())
     StartSubmitting();
+}
+
+bool VideoFrameSubmitter::MaybeAcceptContextProvider(
+    scoped_refptr<viz::RasterContextProvider> context_provider) {
+  if (!context_provider) {
+    return false;
+  }
+
+  context_provider_ = std::move(context_provider);
+  if (context_provider_->BindToCurrentThread() !=
+      gpu::ContextResult::kSuccess) {
+    return false;
+  }
+
+  return context_provider_->ContextGL()->GetGraphicsResetStatusKHR() ==
+         GL_NO_ERROR;
 }
 
 void VideoFrameSubmitter::StartSubmitting() {
@@ -456,17 +483,13 @@ void VideoFrameSubmitter::StartSubmitting() {
   mojo::Remote<mojom::blink::EmbeddedFrameSinkProvider> provider;
   Platform::Current()->GetBrowserInterfaceBroker()->GetInterface(
       provider.BindNewPipeAndPassReceiver());
-
   if (base::FeatureList::IsEnabled(kUseVideoFrameSinkBundle)) {
     auto& bundle = VideoFrameSinkBundle::GetOrCreateSharedInstance(
-        *provider.get(), parent_frame_sink_id_, is_media_stream_);
-    provider->CreateBundledCompositorFrameSink(
-        frame_sink_id_, bundle.bundle_id(),
-        receiver_.BindNewPipeAndPassRemote(),
-        remote_frame_sink_.BindNewPipeAndPassReceiver());
-    bundle.AddClient(frame_sink_id_, this, remote_frame_sink_);
-    bundle_proxy_ =
-        std::make_unique<FrameSinkBundleProxy>(bundle, frame_sink_id_);
+        frame_sink_id_.client_id());
+    auto weak_bundle = bundle.AddClient(frame_sink_id_, this, provider,
+                                        receiver_, remote_frame_sink_);
+    bundle_proxy_ = std::make_unique<FrameSinkBundleProxy>(
+        std::move(weak_bundle), frame_sink_id_);
     compositor_frame_sink_ = bundle_proxy_.get();
   } else {
     provider->CreateCompositorFrameSink(
@@ -488,6 +511,14 @@ void VideoFrameSubmitter::StartSubmitting() {
   compositor_frame_sink_->InitializeCompositorFrameSinkType(
       is_media_stream_ ? viz::mojom::CompositorFrameSinkType::kMediaStream
                        : viz::mojom::CompositorFrameSinkType::kVideo);
+
+#if BUILDFLAG(IS_ANDROID)
+  WTF::Vector<base::PlatformThreadId> thread_ids;
+  thread_ids.push_back(base::PlatformThread::CurrentId());
+  thread_ids.push_back(Platform::Current()->GetIOThreadId());
+  compositor_frame_sink_->SetThreadIds(thread_ids);
+#endif
+
   UpdateSubmissionState();
 }
 
@@ -536,7 +567,7 @@ void VideoFrameSubmitter::UpdateSubmissionState() {
     // If there are any in-flight empty frame requests, this cancels them. We
     // want to wait until any group of state changes stabilizes.
     empty_frame_timer_.Start(
-        FROM_HERE, base::TimeDelta::FromMilliseconds(500),
+        FROM_HERE, base::Milliseconds(500),
         base::BindOnce(&VideoFrameSubmitter::SubmitEmptyFrameIfNeeded,
                        base::Unretained(this)));
   }
@@ -733,6 +764,10 @@ viz::CompositorFrame VideoFrameSubmitter::CreateCompositorFrame(
   compositor_frame.metadata.begin_frame_ack.has_damage = true;
   compositor_frame.metadata.device_scale_factor = 1;
   compositor_frame.metadata.may_contain_video = true;
+  // If we're submitting frames even if we're not visible, then also turn off
+  // throttling.  This is for picture in picture, which can be throttled if the
+  // opener window is minimized without this.
+  compositor_frame.metadata.may_throttle_if_undrawn_frames = force_submit_;
 
   // Specify size of shared quad state and quad lists so that RenderPass doesn't
   // allocate using the defaults of 32 and 128 since we only append one quad.

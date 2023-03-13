@@ -587,9 +587,9 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeWinUIABrowserTest,
   BrowserAccessibilityComWin* fake_lang_node_com_win =
       ToBrowserAccessibilityWin(node)->GetCOM();
   ASSERT_NE(nullptr, fake_lang_node_com_win);
-  base::win::ScopedVariant actual;
+  base::win::ScopedVariant actual_value;
   EXPECT_HRESULT_FAILED(fake_lang_node_com_win->GetPropertyValue(
-      UIA_CulturePropertyId, actual.Receive()));
+      UIA_CulturePropertyId, actual_value.Receive()));
 
   // No lang should default to the page's default language (en-us).
   node = FindNodeAfter(node, "no lang");
@@ -726,7 +726,10 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeWinBrowserTest, IFrameTraversal) {
       FindNodeAfter(root_node, "Before iframe");
   ASSERT_NE(nullptr, before_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kStaticText, before_iframe_node->GetRole());
-  before_iframe_node = before_iframe_node->PlatformGetFirstChild();
+
+  ASSERT_EQ(0U, before_iframe_node->PlatformChildCount());
+  ASSERT_EQ(1U, before_iframe_node->InternalChildCount());
+  before_iframe_node = before_iframe_node->InternalGetFirstChild();
   ASSERT_NE(nullptr, before_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kInlineTextBox, before_iframe_node->GetRole());
 
@@ -734,7 +737,10 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeWinBrowserTest, IFrameTraversal) {
       FindNodeAfter(before_iframe_node, "Text in iframe");
   ASSERT_NE(nullptr, inside_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kStaticText, inside_iframe_node->GetRole());
-  inside_iframe_node = inside_iframe_node->PlatformGetFirstChild();
+
+  ASSERT_EQ(0U, inside_iframe_node->PlatformChildCount());
+  ASSERT_EQ(1U, inside_iframe_node->InternalChildCount());
+  inside_iframe_node = inside_iframe_node->InternalGetFirstChild();
   ASSERT_NE(nullptr, inside_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kInlineTextBox, inside_iframe_node->GetRole());
 
@@ -742,7 +748,10 @@ IN_PROC_BROWSER_TEST_F(AXPlatformNodeWinBrowserTest, IFrameTraversal) {
       FindNodeAfter(inside_iframe_node, "After iframe");
   ASSERT_NE(nullptr, after_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kStaticText, after_iframe_node->GetRole());
-  after_iframe_node = after_iframe_node->PlatformGetFirstChild();
+
+  ASSERT_EQ(0U, after_iframe_node->PlatformChildCount());
+  ASSERT_EQ(1U, after_iframe_node->InternalChildCount());
+  after_iframe_node = after_iframe_node->InternalGetFirstChild();
   ASSERT_NE(nullptr, after_iframe_node);
   ASSERT_EQ(ax::mojom::Role::kInlineTextBox, after_iframe_node->GetRole());
 

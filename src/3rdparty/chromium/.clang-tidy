@@ -1,6 +1,7 @@
 ---
   Checks:          '-*,
                     bugprone-argument-comment,
+                    bugprone-assert-side-effect,
                     bugprone-dangling-handle,
                     bugprone-inaccurate-erase,
                     bugprone-string-constructor,
@@ -11,6 +12,7 @@
                     google-explicit-constructor,
                     google-readability-casting,
                     modernize-avoid-bind,
+                    modernize-concat-nested-namespaces,
                     modernize-loop-convert,
                     modernize-make-shared,
                     modernize-make-unique,
@@ -28,8 +30,10 @@
                     modernize-use-transparent-functors,
                     readability-redundant-member-init'
   CheckOptions:
+    - key:          bugprone-assert-side-effect.AssertMacros
+      value:        assert,DCHECK
     - key:          bugprone-dangling-handle.HandleClasses
-      value:        ::std::basic_string_view;::std::span;::base::BasicStringPiece;::base::span
+      value:        ::std::basic_string_view;::std::span;::absl::string_view;::base::BasicStringPiece;::base::span
     - key:          bugprone-string-constructor.StringNames
       value:        ::std::basic_string;::std::basic_string_view;::base::BasicStringPiece
     - key:          modernize-use-default-member-init.UseAssignment

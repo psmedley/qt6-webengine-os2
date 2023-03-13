@@ -12,7 +12,8 @@
 #include "base/callback.h"
 #include "base/containers/circular_deque.h"
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/common/quads/aggregated_render_pass.h"
 #include "components/viz/common/quads/tile_draw_quad.h"
@@ -24,6 +25,7 @@
 #include "components/viz/service/viz_service_export.h"
 #include "gpu/command_buffer/common/texture_in_use_response.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+#include "ui/gfx/ca_layer_result.h"
 #include "ui/gfx/delegated_ink_metadata.h"
 #include "ui/gfx/display_color_spaces.h"
 #include "ui/gfx/geometry/quad_f.h"
@@ -62,6 +64,10 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
                  OutputSurface* output_surface,
                  DisplayResourceProvider* resource_provider,
                  OverlayProcessorInterface* overlay_processor);
+
+  DirectRenderer(const DirectRenderer&) = delete;
+  DirectRenderer& operator=(const DirectRenderer&) = delete;
+
   virtual ~DirectRenderer();
 
   void Initialize();
@@ -69,6 +75,7 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   bool use_partial_swap() const { return use_partial_swap_; }
 
   void SetVisible(bool visible);
+  void ReallocatedFrameBuffers();
   void DecideRenderPassAllocationsForFrame(
       const AggregatedRenderPassList& render_passes_in_draw_order);
   void DrawFrame(AggregatedRenderPassList* render_passes_in_draw_order,
@@ -95,6 +102,10 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
 
     std::vector<ui::LatencyInfo> latency_info;
     bool top_controls_visible_height_changed = false;
+#if BUILDFLAG(IS_MAC)
+    gfx::CALayerResult ca_layer_error_code = gfx::kCALayerSuccess;
+#endif
+    absl::optional<int64_t> choreographer_vsync_id;
   };
   virtual void SwapBuffers(SwapFrameData swap_frame_data) = 0;
   virtual void SwapBuffersSkipped() {}
@@ -110,8 +121,9 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
     DrawingFrame();
     ~DrawingFrame();
 
-    const AggregatedRenderPassList* render_passes_in_draw_order = nullptr;
-    const AggregatedRenderPass* root_render_pass = nullptr;
+    raw_ptr<const AggregatedRenderPassList> render_passes_in_draw_order =
+        nullptr;
+    raw_ptr<const AggregatedRenderPass> root_render_pass = nullptr;
     const AggregatedRenderPass* current_render_pass = nullptr;
 
     gfx::Rect root_damage_rect;
@@ -272,21 +284,24 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   gfx::Size surface_size_for_swap_buffers() const {
     return reshape_surface_size_;
   }
+  gfx::Size viewport_size_for_swap_buffers() const {
+    return device_viewport_size_;
+  }
 
   bool ShouldApplyRoundedCorner(const DrawQuad* quad) const;
 
   gfx::ColorSpace RootRenderPassColorSpace() const;
   gfx::ColorSpace CurrentRenderPassColorSpace() const;
 
-  const RendererSettings* const settings_;
+  const raw_ptr<const RendererSettings> settings_;
   // Points to the viz-global singleton.
-  const DebugRendererSettings* const debug_settings_;
-  OutputSurface* const output_surface_;
-  DisplayResourceProvider* const resource_provider_;
+  const raw_ptr<const DebugRendererSettings> debug_settings_;
+  const raw_ptr<OutputSurface> output_surface_;
+  const raw_ptr<DisplayResourceProvider> resource_provider_;
   // This can be replaced by test implementations.
   // TODO(weiliangc): For SoftwareRenderer and tests where overlay is not used,
   // use OverlayProcessorStub so this pointer is never null.
-  OverlayProcessorInterface* overlay_processor_;
+  raw_ptr<OverlayProcessorInterface> overlay_processor_;
 
   // Whether it's valid to SwapBuffers with an empty rect. Trivially true when
   // using partial swap.
@@ -367,6 +382,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   // |reshape_surface_size_|.
   base::TimeTicks last_viewport_resize_time_;
 
+  bool next_frame_needs_full_frame_redraw_ = false;
+
   // Cached values given to Reshape(). The |reshape_buffer_format_| is optional
   // to prevent use of uninitialized values. This may be larger than the
   // |device_viewport_size_| that users see.
@@ -376,8 +393,8 @@ class VIZ_SERVICE_EXPORT DirectRenderer {
   gfx::ColorSpace reshape_color_space_;
   absl::optional<gfx::BufferFormat> reshape_buffer_format_;
   bool reshape_use_stencil_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(DirectRenderer);
+  gfx::OverlayTransform reshape_display_transform_ =
+      gfx::OVERLAY_TRANSFORM_INVALID;
 };
 
 }  // namespace viz

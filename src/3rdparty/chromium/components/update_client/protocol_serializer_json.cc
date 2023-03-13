@@ -12,7 +12,6 @@
 #include "base/values.h"
 #include "build/branding_buildflags.h"
 #include "build/build_config.h"
-#include "components/update_client/updater_state.h"
 
 namespace update_client {
 
@@ -24,8 +23,9 @@ std::string ProtocolSerializerJSON::Serialize(
   auto* request_node =
       root_node.SetKey("request", Value(Value::Type::DICTIONARY));
   request_node->SetKey("protocol", Value(request.protocol_version));
+  request_node->SetKey("ismachine", Value(request.is_machine));
   request_node->SetKey("dedup", Value("cr"));
-  request_node->SetKey("acceptformat", Value("crx2,crx3"));
+  request_node->SetKey("acceptformat", Value("crx3"));
   if (!request.additional_attributes.empty()) {
     for (const auto& attr : request.additional_attributes)
       request_node->SetKey(attr.first, Value(attr.second));
@@ -35,14 +35,13 @@ std::string ProtocolSerializerJSON::Serialize(
   request_node->SetKey("@updater", Value(request.updatername));
   request_node->SetKey("prodversion", Value(request.updaterversion));
   request_node->SetKey("updaterversion", Value(request.prodversion));
-  request_node->SetKey("lang", Value(request.lang));
   request_node->SetKey("@os", Value(request.operating_system));
   request_node->SetKey("arch", Value(request.arch));
   request_node->SetKey("nacl_arch", Value(request.nacl_arch));
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   if (request.is_wow64)
     request_node->SetKey("wow64", Value(request.is_wow64));
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
   if (!request.updaterchannel.empty())
     request_node->SetKey("updaterchannel", Value(request.updaterchannel));
   if (!request.prodchannel.empty())
@@ -50,13 +49,19 @@ std::string ProtocolSerializerJSON::Serialize(
   if (!request.dlpref.empty())
     request_node->SetKey("dlpref", Value(request.dlpref));
   if (request.domain_joined) {
-    request_node->SetKey(UpdaterState::kIsEnterpriseManaged,
-                         Value(*request.domain_joined));
+    request_node->SetKey("domainjoined", Value(*request.domain_joined));
   }
 
   // HW platform information.
   auto* hw_node = request_node->SetKey("hw", Value(Value::Type::DICTIONARY));
   hw_node->SetKey("physmemory", Value(static_cast<int>(request.hw.physmemory)));
+  hw_node->SetKey("sse", Value(request.hw.sse));
+  hw_node->SetKey("sse2", Value(request.hw.sse2));
+  hw_node->SetKey("sse3", Value(request.hw.sse3));
+  hw_node->SetKey("sse41", Value(request.hw.sse41));
+  hw_node->SetKey("sse42", Value(request.hw.sse42));
+  hw_node->SetKey("ssse3", Value(request.hw.ssse3));
+  hw_node->SetKey("avx", Value(request.hw.avx));
 
   // OS version and platform information.
   auto* os_node = request_node->SetKey("os", Value(Value::Type::DICTIONARY));
@@ -91,8 +96,12 @@ std::string ProtocolSerializerJSON::Serialize(
     Value app_node(Value::Type::DICTIONARY);
     app_node.SetKey("appid", Value(app.app_id));
     app_node.SetKey("version", Value(app.version));
+    if (!app.ap.empty())
+      app_node.SetKey("ap", Value(app.ap));
     if (!app.brand_code.empty())
       app_node.SetKey("brand", Value(app.brand_code));
+    if (!app.lang.empty())
+      app_node.SetKey("lang", Value(app.lang));
     if (!app.install_source.empty())
       app_node.SetKey("installsource", Value(app.install_source));
     if (!app.install_location.empty())
@@ -130,11 +139,31 @@ std::string ProtocolSerializerJSON::Serialize(
         update_check_node->SetKey("updatedisabled", Value(true));
       if (app.update_check->rollback_allowed)
         update_check_node->SetKey("rollback_allowed", Value(true));
+      if (app.update_check->same_version_update_allowed)
+        update_check_node->SetKey("sameversionupdate", Value(true));
       if (!app.update_check->target_version_prefix.empty()) {
         update_check_node->SetKey(
             "targetversionprefix",
             Value(app.update_check->target_version_prefix));
       }
+    }
+
+    if (!app.data.empty()) {
+      std::vector<Value> data_nodes;
+      for (const auto& data : app.data) {
+        Value data_node(Value::Type::DICTIONARY);
+
+        data_node.SetKey("name", Value(data.name));
+        if (data.name == "install")
+          data_node.SetKey("index", Value(data.install_data_index));
+        else if (data.name == "untrusted")
+          data_node.SetKey("#text", Value(data.untrusted_data));
+
+        data_nodes.push_back(std::move(data_node));
+      }
+
+      if (!data_nodes.empty())
+        app_node.SetKey("data", Value(std::move(data_nodes)));
     }
 
     if (app.ping) {

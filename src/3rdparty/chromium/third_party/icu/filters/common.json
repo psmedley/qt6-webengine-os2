@@ -141,7 +141,7 @@
     },
     "brkitr_tree": {
       "excludelist": [
-	"en_US_POSIX"
+        "en_US_POSIX"
       ]
     },
 // Based on the ICU63 version of
@@ -191,8 +191,9 @@
       "filterType": "language",
       "includelist": [
 // Need to explicitly add "root"
-	"root",
+        "root",
 
+        "af",
         "am",
         "ar",
         "bg",
@@ -246,6 +247,7 @@
         "tl",
         "tr",
         "uk",
+        "ur",
         "vi",
         "zh"
       ]
@@ -266,8 +268,9 @@
           "filterType": "language",
           "includelist": [
 // Need to explicitly add "root"
-    	    "root",
+            "root",
 
+            "af",
             "am",
             "ar",
             "bg",
@@ -320,6 +323,7 @@
             "tl",
             "tr",
             "uk",
+            "ur",
             "vi",
             "zh"
           ]
@@ -341,8 +345,9 @@
       "filterType": "language",
       "includelist": [
 // Need to explicitly add "root"
-	"root",
+        "root",
 
+        "af",
         "am",
         "ar",
         "bg",
@@ -396,6 +401,7 @@
         "tl",
         "tr",
         "uk",
+        "ur",
         "vi",
         "zh"
       ]
@@ -403,7 +409,12 @@
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/sprep/spreplocal.mk?rcl=797b7c
     "stringprep": { "filterType": "exclude" },
-    "translit": { "filterType": "exclude" },
+    "translit": {
+      "filterType": "language",
+      "includelist": [
+         "root"
+      ]
+    },
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/unit/reslocal.mk?rcl=797b7c
 // Includes the items from UNIT_ALIAS_SOURCE and UNIT_SOURCE
@@ -411,8 +422,9 @@
       "filterType": "language",
       "includelist": [
 // Need to explicitly add "root"
-	"root",
+        "root",
 
+        "af",
         "am",
         "ar",
         "bg",
@@ -466,6 +478,7 @@
         "tl",
         "tr",
         "uk",
+        "ur",
         "vi",
         "zh"
       ]
@@ -477,11 +490,12 @@
       "filterType": "language",
       "includelist": [
 // Need to explicitly add "root"
-	"root",
+        "root",
 
 // Need to explicitly add "tzdbNames"
-	"tzdbNames",
+        "tzdbNames",
 
+        "af",
         "am",
         "ar",
         "bg",
@@ -535,6 +549,7 @@
         "tl",
         "tr",
         "uk",
+        "ur",
         "vi",
         "zh"
       ]
@@ -809,7 +824,6 @@
         "includelist": [
 // Created by diff scripts/chrome_ui_languages.list scripts/accept_lang.list|egrep "^>"|egrep -v "#"|cut -c3-10
           "ach",
-          "af",
           "ak",
           "an",
           "ast",
@@ -904,7 +918,6 @@
           "tum",
           "tw",
           "ug",
-          "ur",
           "uz",
           "wa",
           "wo",
@@ -913,7 +926,7 @@
           "yi",
           "yo",
           "zu"
-	]
+        ]
       },
       "rules": [
         "-/*",
@@ -926,7 +939,6 @@
     },
 // Created by diff scripts/chrome_ui_languages.list scripts/accept_lang.list|egrep "^>"|egrep -v "#"|cut -c3-10
     {"categories":["lang_tree"],"files":{"includelist":["ach"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/ach"] },
-    {"categories":["lang_tree"],"files":{"includelist":["af"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/af"] },
     {"categories":["lang_tree"],"files":{"includelist":["ak"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/ak"] },
     {"categories":["lang_tree"],"files":{"includelist":["an"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/an"] },
     {"categories":["lang_tree"],"files":{"includelist":["ast"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/ast"] },
@@ -1017,7 +1029,6 @@
     {"categories":["lang_tree"],"files":{"includelist":["tum"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/tum"] },
     {"categories":["lang_tree"],"files":{"includelist":["tw"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/tw"] },
     {"categories":["lang_tree"],"files":{"includelist":["ug"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/ug"] },
-    {"categories":["lang_tree"],"files":{"includelist":["ur"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/ur"] },
     {"categories":["lang_tree"],"files":{"includelist":["uz"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/uz"] },
     {"categories":["lang_tree"],"files":{"includelist":["wa"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/wa"] },
     {"categories":["lang_tree"],"files":{"includelist":["wo"]},"rules":["-/*","+/%%ALIAS","+/%%Parent","+/Languages/wo"] },
@@ -1265,23 +1276,6 @@
         "-/*/202"
       ]
     },
-// Based on remove_legacy_chinese_codepoint_collation
-// # big5han and gb2312han collation do not make any sense and nobody uses them.
-    {
-      "categories": [
-        "coll_tree"
-      ],
-      "files": {
-        "includelist": [
-	  "zh"
-	]
-      },
-      "rules": [
-        "-/*/unihan",
-        "-/*/big5han",
-        "-/*/gb2312han"
-      ]
-    },
 // Based on https://cs.chromium.org/chromium/src/third_party/icu/patches/data.build.patch?rcl=797b7c
 // +# Chromium : To save space, use '-R' option (exclude collation rules. just
 // +# include the compiled binary data.)
@@ -1292,7 +1286,25 @@
       ],
       "rules": [
         "-/UCARules",
-	"-/collations/*/Sequence"
+        "-/collations/*/Sequence"
+      ]
+    },
+// The following rules must be placed below "-/collations/*/Sequence" to avoid keeping empty unihan, big5han and gb2312han
+// Based on remove_legacy_chinese_codepoint_collation
+// # big5han and gb2312han collation do not make any sense and nobody uses them.
+    {
+      "categories": [
+        "coll_tree"
+      ],
+      "files": {
+        "includelist": [
+          "zh"
+        ]
+      },
+      "rules": [
+        "-/*/unihan",
+        "-/*/big5han",
+        "-/*/gb2312han"
       ]
     },
     {
@@ -1302,7 +1314,7 @@
       "files": {
         "includelist": [
           "grammaticalFeatures"
-	]
+        ]
       },
       "rules": [
         "-/*",
@@ -1316,7 +1328,7 @@
       "files": {
         "includelist": [
           "supplementalData"
-	]
+        ]
       },
       "rules": [
         "-/*",
@@ -1330,6 +1342,15 @@
         "+/timeData",
         "+/weekData",
         "+/weekData%variant"
+      ]
+    },
+    {
+      "categories": [
+        "translit"
+      ],
+      "rules": [
+        "-/*",
+        "+/RuleBasedTransliteratorIDs/Latin-ASCII"
       ]
     },
 // Based on filter_unit_data

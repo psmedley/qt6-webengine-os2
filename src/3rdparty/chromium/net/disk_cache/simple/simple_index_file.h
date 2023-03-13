@@ -12,7 +12,6 @@
 
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/pickle.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_export.h"
@@ -21,7 +20,6 @@
 
 namespace base {
 class SequencedTaskRunner;
-class TaskRunner;
 }
 
 namespace disk_cache {
@@ -87,10 +85,13 @@ class NET_EXPORT_PRIVATE SimpleIndexFile {
     uint64_t cache_size_;  // Total cache storage size in bytes.
   };
 
-  SimpleIndexFile(const scoped_refptr<base::SequencedTaskRunner>& cache_runner,
-                  const scoped_refptr<base::TaskRunner>& worker_pool,
+  SimpleIndexFile(scoped_refptr<base::SequencedTaskRunner> cache_runner,
                   net::CacheType cache_type,
                   const base::FilePath& cache_directory);
+
+  SimpleIndexFile(const SimpleIndexFile&) = delete;
+  SimpleIndexFile& operator=(const SimpleIndexFile&) = delete;
+
   virtual ~SimpleIndexFile();
 
   // Gets index entries based on current disk context. On error it may leave
@@ -160,15 +161,6 @@ class NET_EXPORT_PRIVATE SimpleIndexFile {
                           base::Time* out_cache_last_modified,
                           SimpleIndexLoadResult* out_result);
 
-  // Implemented either in simple_index_file_posix.cc or
-  // simple_index_file_win.cc. base::FileEnumerator turned out to be very
-  // expensive in terms of memory usage therefore it's used only on non-POSIX
-  // environments for convenience (for now). Returns whether the traversal
-  // succeeded.
-  static bool TraverseCacheDirectory(
-      const base::FilePath& cache_path,
-      const EntryFileCallback& entry_file_callback);
-
   // Writes the index file to disk atomically.
   static void SyncWriteToDisk(net::CacheType cache_type,
                               const base::FilePath& cache_directory,
@@ -191,7 +183,6 @@ class NET_EXPORT_PRIVATE SimpleIndexFile {
                                      const base::FilePath& index_file_path);
 
   const scoped_refptr<base::SequencedTaskRunner> cache_runner_;
-  const scoped_refptr<base::TaskRunner> worker_pool_;
   const net::CacheType cache_type_;
   const base::FilePath cache_directory_;
   const base::FilePath index_file_;
@@ -200,8 +191,6 @@ class NET_EXPORT_PRIVATE SimpleIndexFile {
   static const char kIndexDirectory[];
   static const char kIndexFileName[];
   static const char kTempIndexFileName[];
-
-  DISALLOW_COPY_AND_ASSIGN(SimpleIndexFile);
 };
 
 }  // namespace disk_cache

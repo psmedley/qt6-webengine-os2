@@ -3,8 +3,14 @@
 // found in the LICENSE file.
 
 #include "components/autofill_assistant/browser/starter_heuristic.h"
+
+#include <set>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/callback.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
@@ -70,7 +76,7 @@ void StarterHeuristic::InitFromTrialParams() {
   url_matcher::URLMatcherConditionSet::Vector condition_sets;
   base::flat_map<url_matcher::URLMatcherConditionSet::ID, std::string> mapping;
   url_matcher::URLMatcherConditionSet::ID next_condition_set_id = 0;
-  for (const auto& heuristic : heuristics->GetList()) {
+  for (const auto& heuristic : heuristics->GetListDeprecated()) {
     auto* intent =
         heuristic.FindKeyOfType(kHeuristicIntentKey, base::Value::Type::STRING);
     auto* url_conditions = heuristic.FindKeyOfType(
@@ -98,7 +104,7 @@ void StarterHeuristic::InitFromTrialParams() {
   auto* denylisted_domains_value = dict->FindListKey(kDenylistedDomainsKey);
   base::flat_set<std::string> denylisted_domains;
   if (denylisted_domains_value != nullptr) {
-    for (const auto& domain : denylisted_domains_value->GetList()) {
+    for (const auto& domain : denylisted_domains_value->GetListDeprecated()) {
       if (!domain.is_string()) {
         VLOG(1) << "Invalid type for denylisted domain";
         return;
@@ -114,35 +120,35 @@ void StarterHeuristic::InitFromTrialParams() {
   matcher_id_to_intent_map_ = std::move(mapping);
 }
 
-absl::optional<std::string> StarterHeuristic::IsHeuristicMatch(
+base::flat_set<std::string> StarterHeuristic::IsHeuristicMatch(
     const GURL& url) const {
+  base::flat_set<std::string> matching_intents;
   if (matcher_id_to_intent_map_.empty() || !url.is_valid()) {
-    return absl::nullopt;
+    return matching_intents;
   }
 
   if (denylisted_domains_.count(
           url_utils::GetOrganizationIdentifyingDomain(url)) > 0) {
-    return absl::nullopt;
+    return matching_intents;
   }
 
   std::set<url_matcher::URLMatcherConditionSet::ID> matches =
       url_matcher_.MatchURL(url);
-  if (matches.empty()) {
-    return absl::nullopt;
+  for (const auto& match : matches) {
+    auto intent = matcher_id_to_intent_map_.find(match);
+    if (intent == matcher_id_to_intent_map_.end()) {
+      DCHECK(false);
+      continue;
+    }
+    matching_intents.emplace(intent->second);
   }
-  // Return the first matching intent.
-  auto first_matching_it = matcher_id_to_intent_map_.find(*matches.begin());
-  if (first_matching_it == matcher_id_to_intent_map_.end()) {
-    DCHECK(false);
-    return absl::nullopt;
-  }
-  return first_matching_it->second;
+  return matching_intents;
 }
 
 void StarterHeuristic::RunHeuristicAsync(
     const GURL& url,
-    base::OnceCallback<void(absl::optional<std::string> intent)> callback)
-    const {
+    base::OnceCallback<void(const base::flat_set<std::string>& intents)>
+        callback) const {
   base::ThreadPool::PostTaskAndReplyWithResult(
       FROM_HERE, {base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
       base::BindOnce(&StarterHeuristic::IsHeuristicMatch,

@@ -16,10 +16,8 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/trace_event/memory_allocator_dump.h"
-#include "base/trace_event/memory_dump_request_args.h"
-#include "base/trace_event/process_memory_dump.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "net/base/features.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -36,10 +34,10 @@
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_session.h"
 #include "net/spdy/spdy_session_pool.h"
-#include "net/third_party/quiche/src/quic/core/crypto/quic_random.h"
-#include "net/third_party/quiche/src/quic/core/quic_packets.h"
-#include "net/third_party/quiche/src/quic/core/quic_tag.h"
-#include "net/third_party/quiche/src/quic/core/quic_utils.h"
+#include "net/third_party/quiche/src/quiche/quic/core/crypto/quic_random.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_packets.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_tag.h"
+#include "net/third_party/quiche/src/quiche/quic/core/quic_utils.h"
 
 namespace net {
 
@@ -89,15 +87,25 @@ HttpNetworkSessionParams::HttpNetworkSessionParams()
       enable_http2(true),
       spdy_session_max_recv_window_size(kSpdySessionMaxRecvWindowSize),
       spdy_session_max_queued_capped_frames(kSpdySessionMaxQueuedCappedFrames),
+// For OSs that terminate TCP connections upon relevant network changes,
+// attempt to preserve active streams by marking all sessions as going
+// away, rather than explicitly closing them. Streams may still fail due
+// to a generated TCP reset.
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_IOS)
+      spdy_go_away_on_ip_change(true),
+#else
+      spdy_go_away_on_ip_change(false),
+#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_IOS)
+      enable_http2_settings_grease(false),
       http2_end_stream_with_data_frame(false),
       time_func(&base::TimeTicks::Now),
       enable_http2_alternative_service(false),
-      enable_websocket_over_http2(true),
       enable_quic(true),
       enable_quic_proxies_for_https_urls(false),
       disable_idle_sockets_close_on_memory_pressure(false),
       key_auth_cache_server_entries_by_network_isolation_key(false),
-      enable_priority_update(false) {
+      enable_priority_update(false),
+      ignore_ip_address_changes(false) {
   enable_early_data =
       base::FeatureList::IsEnabled(features::kEnableTLS13EarlyData);
 }
@@ -163,9 +171,7 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
       quic_stream_factory_(context.net_log,
                            context.host_resolver,
                            context.ssl_config_service,
-                           context.client_socket_factory
-                               ? context.client_socket_factory
-                               : ClientSocketFactory::GetDefaultFactory(),
+                           context.client_socket_factory,
                            context.http_server_properties,
                            context.cert_verifier,
                            context.ct_policy_enforcer,
@@ -185,27 +191,36 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
                          params.spdy_session_max_recv_window_size,
                          params.spdy_session_max_queued_capped_frames,
                          AddDefaultHttp2Settings(params.http2_settings),
+                         params.enable_http2_settings_grease,
                          params.greased_http2_frame,
                          params.http2_end_stream_with_data_frame,
                          params.enable_priority_update,
+                         params.spdy_go_away_on_ip_change,
                          params.time_func,
-                         context.network_quality_estimator),
+                         context.network_quality_estimator,
+                         // cleanup_sessions_on_ip_address_changed
+                         !params.ignore_ip_address_changes),
       http_stream_factory_(std::make_unique<HttpStreamFactory>(this)),
       params_(params),
       context_(context) {
   DCHECK(proxy_resolution_service_);
   DCHECK(ssl_config_service_);
   CHECK(http_server_properties_);
+  DCHECK(context_.client_socket_factory);
 
   normal_socket_pool_manager_ = std::make_unique<ClientSocketPoolManagerImpl>(
       CreateCommonConnectJobParams(false /* for_websockets */),
       CreateCommonConnectJobParams(true /* for_websockets */),
-      NORMAL_SOCKET_POOL);
+      NORMAL_SOCKET_POOL,
+      // cleanup_on_ip_address_change
+      !params.ignore_ip_address_changes);
   websocket_socket_pool_manager_ =
       std::make_unique<ClientSocketPoolManagerImpl>(
           CreateCommonConnectJobParams(false /* for_websockets */),
           CreateCommonConnectJobParams(true /* for_websockets */),
-          WEBSOCKET_SOCKET_POOL);
+          WEBSOCKET_SOCKET_POOL,
+          // cleanup_on_ip_address_change
+          !params.ignore_ip_address_changes);
 
   if (params_.enable_http2) {
     next_protos_.push_back(kProtoHTTP2);
@@ -219,6 +234,10 @@ HttpNetworkSession::HttpNetworkSession(const HttpNetworkSessionParams& params,
 
   http_server_properties_->SetMaxServerConfigsStoredInProperties(
       context.quic_context->params()->max_server_configs_stored_in_properties);
+  http_server_properties_->SetBrokenAlternativeServicesDelayParams(
+      context.quic_context->params()
+          ->initial_delay_for_broken_alternative_service,
+      context.quic_context->params()->exponential_backoff_on_initial_delay);
 
   if (!params_.disable_idle_sockets_close_on_memory_pressure) {
     memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
@@ -327,8 +346,6 @@ base::Value HttpNetworkSession::QuicInfoToValue() const {
                   quic_params->allow_server_migration);
   dict.SetBoolKey("race_stale_dns_on_connection",
                   quic_params->race_stale_dns_on_connection);
-  dict.SetBoolKey("go_away_on_path_degrading",
-                  quic_params->go_away_on_path_degrading);
   dict.SetBoolKey("estimate_initial_rtt", quic_params->estimate_initial_rtt);
   dict.SetBoolKey("server_push_cancellation",
                   params_.enable_server_push_cancellation);
@@ -365,46 +382,6 @@ void HttpNetworkSession::SetServerPushDelegate(
   quic_stream_factory_.set_server_push_delegate(push_delegate_.get());
 }
 
-void HttpNetworkSession::GetSSLConfig(SSLConfig* server_config,
-                                      SSLConfig* proxy_config) const {
-  server_config->alpn_protos = GetAlpnProtos();
-  server_config->application_settings = GetApplicationSettings();
-  server_config->ignore_certificate_errors = params_.ignore_certificate_errors;
-  *proxy_config = *server_config;
-  server_config->early_data_enabled = params_.enable_early_data;
-}
-
-void HttpNetworkSession::DumpMemoryStats(
-    base::trace_event::ProcessMemoryDump* pmd,
-    const std::string& parent_absolute_name) const {
-  std::string name = base::StringPrintf("net/http_network_session_0x%" PRIxPTR,
-                                        reinterpret_cast<uintptr_t>(this));
-  base::trace_event::MemoryAllocatorDump* http_network_session_dump =
-      pmd->GetAllocatorDump(name);
-  if (http_network_session_dump == nullptr) {
-    http_network_session_dump = pmd->CreateAllocatorDump(name);
-    normal_socket_pool_manager_->DumpMemoryStats(
-        pmd, http_network_session_dump->absolute_name());
-    spdy_session_pool_.DumpMemoryStats(
-        pmd, http_network_session_dump->absolute_name());
-    if (http_stream_factory_) {
-      http_stream_factory_->DumpMemoryStats(
-          pmd, http_network_session_dump->absolute_name());
-    }
-    quic_stream_factory_.DumpMemoryStats(
-        pmd, http_network_session_dump->absolute_name());
-    ssl_client_session_cache_.DumpMemoryStats(pmd, name);
-  }
-
-  // Create an empty row under parent's dump so size can be attributed correctly
-  // if |this| is shared between URLRequestContexts.
-  base::trace_event::MemoryAllocatorDump* empty_row_dump =
-      pmd->CreateAllocatorDump(base::StringPrintf(
-          "%s/http_network_session", parent_absolute_name.c_str()));
-  pmd->AddOwnershipEdge(empty_row_dump->guid(),
-                        http_network_session_dump->guid());
-}
-
 bool HttpNetworkSession::IsQuicEnabled() const {
   return params_.enable_quic;
 }
@@ -422,9 +399,7 @@ CommonConnectJobParams HttpNetworkSession::CreateCommonConnectJobParams(
   // Use null websocket_endpoint_lock_manager, which is only set for WebSockets,
   // and only when not using a proxy.
   return CommonConnectJobParams(
-      context_.client_socket_factory ? context_.client_socket_factory
-                                     : ClientSocketFactory::GetDefaultFactory(),
-      context_.host_resolver, &http_auth_cache_,
+      context_.client_socket_factory, context_.host_resolver, &http_auth_cache_,
       context_.http_auth_handler_factory, &spdy_session_pool_,
       &context_.quic_context->params()->supported_versions,
       &quic_stream_factory_, context_.proxy_delegate,

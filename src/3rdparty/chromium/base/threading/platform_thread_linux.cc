@@ -18,6 +18,7 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_params.h"
+#include "base/notreached.h"
 #include "base/process/internal_linux.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -27,7 +28,7 @@
 #include "build/chromeos_buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if !defined(OS_NACL) && !defined(OS_AIX)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 #include <pthread.h>
 #include <sys/prctl.h>
 #include <sys/resource.h>
@@ -61,7 +62,7 @@ int g_scheduler_boost_adj;
 int g_scheduler_limit_adj;
 bool g_scheduler_use_latency_tune_adj;
 
-#if !defined(OS_NACL) && !defined(OS_AIX)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 
 // Defined by linux uclamp ABI of sched_setattr().
 const uint32_t kSchedulerUclampMin = 0;
@@ -129,10 +130,10 @@ int sched_setattr(pid_t pid,
                   unsigned int flags) {
   return syscall(__NR_sched_setattr, pid, attr, flags);
 }
-#endif  // !defined(OS_NACL) && !defined(OS_AIX)
+#endif  // !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
 const FilePath::CharType kCgroupDirectory[] =
     FILE_PATH_LITERAL("/sys/fs/cgroup");
 
@@ -144,7 +145,7 @@ FilePath ThreadPriorityToCgroupDirectory(const FilePath& cgroup_filepath,
     case ThreadPriority::BACKGROUND:
       return cgroup_filepath.Append(FILE_PATH_LITERAL("non-urgent"));
     case ThreadPriority::DISPLAY:
-      FALLTHROUGH;
+      [[fallthrough]];
     case ThreadPriority::REALTIME_AUDIO:
       return cgroup_filepath.Append(FILE_PATH_LITERAL("urgent"));
   }
@@ -228,12 +229,12 @@ void SetThreadLatencySensitivity(ProcessId process_id,
 
   switch (priority) {
     case ThreadPriority::NORMAL:
-      FALLTHROUGH;
+      [[fallthrough]];
     case ThreadPriority::BACKGROUND:
       break;
     case ThreadPriority::DISPLAY:
       // Display needs a boost for consistent 60 fps compositing.
-      FALLTHROUGH;
+      [[fallthrough]];
     case ThreadPriority::REALTIME_AUDIO:
       is_urgent = true;
       break;
@@ -286,7 +287,7 @@ void SetThreadCgroupsForThreadPriority(PlatformThreadId thread_id,
 namespace internal {
 
 namespace {
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
 const struct sched_param kRealTimePrio = {8};
 #endif
 }  // namespace
@@ -298,22 +299,19 @@ const ThreadPriorityToNiceValuePair kThreadPriorityToNiceValueMap[4] = {
     {ThreadPriority::REALTIME_AUDIO, -10},
 };
 
-absl::optional<bool> CanIncreaseCurrentThreadPriorityForPlatform(
-    ThreadPriority priority) {
-#if !defined(OS_NACL)
+bool CanSetThreadPriorityToRealtimeAudio() {
+#if !BUILDFLAG(IS_NACL)
   // A non-zero soft-limit on RLIMIT_RTPRIO is required to be allowed to invoke
   // pthread_setschedparam in SetCurrentThreadPriorityForPlatform().
   struct rlimit rlim;
-  if (priority == ThreadPriority::REALTIME_AUDIO &&
-      getrlimit(RLIMIT_RTPRIO, &rlim) != 0 && rlim.rlim_cur != 0) {
-    return absl::make_optional(true);
-  }
+  return getrlimit(RLIMIT_RTPRIO, &rlim) != 0 && rlim.rlim_cur != 0;
+#else
+  return false;
 #endif
-  return absl::nullopt;
 }
 
 bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
   // For legacy schedtune interface
   SetThreadCgroupsForThreadPriority(PlatformThread::CurrentId(), priority);
 
@@ -331,7 +329,7 @@ bool SetCurrentThreadPriorityForPlatform(ThreadPriority priority) {
 }
 
 absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
   int maybe_sched_rr = 0;
   struct sched_param maybe_realtime_prio = {0};
   if (pthread_getschedparam(pthread_self(), &maybe_sched_rr,
@@ -350,7 +348,7 @@ absl::optional<ThreadPriority> GetCurrentThreadPriorityForPlatform() {
 void PlatformThread::SetName(const std::string& name) {
   ThreadIdNameManager::GetInstance()->SetName(name);
 
-#if !defined(OS_NACL) && !defined(OS_AIX)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
   // On linux we can get the thread names to show up in the debugger by setting
   // the process name for the LWP.  We don't want to do this for the main
   // thread because that would rename the process, causing tools like killall
@@ -367,10 +365,10 @@ void PlatformThread::SetName(const std::string& name) {
   // We expect EPERM failures in sandboxed processes, just ignore those.
   if (err < 0 && errno != EPERM)
     DPLOG(ERROR) << "prctl(PR_SET_NAME)";
-#endif  //  !defined(OS_NACL) && !defined(OS_AIX)
+#endif  //  !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 }
 
-#if !defined(OS_NACL) && !defined(OS_AIX)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 // static
 void PlatformThread::SetThreadPriority(ProcessId process_id,
                                        PlatformThreadId thread_id,
@@ -395,7 +393,7 @@ void PlatformThread::SetThreadPriority(ProcessId process_id,
               << nice_setting;
   }
 }
-#endif  //  !defined(OS_NACL) && !defined(OS_AIX)
+#endif  //  !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_AIX)
 
 #if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
 void PlatformThread::InitThreadPostFieldTrial() {

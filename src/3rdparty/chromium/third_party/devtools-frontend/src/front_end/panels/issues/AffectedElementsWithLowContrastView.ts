@@ -4,43 +4,30 @@
 
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Platform from '../../core/platform/platform.js';
-import * as SDK from '../../core/sdk/sdk.js';
 import type * as IssuesManager from '../../models/issues_manager/issues_manager.js';
 
 import {AffectedElementsView} from './AffectedElementsView.js';
-import type {AggregatedIssue} from './IssueAggregator.js';
-import type {IssueView} from './IssueView.js';
 
 export class AffectedElementsWithLowContrastView extends AffectedElementsView {
-  private aggregateIssue: AggregatedIssue;
-  private runningUpdatePromise: Promise<void> = Promise.resolve();
-
-  constructor(parent: IssueView, issue: AggregatedIssue) {
-    super(parent, issue);
-    this.aggregateIssue = issue;
-  }
+  #runningUpdatePromise: Promise<void> = Promise.resolve();
 
   update(): void {
     // Ensure that doUpdate is invoked atomically by serializing the update calls
     // because it's not re-entrace safe.
-    this.runningUpdatePromise = this.runningUpdatePromise.then(this.doUpdate.bind(this));
+    this.#runningUpdatePromise = this.#runningUpdatePromise.then(this.#doUpdate.bind(this));
   }
 
-  private async doUpdate(): Promise<void> {
+  async #doUpdate(): Promise<void> {
     this.clear();
-    await this.appendLowContrastElements(this.aggregateIssue.getLowContrastIssues());
+    await this.#appendLowContrastElements(this.issue.getLowContrastIssues());
   }
 
-  private async appendLowContrastElement(issue: IssuesManager.LowTextContrastIssue.LowTextContrastIssue):
-      Promise<void> {
+  async #appendLowContrastElement(issue: IssuesManager.LowTextContrastIssue.LowTextContrastIssue): Promise<void> {
     const row = document.createElement('tr');
     row.classList.add('affected-resource-low-contrast');
 
     const details = issue.details();
-
-    // TODO: Use the correct target once we report LowContrastIssues for frames
-    // besides the main frame.
-    const target = SDK.TargetManager.TargetManager.instance().mainTarget();
+    const target = issue.model()?.target() || null;
     row.appendChild(await this.createElementCell(
         {nodeName: details.violatingNodeSelector, backendNodeId: details.violatingNodeId, target},
         issue.getCategory()));
@@ -53,7 +40,7 @@ export class AffectedElementsWithLowContrastView extends AffectedElementsView {
     this.affectedResources.appendChild(row);
   }
 
-  private async appendLowContrastElements(issues: Iterable<IssuesManager.LowTextContrastIssue.LowTextContrastIssue>):
+  async #appendLowContrastElements(issues: Iterable<IssuesManager.LowTextContrastIssue.LowTextContrastIssue>):
       Promise<void> {
     const header = document.createElement('tr');
     this.appendColumnTitle(header, i18nString(UIStrings.element));
@@ -67,7 +54,7 @@ export class AffectedElementsWithLowContrastView extends AffectedElementsView {
     let count = 0;
     for (const lowContrastIssue of issues) {
       count++;
-      await this.appendLowContrastElement(lowContrastIssue);
+      await this.#appendLowContrastElement(lowContrastIssue);
     }
     this.updateAffectedResourceCount(count);
   }

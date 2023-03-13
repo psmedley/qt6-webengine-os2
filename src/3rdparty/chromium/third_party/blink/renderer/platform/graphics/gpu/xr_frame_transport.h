@@ -5,11 +5,12 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_XR_FRAME_TRANSPORT_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_XR_FRAME_TRANSPORT_H_
 
+#include "base/time/time.h"
 #include "device/vr/public/mojom/vr_service.mojom-blink.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/renderer/platform/context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_receiver.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/platform_export.h"

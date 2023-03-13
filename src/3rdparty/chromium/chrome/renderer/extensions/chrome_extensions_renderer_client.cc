@@ -19,7 +19,6 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
 #include "chrome/renderer/extensions/chrome_extensions_dispatcher_delegate.h"
-#include "chrome/renderer/extensions/extension_process_policy.h"
 #include "chrome/renderer/extensions/renderer_permissions_policy_delegate.h"
 #include "chrome/renderer/extensions/resource_request_policy.h"
 #include "content/public/common/content_constants.h"
@@ -36,7 +35,6 @@
 #include "extensions/renderer/extension_frame_helper.h"
 #include "extensions/renderer/extensions_render_frame_observer.h"
 #include "extensions/renderer/extensions_renderer_client.h"
-#include "extensions/renderer/guest_view/extensions_guest_view_container_dispatcher.h"
 #include "extensions/renderer/guest_view/mime_handler_view/mime_handler_view_container_manager.h"
 #include "extensions/renderer/renderer_extension_registry.h"
 #include "extensions/renderer/script_context.h"
@@ -148,11 +146,8 @@ void ChromeExtensionsRendererClient::RenderThreadStarted() {
   resource_request_policy_ =
       std::make_unique<extensions::ResourceRequestPolicy>(
           extension_dispatcher_.get());
-  guest_view_container_dispatcher_ =
-      std::make_unique<extensions::ExtensionsGuestViewContainerDispatcher>();
 
   thread->AddObserver(extension_dispatcher_.get());
-  thread->AddObserver(guest_view_container_dispatcher_.get());
 }
 
 void ChromeExtensionsRendererClient::RenderFrameCreated(

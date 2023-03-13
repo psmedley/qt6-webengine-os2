@@ -19,6 +19,7 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/worker_pool.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
@@ -110,7 +111,6 @@ class ClipboardTextWriter final : public ClipboardWriter {
     String wtf_string =
         String::FromUTF8(reinterpret_cast<const LChar*>(raw_data->Data()),
                          raw_data->ByteLength());
-    DCHECK(wtf_string.IsSafeToSendToAnotherThread());
     PostCrossThreadTask(*task_runner, FROM_HERE,
                         CrossThreadBindOnce(&ClipboardTextWriter::Write,
                                             WrapCrossThreadPersistent(writer),
@@ -215,6 +215,43 @@ class ClipboardSvgWriter final : public ClipboardWriter {
   }
 };
 
+// Writes a Blob with arbitrary, unsanitized content to the System Clipboard.
+class ClipboardCustomFormatWriter final : public ClipboardWriter {
+ public:
+  ClipboardCustomFormatWriter(SystemClipboard* system_clipboard,
+                              ClipboardPromise* promise,
+                              const String& mime_type)
+      : ClipboardWriter(system_clipboard, promise), mime_type_(mime_type) {}
+  ~ClipboardCustomFormatWriter() override = default;
+
+ private:
+  void StartWrite(
+      DOMArrayBuffer* custom_format_data,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner) override {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    Write(custom_format_data);
+  }
+
+  void Write(DOMArrayBuffer* custom_format_data) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+    if (!promise_->GetLocalFrame())
+      return;
+    if (custom_format_data->ByteLength() >=
+        mojom::blink::ClipboardHost::kMaxDataSize) {
+      promise_->RejectFromReadOrDecodeFailure();
+      return;
+    }
+    mojo_base::BigBuffer buffer(
+        base::make_span(static_cast<uint8_t*>(custom_format_data->Data()),
+                        custom_format_data->ByteLength()));
+    system_clipboard()->WriteUnsanitizedCustomFormat(mime_type_,
+                                                     std::move(buffer));
+    promise_->CompleteWriteRepresentation();
+  }
+
+  String mime_type_;
+};
+
 }  // anonymous namespace
 
 // ClipboardWriter functions.
@@ -222,9 +259,14 @@ class ClipboardSvgWriter final : public ClipboardWriter {
 // static
 ClipboardWriter* ClipboardWriter::Create(SystemClipboard* system_clipboard,
                                          const String& mime_type,
-                                         ClipboardPromise* promise) {
-  DCHECK(
-      ClipboardWriter::IsValidType(mime_type, /*is_custom_format_type=*/false));
+                                         ClipboardPromise* promise,
+                                         bool is_custom_format_type) {
+  DCHECK(ClipboardWriter::IsValidType(mime_type, is_custom_format_type));
+  if (is_custom_format_type &&
+      RuntimeEnabledFeatures::ClipboardCustomFormatsEnabled()) {
+    return MakeGarbageCollected<ClipboardCustomFormatWriter>(
+        system_clipboard, promise, mime_type);
+  }
   if (mime_type == kMimeTypeImagePng) {
     return MakeGarbageCollected<ClipboardImageWriter>(system_clipboard,
                                                       promise);
@@ -251,8 +293,7 @@ ClipboardWriter::ClipboardWriter(SystemClipboard* system_clipboard,
           TaskType::kUserInteraction)),
       file_reading_task_runner_(promise->GetExecutionContext()->GetTaskRunner(
           TaskType::kFileReading)),
-      system_clipboard_(system_clipboard),
-      self_keep_alive_(PERSISTENT_FROM_HERE, this) {}
+      system_clipboard_(system_clipboard) {}
 
 ClipboardWriter::~ClipboardWriter() {
   DCHECK(!file_reader_);
@@ -261,9 +302,10 @@ ClipboardWriter::~ClipboardWriter() {
 // static
 bool ClipboardWriter::IsValidType(const String& type,
                                   bool is_custom_format_type) {
-  if (is_custom_format_type)
-    return type.length() < mojom::blink::ClipboardHost::kMaxFormatSize;
-
+  if (is_custom_format_type) {
+    return RuntimeEnabledFeatures::ClipboardCustomFormatsEnabled() &&
+           type.length() < mojom::blink::ClipboardHost::kMaxFormatSize;
+  }
   if (type == kMimeTypeImageSvg)
     return RuntimeEnabledFeatures::ClipboardSvgEnabled();
 

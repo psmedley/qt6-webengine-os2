@@ -79,8 +79,8 @@ source_set("parser") {
     "../../../constants",
     "../../fdrm",
     "../../fxcodec",
-    "../../fxcrt",
   ]
+  public_deps = [ "../../fxcrt" ]
   allow_circular_includes_from = []
   visibility = [ "../../../*" ]
 
@@ -96,6 +96,20 @@ source_set("parser") {
   }
 }
 
+source_set("unit_test_support") {
+  testonly = true
+  sources = [
+    "cpdf_test_document.cpp",
+    "cpdf_test_document.h",
+  ]
+  configs += [ "../../../:pdfium_strict_config" ]
+  deps = [
+    ":parser",
+    "../page",
+    "../render",
+  ]
+}
+
 pdfium_unittest_source_set("unittests") {
   sources = [
     "cpdf_array_unittest.cpp",
@@ -104,6 +118,7 @@ pdfium_unittest_source_set("unittests") {
     "cpdf_hint_tables_unittest.cpp",
     "cpdf_indirect_object_holder_unittest.cpp",
     "cpdf_object_avail_unittest.cpp",
+    "cpdf_object_stream_unittest.cpp",
     "cpdf_object_unittest.cpp",
     "cpdf_object_walker_unittest.cpp",
     "cpdf_page_object_avail_unittest.cpp",
@@ -117,18 +132,16 @@ pdfium_unittest_source_set("unittests") {
   ]
   deps = [
     ":parser",
+    ":unit_test_support",
     "../../../constants",
     "../page",
+    "../page:unit_test_support",
     "../render",
   ]
   pdfium_root_dir = "../../../"
 
   if (pdf_enable_xfa) {
     sources += [ "cpdf_seekablemultistream_unittest.cpp" ]
-  }
-  if (is_clang) {
-    # Suppress no override warning for overridden functions.
-    cflags = [ "-Wno-inconsistent-missing-override" ]
   }
 }
 

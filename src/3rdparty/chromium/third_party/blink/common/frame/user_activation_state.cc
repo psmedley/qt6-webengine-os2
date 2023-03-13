@@ -31,7 +31,7 @@ bool IsRestricted(UserActivationNotificationType notification_type) {
 // The expiry time should be long enough to allow network round trips even in a
 // very slow connection (to support xhr-like calls with user activation), yet
 // not too long to make an "unattended" page feel activated.
-constexpr base::TimeDelta kActivationLifespan2 = base::TimeDelta::FromSeconds(5);
+constexpr base::TimeDelta kActivationLifespan2 = base::Seconds(5);
 
 UserActivationState::UserActivationState()
     : first_notification_type_(UserActivationNotificationType::kNone),

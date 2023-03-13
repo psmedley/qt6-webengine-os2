@@ -15,6 +15,7 @@
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/ui/web_applications/test/web_app_browsertest_util.h"
 #include "chrome/browser/web_applications/test/web_app_install_test_utils.h"
+#include "chrome/browser/web_applications/web_app_utils.h"
 #include "chrome/common/chrome_features.h"
 #include "components/crash/content/browser/error_reporting/mock_crash_endpoint.h"
 #include "content/public/test/browser_task_environment.h"
@@ -40,6 +41,11 @@ constexpr const char* kTestExtensionId = "jjeoclcdfjddkdjokiejckgcildcflpp";
 class CrashReportPrivateApiTest : public ExtensionApiTest {
  public:
   CrashReportPrivateApiTest() = default;
+
+  CrashReportPrivateApiTest(const CrashReportPrivateApiTest&) = delete;
+  CrashReportPrivateApiTest& operator=(const CrashReportPrivateApiTest&) =
+      delete;
+
   ~CrashReportPrivateApiTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -88,9 +94,6 @@ class CrashReportPrivateApiTest : public ExtensionApiTest {
   const Extension* extension_;
   std::unique_ptr<MockCrashEndpoint> crash_endpoint_;
   std::unique_ptr<ScopedMockChromeJsErrorReportProcessor> processor_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CrashReportPrivateApiTest);
 };
 
 IN_PROC_BROWSER_TEST_F(CrashReportPrivateApiTest, Basic) {
@@ -311,7 +314,7 @@ using CrashReportPrivateCalledFromSwaTest = SystemWebAppIntegrationTest;
 // window.
 IN_PROC_BROWSER_TEST_P(CrashReportPrivateCalledFromSwaTest,
                        CalledFromWebContentsInWebAppWindow) {
-  if (base::FeatureList::IsEnabled(features::kWebAppsCrosapi)) {
+  if (web_app::IsWebAppsCrosapiEnabled()) {
     // TODO(crbug.com/1234938): Support Crosapi (web apps running in Lacros).
     return;
   }
@@ -323,7 +326,7 @@ IN_PROC_BROWSER_TEST_P(CrashReportPrivateCalledFromSwaTest,
   ASSERT_TRUE(embedded_test_server()->Started());
   // Create and launch a test web app, opens in an app window.
   GURL start_url = embedded_test_server()->GetURL("/test_app.html");
-  auto web_app_info = std::make_unique<WebApplicationInfo>();
+  auto web_app_info = std::make_unique<WebAppInstallInfo>();
   web_app_info->start_url = start_url;
   web_app::AppId app_id =
       web_app::test::InstallWebApp(profile(), std::move(web_app_info));

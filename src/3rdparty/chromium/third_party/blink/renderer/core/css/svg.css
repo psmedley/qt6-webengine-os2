@@ -91,7 +91,7 @@ tspan, textPath {
 */
 @media ua-forced-colors {
   svg {
-      forced-color-adjust: none;
+      forced-color-adjust: preserve-parent-color;
   }
 
   foreignObject {

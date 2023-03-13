@@ -14,7 +14,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/supports_user_data.h"
-#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/api/tabs/tabs_constants.h"
 #if !defined(TOOLKIT_QT)
@@ -32,7 +31,7 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/error_utils.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #include "extensions/common/permissions/permissions_data.h"
 #endif
 
@@ -41,7 +40,7 @@ namespace {
 bool CanEnableAudioDebugRecordingsFromExtension(
     const extensions::Extension* extension) {
   bool enabled_by_permissions = false;
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   if (extension) {
     enabled_by_permissions =
         extension->permissions_data()->active_permissions().HasAPIPermission(
@@ -174,7 +173,8 @@ content::RenderProcessHost* WebrtcLoggingPrivateFunction::RphFromRequest(
     *error = "Web contents for tab not found.";
     return nullptr;
   }
-  GURL expected_origin = contents->GetLastCommittedURL().GetOrigin();
+  GURL expected_origin =
+      contents->GetLastCommittedURL().DeprecatedGetOriginAsURL();
   if (expected_origin.spec() != security_origin) {
     *error = base::StringPrintf(
         "Invalid security origin. Expected=%s, actual=%s",
@@ -261,7 +261,7 @@ void WebrtcLoggingPrivateFunctionWithRecordingDoneCallback::FireCallback(
 ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateSetMetaDataFunction::Run() {
   std::unique_ptr<SetMetaData::Params> params(
-      SetMetaData::Params::Create(*args_));
+      SetMetaData::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   WebRtcLoggingController::GenericDoneCallback callback;
@@ -281,7 +281,7 @@ WebrtcLoggingPrivateSetMetaDataFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction WebrtcLoggingPrivateStartFunction::Run() {
-  std::unique_ptr<Start::Params> params(Start::Params::Create(*args_));
+  std::unique_ptr<Start::Params> params(Start::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   WebRtcLoggingController::GenericDoneCallback callback;
@@ -299,7 +299,7 @@ ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateSetUploadOnRenderCloseFunction::Run() {
 #if !defined(TOOLKIT_QT)
   std::unique_ptr<SetUploadOnRenderClose::Params> params(
-      SetUploadOnRenderClose::Params::Create(*args_));
+      SetUploadOnRenderClose::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
@@ -319,7 +319,7 @@ WebrtcLoggingPrivateSetUploadOnRenderCloseFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction WebrtcLoggingPrivateStopFunction::Run() {
-  std::unique_ptr<Stop::Params> params(Stop::Params::Create(*args_));
+  std::unique_ptr<Stop::Params> params(Stop::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   WebRtcLoggingController::GenericDoneCallback callback;
@@ -334,7 +334,7 @@ ExtensionFunction::ResponseAction WebrtcLoggingPrivateStopFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction WebrtcLoggingPrivateStoreFunction::Run() {
-  std::unique_ptr<Store::Params> params(Store::Params::Create(*args_));
+  std::unique_ptr<Store::Params> params(Store::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   WebRtcLoggingController::GenericDoneCallback callback;
@@ -355,7 +355,7 @@ ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateUploadStoredFunction::Run() {
 #if !defined(TOOLKIT_QT)
   std::unique_ptr<UploadStored::Params> params(
-      UploadStored::Params::Create(*args_));
+      UploadStored::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
@@ -379,7 +379,7 @@ WebrtcLoggingPrivateUploadStoredFunction::Run() {
 
 ExtensionFunction::ResponseAction WebrtcLoggingPrivateUploadFunction::Run() {
 #if !defined(TOOLKIT_QT)
-  std::unique_ptr<Upload::Params> params(Upload::Params::Create(*args_));
+  std::unique_ptr<Upload::Params> params(Upload::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
@@ -399,7 +399,7 @@ ExtensionFunction::ResponseAction WebrtcLoggingPrivateUploadFunction::Run() {
 }
 
 ExtensionFunction::ResponseAction WebrtcLoggingPrivateDiscardFunction::Run() {
-  std::unique_ptr<Discard::Params> params(Discard::Params::Create(*args_));
+  std::unique_ptr<Discard::Params> params(Discard::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   WebRtcLoggingController::GenericDoneCallback callback;
@@ -416,7 +416,7 @@ ExtensionFunction::ResponseAction WebrtcLoggingPrivateDiscardFunction::Run() {
 ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateStartRtpDumpFunction::Run() {
   std::unique_ptr<StartRtpDump::Params> params(
-      StartRtpDump::Params::Create(*args_));
+      StartRtpDump::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (!params->incoming && !params->outgoing) {
@@ -449,7 +449,7 @@ WebrtcLoggingPrivateStartRtpDumpFunction::Run() {
 ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateStopRtpDumpFunction::Run() {
   std::unique_ptr<StopRtpDump::Params> params(
-      StopRtpDump::Params::Create(*args_));
+      StopRtpDump::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (!params->incoming && !params->outgoing) {
@@ -486,7 +486,7 @@ WebrtcLoggingPrivateStartAudioDebugRecordingsFunction::Run() {
   }
 
   std::unique_ptr<StartAudioDebugRecordings::Params> params(
-      StartAudioDebugRecordings::Params::Create(*args_));
+      StartAudioDebugRecordings::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   if (params->seconds < 0) {
@@ -506,7 +506,7 @@ WebrtcLoggingPrivateStartAudioDebugRecordingsFunction::Run() {
           host, AudioDebugRecordingsHandler::kAudioDebugRecordingsHandlerKey));
 
   audio_debug_recordings_handler->StartAudioDebugRecordings(
-      host, base::TimeDelta::FromSeconds(params->seconds),
+      host, base::Seconds(params->seconds),
       base::BindOnce(
           &WebrtcLoggingPrivateStartAudioDebugRecordingsFunction::FireCallback,
           this),
@@ -523,7 +523,7 @@ WebrtcLoggingPrivateStopAudioDebugRecordingsFunction::Run() {
   }
 
   std::unique_ptr<StopAudioDebugRecordings::Params> params(
-      StopAudioDebugRecordings::Params::Create(*args_));
+      StopAudioDebugRecordings::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
@@ -551,7 +551,7 @@ WebrtcLoggingPrivateStopAudioDebugRecordingsFunction::Run() {
 ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateStartEventLoggingFunction::Run() {
   std::unique_ptr<StartEventLogging::Params> params(
-      StartEventLogging::Params::Create(*args_));
+      StartEventLogging::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   std::string error;
@@ -597,7 +597,7 @@ void WebrtcLoggingPrivateStartEventLoggingFunction::FireCallback(
 
 ExtensionFunction::ResponseAction
 WebrtcLoggingPrivateGetLogsDirectoryFunction::Run() {
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // Unlike other WebrtcLoggingPrivate functions that take a RequestInfo object,
   // this function shouldn't be called by a component extension on behalf of
   // some web code. It returns a DirectoryEntry for use directly in the calling
@@ -620,9 +620,9 @@ WebrtcLoggingPrivateGetLogsDirectoryFunction::Run() {
           &WebrtcLoggingPrivateGetLogsDirectoryFunction::FireErrorCallback,
           this));
   return RespondLater();
-#else   // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#else   // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   return RespondNow(Error("Not supported on the current OS"));
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 }
 
 void WebrtcLoggingPrivateGetLogsDirectoryFunction::FireCallback(
@@ -630,8 +630,8 @@ void WebrtcLoggingPrivateGetLogsDirectoryFunction::FireCallback(
     const std::string& base_name) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
-  dict->SetString("fileSystemId", filesystem_id);
-  dict->SetString("baseName", base_name);
+  dict->SetStringKey("fileSystemId", filesystem_id);
+  dict->SetStringKey("baseName", base_name);
   Respond(OneArgument(base::Value::FromUniquePtrValue(std::move(dict))));
 }
 

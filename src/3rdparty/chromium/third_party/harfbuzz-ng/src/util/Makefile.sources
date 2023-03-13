@@ -4,6 +4,8 @@ HB_VIEW_sources = \
 	font-options.hh \
 	hb-view.cc \
 	helper-cairo-ansi.hh \
+	helper-cairo-ft.hh \
+	helper-cairo-user.hh \
 	helper-cairo.hh \
 	main-font-text.hh \
 	options.hh \
@@ -36,7 +38,6 @@ HB_SUBSET_CLI_sources = \
 	main-font-text.hh \
 	options.hh \
 	output-options.hh \
-	subset-options.hh \
 	text-options.hh \
 	$(NULL)
 

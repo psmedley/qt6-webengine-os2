@@ -7,12 +7,14 @@
 #include <memory>
 
 #include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
 #include "media/base/video_codecs.h"
 #include "media/base/video_frame.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/modules/mediarecorder/video_track_recorder.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_media.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -58,11 +60,14 @@ class H264EncoderFixture : public ::testing::Test {
             ConvertToBaseRepeatingCallback(
                 CrossThreadBindRepeating(&H264EncoderFixture::OnEncodedVideo,
                                          CrossThreadUnretained(this))),
-            VideoTrackRecorder::CodecProfile(VideoTrackRecorder::CodecId::H264,
+            VideoTrackRecorder::CodecProfile(VideoTrackRecorder::CodecId::kH264,
                                              profile_,
                                              level_),
             bitrate_,
             testing_render_thread_->task_runner())) {}
+
+  H264EncoderFixture(const H264EncoderFixture&) = delete;
+  H264EncoderFixture& operator=(const H264EncoderFixture&) = delete;
 
  protected:
   void EncodeFrame() {
@@ -138,8 +143,6 @@ class H264EncoderFixture : public ::testing::Test {
   std::unique_ptr<base::Thread> testing_render_thread_;
   const scoped_refptr<H264Encoder> encoder_;
   base::WaitableEvent frame_encoded_;
-
-  DISALLOW_COPY_AND_ASSIGN(H264EncoderFixture);
 };
 
 class H264EncoderParameterTest
@@ -151,8 +154,8 @@ class H264EncoderParameterTest
                            GetParam().level,
                            GetParam().bitrate) {}
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(H264EncoderParameterTest);
+  H264EncoderParameterTest(const H264EncoderParameterTest&) = delete;
+  H264EncoderParameterTest& operator=(const H264EncoderParameterTest&) = delete;
 };
 
 TEST_P(H264EncoderParameterTest, CheckProfileLevel) {

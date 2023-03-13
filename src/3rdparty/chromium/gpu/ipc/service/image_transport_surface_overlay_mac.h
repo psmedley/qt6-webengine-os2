@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "gpu/ipc/service/command_buffer_stub.h"
 #include "gpu/ipc/service/image_transport_surface.h"
+#include "ui/gfx/ca_layer_result.h"
 #include "ui/gfx/presentation_feedback.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_surface.h"
@@ -87,14 +88,10 @@ class ImageTransportSurfaceOverlayMacBase : public BaseClass,
   void* GetHandle() override;
   gl::GLSurfaceFormat GetFormat() override;
   bool OnMakeCurrent(gl::GLContext* context) override;
-  bool ScheduleOverlayPlane(int z_order,
-                            gfx::OverlayTransform transform,
-                            gl::GLImage* image,
-                            const gfx::Rect& bounds_rect,
-                            const gfx::RectF& crop_rect,
-                            bool enable_blend,
-                            const gfx::Rect& damage_rect,
-                            std::unique_ptr<gfx::GpuFence> gpu_fence) override;
+  bool ScheduleOverlayPlane(
+      gl::GLImage* image,
+      std::unique_ptr<gfx::GpuFence> gpu_fence,
+      const gfx::OverlayPlaneData& overlay_plane_data) override;
   bool ScheduleCALayer(const ui::CARendererLayerParams& params) override;
   void ScheduleCALayerInUseQuery(
       std::vector<gl::GLSurface::CALayerInUseQuery> queries) override;
@@ -103,6 +100,8 @@ class ImageTransportSurfaceOverlayMacBase : public BaseClass,
 
   // ui::GpuSwitchingObserver implementation.
   void OnGpuSwitched(gl::GpuPreference active_gpu_heuristic) override;
+
+  void SetCALayerErrorCode(gfx::CALayerResult ca_layer_error_code) override;
 
  private:
   ~ImageTransportSurfaceOverlayMacBase() override;
@@ -122,6 +121,7 @@ class ImageTransportSurfaceOverlayMacBase : public BaseClass,
 
   gfx::Size pixel_size_;
   float scale_factor_;
+  gfx::CALayerResult ca_layer_error_code_ = gfx::kCALayerSuccess;
 
   std::vector<gl::GLSurface::CALayerInUseQuery> ca_layer_in_use_queries_;
 

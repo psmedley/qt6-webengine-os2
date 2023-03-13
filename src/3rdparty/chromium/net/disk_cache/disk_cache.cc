@@ -5,11 +5,14 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/files/file_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/field_trial.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/thread_pool/thread_pool_instance.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/cache_type.h"
 #include "net/base/net_errors.h"
@@ -19,26 +22,34 @@
 #include "net/disk_cache/disk_cache.h"
 #include "net/disk_cache/memory/mem_backend_impl.h"
 #include "net/disk_cache/simple/simple_backend_impl.h"
+#include "net/disk_cache/simple/simple_file_enumerator.h"
 
 namespace {
+
+using FileEnumerator = disk_cache::BackendFileOperations::FileEnumerator;
 
 // Builds an instance of the backend depending on platform, type, experiments
 // etc. Takes care of the retry state. This object will self-destroy when
 // finished.
 class CacheCreator {
  public:
-  CacheCreator(const base::FilePath& path,
-               disk_cache::ResetHandling reset_handling,
-               int64_t max_bytes,
-               net::CacheType type,
-               net::BackendType backend_type,
-#if defined(OS_ANDROID)
-               base::android::ApplicationStatusListener* app_status_listener,
+  CacheCreator(
+      const base::FilePath& path,
+      disk_cache::ResetHandling reset_handling,
+      int64_t max_bytes,
+      net::CacheType type,
+      net::BackendType backend_type,
+      scoped_refptr<disk_cache::BackendFileOperationsFactory> file_operations,
+#if BUILDFLAG(IS_ANDROID)
+      base::android::ApplicationStatusListener* app_status_listener,
 #endif
-               net::NetLog* net_log,
-               std::unique_ptr<disk_cache::Backend>* backend,
-               base::OnceClosure post_cleanup_callback,
-               net::CompletionOnceCallback callback);
+      net::NetLog* net_log,
+      std::unique_ptr<disk_cache::Backend>* backend,
+      base::OnceClosure post_cleanup_callback,
+      net::CompletionOnceCallback callback);
+
+  CacheCreator(const CacheCreator&) = delete;
+  CacheCreator& operator=(const CacheCreator&) = delete;
 
   net::Error TryCreateCleanupTrackerAndRun();
 
@@ -59,17 +70,16 @@ class CacheCreator {
   int64_t max_bytes_;
   net::CacheType type_;
   net::BackendType backend_type_;
-#if defined(OS_ANDROID)
-  base::android::ApplicationStatusListener* app_status_listener_;
+  scoped_refptr<disk_cache::BackendFileOperationsFactory> file_operations_;
+#if BUILDFLAG(IS_ANDROID)
+  raw_ptr<base::android::ApplicationStatusListener> app_status_listener_;
 #endif
-  std::unique_ptr<disk_cache::Backend>* backend_;
+  raw_ptr<std::unique_ptr<disk_cache::Backend>> backend_;
   base::OnceClosure post_cleanup_callback_;
   net::CompletionOnceCallback callback_;
   std::unique_ptr<disk_cache::Backend> created_cache_;
-  net::NetLog* net_log_;
+  raw_ptr<net::NetLog> net_log_;
   scoped_refptr<disk_cache::BackendCleanupTracker> cleanup_tracker_;
-
-  DISALLOW_COPY_AND_ASSIGN(CacheCreator);
 };
 
 CacheCreator::CacheCreator(
@@ -78,7 +88,8 @@ CacheCreator::CacheCreator(
     int64_t max_bytes,
     net::CacheType type,
     net::BackendType backend_type,
-#if defined(OS_ANDROID)
+    scoped_refptr<disk_cache::BackendFileOperationsFactory> file_operations,
+#if BUILDFLAG(IS_ANDROID)
     base::android::ApplicationStatusListener* app_status_listener,
 #endif
     net::NetLog* net_log,
@@ -91,7 +102,8 @@ CacheCreator::CacheCreator(
       max_bytes_(max_bytes),
       type_(type),
       backend_type_(backend_type),
-#if defined(OS_ANDROID)
+      file_operations_(std::move(file_operations)),
+#if BUILDFLAG(IS_ANDROID)
       app_status_listener_(app_status_listener),
 #endif
       backend_(backend),
@@ -103,7 +115,7 @@ CacheCreator::CacheCreator(
 CacheCreator::~CacheCreator() = default;
 
 net::Error CacheCreator::Run() {
-#if defined(OS_ANDROID) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
   static const bool kSimpleBackendIsDefault = true;
 #else
   static const bool kSimpleBackendIsDefault = false;
@@ -118,11 +130,11 @@ net::Error CacheCreator::Run() {
       (backend_type_ == net::CACHE_BACKEND_DEFAULT &&
        kSimpleBackendIsDefault)) {
     disk_cache::SimpleBackendImpl* simple_cache =
-        new disk_cache::SimpleBackendImpl(path_, cleanup_tracker_.get(),
-                                          /* file_tracker = */ nullptr,
-                                          max_bytes_, type_, net_log_);
+        new disk_cache::SimpleBackendImpl(
+            file_operations_, path_, cleanup_tracker_.get(),
+            /* file_tracker = */ nullptr, max_bytes_, type_, net_log_);
     created_cache_.reset(simple_cache);
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     if (app_status_listener_)
       simple_cache->set_app_status_listener(app_status_listener_);
 #endif
@@ -131,7 +143,7 @@ net::Error CacheCreator::Run() {
   }
 
 // Avoid references to blockfile functions on Android to reduce binary size.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return net::ERR_FAILED;
 #else
   disk_cache::BackendImpl* new_cache =
@@ -208,6 +220,24 @@ void CacheCreator::OnIOComplete(int result) {
   DCHECK_EQ(net::ERR_IO_PENDING, rv);
 }
 
+class TrivialFileEnumerator final : public FileEnumerator {
+ public:
+  using FileEnumerationEntry =
+      disk_cache::BackendFileOperations::FileEnumerationEntry;
+
+  explicit TrivialFileEnumerator(const base::FilePath& path)
+      : enumerator_(path) {}
+  ~TrivialFileEnumerator() override = default;
+
+  absl::optional<FileEnumerationEntry> Next() override {
+    return enumerator_.Next();
+  }
+  bool HasError() const override { return enumerator_.HasError(); }
+
+ private:
+  disk_cache::SimpleFileEnumerator enumerator_;
+};
+
 }  // namespace
 
 namespace disk_cache {
@@ -215,10 +245,11 @@ namespace disk_cache {
 net::Error CreateCacheBackendImpl(
     net::CacheType type,
     net::BackendType backend_type,
+    scoped_refptr<BackendFileOperationsFactory> file_operations,
     const base::FilePath& path,
     int64_t max_bytes,
     ResetHandling reset_handling,
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     base::android::ApplicationStatusListener* app_status_listener,
 #endif
     net::NetLog* net_log,
@@ -246,7 +277,8 @@ net::Error CreateCacheBackendImpl(
   bool had_post_cleanup_callback = !post_cleanup_callback.is_null();
   CacheCreator* creator = new CacheCreator(
       path, reset_handling, max_bytes, type, backend_type,
-#if defined(OS_ANDROID)
+      std::move(file_operations),
+#if BUILDFLAG(IS_ANDROID)
       std::move(app_status_listener),
 #endif
       net_log, backend, std::move(post_cleanup_callback), std::move(callback));
@@ -258,26 +290,30 @@ net::Error CreateCacheBackendImpl(
   return creator->TryCreateCleanupTrackerAndRun();
 }
 
-net::Error CreateCacheBackend(net::CacheType type,
-                              net::BackendType backend_type,
-                              const base::FilePath& path,
-                              int64_t max_bytes,
-                              ResetHandling reset_handling,
-                              net::NetLog* net_log,
-                              std::unique_ptr<Backend>* backend,
-                              net::CompletionOnceCallback callback) {
-  return CreateCacheBackendImpl(
-      type, backend_type, path, max_bytes, reset_handling,
-#if defined(OS_ANDROID)
-      nullptr,
+net::Error CreateCacheBackend(
+    net::CacheType type,
+    net::BackendType backend_type,
+    scoped_refptr<BackendFileOperationsFactory> file_operations,
+    const base::FilePath& path,
+    int64_t max_bytes,
+    ResetHandling reset_handling,
+    net::NetLog* net_log,
+    std::unique_ptr<Backend>* backend,
+    net::CompletionOnceCallback callback) {
+  return CreateCacheBackendImpl(type, backend_type, std::move(file_operations),
+                                path, max_bytes, reset_handling,
+#if BUILDFLAG(IS_ANDROID)
+                                nullptr,
 #endif
-      net_log, backend, base::OnceClosure(), std::move(callback));
+                                net_log, backend, base::OnceClosure(),
+                                std::move(callback));
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 NET_EXPORT net::Error CreateCacheBackend(
     net::CacheType type,
     net::BackendType backend_type,
+    scoped_refptr<BackendFileOperationsFactory> file_operations,
     const base::FilePath& path,
     int64_t max_bytes,
     ResetHandling reset_handling,
@@ -285,25 +321,28 @@ NET_EXPORT net::Error CreateCacheBackend(
     std::unique_ptr<Backend>* backend,
     net::CompletionOnceCallback callback,
     base::android::ApplicationStatusListener* app_status_listener) {
-  return CreateCacheBackendImpl(type, backend_type, path, max_bytes,
-                                reset_handling, std::move(app_status_listener),
-                                net_log, backend, base::OnceClosure(),
-                                std::move(callback));
+  return CreateCacheBackendImpl(
+      type, backend_type, std::move(file_operations), path, max_bytes,
+      reset_handling, std::move(app_status_listener), net_log, backend,
+      base::OnceClosure(), std::move(callback));
 }
 #endif
 
-net::Error CreateCacheBackend(net::CacheType type,
-                              net::BackendType backend_type,
-                              const base::FilePath& path,
-                              int64_t max_bytes,
-                              ResetHandling reset_handling,
-                              net::NetLog* net_log,
-                              std::unique_ptr<Backend>* backend,
-                              base::OnceClosure post_cleanup_callback,
-                              net::CompletionOnceCallback callback) {
+net::Error CreateCacheBackend(
+    net::CacheType type,
+    net::BackendType backend_type,
+    scoped_refptr<BackendFileOperationsFactory> file_operations,
+    const base::FilePath& path,
+    int64_t max_bytes,
+    ResetHandling reset_handling,
+    net::NetLog* net_log,
+    std::unique_ptr<Backend>* backend,
+    base::OnceClosure post_cleanup_callback,
+    net::CompletionOnceCallback callback) {
   return CreateCacheBackendImpl(
-      type, backend_type, path, max_bytes, reset_handling,
-#if defined(OS_ANDROID)
+      type, backend_type, std::move(file_operations), path, max_bytes,
+      reset_handling,
+#if BUILDFLAG(IS_ANDROID)
       nullptr,
 #endif
       net_log, backend, std::move(post_cleanup_callback), std::move(callback));
@@ -389,6 +428,85 @@ Entry* EntryResult::ReleaseEntry() {
   net_error_ = net::ERR_FAILED;
   opened_ = false;
   return ret;
+}
+
+TrivialFileOperations::TrivialFileOperations() {
+  DETACH_FROM_SEQUENCE(sequence_checker_);
+}
+
+TrivialFileOperations::~TrivialFileOperations() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+}
+
+bool TrivialFileOperations::CreateDirectory(const base::FilePath& path) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // This is needed for some unittests.
+  if (path.empty()) {
+    return false;
+  }
+
+  DCHECK(path.IsAbsolute());
+
+  bool result = base::CreateDirectory(path);
+  return result;
+}
+
+bool TrivialFileOperations::PathExists(const base::FilePath& path) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // This is needed for some unittests.
+  if (path.empty()) {
+    return false;
+  }
+
+  DCHECK(path.IsAbsolute());
+
+  bool result = base::PathExists(path);
+  return result;
+}
+
+base::File TrivialFileOperations::OpenFile(const base::FilePath& path,
+                                           uint32_t flags) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(path.IsAbsolute());
+
+  base::File file(path, flags);
+  return file;
+}
+
+bool TrivialFileOperations::DeleteFile(const base::FilePath& path) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(path.IsAbsolute());
+
+  return base::DeleteFile(path);
+}
+
+bool TrivialFileOperations::ReplaceFile(const base::FilePath& from_path,
+                                        const base::FilePath& to_path,
+                                        base::File::Error* error) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(from_path.IsAbsolute());
+  DCHECK(to_path.IsAbsolute());
+
+  return base::ReplaceFile(from_path, to_path, error);
+}
+
+absl::optional<base::File::Info> TrivialFileOperations::GetFileInfo(
+    const base::FilePath& path) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(path.IsAbsolute());
+
+  base::File::Info file_info;
+  if (!base::GetFileInfo(path, &file_info)) {
+    return absl::nullopt;
+  }
+  return file_info;
+}
+
+std::unique_ptr<FileEnumerator> TrivialFileOperations::EnumerateFiles(
+    const base::FilePath& path) {
+  return std::make_unique<TrivialFileEnumerator>(path);
 }
 
 }  // namespace disk_cache

@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_DRAWING_BUFFER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_DRAWING_BUFFER_H_
 
+#include <limits>
 #include <memory>
 
 #include "base/containers/span.h"
@@ -45,9 +46,9 @@
 #include "gpu/config/gpu_feature_info.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgl_image_conversion.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types_3d.h"
+#include "third_party/blink/renderer/platform/graphics/web_graphics_context_3d_video_frame_pool.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -56,6 +57,7 @@
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/color_space.h"
+#include "ui/gfx/geometry/size.h"
 #include "ui/gl/gpu_preference.h"
 
 namespace cc {
@@ -73,7 +75,6 @@ class GLES2Interface;
 }
 
 namespace blink {
-class CanvasColorParams;
 class CanvasResource;
 class CanvasResourceProvider;
 class Extensions3DUtil;
@@ -129,7 +130,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
       const Platform::GraphicsInfo& graphics_info,
       bool using_swap_chain,
       Client*,
-      const IntSize&,
+      const gfx::Size&,
       bool premultiplied_alpha,
       bool want_alpha_channel,
       bool want_depth_buffer,
@@ -139,7 +140,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
       WebGLVersion,
       ChromiumImageUsage,
       cc::PaintFlags::FilterQuality,
-      const CanvasColorParams&,
+      PredefinedColorSpace color_space,
+      CanvasPixelFormat pixel_format,
       gl::GpuPreference);
 
   DrawingBuffer(const DrawingBuffer&) = delete;
@@ -171,18 +173,23 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   // Given the desired buffer size, provides the largest dimensions that will
   // fit in the pixel budget.
-  static IntSize AdjustSize(const IntSize& desired_size,
-                            const IntSize& cur_size,
-                            int max_texture_size);
+  static gfx::Size AdjustSize(const gfx::Size& desired_size,
+                              const gfx::Size& cur_size,
+                              int max_texture_size);
 
   // Resizes (or allocates if necessary) all buffers attached to the default
   // framebuffer. Returns whether the operation was successful.
-  bool Resize(const IntSize&);
+  bool Resize(const gfx::Size&);
+
+  // Set the color space of the default draw buffer. This will destroy the
+  // contents of the drawing buffer.
+  void SetColorSpace(PredefinedColorSpace color_space);
 
   // Bind the default framebuffer to |target|. |target| must be
   // GL_FRAMEBUFFER, GL_READ_FRAMEBUFFER, or GL_DRAW_FRAMEBUFFER.
   void Bind(GLenum target);
-  IntSize Size() const { return size_; }
+  gfx::Size Size() const { return size_; }
+  GLenum StorageFormat() const;
 
   // Resolves the multisample color buffer to the normal color buffer and leaves
   // the resolved color buffer bound to GL_READ_FRAMEBUFFER and
@@ -226,6 +233,11 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // default framebuffer.
   bool DefaultBufferRequiresAlphaChannelToBePreserved();
 
+  // Set the current GL draw buffer being used with this framebuffer. Allows
+  // DrawingBuffer to properly reset the draw buffer state when doing internal
+  // operations.
+  void SetDrawBuffer(GLenum draw_buffer);
+
   cc::Layer* CcLayer();
 
   gpu::gles2::GLES2Interface* ContextGL();
@@ -260,17 +272,24 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                              GLint dst_level,
                              bool premultiply_alpha,
                              bool flip_y,
-                             const IntPoint& dst_texture_offset,
-                             const IntRect& src_sub_rectangle,
+                             const gfx::Point& dst_texture_offset,
+                             const gfx::Rect& src_sub_rectangle,
                              SourceDrawingBuffer);
 
   bool CopyToPlatformMailbox(gpu::raster::RasterInterface*,
                              gpu::Mailbox dst_mailbox,
                              GLenum dst_texture_target,
                              bool flip_y,
-                             const IntPoint& dst_texture_offset,
-                             const IntRect& src_sub_rectangle,
+                             const gfx::Point& dst_texture_offset,
+                             const gfx::Rect& src_sub_rectangle,
                              SourceDrawingBuffer src_buffer);
+
+  void CopyToVideoFrame(
+      WebGraphicsContext3DVideoFramePool* frame_pool,
+      SourceDrawingBuffer src_buffer,
+      bool src_origin_is_top_left,
+      const gfx::ColorSpace& dst_color_space,
+      WebGraphicsContext3DVideoFramePool::FrameReadyCallback& callback);
 
   sk_sp<SkData> PaintRenderingResultsToDataArray(SourceDrawingBuffer);
 
@@ -331,10 +350,11 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                 bool wants_stencil,
                 ChromiumImageUsage,
                 cc::PaintFlags::FilterQuality,
-                const CanvasColorParams&,
+                PredefinedColorSpace color_space,
+                CanvasPixelFormat pixel_format,
                 gl::GpuPreference gpu_preference);
 
-  bool Initialize(const IntSize&, bool use_multisampling);
+  bool Initialize(const gfx::Size&, bool use_multisampling);
 
   struct RegisteredBitmap {
     scoped_refptr<cc::CrossThreadSharedBitmap> bitmap;
@@ -390,7 +410,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   struct ColorBuffer : public base::RefCountedThreadSafe<ColorBuffer> {
     ColorBuffer(base::WeakPtr<DrawingBuffer> drawing_buffer,
-                const IntSize&,
+                const gfx::Size&,
+                const gfx::ColorSpace& color_space,
                 viz::ResourceFormat,
                 GLuint texture_id,
                 std::unique_ptr<gfx::GpuMemoryBuffer>,
@@ -407,7 +428,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     // by the beginDestruction method, which will eventually drain all of its
     // ColorBuffers.
     base::WeakPtr<DrawingBuffer> drawing_buffer;
-    const IntSize size;
+    const gfx::Size size;
+    const gfx::ColorSpace color_space;
     const viz::ResourceFormat format;
     const GLuint texture_id = 0;
     std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer;
@@ -438,7 +460,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                               SourceDrawingBuffer src_buffer,
                               const CopyFunction& copy_function);
 
-  enum ClearOption { ClearOnlyMultisampledFBO, ClearAllFBOs };
+  enum ClearOption { kClearOnlyMultisampledFBO, kClearAllFBOs };
 
   // Clears out newly-allocated framebuffers (really, renderbuffers / textures).
   void ClearNewlyAllocatedFramebuffers(ClearOption clear_option);
@@ -448,7 +470,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                                  ClearOption clear_option);
 
   // The same as reset(), but leaves GL state dirty.
-  bool ResizeFramebufferInternal(const IntSize&);
+  bool ResizeFramebufferInternal(const gfx::Size&);
 
   // The same as resolveAndBindForReadAndDraw(), but leaves GL state dirty.
   void ResolveMultisampleFramebufferInternal();
@@ -457,9 +479,9 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   void ResolveIfNeeded();
 
   enum CheckForDestructionResult {
-    DestroyedOrLost,
-    ContentsUnchanged,
-    ContentsResolvedIfNeeded
+    kDestroyedOrLost,
+    kContentsUnchanged,
+    kContentsResolvedIfNeeded
   };
 
   // This method:
@@ -496,9 +518,12 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                                const gpu::SyncToken&,
                                bool lost_resource);
 
-  // Attempts to allocator storage for, or resize all buffers. Returns whether
-  // the operation was successful.
-  bool ResizeDefaultFramebuffer(const IntSize&);
+  // Reallocates the storage for all buffers. This is called due to a change in
+  // the properties of the buffer (e.g, its size or color space). If
+  // `only_reallocate_color` is true, then do not reallocate the depth stencil
+  // buffer.
+  bool ReallocateDefaultFramebuffer(const gfx::Size&,
+                                    bool only_reallocate_color);
 
   void ClearCcLayer();
 
@@ -507,7 +532,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   // Updates the current size of the buffer, ensuring that
   // s_currentResourceUsePixels is updated.
-  void SetSize(const IntSize&);
+  void SetSize(const gfx::Size&);
 
   // Read the content of the FrameBuffer into the bitmap.
   void ReadFramebufferIntoBitmapPixels(uint8_t* pixels);
@@ -527,7 +552,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // RuntimeEnabledFeatures::WebGLImageChromiumEnabled() is true. On failure,
   // or if the flag is false, creates a default texture. Always returns a valid
   // ColorBuffer.
-  scoped_refptr<ColorBuffer> CreateColorBuffer(const IntSize&);
+  scoped_refptr<ColorBuffer> CreateColorBuffer(const gfx::Size&);
 
   // Creates or recycles a ColorBuffer of size |m_size|.
   scoped_refptr<ColorBuffer> CreateOrRecycleColorBuffer();
@@ -551,7 +576,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   // Reallocate Multisampled renderbuffer, used by explicit resolve when resize
   // and GPU switch
-  bool ReallocateMultisampleRenderbuffer(const IntSize&);
+  bool ReallocateMultisampleRenderbuffer(const gfx::Size&);
 
   // Presents swap chain if swap chain is being used and contents have changed.
   void ResolveAndPresentSwapChainIfNeeded();
@@ -566,7 +591,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // Lifetime is tied to the m_contextProvider.
   gpu::gles2::GLES2Interface* gl_;
   std::unique_ptr<Extensions3DUtil> extensions_util_;
-  IntSize size_ = {-1, -1};
+  gfx::Size size_;
   const bool discard_framebuffer_supported_;
   // Did the user request an alpha channel be allocated.
   const bool want_alpha_channel_;
@@ -642,8 +667,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   const bool want_depth_;
   const bool want_stencil_;
 
-  // The color space of this buffer's storage.
-  const gfx::ColorSpace storage_color_space_;
+  // The color space of this buffer.
+  gfx::ColorSpace color_space_;
 
   AntialiasingMode anti_aliasing_mode_ = kAntialiasingModeNone;
 
@@ -657,6 +682,8 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   bool has_eqaa_support = false;
   cc::PaintFlags::FilterQuality filter_quality_ =
       cc::PaintFlags::FilterQuality::kLow;
+
+  GLenum draw_buffer_ = GL_COLOR_ATTACHMENT0;
 
   scoped_refptr<cc::TextureLayer> layer_;
 

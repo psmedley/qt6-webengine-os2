@@ -27,16 +27,14 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final : public NGPhysicalFragment {
     kEmptyLineBox
   };
 
-  static scoped_refptr<const NGPhysicalLineBoxFragment> Create(
+  static const NGPhysicalLineBoxFragment* Create(
       NGLineBoxFragmentBuilder* builder);
 
   using PassKey = base::PassKey<NGPhysicalLineBoxFragment>;
   NGPhysicalLineBoxFragment(PassKey, NGLineBoxFragmentBuilder* builder);
+  ~NGPhysicalLineBoxFragment();
 
-  ~NGPhysicalLineBoxFragment() {
-    for (const NGLink& child : Children())
-      child.fragment->Release();
-  }
+  void TraceAfterDispatch(Visitor*) const;
 
   NGLineBoxType LineBoxType() const {
     return static_cast<NGLineBoxType>(sub_type_);
@@ -55,7 +53,7 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final : public NGPhysicalFragment {
   // This may be different from the direction of the container box when
   // first-line style is used, or when 'unicode-bidi: plaintext' is used.
   TextDirection BaseDirection() const {
-    return static_cast<TextDirection>(base_or_resolved_direction_);
+    return static_cast<TextDirection>(base_direction_);
   }
 
   // Compute the baseline metrics for this linebox.
@@ -80,6 +78,10 @@ class CORE_EXPORT NGPhysicalLineBoxFragment final : public NGPhysicalFragment {
   // Returns the |LayoutObject| of the container. |GetLayoutObject()| returns
   // |nullptr| because line boxes do not have corresponding |LayoutObject|.
   const LayoutObject* ContainerLayoutObject() const { return layout_object_; }
+
+ protected:
+  friend class NGPhysicalFragment;
+  void Dispose();
 
  private:
   FontHeight metrics_;

@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/collapsed_border_value.h"
 #include "third_party/blink/renderer/core/layout/geometry/transform_state.h"
-#include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_object_factory.h"
 #include "third_party/blink/renderer/core/layout/layout_table_col.h"
 #include "third_party/blink/renderer/core/layout/subtree_layout_scope.h"
@@ -39,8 +38,8 @@
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/table_cell_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/table_cell_painter.h"
-#include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/wtf/size_assertions.h"
+#include "ui/gfx/geometry/quad_f.h"
 
 namespace blink {
 
@@ -298,7 +297,6 @@ void LayoutTableCell::SetCellLogicalWidth(int table_layout_logical_width,
 void LayoutTableCell::UpdateLayout() {
   NOT_DESTROYED();
   DCHECK(NeedsLayout());
-  LayoutAnalyzer::Scope analyzer(*this);
 
   UpdateBlockLayout(CellChildrenNeedLayout());
 

@@ -28,7 +28,7 @@ function createExternalTextureSamplingTestPipeline(t: GPUTest): GPURenderPipelin
     vertex: {
       module: t.device.createShaderModule({
         code: `
-        [[stage(vertex)]] fn main([[builtin(vertex_index)]] VertexIndex : u32) -> [[builtin(position)]] vec4<f32> {
+        @stage(vertex) fn main(@builtin(vertex_index) VertexIndex : u32) -> @builtin(position) vec4<f32> {
             var pos = array<vec4<f32>, 6>(
               vec4<f32>( 1.0,  1.0, 0.0, 1.0),
               vec4<f32>( 1.0, -1.0, 0.0, 1.0),
@@ -46,11 +46,11 @@ function createExternalTextureSamplingTestPipeline(t: GPUTest): GPURenderPipelin
     fragment: {
       module: t.device.createShaderModule({
         code: `
-        [[group(0), binding(0)]] var s : sampler;
-        [[group(0), binding(1)]] var t : texture_external;
+        @group(0) @binding(0) var s : sampler;
+        @group(0) @binding(1) var t : texture_external;
 
-        [[stage(fragment)]] fn main([[builtin(position)]] FragCoord : vec4<f32>)
-                                 -> [[location(0)]] vec4<f32> {
+        @stage(fragment) fn main(@builtin(position) FragCoord : vec4<f32>)
+                                 -> @location(0) vec4<f32> {
             return textureSampleLevel(t, s, FragCoord.xy / vec2<f32>(16.0, 16.0));
         }
         `,
@@ -129,7 +129,8 @@ TODO: Multiplanar scenarios
         colorAttachments: [
           {
             view: colorAttachment.createView(),
-            loadValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+            loadOp: 'clear',
             storeOp: 'store',
           },
         ],
@@ -137,7 +138,7 @@ TODO: Multiplanar scenarios
       passEncoder.setPipeline(pipeline);
       passEncoder.setBindGroup(0, bindGroup);
       passEncoder.draw(6);
-      passEncoder.endPass();
+      passEncoder.end();
       t.device.queue.submit([commandEncoder.finish()]);
 
       // Top left corner should be red. Sample a few pixels away from the edges to avoid compression
@@ -183,7 +184,12 @@ destroyed results in an error.
     });
     const passDescriptor = {
       colorAttachments: [
-        { view: colorAttachment.createView(), loadValue: [0, 0, 0, 1], storeOp: 'store' },
+        {
+          view: colorAttachment.createView(),
+          clearValue: [0, 0, 0, 1],
+          loadOp: 'clear',
+          storeOp: 'store',
+        },
       ],
     } as const;
 
@@ -196,7 +202,7 @@ destroyed results in an error.
       const commandEncoder = t.device.createCommandEncoder();
       const passEncoder = commandEncoder.beginRenderPass(passDescriptor);
       passEncoder.setBindGroup(0, bindGroup);
-      passEncoder.endPass();
+      passEncoder.end();
       return commandEncoder.finish();
     };
 
@@ -247,7 +253,7 @@ Tests that we can import an HTMLVideoElement into a GPUExternalTexture and use i
       const outputTexture = t.device.createTexture({
         format: 'rgba8unorm',
         size: [2, 1, 1],
-        usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE,
+        usage: GPUTextureUsage.COPY_SRC | GPUTextureUsage.STORAGE_BINDING,
       });
 
       const pipeline = t.device.createComputePipeline({
@@ -256,10 +262,10 @@ Tests that we can import an HTMLVideoElement into a GPUExternalTexture and use i
           // stored in storage texture.
           module: t.device.createShaderModule({
             code: `
-              [[group(0), binding(0)]] var t : texture_external;
-              [[group(0), binding(1)]] var outImage : texture_storage_2d<rgba8unorm, write>;
+              @group(0) @binding(0) var t : texture_external;
+              @group(0) @binding(1) var outImage : texture_storage_2d<rgba8unorm, write>;
 
-              [[stage(compute), workgroup_size(1)]] fn main() {
+              @stage(compute) @workgroup_size(1) fn main() {
                 var red : vec4<f32> = textureLoad(t, vec2<i32>(10,10));
                 textureStore(outImage, vec2<i32>(0, 0), red);
                 var green : vec4<f32> = textureLoad(t, vec2<i32>(70,118));
@@ -285,7 +291,7 @@ Tests that we can import an HTMLVideoElement into a GPUExternalTexture and use i
       pass.setPipeline(pipeline);
       pass.setBindGroup(0, bg);
       pass.dispatch(1);
-      pass.endPass();
+      pass.end();
       t.device.queue.submit([encoder.finish()]);
 
       // Pixel loaded from top left corner should be red.

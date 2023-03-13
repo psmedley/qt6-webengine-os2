@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "base/macros.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/strcat.h"
@@ -48,6 +47,15 @@ std::string GetHistogramNameForProvider(
     // The rest use the base histogram name.
     case mojom::MediaRouteProviderId::TEST:
       return base_name;
+  }
+}
+
+std::string GetUiName(UiType ui) {
+  switch (ui) {
+    case UiType::kCastDialog:
+      return "CastHarmony";
+    case UiType::kGlobalMediaControls:
+      return "GlobalMediaControls";
   }
 }
 
@@ -96,10 +104,6 @@ MediaRouterMetrics::~MediaRouterMetrics() = default;
 // static
 const char MediaRouterMetrics::kHistogramCloseLatency[] =
     "MediaRouter.Ui.Action.CloseLatency";
-const char MediaRouterMetrics::kHistogramCloudPrefAtDialogOpen[] =
-    "MediaRouter.Cloud.PrefAtDialogOpen";
-const char MediaRouterMetrics::kHistogramCloudPrefAtInit[] =
-    "MediaRouter.Cloud.PrefAtInit";
 const char MediaRouterMetrics::kHistogramIconClickLocation[] =
     "MediaRouter.Icon.Click.Location";
 const char MediaRouterMetrics::kHistogramMediaRouterFileFormat[] =
@@ -132,10 +136,14 @@ const char MediaRouterMetrics::kHistogramUiFirstAction[] =
     "MediaRouter.Ui.FirstAction";
 const char MediaRouterMetrics::kHistogramUiIconStateAtInit[] =
     "MediaRouter.Ui.IconStateAtInit";
+const char MediaRouterMetrics::kHistogramUiAndroidDialogType[] =
+    "MediaRouter.Ui.Android.DialogType";
+const char MediaRouterMetrics::kHistogramUiAndroidDialogAction[] =
+    "MediaRouter.Ui.Android.DialogAction";
 
 // static
 const base::TimeDelta MediaRouterMetrics::kDeviceCountMetricDelay =
-    base::TimeDelta::FromSeconds(3);
+    base::Seconds(3);
 
 // static
 void MediaRouterMetrics::RecordMediaRouterDialogOrigin(
@@ -211,6 +219,32 @@ void MediaRouterMetrics::RecordMediaSinkType(SinkIconType sink_icon_type) {
 }
 
 // static
+void MediaRouterMetrics::RecordMediaSinkTypeForGlobalMediaControls(
+    SinkIconType sink_icon_type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      base::StrCat({kHistogramMediaSinkType, ".GlobalMediaControls"}),
+      sink_icon_type, SinkIconType::TOTAL_COUNT);
+}
+
+// static
+void MediaRouterMetrics::RecordMediaSinkTypeForCastDialog(
+    SinkIconType sink_icon_type) {
+  UMA_HISTOGRAM_ENUMERATION(
+      base::StrCat({kHistogramMediaSinkType, ".CastHarmony"}), sink_icon_type,
+      SinkIconType::TOTAL_COUNT);
+}
+
+// static
+void MediaRouterMetrics::RecordMediaSinkTypeWhenCastAndDialPresent(
+    SinkIconType sink_icon_type,
+    UiType ui) {
+  UMA_HISTOGRAM_ENUMERATION(
+      base::StrCat(
+          {kHistogramMediaSinkType, ".CastAndDialPresent.", GetUiName(ui)}),
+      sink_icon_type, SinkIconType::TOTAL_COUNT);
+}
+
+// static
 void MediaRouterMetrics::RecordDeviceCount(int device_count) {
   UMA_HISTOGRAM_COUNTS_100(kHistogramUiDeviceCount, device_count);
 }
@@ -280,16 +314,6 @@ void MediaRouterMetrics::RecordIconStateAtInit(bool is_pinned) {
 }
 
 // static
-void MediaRouterMetrics::RecordCloudPrefAtDialogOpen(bool enabled) {
-  base::UmaHistogramBoolean(kHistogramCloudPrefAtDialogOpen, enabled);
-}
-
-// static
-void MediaRouterMetrics::RecordCloudPrefAtInit(bool enabled) {
-  base::UmaHistogramBoolean(kHistogramCloudPrefAtInit, enabled);
-}
-
-// static
 void MediaRouterMetrics::RecordCreateRouteResultCode(
     RouteRequestResult::ResultCode result_code,
     absl::optional<mojom::MediaRouteProviderId> provider_id) {
@@ -320,6 +344,18 @@ void MediaRouterMetrics::RecordMediaRouteProviderTerminateRoute(
       GetHistogramNameForProvider(kHistogramProviderTerminateRouteResult,
                                   provider_id),
       result_code, RouteRequestResult::TOTAL_COUNT);
+}
+
+// static
+void MediaRouterMetrics::RecordMediaRouterAndroidDialogType(
+    MediaRouterAndroidDialogType type) {
+  base::UmaHistogramEnumeration(kHistogramUiAndroidDialogType, type);
+}
+
+// static
+void MediaRouterMetrics::RecordMediaRouterAndroidDialogAction(
+    MediaRouterAndroidDialogAction action) {
+  base::UmaHistogramEnumeration(kHistogramUiAndroidDialogAction, action);
 }
 
 }  // namespace media_router

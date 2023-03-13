@@ -6,11 +6,11 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_PROPERTIES_CSS_PROPERTY_H_
 
 #include <memory>
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/css_property_name.h"
 #include "third_party/blink/renderer/core/css/css_value.h"
 #include "third_party/blink/renderer/core/css/properties/css_direction_aware_resolver.h"
 #include "third_party/blink/renderer/core/css/properties/css_unresolved_property.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
@@ -35,10 +35,13 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
   // For backwards compatibility when passing around CSSUnresolvedProperty
   // references. In case we need to call a function that hasn't been converted
   // to using property classes yet.
-  CSSPropertyID PropertyID() const { return property_id_; }
+  CSSPropertyID PropertyID() const {
+    return static_cast<CSSPropertyID>(property_id_);
+  }
   virtual CSSPropertyName GetCSSPropertyName() const {
     return CSSPropertyName(PropertyID());
   }
+  virtual bool HasEqualCSSPropertyName(const CSSProperty& other) const;
 
   bool IDEquals(CSSPropertyID id) const { return PropertyID() == id; }
   bool IsResolvedProperty() const override { return true; }
@@ -53,11 +56,22 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
   bool IsInherited() const { return flags_ & kInherited; }
   bool IsVisited() const { return flags_ & kVisited; }
   bool IsInternal() const { return flags_ & kInternal; }
+  bool IsAnimationProperty() const { return flags_ & kAnimation; }
+  bool SupportsIncrementalStyle() const {
+    return flags_ & kSupportsIncrementalStyle;
+  }
+  bool IsIdempotent() const { return flags_ & kIdempotent; }
   bool IsValidForFirstLetter() const { return flags_ & kValidForFirstLetter; }
   bool IsValidForFirstLine() const { return flags_ & kValidForFirstLine; }
   bool IsValidForCue() const { return flags_ & kValidForCue; }
   bool IsValidForMarker() const { return flags_ & kValidForMarker; }
   bool IsValidForHighlight() const { return flags_ & kValidForHighlight; }
+  bool IsValidForCanvasFormattedText() const {
+    return flags_ & kValidForCanvasFormattedText;
+  }
+  bool IsValidForCanvasFormattedTextRun() const {
+    return flags_ & kValidForCanvasFormattedTextRun;
+  }
   bool IsSurrogate() const { return flags_ & kSurrogate; }
   bool AffectsFont() const { return flags_ & kAffectsFont; }
   bool IsBackground() const { return flags_ & kBackground; }
@@ -155,20 +169,39 @@ class CORE_EXPORT CSSProperty : public CSSUnresolvedProperty {
     kInLogicalPropertyGroup = 1 << 20,
     // https://drafts.csswg.org/css-pseudo-4/#first-line-styling
     kValidForFirstLine = 1 << 21,
+    // The property participates in paired cascade, such that when encountered
+    // in highlight styles, we make all other highlight color properties default
+    // to initial, rather than the UA default.
+    // https://drafts.csswg.org/css-pseudo-4/#highlight-cascade
+    kHighlightColors = 1 << 22,
+    // See supports_incremental_style in css_properties.json5.
+    kSupportsIncrementalStyle = 1 << 23,
+    // See idempotent in css_properties.json5.
+    kIdempotent = 1 << 24,
+    // Set if the css property can apply to the experiemental canvas
+    // formatted text API to render multiline text in canvas.
+    // https://github.com/WICG/canvas-formatted-text
+    kValidForCanvasFormattedText = 1 << 25,
+    kValidForCanvasFormattedTextRun = 1 << 26,
   };
 
   constexpr CSSProperty(CSSPropertyID property_id,
                         Flags flags,
                         char repetition_separator)
-      : CSSUnresolvedProperty(),
-        property_id_(property_id),
-        flags_(flags),
-        repetition_separator_(repetition_separator) {}
+      : property_id_(static_cast<uint16_t>(property_id)),
+        repetition_separator_(repetition_separator),
+        flags_(flags) {}
 
  private:
-  CSSPropertyID property_id_;
-  Flags flags_;
+  uint16_t property_id_;
   char repetition_separator_;
+  Flags flags_;
+
+  // Make sure we have room for all valid CSSPropertyIDs.
+  // (Using a smaller type here reduces CSSProperty size from 24 to 16
+  // bytes, and we have many of them that are frequently accessed
+  // during style application.)
+  static_assert(sizeof(property_id_) * 8 >= kCSSPropertyIDBitLength);
 };
 
 template <>

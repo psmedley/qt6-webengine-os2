@@ -21,6 +21,7 @@
 #include "gpu/vulkan/vulkan_implementation.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/core/SkSurface.h"
@@ -32,8 +33,8 @@
 
 #if BUILDFLAG(USE_DAWN)
 #include <dawn/dawn_proc.h>
+#include <dawn/native/DawnNative.h>
 #include <dawn/webgpu_cpp.h>
-#include <dawn_native/DawnNative.h>
 #endif  // BUILDFLAG(USE_DAWN)
 
 namespace gpu {
@@ -93,17 +94,25 @@ class ExternalVkImageFactoryTest : public testing::Test {
     // Create a Dawn Vulkan device
     dawn_instance_.DiscoverDefaultAdapters();
 
-    std::vector<dawn_native::Adapter> adapters = dawn_instance_.GetAdapters();
+    std::vector<dawn::native::Adapter> adapters = dawn_instance_.GetAdapters();
     auto adapter_it = std::find_if(
-        adapters.begin(), adapters.end(), [](dawn_native::Adapter adapter) {
-          return adapter.GetBackendType() == dawn_native::BackendType::Vulkan;
+        adapters.begin(), adapters.end(), [](dawn::native::Adapter adapter) {
+          wgpu::AdapterProperties properties;
+          adapter.GetProperties(&properties);
+          return properties.backendType == wgpu::BackendType::Vulkan;
         });
     ASSERT_NE(adapter_it, adapters.end());
 
-    DawnProcTable procs = dawn_native::GetProcs();
+    DawnProcTable procs = dawn::native::GetProcs();
     dawnProcSetProcs(&procs);
 
-    dawn_device_ = wgpu::Device::Acquire(adapter_it->CreateDevice());
+    dawn::native::DawnDeviceDescriptor device_descriptor;
+    // We need to request internal usage to be able to do operations with
+    // internal methods that would need specific usages.
+    device_descriptor.requiredFeatures.push_back("dawn-internal-usages");
+
+    dawn_device_ =
+        wgpu::Device::Acquire(adapter_it->CreateDevice(&device_descriptor));
     DCHECK(dawn_device_) << "Failed to create Dawn device";
 #endif  // BUILDFLAG(USE_DAWN)
   }
@@ -129,7 +138,7 @@ class ExternalVkImageFactoryTest : public testing::Test {
   std::unique_ptr<ExternalVkImageFactory> shared_image_factory_;
 
 #if BUILDFLAG(USE_DAWN)
-  dawn_native::Instance dawn_instance_;
+  dawn::native::Instance dawn_instance_;
   wgpu::Device dawn_device_;
 #endif  // BUILDFLAG(USE_DAWN)
 };
@@ -171,8 +180,8 @@ TEST_F(ExternalVkImageFactoryTest, DawnWrite_SkiaVulkanRead) {
     ASSERT_TRUE(dawn_scoped_access);
 
     wgpu::Texture texture(dawn_scoped_access->texture());
-    wgpu::RenderPassColorAttachmentDescriptor color_desc;
-    color_desc.attachment = texture.CreateView();
+    wgpu::RenderPassColorAttachment color_desc;
+    color_desc.view = texture.CreateView();
     color_desc.resolveTarget = nullptr;
     color_desc.loadOp = wgpu::LoadOp::Clear;
     color_desc.storeOp = wgpu::StoreOp::Store;
@@ -243,6 +252,11 @@ TEST_F(ExternalVkImageFactoryTest, DawnWrite_SkiaVulkanRead) {
       EXPECT_EQ(pixel[3], 255);
     }
 
+    if (skia_scoped_access->end_state()) {
+      context_state_->gr_context()->setBackendTextureState(
+          backend_texture, *skia_scoped_access->end_state());
+    }
+
     GrFlushInfo flush_info;
     flush_info.fNumSemaphores = end_semaphores.size();
     flush_info.fSignalSemaphores = end_semaphores.data();
@@ -286,7 +300,7 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
     std::vector<GrBackendSemaphore> begin_semaphores;
     std::vector<GrBackendSemaphore> end_semaphores;
     auto skia_scoped_access = skia_representation->BeginScopedWriteAccess(
-        1 /* final_msaa_count */,
+        /*final_msaa_count=*/1,
         SkSurfaceProps(0 /* flags */, kUnknown_SkPixelGeometry),
         &begin_semaphores, &end_semaphores,
         gpu::SharedImageRepresentation::AllowUnclearedAccess::kYes);
@@ -347,11 +361,11 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
     // Encode the buffer copy
     wgpu::CommandEncoder encoder = dawn_device_.CreateCommandEncoder();
     {
-      wgpu::TextureCopyView src_copy_view = {};
+      wgpu::ImageCopyTexture src_copy_view = {};
       src_copy_view.origin = {0, 0, 0};
       src_copy_view.texture = src_texture;
 
-      wgpu::BufferCopyView dst_copy_view = {};
+      wgpu::ImageCopyBuffer dst_copy_view = {};
       dst_copy_view.buffer = dst_buffer;
       dst_copy_view.layout.bytesPerRow = 256;
       dst_copy_view.layout.offset = 0;
@@ -377,7 +391,7 @@ TEST_F(ExternalVkImageFactoryTest, SkiaVulkanWrite_DawnRead) {
         &done);
 
     while (!done) {
-      base::PlatformThread::Sleep(base::TimeDelta::FromMicroseconds(100));
+      base::PlatformThread::Sleep(base::Microseconds(100));
       dawn_device_.Tick();
     }
 

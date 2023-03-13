@@ -11,12 +11,15 @@
 #include <utility>
 #include <vector>
 
+#include "base/allocator/allocator_shim.h"
+#include "base/allocator/allocator_shim_default_dispatch_to_partition_alloc.h"
 #include "base/allocator/buildflags.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/condition_variable.h"
 #include "base/task/common/checked_lock.h"
@@ -63,7 +66,7 @@ class WorkerThreadDefaultDelegate : public WorkerThread::Delegate {
   WorkerThread::ThreadLabel GetThreadLabel() const override {
     return WorkerThread::ThreadLabel::DEDICATED;
   }
-  void OnMainEntry(const WorkerThread* worker) override {}
+  void OnMainEntry(WorkerThread* worker) override {}
   RegisteredTaskSource GetWork(WorkerThread* worker) override {
     return nullptr;
   }
@@ -151,7 +154,7 @@ class ThreadPoolWorkerTest : public testing::TestWithParam<int> {
     }
 
     // WorkerThread::Delegate:
-    void OnMainEntry(const WorkerThread* worker) override {
+    void OnMainEntry(WorkerThread* worker) override {
       outer_->worker_set_.Wait();
       EXPECT_EQ(outer_->worker_.get(), worker);
       EXPECT_FALSE(IsCallToDidProcessTaskExpected());
@@ -264,7 +267,7 @@ class ThreadPoolWorkerTest : public testing::TestWithParam<int> {
       return expect_did_run_task_;
     }
 
-    ThreadPoolWorkerTest* outer_;
+    raw_ptr<ThreadPoolWorkerTest> outer_;
 
     // Synchronizes access to |expect_did_run_task_|.
     mutable CheckedLock expect_did_run_task_lock_;
@@ -508,7 +511,7 @@ class ControllableCleanupDelegate : public WorkerThreadDefaultDelegate {
 
  private:
   scoped_refptr<Sequence> work_sequence_;
-  TaskTracker* const task_tracker_;
+  const raw_ptr<TaskTracker> task_tracker_;
   scoped_refptr<Controls> controls_;
 };
 
@@ -523,7 +526,7 @@ class MockedControllableCleanupDelegate : public ControllableCleanupDelegate {
   ~MockedControllableCleanupDelegate() override = default;
 
   // WorkerThread::Delegate:
-  MOCK_METHOD1(OnMainEntry, void(const WorkerThread* worker));
+  MOCK_METHOD1(OnMainEntry, void(WorkerThread* worker));
 };
 
 }  // namespace
@@ -667,7 +670,7 @@ class CallJoinFromDifferentThread : public SimpleThread {
   void WaitForRunToStart() { run_started_event_.Wait(); }
 
  private:
-  WorkerThread* const worker_to_join_;
+  const raw_ptr<WorkerThread> worker_to_join_;
   TestWaitableEvent run_started_event_;
 };
 
@@ -729,9 +732,7 @@ class ExpectThreadPriorityDelegate : public WorkerThreadDefaultDelegate {
   }
 
   // WorkerThread::Delegate:
-  void OnMainEntry(const WorkerThread* worker) override {
-    VerifyThreadPriority();
-  }
+  void OnMainEntry(WorkerThread* worker) override { VerifyThreadPriority(); }
   RegisteredTaskSource GetWork(WorkerThread* worker) override {
     VerifyThreadPriority();
     priority_verified_in_get_work_event_.Signal();
@@ -806,7 +807,7 @@ class VerifyCallsToObserverDelegate : public WorkerThreadDefaultDelegate {
       const VerifyCallsToObserverDelegate&) = delete;
 
   // WorkerThread::Delegate:
-  void OnMainEntry(const WorkerThread* worker) override {
+  void OnMainEntry(WorkerThread* worker) override {
     Mock::VerifyAndClear(observer_);
   }
 
@@ -815,7 +816,7 @@ class VerifyCallsToObserverDelegate : public WorkerThreadDefaultDelegate {
   }
 
  private:
-  test::MockWorkerThreadObserver* const observer_;
+  const raw_ptr<test::MockWorkerThreadObserver> observer_;
 };
 
 }  // namespace
@@ -837,11 +838,8 @@ TEST(ThreadPoolWorkerTest, WorkerThreadObserver) {
   Mock::VerifyAndClear(&observer);
 }
 
-// ThreadCache tests disabled  when ENABLE_RUNTIME_BACKUP_REF_PTR_CONTROL is
-// enabled, because the "original" PartitionRoot has ThreadCache disabled.
 #if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && \
-    defined(PA_THREAD_CACHE_SUPPORTED) &&       \
-    !BUILDFLAG(ENABLE_RUNTIME_BACKUP_REF_PTR_CONTROL)
+    defined(PA_THREAD_CACHE_SUPPORTED)
 namespace {
 NOINLINE void FreeForTest(void* data) {
   free(data);
@@ -882,6 +880,10 @@ class WorkerThreadThreadCacheDelegate : public WorkerThreadDefaultDelegate {
 };
 
 TEST(ThreadPoolWorkerThreadCachePurgeTest, Purge) {
+  // Make sure the thread cache is enabled in the main partition.
+  base::internal::PartitionAllocMalloc::Allocator()
+      ->EnableThreadCacheIfSupported();
+
   TaskTracker task_tracker;
   auto delegate = std::make_unique<WorkerThreadThreadCacheDelegate>();
   auto* delegate_raw = delegate.get();
@@ -904,7 +906,6 @@ TEST(ThreadPoolWorkerThreadCachePurgeTest, Purge) {
 
 #endif  // BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) &&
         // defined(PA_THREAD_CACHE_SUPPORTED) &&
-        // !BUILDFLAG(ENABLE_RUNTIME_BACKUP_REF_PTR_CONTROL)
 
 }  // namespace internal
 }  // namespace base

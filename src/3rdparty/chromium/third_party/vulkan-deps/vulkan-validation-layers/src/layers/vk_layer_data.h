@@ -1,6 +1,6 @@
-/* Copyright (c) 2015-2017, 2019-2021 The Khronos Group Inc.
- * Copyright (c) 2015-2017, 2019-2021 Valve Corporation
- * Copyright (c) 2015-2017, 2019-2021 LunarG, Inc.
+/* Copyright (c) 2015-2017, 2019-2022 The Khronos Group Inc.
+ * Copyright (c) 2015-2017, 2019-2022 Valve Corporation
+ * Copyright (c) 2015-2017, 2019-2022 LunarG, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -104,16 +104,12 @@ template <typename T>
 using insert_iterator = std::insert_iterator<T>;
 #endif
 
-#if __cplusplus < 201402L
-// Temporary workaround for c++11. Remove with std >= c++14.
+// Can't alias variadic functions even on C++14, and wrapping the 14 implementation wouldn't gain us anything...
+// leave it in unconditionally and for backwards compatibility
 template<typename T, typename... Args>
 constexpr std::unique_ptr<T> make_unique(Args&&... args) {
     return std::unique_ptr<T>(new T(std::forward<Args>(args)...));
 }
-#else
-template <typename T>
-constexpr auto make_unique = std::make_unique<T>;
-#endif
 
 }  // namespace layer_data
 
@@ -169,6 +165,8 @@ class small_vector {
         size_ = other.size_;
         other.size_ = 0;
     }
+
+    ~small_vector() { clear(); }
 
     bool operator==(const small_vector &rhs) const {
         if (size_ != rhs.size_) return false;
@@ -271,7 +269,15 @@ class small_vector {
         return GetWorkingStore()[pos];
     }
 
-    // Like std::vector::back, calling back on an empty container causes undefined behavior
+    // Like std::vector:: calling front or back on an empty container causes undefined behavior
+    reference front() {
+        assert(size_ > 0);
+        return GetWorkingStore()[0];
+    }
+    const_reference front() const {
+        assert(size_ > 0);
+        return GetWorkingStore()[0];
+    }
     reference back() {
         assert(size_ > 0);
         return GetWorkingStore()[size_ - 1];
@@ -817,6 +823,45 @@ class optional {
     }
     Store store_;
     bool init_;
+};
+
+// Partial implementation of std::span for C++11
+template <typename T>
+class span {
+  public:
+    using pointer = T *;
+    using iterator = pointer;
+    using const_iterator = T const *;
+
+    span() = default;
+    span(pointer start, size_t n) : data_(start), count_(n) {}
+    template <typename Iterator>
+    span(Iterator start, Iterator end) : data_(&(*start)), count_(end - start) {}
+    template <typename Container>
+    span(const Container &c) : data_(c.data()), count_(c.size()) {}
+
+    iterator begin() { return data_; }
+    const_iterator begin() const { return data_; }
+
+    iterator end() { return data_ + count_; }
+    const_iterator end() const { return data_ + count_; }
+
+    T &operator[](int i) { return data_[i]; }
+    const T &operator[](int i) const { return data_[i]; }
+
+    T &front() { return *data_; }
+    const T &front() const { return *data_; }
+
+    T &back() { return *(data_ + (count_ - 1)); }
+    const T &back() const { return *(data_ + (count_ - 1)); }
+
+    size_t size() const { return count_; }
+
+    pointer data() { return data_; }
+
+  private:
+    pointer data_ = {};
+    size_t count_ = 0;
 };
 }  // namespace layer_data
 #endif  // LAYER_DATA_H

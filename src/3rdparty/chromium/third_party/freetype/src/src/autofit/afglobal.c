@@ -4,7 +4,7 @@
  *
  *   Auto-fitter routines to compute global hinting values (body).
  *
- * Copyright (C) 2003-2021 by
+ * Copyright (C) 2003-2022 by
  * David Turner, Robert Wilhelm, and Werner Lemberg.
  *
  * This file is part of the FreeType project, and may only be used,
@@ -337,10 +337,12 @@
 
     /* we allocate an AF_FaceGlobals structure together */
     /* with the glyph_styles array                      */
-    if ( FT_ALLOC( globals,
-                   sizeof ( *globals ) +
-                     (FT_ULong)face->num_glyphs * sizeof ( FT_UShort ) ) )
+    if ( FT_QALLOC( globals,
+                    sizeof ( *globals ) +
+                      (FT_ULong)face->num_glyphs * sizeof ( FT_UShort ) ) )
       goto Exit;
+
+    FT_ZERO( &globals->metrics );
 
     globals->face                      = face;
     globals->glyph_count               = face->num_glyphs;
@@ -477,7 +479,7 @@
             /* IMPORTANT: Clear the error code, see
              * https://gitlab.freedesktop.org/freetype/freetype/-/issues/1063
              */
-            error = 0;
+            error = FT_Err_Ok;
             goto Again;
           }
 

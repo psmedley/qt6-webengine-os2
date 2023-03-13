@@ -31,17 +31,20 @@ class COMPONENT_EXPORT(UI_BASE_IME_LINUX) InputMethodAuraLinux
 
   // Overriden from InputMethod.
   ui::EventDispatchDetails DispatchKeyEvent(ui::KeyEvent* event) override;
-  void OnTextInputTypeChanged(const TextInputClient* client) override;
+  void OnTextInputTypeChanged(TextInputClient* client) override;
   void OnCaretBoundsChanged(const TextInputClient* client) override;
   void CancelComposition(const TextInputClient* client) override;
   bool IsCandidatePopupOpen() const override;
+  VirtualKeyboardController* GetVirtualKeyboardController() override;
 
   // Overriden from ui::LinuxInputMethodContextDelegate
   void OnCommit(const std::u16string& text) override;
-  void OnDeleteSurroundingText(int32_t index, uint32_t length) override;
+  void OnDeleteSurroundingText(size_t before, size_t after) override;
   void OnPreeditChanged(const CompositionText& composition_text) override;
   void OnPreeditEnd() override;
   void OnPreeditStart() override {}
+  void OnSetPreeditRegion(const gfx::Range& range,
+                          const std::vector<ImeTextSpan>& spans) override;
 
  protected:
   // Overridden from InputMethodBase.
@@ -72,8 +75,8 @@ class COMPONENT_EXPORT(UI_BASE_IME_LINUX) InputMethodAuraLinux
   void ConfirmCompositionText();
   bool HasInputMethodResult();
   bool NeedInsertChar(const std::u16string& result_text) const;
-  ui::EventDispatchDetails SendFakeProcessKeyEvent(ui::KeyEvent* event) const
-      WARN_UNUSED_RESULT;
+  [[nodiscard]] ui::EventDispatchDetails SendFakeProcessKeyEvent(
+      ui::KeyEvent* event) const;
   void UpdateContextFocusState();
   void ResetContext();
   bool IgnoringNonKeyInput() const;

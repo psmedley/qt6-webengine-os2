@@ -11,6 +11,7 @@
 #include "third_party/blink/public/mojom/frame/tree_scope_type.mojom-blink.h"
 #include "third_party/blink/public/mojom/security_context/insecure_request_policy.mojom-blink.h"
 #include "third_party/blink/public/web/web_document.h"
+#include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_frame_owner_properties.h"
 #include "third_party/blink/public/web/web_performance.h"
 #include "third_party/blink/public/web/web_range.h"
@@ -35,11 +36,10 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
+#include "ui/gfx/geometry/quad_f.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -139,9 +139,9 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::CreateForPortalOrFencedFrame(
       To<HTMLFrameOwnerElement>(element);
   LocalFrame* host_frame = frame_owner_element->GetDocument().GetFrame();
   frame->InitializeCoreFrame(
-      *host_frame->GetPage(), frame_owner_element, nullptr, nullptr,
-      FrameInsertType::kInsertInConstructor, g_null_atom,
-      &host_frame->window_agent_factory(), devtools_frame_token);
+      *host_frame->GetPage(), frame_owner_element, /*parent=*/nullptr,
+      /*previous_sibling=*/nullptr, FrameInsertType::kInsertInConstructor,
+      g_null_atom, &host_frame->window_agent_factory(), devtools_frame_token);
 
   return frame;
 }
@@ -315,7 +315,7 @@ void WebRemoteFrameImpl::InitializeFrameVisualProperties(
   visual_properties.page_scale_factor = ancestor_widget->PageScaleInMainFrame();
   visual_properties.is_pinch_gesture_active =
       ancestor_widget->PinchGestureActiveInMainFrame();
-  visual_properties.screen_info = ancestor_widget->GetOriginalScreenInfo();
+  visual_properties.screen_infos = ancestor_widget->GetOriginalScreenInfos();
   visual_properties.visible_viewport_size =
       ancestor_widget->VisibleViewportSizeInDIPs();
   const WebVector<gfx::Rect>& window_segments =
@@ -424,8 +424,7 @@ WebRemoteFrameImpl::WebRemoteFrameImpl(
       client_(client),
       frame_client_(MakeGarbageCollected<RemoteFrameClientImpl>(this)),
       interface_registry_(interface_registry),
-      associated_interface_provider_(associated_interface_provider),
-      self_keep_alive_(PERSISTENT_FROM_HERE, this) {
+      associated_interface_provider_(associated_interface_provider) {
   DCHECK(client);
 }
 

@@ -35,6 +35,8 @@
 #include "mpegvideo.h"
 #include "h264qpel.h"
 
+#define SNOW_MAX_PLANES 4
+
 #define FF_ME_ITER 3
 
 #define MID_STATE 128
@@ -186,8 +188,9 @@ typedef struct SnowContext{
     uint8_t *emu_edge_buffer;
 
     AVMotionVector *avmv;
+    unsigned avmv_size;
     int avmv_index;
-    uint64_t encoding_error[AV_NUM_DATA_POINTERS];
+    uint64_t encoding_error[SNOW_MAX_PLANES];
 
     int pred;
 }SnowContext;

@@ -20,8 +20,6 @@ limitations under the License.
 #include <utility>
 
 #include "absl/strings/str_format.h"
-#include "tensorflow/c/c_api.h"
-#include "tensorflow/core/framework/tensor.h"
 #include "tensorflow/core/platform/regexp.h"
 #include "tensorflow/core/profiler/internal/tfprof_constants.h"
 #include "tensorflow/core/profiler/internal/tfprof_tensor.h"
@@ -48,13 +46,13 @@ void TFScope::AddNode(TFGraphNode* node) {
     nodes_map_[name] = std::unique_ptr<ScopeNode>(new ScopeNode(node));
   }
 
-  auto last_slash = name.find_last_of("/");
+  auto last_slash = name.find_last_of('/');
   while (last_slash != name.npos) {
     name = name.substr(0, last_slash);
     if (nodes_map_.find(name) == nodes_map_.end()) {
       CHECK(CreateParentNode(name));
     }
-    last_slash = name.find_last_of("/");
+    last_slash = name.find_last_of('/');
   }
 }
 
@@ -65,7 +63,7 @@ void TFScope::Build() {
   // Found roots, which are nodes without "/".
   for (auto it = nodes_map_.begin(); it != nodes_map_.end(); it++) {
     ScopeNode* node = it->second.get();
-    auto last_slash = node->name().find_last_of("/");
+    auto last_slash = node->name().find_last_of('/');
     if (last_slash == string::npos) {
       roots.push_back(node);
     } else {

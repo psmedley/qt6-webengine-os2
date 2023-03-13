@@ -7,6 +7,7 @@
 
 #include "base/bind.h"
 #include "base/enterprise_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_restrictions.h"
@@ -52,7 +53,7 @@
 #include "services/network/public/cpp/features.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/win_util.h"
 #endif
 
@@ -180,12 +181,12 @@ class DnsProbeBrowserTest : public InProcessBrowserTest {
 
   std::unique_ptr<FakeHostResolverNetworkContext> network_context_;
   std::unique_ptr<FakeDnsConfigChangeManager> dns_config_change_manager_;
-  DelayingDnsProbeService* delaying_dns_probe_service_;
+  raw_ptr<DelayingDnsProbeService> delaying_dns_probe_service_;
 
   // Browser that methods apply to.
-  Browser* active_browser_;
+  raw_ptr<Browser> active_browser_;
   // Helper that current has its DnsProbeStatus messages monitored.
-  NetErrorTabHelper* monitored_tab_helper_;
+  raw_ptr<NetErrorTabHelper> monitored_tab_helper_;
 
   std::unique_ptr<base::RunLoop> awaiting_dns_probe_status_run_loop_;
   // Queue of statuses received but not yet consumed by WaitForSentStatus().
@@ -272,13 +273,15 @@ void DnsProbeBrowserTest::SetFakeHostResolverResults(
 }
 
 void DnsProbeBrowserTest::NavigateToDnsError() {
-  NavigateToURL(active_browser_, URLRequestFailedJob::GetMockHttpUrl(
-                                     net::ERR_NAME_NOT_RESOLVED));
+  ASSERT_TRUE(NavigateToURL(
+      active_browser_,
+      URLRequestFailedJob::GetMockHttpUrl(net::ERR_NAME_NOT_RESOLVED)));
 }
 
 void DnsProbeBrowserTest::NavigateToOtherError() {
-  NavigateToURL(active_browser_, URLRequestFailedJob::GetMockHttpUrl(
-                                     net::ERR_CONNECTION_REFUSED));
+  ASSERT_TRUE(NavigateToURL(
+      active_browser_,
+      URLRequestFailedJob::GetMockHttpUrl(net::ERR_CONNECTION_REFUSED)));
 }
 
 void DnsProbeBrowserTest::StartDelayedProbes(int expected_delayed_probe_count) {
@@ -402,7 +405,7 @@ class DnsProbeCurrentSecureConfigFailingProbesTest
   }
 
   void SetUpOnMainThread() override {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     // Mark as not enterprise managed to prevent the secure DNS mode from
     // being downgraded to off.
     base::win::ScopedDomainStateForTesting scoped_domain(false);
@@ -547,8 +550,8 @@ IN_PROC_BROWSER_TEST_F(DnsProbeFailingProbesTest, SyncFailure) {
 
 // Make sure probes don't run for subframe DNS errors.
 IN_PROC_BROWSER_TEST_F(DnsProbeSuccessfulProbesTest, NoProbeInSubframe) {
-  NavigateToURL(browser(),
-                embedded_test_server()->GetURL("/iframe_dns_error.html"));
+  ASSERT_TRUE(NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/iframe_dns_error.html")));
 
   // By the time NavigateToURL returns, the browser will have seen the failed
   // provisional load.  If a probe was started (or considered but not run),

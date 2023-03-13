@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "gpu/command_buffer/service/sequence_id.h"
 #include "gpu/ipc/gl_in_process_context_export.h"
@@ -47,6 +48,10 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GpuTaskSchedulerHelper {
   // This constructor is used for command buffer GLOutputSurface.
   explicit GpuTaskSchedulerHelper(
       CommandBufferTaskExecutor* command_buffer_task_executor);
+
+  GpuTaskSchedulerHelper(const GpuTaskSchedulerHelper&) = delete;
+  GpuTaskSchedulerHelper& operator=(const GpuTaskSchedulerHelper&) = delete;
+
   ~GpuTaskSchedulerHelper();
 
   // This function sets up the |command_buffer_helper| which flushes the command
@@ -101,9 +106,7 @@ class GL_IN_PROCESS_CONTEXT_EXPORT GpuTaskSchedulerHelper {
   // before posting tasks from a different user. This gives the command buffer a
   // chance to post any pending tasks and maintains the ordering between command
   // buffer and other user tasks.
-  CommandBufferHelper* command_buffer_helper_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(GpuTaskSchedulerHelper);
+  raw_ptr<CommandBufferHelper> command_buffer_helper_ = nullptr;
 };
 
 }  // namespace gpu

@@ -8,6 +8,7 @@
 #include <memory>
 
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/devtools/devtools/domains/types_runtime.h"
@@ -28,7 +29,7 @@ class CheckOnTopWorker : public WebControllerWorker {
   using Callback = base::OnceCallback<void(const ClientStatus&)>;
 
   // Have the worker check |element| and report the result to |callback|.
-  void Start(const ElementFinder::Result& element, Callback callback);
+  void Start(const ElementFinderResult& element, Callback callback);
 
  private:
   void CallFunctionOn(const std::string& function,
@@ -37,7 +38,7 @@ class CheckOnTopWorker : public WebControllerWorker {
   void OnReply(const DevtoolsClient::ReplyStatus& reply_status,
                std::unique_ptr<runtime::CallFunctionOnResult> result);
 
-  DevtoolsClient* const devtools_client_;
+  const raw_ptr<DevtoolsClient> devtools_client_;
   Callback callback_;
 
   // The number of successful results that are still expected before the check

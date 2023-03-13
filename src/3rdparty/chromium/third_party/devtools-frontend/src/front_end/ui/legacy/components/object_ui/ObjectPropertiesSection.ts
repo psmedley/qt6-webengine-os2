@@ -37,12 +37,14 @@ import * as Platform from '../../../../core/platform/platform.js';
 import * as SDK from '../../../../core/sdk/sdk.js';
 import * as TextUtils from '../../../../models/text_utils/text_utils.js';
 import * as IconButton from '../../../components/icon_button/icon_button.js';
+import * as TextEditor from '../../../components/text_editor/text_editor.js';
 import * as UI from '../../legacy.js';
 
 import {CustomPreviewComponent} from './CustomPreviewComponent.js';
-import {JavaScriptAutocomplete} from './JavaScriptAutocomplete.js';
 import {JavaScriptREPL} from './JavaScriptREPL.js';
 import {createSpansForNodeTitle, RemoteObjectPreviewFormatter} from './RemoteObjectPreviewFormatter.js';
+import objectValueStyles from './objectValue.css.js';
+import objectPropertiesSectionStyles from './objectPropertiesSection.css.js';
 
 const UIStrings = {
   /**
@@ -121,6 +123,7 @@ const UIStrings = {
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/object_ui/ObjectPropertiesSection.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 const EXPANDABLE_MAX_LENGTH = 50;
+const EXPANDABLE_MAX_DEPTH = 100;
 
 const parentMap = new WeakMap<SDK.RemoteObject.RemoteObjectProperty, SDK.RemoteObject.RemoteObject|null>();
 
@@ -161,8 +164,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
     }
 
     objectPropertiesSectionMap.set(this.element, this);
-    this.registerRequiredCSS('ui/legacy/components/object_ui/objectValue.css');
-    this.registerRequiredCSS('ui/legacy/components/object_ui/objectPropertiesSection.css');
+    this.registerCSSFiles([objectValueStyles, objectPropertiesSectionStyles]);
     this.rootElement().childrenListElement.classList.add('source-code', 'object-properties-section');
   }
 
@@ -183,7 +185,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
     const titleElement = document.createElement('span');
     titleElement.classList.add('source-code');
     const shadowRoot = UI.Utils.createShadowRootWithCoreStyles(titleElement, {
-      cssFile: 'ui/legacy/components/object_ui/objectValue.css',
+      cssFile: [objectValueStyles],
       delegatesFocus: undefined,
     });
     const propertyValue =
@@ -207,6 +209,12 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
       return 1;
     }
     if (!propertyB.synthetic && propertyA.synthetic) {
+      return -1;
+    }
+    if (!propertyA.isOwn && propertyB.isOwn) {
+      return 1;
+    }
+    if (!propertyB.isOwn && propertyA.isOwn) {
       return -1;
     }
     if (!propertyA.enumerable && propertyB.enumerable) {
@@ -253,7 +261,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
     return UI.Fragment.html`<span class="name">${name}</span>`;
   }
 
-  static valueElementForFunctionDescription(description?: string|null, includePreview?: boolean, defaultName?: string):
+  static valueElementForFunctionDescription(description?: string, includePreview?: boolean, defaultName?: string):
       Element {
     const valueElement = document.createElement('span');
     valueElement.classList.add('object-value-function');
@@ -363,7 +371,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
     };
     memoryIcon.onclick = (event: MouseEvent): void => {
       Host.userMetrics.linearMemoryInspectorRevealedFrom(Host.UserMetrics.LinearMemoryInspectorRevealedFrom.MemoryIcon);
-      LinearMemoryInspector.LinearMemoryInspectorController.LinearMemoryInspectorController.instance()
+      void LinearMemoryInspector.LinearMemoryInspectorController.LinearMemoryInspectorController.instance()
           .openInspectorView(obj);
       event.stopPropagation();
     };
@@ -469,7 +477,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
       valueElement.classList.add('object-value-node');
       createSpansForNodeTitle(valueElement, (description as string));
       valueElement.addEventListener('click', event => {
-        Common.Revealer.reveal(value);
+        void Common.Revealer.reveal(value);
         event.consume(true);
       }, false);
       valueElement.addEventListener(
@@ -488,7 +496,7 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
       if (linkify && response && response.location) {
         element.classList.add('linkified');
         element.addEventListener('click', () => {
-          Common.Revealer.reveal(response.location);
+          void Common.Revealer.reveal(response.location);
           return false;
         });
       }
@@ -541,12 +549,12 @@ export class ObjectPropertiesSection extends UI.TreeOutline.TreeOutlineInShadow 
     if (this.object instanceof SDK.RemoteObject.LocalJSONObject) {
       contextMenu.viewSection().appendItem(
           i18nString(UIStrings.expandRecursively),
-          this.objectTreeElementInternal.expandRecursively.bind(this.objectTreeElementInternal, Number.MAX_VALUE));
+          this.objectTreeElementInternal.expandRecursively.bind(this.objectTreeElementInternal, EXPANDABLE_MAX_DEPTH));
       contextMenu.viewSection().appendItem(
           i18nString(UIStrings.collapseChildren),
           this.objectTreeElementInternal.collapseChildren.bind(this.objectTreeElementInternal));
     }
-    contextMenu.show();
+    void contextMenu.show();
   }
 
   titleLessMode(): void {
@@ -572,8 +580,7 @@ export class ObjectPropertiesSectionsTreeOutline extends UI.TreeOutline.TreeOutl
   private readonly editable: boolean;
   constructor(options?: TreeOutlineOptions|null) {
     super();
-    this.registerRequiredCSS('ui/legacy/components/object_ui/objectValue.css');
-    this.registerRequiredCSS('ui/legacy/components/object_ui/objectPropertiesSection.css');
+    this.registerCSSFiles([objectValueStyles, objectPropertiesSectionStyles]);
     this.editable = !(options && options.readOnly);
     this.contentElement.classList.add('source-code');
     this.contentElement.classList.add('object-properties-section');
@@ -583,8 +590,7 @@ export class ObjectPropertiesSectionsTreeOutline extends UI.TreeOutline.TreeOutl
 
 export const enum ObjectPropertiesMode {
   All = 0,                         // All properties, including prototype properties
-  OwnOnly = 1,                     // Own properties, excluding internal properties
-  OwnAndInternalAndInherited = 2,  // Own, internal, and inherited properties
+  OwnAndInternalAndInherited = 1,  // Own, internal, and inherited properties
 }
 
 export class RootElement extends UI.TreeOutline.TreeElement {
@@ -648,17 +654,17 @@ export class RootElement extends UI.TreeOutline.TreeElement {
     }
 
     contextMenu.viewSection().appendItem(
-        i18nString(UIStrings.expandRecursively), this.expandRecursively.bind(this, Number.MAX_VALUE));
+        i18nString(UIStrings.expandRecursively), this.expandRecursively.bind(this, EXPANDABLE_MAX_DEPTH));
     contextMenu.viewSection().appendItem(i18nString(UIStrings.collapseChildren), this.collapseChildren.bind(this));
-    contextMenu.show();
+    void contextMenu.show();
   }
 
   async onpopulate(): Promise<void> {
     const treeOutline = (this.treeOutline as ObjectPropertiesSection | null);
     const skipProto = treeOutline ? Boolean(treeOutline.skipProtoInternal) : false;
     return ObjectPropertyTreeElement.populate(
-        this, this.object, skipProto, this.linkifier, this.emptyPlaceholder, this.propertiesMode, this.extraProperties,
-        this.targetObject);
+        this, this.object, skipProto, false, this.linkifier, this.emptyPlaceholder, this.propertiesMode,
+        this.extraProperties, this.targetObject);
   }
 }
 
@@ -691,17 +697,18 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     this.maxNumPropertiesToShow = InitialVisibleChildrenLimit;
     this.listItemElement.addEventListener('contextmenu', this.contextMenuFired.bind(this), false);
     this.listItemElement.dataset.objectPropertyNameForTest = property.name;
+    this.setExpandRecursively(property.name !== '[[Prototype]]');
   }
 
   static async populate(
       treeElement: UI.TreeOutline.TreeElement, value: SDK.RemoteObject.RemoteObject, skipProto: boolean,
-      linkifier?: Components.Linkifier.Linkifier, emptyPlaceholder?: string|null,
+      skipGettersAndSetters: boolean, linkifier?: Components.Linkifier.Linkifier, emptyPlaceholder?: string|null,
       propertiesMode: ObjectPropertiesMode = ObjectPropertiesMode.OwnAndInternalAndInherited,
       extraProperties?: SDK.RemoteObject.RemoteObjectProperty[],
       targetValue?: SDK.RemoteObject.RemoteObject): Promise<void> {
     if (value.arrayLength() > ARRAY_LOAD_THRESHOLD) {
       treeElement.removeChildren();
-      ArrayGroupingTreeElement.populateArray(treeElement, value, 0, value.arrayLength() - 1, linkifier);
+      void ArrayGroupingTreeElement.populateArray(treeElement, value, 0, value.arrayLength() - 1, linkifier);
       return;
     }
 
@@ -709,9 +716,6 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     switch (propertiesMode) {
       case ObjectPropertiesMode.All:
         ({properties} = await value.getAllProperties(false /* accessorPropertiesOnly */, true /* generatePreview */));
-        break;
-      case ObjectPropertiesMode.OwnOnly:
-        ({properties} = await value.getOwnProperties(true /* generatePreview */));
         break;
       case ObjectPropertiesMode.OwnAndInternalAndInherited:
         ({properties, internalProperties} =
@@ -728,15 +732,15 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     }
 
     ObjectPropertyTreeElement.populateWithProperties(
-        treeElement, properties, internalProperties, skipProto, targetValue || value, linkifier, emptyPlaceholder,
-        propertiesMode === ObjectPropertiesMode.OwnOnly);
+        treeElement, properties, internalProperties, skipProto, skipGettersAndSetters, targetValue || value, linkifier,
+        emptyPlaceholder);
   }
 
   static populateWithProperties(
       treeNode: UI.TreeOutline.TreeElement, properties: SDK.RemoteObject.RemoteObjectProperty[],
       internalProperties: SDK.RemoteObject.RemoteObjectProperty[]|null, skipProto: boolean,
-      value: SDK.RemoteObject.RemoteObject|null, linkifier?: Components.Linkifier.Linkifier,
-      emptyPlaceholder?: string|null, skipGettersAndSetters?: boolean): void {
+      skipGettersAndSetters: boolean, value: SDK.RemoteObject.RemoteObject|null,
+      linkifier?: Components.Linkifier.Linkifier, emptyPlaceholder?: string|null): void {
     properties.sort(ObjectPropertiesSection.compareProperties);
     internalProperties = internalProperties || [];
 
@@ -836,7 +840,7 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
         // The definition of callFunction expects an unknown, and setting to `any` causes Closure to fail.
         // However, leaving this as unknown also causes TypeScript to fail, so for now we leave this as unchecked.
         // @ts-ignore  TODO(crbug.com/1011811): Fix after Closure is removed.
-        object.callFunction(invokeGetter, [{value: JSON.stringify(propertyPath)}]).then(callback);
+        void object.callFunction(invokeGetter, [{value: JSON.stringify(propertyPath)}]).then(callback);
       }
     }
 
@@ -920,7 +924,7 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     const targetValue = this.property.name !== '[[Prototype]]' ? propertyValue : parentMap.get(this.property);
     if (targetValue) {
       await ObjectPropertyTreeElement.populate(
-          this, propertyValue, skipProto, this.linkifier, undefined, undefined, undefined, targetValue);
+          this, propertyValue, skipProto, false, this.linkifier, undefined, undefined, undefined, targetValue);
       if (this.childCount() > this.maxNumPropertiesToShow) {
         this.createShowAllPropertiesButton();
       }
@@ -997,6 +1001,9 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     if (!this.property.enumerable) {
       this.nameElement.classList.add('object-properties-section-dimmed');
     }
+    if (this.property.isOwn) {
+      this.nameElement.classList.add('own-property');
+    }
     if (this.property.synthetic) {
       this.nameElement.classList.add('synthetic-property');
     }
@@ -1013,9 +1020,24 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
           this.property.value, this.property.wasThrown, showPreview, this.listItemElement, this.linkifier);
       this.valueElement = (this.propertyValue.element as HTMLElement);
     } else if (this.property.getter) {
-      this.valueElement = ObjectPropertyTreeElement.createRemoteObjectAccessorPropertySpan(
-          (parentMap.get(this.property) as SDK.RemoteObject.RemoteObject), [this.property.name],
-          this.onInvokeGetterClick.bind(this));
+      this.valueElement = document.createElement('span');
+      const element = this.valueElement.createChild('span');
+      element.textContent = i18nString(UIStrings.dots);
+      element.classList.add('object-value-calculate-value-button');
+      UI.Tooltip.Tooltip.install(element, i18nString(UIStrings.invokePropertyGetter));
+      const object = parentMap.get(this.property) as SDK.RemoteObject.RemoteObject;
+      const getter = this.property.getter;
+      element.addEventListener('click', (event: Event) => {
+        event.consume();
+        const invokeGetter = `
+          function invokeGetter(getter) {
+            return Reflect.apply(getter, this, []);
+          }`;
+        // @ts-ignore No way to teach TypeScript to preserve the Function-ness of `getter`.
+        // Also passing a string instead of a Function to avoid coverage implementation messing with it.
+        void object.callFunction(invokeGetter, [SDK.RemoteObject.RemoteObject.toCallArgument(getter)])
+            .then(this.onInvokeGetterClick.bind(this));
+      }, false);
     } else {
       this.valueElement = document.createElement('span');
       this.valueElement.classList.add('object-value-undefined');
@@ -1094,13 +1116,13 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     }
     if (parentMap.get(this.property) instanceof SDK.RemoteObject.LocalJSONObject) {
       contextMenu.viewSection().appendItem(
-          i18nString(UIStrings.expandRecursively), this.expandRecursively.bind(this, Number.MAX_VALUE));
+          i18nString(UIStrings.expandRecursively), this.expandRecursively.bind(this, EXPANDABLE_MAX_DEPTH));
       contextMenu.viewSection().appendItem(i18nString(UIStrings.collapseChildren), this.collapseChildren.bind(this));
     }
     if (this.propertyValue) {
       this.propertyValue.appendApplicableItems(event, contextMenu, {});
     }
-    contextMenu.show();
+    void contextMenu.show();
   }
 
   private startEditing(): void {
@@ -1172,7 +1194,7 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
     const keyboardEvent = (event as KeyboardEvent);
     if (keyboardEvent.key === 'Enter') {
       keyboardEvent.consume();
-      this.editingCommitted(originalContent);
+      void this.editingCommitted(originalContent);
       return;
     }
     if (keyboardEvent.key === Platform.KeyboardUtilities.ESCAPE_KEY) {
@@ -1195,7 +1217,7 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
         const parent = this.parent;
         if (parent) {
           parent.invalidateChildren();
-          parent.onpopulate();
+          void parent.onpopulate();
         }
       } else {
         this.update();
@@ -1220,7 +1242,7 @@ export class ObjectPropertyTreeElement extends UI.TreeOutline.TreeElement {
       const parent = this.parent;
       if (parent) {
         parent.invalidateChildren();
-        parent.onpopulate();
+        void parent.onpopulate();
       }
     }
   }
@@ -1289,7 +1311,6 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
       {value: toIndex},
       {value: ArrayGroupingTreeElement.bucketThreshold},
       {value: ArrayGroupingTreeElement.sparseIterationThreshold},
-      {value: ArrayGroupingTreeElement.getOwnPropertyNamesThreshold},
     ]);
 
     await callback(jsonValue);
@@ -1298,22 +1319,19 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
      * Note: must declare params as optional.
      */
     function packRanges(
-        this: Object, fromIndex?: number, toIndex?: number, bucketThreshold?: number, sparseIterationThreshold?: number,
-        getOwnPropertyNamesThreshold?: number): {
+        this: Object, fromIndex?: number, toIndex?: number, bucketThreshold?: number,
+        sparseIterationThreshold?: number): {
       ranges: number[][],
-      skipGetOwnPropertyNames: boolean,
     }|undefined {
       if (fromIndex === undefined || toIndex === undefined || sparseIterationThreshold === undefined ||
-          getOwnPropertyNamesThreshold === undefined || bucketThreshold === undefined) {
+          bucketThreshold === undefined) {
         return;
       }
       let ownPropertyNames: string[]|null = null;
       const consecutiveRange = (toIndex - fromIndex >= sparseIterationThreshold) && ArrayBuffer.isView(this);
-      const skipGetOwnPropertyNames = consecutiveRange && (toIndex - fromIndex >= getOwnPropertyNamesThreshold);
 
       function* arrayIndexes(object: Object): Generator<number, void, unknown> {
-        if (fromIndex === undefined || toIndex === undefined || sparseIterationThreshold === undefined ||
-            getOwnPropertyNamesThreshold === undefined) {
+        if (fromIndex === undefined || toIndex === undefined || sparseIterationThreshold === undefined) {
           return;
         }
 
@@ -1340,8 +1358,10 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
       if (consecutiveRange) {
         count = toIndex - fromIndex + 1;
       } else {
-        for (const i of arrayIndexes(this))  // eslint-disable-line
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        for (const ignored of arrayIndexes(this)) {
           ++count;
+        }
       }
 
       let bucketSize: number = count;
@@ -1381,13 +1401,10 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
         }
       }
 
-      return {ranges: ranges, skipGetOwnPropertyNames: skipGetOwnPropertyNames};
+      return {ranges: ranges};
     }
 
-    async function callback(result: {
-      ranges: Array<Array<number>>,
-      skipGetOwnPropertyNames: boolean,
-    }|undefined): Promise<void> {
+    async function callback(result: {ranges: Array<Array<number>>}|undefined): Promise<void> {
       if (!result) {
         return;
       }
@@ -1413,8 +1430,7 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
       if (topLevel) {
         // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration)
         // @ts-ignore
-        await ArrayGroupingTreeElement.populateNonIndexProperties(
-            treeNode, object, result.skipGetOwnPropertyNames, linkifier);
+        await ArrayGroupingTreeElement.populateNonIndexProperties(treeNode, object, linkifier);
       }
     }
   }
@@ -1482,57 +1498,14 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
 
   private static async populateNonIndexProperties(
       this: ArrayGroupingTreeElement, treeNode: UI.TreeOutline.TreeElement, object: SDK.RemoteObject.RemoteObject,
-      skipGetOwnPropertyNames: boolean, linkifier?: Components.Linkifier.Linkifier): Promise<void> {
-    // The definition of callFunction expects an unknown, and setting to `any` causes Closure to fail.
-    // However, leaving this as unknown also causes TypeScript to fail, so for now we leave this as unchecked.
-    // @ts-ignore  TODO(crbug.com/1011811): Fix after Closure is removed.
-    const result = await object.callFunction(buildObjectFragment, [{value: skipGetOwnPropertyNames}]);
-    if (!result.object || result.wasThrown) {
+      linkifier?: Components.Linkifier.Linkifier): Promise<void> {
+    const {properties, internalProperties} = await SDK.RemoteObject.RemoteObject.loadFromObjectPerProto(
+        object, true /* generatePreview */, true /* nonIndexedPropertiesOnly */);
+    if (!properties) {
       return;
     }
-    const allProperties = await result.object.getOwnProperties(true /* generatePreview */);
-    result.object.release();
-    if (!allProperties.properties) {
-      return;
-    }
-    const properties = allProperties.properties;
-    properties.sort(ObjectPropertiesSection.compareProperties);
-    for (const property of properties) {
-      parentMap.set(property, this.object);
-      // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      if (!ObjectPropertiesSection.isDisplayableProperty(property, (treeNode as any).property)) {
-        continue;
-      }
-      const childTreeElement = new ObjectPropertyTreeElement(property, linkifier);
-      childTreeElement.readOnly = true;
-      treeNode.appendChild(childTreeElement);
-    }
-
-    function buildObjectFragment(this: Object, skipGetOwnPropertyNames?: boolean): {
-      // TODO(crbug.com/1172300) Ignored during the jsdoc to ts migration)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/naming-convention
-      __proto__: any,
-    } {
-      // @ts-ignore __proto__ exists on Object.
-      const result = {__proto__: this.__proto__};
-      if (skipGetOwnPropertyNames) {
-        return result;
-      }
-      const names = Object.getOwnPropertyNames(this);
-      for (let i = 0; i < names.length; ++i) {
-        const name = names[i];
-        // Array index check according to the ES5-15.4.
-        if (String(Number(name) >>> 0) === name && Number(name) >>> 0 !== 0xffffffff) {
-          continue;
-        }
-        const descriptor = Object.getOwnPropertyDescriptor(this, name);
-        if (descriptor) {
-          Object.defineProperty(result, name, descriptor);
-        }
-      }
-      return result;
-    }
+    ObjectPropertyTreeElement.populateWithProperties(
+        treeNode, properties, internalProperties, false, false, object, linkifier);
   }
 
   async onpopulate(): Promise<void> {
@@ -1552,14 +1525,12 @@ export class ArrayGroupingTreeElement extends UI.TreeOutline.TreeElement {
 
   private static bucketThreshold = 100;
   private static sparseIterationThreshold = 250000;
-  private static getOwnPropertyNamesThreshold = 500000;
 }
 
 export class ObjectPropertyPrompt extends UI.TextPrompt.TextPrompt {
   constructor() {
     super();
-    const javaScriptAutocomplete = JavaScriptAutocomplete.instance();
-    this.initialize(javaScriptAutocomplete.completionsForTextInCurrentContext.bind(javaScriptAutocomplete));
+    this.initialize(TextEditor.JavaScript.completeInContext);
   }
 }
 
@@ -1592,20 +1563,20 @@ export class ObjectPropertiesSectionsTreeExpandController {
     }
   }
 
-  private elementAttached(event: Common.EventTarget.EventTargetEvent): void {
-    const element = (event.data as UI.TreeOutline.TreeElement);
+  private elementAttached(event: Common.EventTarget.EventTargetEvent<UI.TreeOutline.TreeElement>): void {
+    const element = event.data;
     if (element.isExpandable() && this.expandedProperties.has(this.propertyPath(element))) {
       element.expand();
     }
   }
 
-  private elementExpanded(event: Common.EventTarget.EventTargetEvent): void {
-    const element = (event.data as UI.TreeOutline.TreeElement);
+  private elementExpanded(event: Common.EventTarget.EventTargetEvent<UI.TreeOutline.TreeElement>): void {
+    const element = event.data;
     this.expandedProperties.add(this.propertyPath(element));
   }
 
-  private elementCollapsed(event: Common.EventTarget.EventTargetEvent): void {
-    const element = (event.data as UI.TreeOutline.TreeElement);
+  private elementCollapsed(event: Common.EventTarget.EventTargetEvent<UI.TreeOutline.TreeElement>): void {
+    const element = event.data;
     this.expandedProperties.delete(this.propertyPath(element));
   }
 
@@ -1658,12 +1629,12 @@ export class Renderer implements UI.UIUtils.Renderer {
     return rendererInstance;
   }
 
-  render(object: Object, options?: UI.UIUtils.Options): Promise<{
+  async render(object: Object, options?: UI.UIUtils.Options): Promise<{
     node: Node,
     tree: UI.TreeOutline.TreeOutline|null,
   }|null> {
     if (!(object instanceof SDK.RemoteObject.RemoteObject)) {
-      return Promise.reject(new Error('Can\'t render ' + object));
+      throw new Error('Can\'t render ' + object);
     }
     options = options || {title: undefined, editable: undefined};
     const title = options.title;
@@ -1672,10 +1643,10 @@ export class Renderer implements UI.UIUtils.Renderer {
       section.titleLessMode();
     }
     section.editable = Boolean(options.editable);
-    return Promise.resolve(({node: section.element, tree: section} as {
+    return {node: section.element, tree: section} as {
       node: Node,
       tree: UI.TreeOutline.TreeOutline | null,
-    } | null));
+    } | null;
   }
 }
 

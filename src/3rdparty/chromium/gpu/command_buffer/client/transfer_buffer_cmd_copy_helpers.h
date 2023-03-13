@@ -87,9 +87,10 @@ auto CopyArraysToBuffer(uint32_t count,
 // Sum the sizes of the types in Ts. This will fail to compile if the result
 // does not fit in T.
 template <typename T, typename... Ts>
-T SizeOfPackedTypes() {
-  base::CheckedNumeric<T> checked_elements_size =
+constexpr T SizeOfPackedTypes() {
+  constexpr base::CheckedNumeric<T> checked_elements_size =
       CheckedSizeOfPackedTypes<T, Ts...>();
+  static_assert(checked_elements_size.IsValid(), "");
   return checked_elements_size.ValueOrDie();
 }
 
@@ -112,7 +113,7 @@ template <typename... Ts>
 constexpr uint32_t ComputeMaxCopyCount(uint32_t buffer_size) {
   // Start by tightly packing the elements and decrease copy_count until
   // the total aligned copy size fits
-  uint32_t elements_size = SizeOfPackedTypes<uint32_t, Ts...>();
+  constexpr uint32_t elements_size = SizeOfPackedTypes<uint32_t, Ts...>();
   uint32_t copy_count = buffer_size / elements_size;
 
   while (copy_count > 0) {

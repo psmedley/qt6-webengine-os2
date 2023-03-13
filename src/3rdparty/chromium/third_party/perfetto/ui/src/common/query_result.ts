@@ -22,7 +22,7 @@
 // The classes in this file are organized as follows:
 //
 // QueryResultImpl:
-// The object returned by the Engine.queryV2(sql) method.
+// The object returned by the Engine.query(sql) method.
 // This object is a holder of row data. Batches of raw get appended
 // incrementally as they are received by the remote TraceProcessor instance.
 // QueryResultImpl also deals with asynchronicity of queries and allows callers
@@ -60,6 +60,26 @@ export const STR_NULL: string|null = 'str_null';
 
 export type ColumnType = string|number|null;
 
+// Info that could help debug a query error. For example the query
+// in question, the stack where the query was issued, the active
+// plugin etc.
+export interface QueryErrorInfo {
+  query: string;
+}
+
+export class QueryError extends Error {
+  readonly query: string;
+
+  constructor(message: string, info: QueryErrorInfo) {
+    super(message);
+    this.query = info.query;
+  }
+
+  toString() {
+    return `Query: ${this.query}\n` + super.toString();
+  }
+}
+
 // One row extracted from an SQL result:
 export interface Row {
   [key: string]: ColumnType;
@@ -83,7 +103,7 @@ export interface RowIteratorBase {
 // A RowIterator is a type that has all the fields defined in the query spec
 // plus the valid() and next() operators. This is to ultimately allow the
 // clients to do:
-// const result = await engine.queryV2("select name, surname, id from people;");
+// const result = await engine.query("select name, surname, id from people;");
 // const iter = queryResult.iter({name: STR, surname: STR, id: NUM});
 // for (; iter.valid(); iter.next())
 //  console.log(iter.name, iter.surname);
@@ -167,6 +187,14 @@ export interface QueryResult {
   // This should be called only after having awaited for at least one batch.
   columns(): string[];
 
+  // Returns the number of SQL statements in the query
+  // (e.g. 2 'if SELECT 1; SELECT 2;')
+  statementCount(): number;
+
+  // Returns the number of SQL statement that produced output rows. This number
+  // is <= statementCount().
+  statementWithOutputCount(): number;
+
   // TODO(primiano): next CLs will introduce a waitMoreRows() to allow tracks
   // to await until some more data (but not necessarily all) is available. For
   // now everything uses waitAllRows().
@@ -176,7 +204,7 @@ export interface QueryResult {
 export interface WritableQueryResult extends QueryResult {
   // |resBytes| is a proto-encoded trace_processor.QueryResult message.
   //  The overall flow looks as follows:
-  // - The user calls engine.queryV2('select ...') and gets a QueryResult back.
+  // - The user calls engine.query('select ...') and gets a QueryResult back.
   // - The query call posts a message to the worker that runs the SQL engine (
   //   or sends a HTTP request in case of the RPC+HTTP interface).
   // - The returned QueryResult object is initially empty.
@@ -197,6 +225,13 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
   private _error?: string;
   private _numRows = 0;
   private _isComplete = false;
+  private _errorInfo: QueryErrorInfo;
+  private _statementCount = 0;
+  private _statementWithOutputCount = 0;
+
+  constructor(errorInfo: QueryErrorInfo) {
+    this._errorInfo = errorInfo;
+  }
 
   // --- QueryResult implementation.
 
@@ -224,6 +259,12 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
   }
   columns(): string[] {
     return this.columnNames;
+  }
+  statementCount(): number {
+    return this._statementCount;
+  }
+  statementWithOutputCount(): number {
+    return this._statementWithOutputCount;
   }
 
   iter<T extends Row>(spec: T): RowIterator<T> {
@@ -312,6 +353,15 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
             assertTrue(parsedBatch.numCells === 0);
           }
           break;
+
+        case 4:
+          this._statementCount = reader.uint32();
+          break;
+
+        case 5:
+          this._statementWithOutputCount = reader.uint32();
+          break;
+
         default:
           console.warn(`Unexpected QueryResult field ${tag >>> 3}`);
           reader.skipType(tag & 7);
@@ -335,7 +385,7 @@ class QueryResultImpl implements QueryResult, WritableQueryResult {
     if (this._error === undefined) {
       promise.resolve(arg);
     } else {
-      promise.reject(new Error(this._error));
+      promise.reject(new QueryError(this._error, this._errorInfo));
     }
   }
 }
@@ -701,8 +751,12 @@ class RowIteratorImplWithRowData implements RowIteratorBase {
 // 2. Clients that know how to handle the streaming can use it straight away.
 class WaitableQueryResultImpl implements QueryResult, WritableQueryResult,
                                          PromiseLike<QueryResult> {
-  private impl = new QueryResultImpl();
+  private impl: QueryResultImpl;
   private thenCalled = false;
+
+  constructor(errorInfo: QueryErrorInfo) {
+    this.impl = new QueryResultImpl(errorInfo);
+  }
 
   // QueryResult implementation. Proxies all calls to the impl object.
   iter<T extends Row>(spec: T) {
@@ -725,6 +779,12 @@ class WaitableQueryResultImpl implements QueryResult, WritableQueryResult,
   }
   error() {
      return this.impl.error();
+  }
+  statementCount() {
+    return this.impl.statementCount();
+  }
+  statementWithOutputCount() {
+    return this.impl.statementWithOutputCount();
   }
 
   // WritableQueryResult implementation.
@@ -756,7 +816,7 @@ class WaitableQueryResultImpl implements QueryResult, WritableQueryResult,
   }
 }
 
-export function createQueryResult(): QueryResult&Promise<QueryResult>&
-    WritableQueryResult {
-  return new WaitableQueryResultImpl();
+export function createQueryResult(errorInfo: QueryErrorInfo): QueryResult&
+    Promise<QueryResult>&WritableQueryResult {
+  return new WaitableQueryResultImpl(errorInfo);
 }

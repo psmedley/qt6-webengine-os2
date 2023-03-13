@@ -2,20 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-source_set("signin") {
-  sources = [
-    "chromium_signin_resources_provider.h",
-    "chromium_signin_resources_provider.mm",
-  ]
-  deps = [
-    "//base",
-    "//ios/chrome/browser/ui/util",
-    "//ios/public/provider/chrome/browser/signin",
-  ]
-  frameworks = [ "UIKit.framework" ]
-  configs += [ "//build/config/compiler:enable_arc" ]
-}
-
 source_set("chromium_signin_error") {
   configs += [ "//build/config/compiler:enable_arc" ]
   sources = [ "chromium_signin_error.mm" ]
@@ -34,4 +20,11 @@ source_set("chromium_signin_resources") {
     "//ios/public/provider/chrome/browser/signin:signin_resources_api",
   ]
   frameworks = [ "UIKit.framework" ]
+}
+
+source_set("chromium_signin_sso") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+  sources = [ "chromium_signin_sso.mm" ]
+  deps = [ "//ios/public/provider/chrome/browser/signin:signin_sso_api" ]
+  frameworks = [ "Foundation.framework" ]
 }

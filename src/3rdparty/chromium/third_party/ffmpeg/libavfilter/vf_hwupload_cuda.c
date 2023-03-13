@@ -171,7 +171,6 @@ static const AVFilterPad cudaupload_inputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .filter_frame = cudaupload_filter_frame,
     },
-    { NULL }
 };
 
 static const AVFilterPad cudaupload_outputs[] = {
@@ -180,7 +179,6 @@ static const AVFilterPad cudaupload_outputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .config_props = cudaupload_config_output,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_hwupload_cuda = {
@@ -190,13 +188,13 @@ const AVFilter ff_vf_hwupload_cuda = {
     .init      = cudaupload_init,
     .uninit    = cudaupload_uninit,
 
-    .query_formats = cudaupload_query_formats,
-
     .priv_size  = sizeof(CudaUploadContext),
     .priv_class = &cudaupload_class,
 
-    .inputs    = cudaupload_inputs,
-    .outputs   = cudaupload_outputs,
+    FILTER_INPUTS(cudaupload_inputs),
+    FILTER_OUTPUTS(cudaupload_outputs),
+
+    FILTER_QUERY_FUNC(cudaupload_query_formats),
 
     .flags_internal = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

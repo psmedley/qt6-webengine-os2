@@ -12,13 +12,14 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "media/base/android/media_codec_util.h"
 #include "media/base/bitstream_buffer.h"
 #include "media/base/limits.h"
+#include "media/base/media_log.h"
 #include "media/base/unaligned_shared_memory.h"
 #include "media/video/picture.h"
 #include "third_party/libyuv/include/libyuv/convert_from.h"
@@ -70,11 +71,11 @@ static inline const base::TimeDelta EncodePollDelay() {
   // pictures have been fed to saturate any internal buffering).  This is
   // speculative and it's unclear that this would be a win (nor that there's a
   // reasonably device-agnostic way to fill in the "believes" above).
-  return base::TimeDelta::FromMilliseconds(10);
+  return base::Milliseconds(10);
 }
 
 static inline const base::TimeDelta NoWaitTimeOut() {
-  return base::TimeDelta::FromMicroseconds(0);
+  return base::Microseconds(0);
 }
 
 static bool GetSupportedColorFormatForMime(const std::string& mime,
@@ -107,16 +108,16 @@ AndroidVideoEncodeAccelerator::GetSupportedProfiles() {
   const struct {
     const VideoCodec codec;
     const VideoCodecProfile profile;
-  } kSupportedCodecs[] = {{kCodecVP8, VP8PROFILE_ANY},
-                          {kCodecH264, H264PROFILE_BASELINE}};
+  } kSupportedCodecs[] = {{VideoCodec::kVP8, VP8PROFILE_ANY},
+                          {VideoCodec::kH264, H264PROFILE_BASELINE}};
 
   for (const auto& supported_codec : kSupportedCodecs) {
-    if (supported_codec.codec == kCodecVP8 &&
+    if (supported_codec.codec == VideoCodec::kVP8 &&
         !MediaCodecUtil::IsVp8EncoderAvailable()) {
       continue;
     }
 
-    if (supported_codec.codec == kCodecH264 &&
+    if (supported_codec.codec == VideoCodec::kH264 &&
         !MediaCodecUtil::IsH264EncoderAvailable()) {
       continue;
     }
@@ -138,8 +139,10 @@ AndroidVideoEncodeAccelerator::GetSupportedProfiles() {
   return profiles;
 }
 
-bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
-                                               Client* client) {
+bool AndroidVideoEncodeAccelerator::Initialize(
+    const Config& config,
+    Client* client,
+    std::unique_ptr<MediaLog> media_log) {
   DVLOG(3) << __func__ << " " << config.AsHumanReadableString();
   DCHECK(!media_codec_);
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -148,8 +151,9 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
   client_ptr_factory_ = std::make_unique<base::WeakPtrFactory<Client>>(client);
 
   if (config.input_format != PIXEL_FORMAT_I420) {
-    DLOG(ERROR) << "Unexpected combo: " << config.input_format << ", "
-                << GetProfileName(config.output_profile);
+    MEDIA_LOG(ERROR, media_log.get())
+        << "Unexpected combo: " << config.input_format << ", "
+        << GetProfileName(config.output_profile);
     return false;
   }
 
@@ -161,13 +165,13 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
   uint32_t frame_input_count;
   uint32_t i_frame_interval;
   if (config.output_profile == VP8PROFILE_ANY) {
-    codec = kCodecVP8;
+    codec = VideoCodec::kVP8;
     mime_type = "video/x-vnd.on2.vp8";
     frame_input_count = 1;
     i_frame_interval = IFRAME_INTERVAL_VPX;
   } else if (config.output_profile == H264PROFILE_BASELINE ||
              config.output_profile == H264PROFILE_MAIN) {
-    codec = kCodecH264;
+    codec = VideoCodec::kH264;
     mime_type = "video/avc";
     frame_input_count = 30;
     i_frame_interval = IFRAME_INTERVAL_H264;
@@ -179,33 +183,48 @@ bool AndroidVideoEncodeAccelerator::Initialize(const Config& config,
   // https://crbug.com/1084702 for details.
   if (config.input_visible_size.width() % 16 != 0 ||
       config.input_visible_size.height() % 16 != 0) {
-    DLOG(ERROR) << "MediaCodec is only tested with resolutions "
-                   "that are 16x16 aligned.";
+    MEDIA_LOG(ERROR, media_log.get())
+        << "MediaCodec is only tested with resolutions "
+           "that are 16x16 aligned.";
     return false;
   }
 
   frame_size_ = config.input_visible_size;
-  last_set_bitrate_ = config.bitrate.target();
+  last_set_bitrate_ = config.bitrate.target_bps();
 
   // Only consider using MediaCodec if it's likely backed by hardware.
   if (MediaCodecUtil::IsKnownUnaccelerated(codec,
                                            MediaCodecDirection::ENCODER)) {
-    DLOG(ERROR) << "No HW support";
+    MEDIA_LOG(ERROR, media_log.get()) << "No HW support";
     return false;
   }
 
   PixelFormat pixel_format = COLOR_FORMAT_YUV420_SEMIPLANAR;
   if (!GetSupportedColorFormatForMime(mime_type, &pixel_format)) {
-    DLOG(ERROR) << "No color format support.";
+    MEDIA_LOG(ERROR, media_log.get()) << "No color format support.";
     return false;
   }
   media_codec_ = MediaCodecBridgeImpl::CreateVideoEncoder(
-      codec, config.input_visible_size, config.bitrate.target(),
+      codec, config.input_visible_size, config.bitrate.target_bps(),
       INITIAL_FRAMERATE, i_frame_interval, pixel_format);
 
   if (!media_codec_) {
-    DLOG(ERROR) << "Failed to create/start the codec: "
-                << config.input_visible_size.ToString();
+    MEDIA_LOG(ERROR, media_log.get()) << "Failed to create/start the codec: "
+                                      << config.input_visible_size.ToString();
+    return false;
+  }
+
+  auto status = media_codec_->GetInputFormatStride(&input_buffer_stride_);
+  if (status != MEDIA_CODEC_OK || input_buffer_stride_ <= 0) {
+    MEDIA_LOG(ERROR, media_log.get()) << "Can't read stride from input format";
+    return false;
+  }
+
+  status =
+      media_codec_->GetInputFormatYPlaneHeight(&input_buffer_yplane_height_);
+  if (status != MEDIA_CODEC_OK || input_buffer_yplane_height_ <= 0) {
+    MEDIA_LOG(ERROR, media_log.get())
+        << "Can't read y-plane height from input format";
     return false;
   }
 
@@ -280,9 +299,9 @@ void AndroidVideoEncodeAccelerator::RequestEncodingParametersChange(
   DVLOG(3) << __PRETTY_FUNCTION__ << ": bitrate: " << bitrate.ToString()
            << ", framerate: " << framerate;
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (bitrate.target() != last_set_bitrate_) {
-    last_set_bitrate_ = bitrate.target();
-    media_codec_->SetVideoBitrate(bitrate.target(), framerate);
+  if (bitrate.target_bps() != last_set_bitrate_) {
+    last_set_bitrate_ = bitrate.target_bps();
+    media_codec_->SetVideoBitrate(bitrate.target_bps(), framerate);
   }
   // Note: Android's MediaCodec doesn't allow mid-stream adjustments to
   // framerate, so we ignore that here.  This is OK because Android only uses
@@ -341,17 +360,29 @@ void AndroidVideoEncodeAccelerator::QueueInput() {
   RETURN_ON_FAILURE(status == MEDIA_CODEC_OK, "GetInputBuffer failed.",
                     kPlatformFailureError);
 
-  size_t queued_size =
-      VideoFrame::AllocationSize(PIXEL_FORMAT_I420, frame->coded_size());
-  RETURN_ON_FAILURE(capacity >= queued_size,
-                    "Failed to get input buffer: " << input_buf_index,
+  uint8_t* dst_y = buffer;
+  const int dst_stride_y = input_buffer_stride_;
+  const int uv_plane_offset =
+      input_buffer_yplane_height_ * input_buffer_stride_;
+  uint8_t* dst_uv = buffer + uv_plane_offset;
+  const int dst_stride_uv = input_buffer_stride_;
+
+  const gfx::Size uv_plane_size = VideoFrame::PlaneSizeInSamples(
+      PIXEL_FORMAT_NV12, VideoFrame::kUVPlane, frame->coded_size());
+  const size_t queued_size =
+      // size of Y-plane plus padding till UV-plane
+      uv_plane_offset +
+      // size of all UV-plane lines but the last one
+      (uv_plane_size.height() - 1) * dst_stride_uv +
+      // size of the very last line in UV-plane (it's not padded to full stride)
+      uv_plane_size.width() * 2;
+
+  RETURN_ON_FAILURE(queued_size <= capacity,
+                    "Frame doesn't fit into the input buffer. "
+                        << "queued_size: " << queued_size
+                        << "capacity: " << capacity,
                     kPlatformFailureError);
 
-  uint8_t* dst_y = buffer;
-  int dst_stride_y = frame->stride(VideoFrame::kYPlane);
-  uint8_t* dst_uv = buffer + frame->stride(VideoFrame::kYPlane) *
-                                 frame->rows(VideoFrame::kYPlane);
-  int dst_stride_uv = frame->stride(VideoFrame::kUPlane) * 2;
   // Why NV12?  Because COLOR_FORMAT_YUV420_SEMIPLANAR.  See comment at other
   // mention of that constant.
   bool converted = !libyuv::I420ToNV12(
@@ -369,7 +400,7 @@ void AndroidVideoEncodeAccelerator::QueueInput() {
   // mapping to the generated |presentation_timestamp_|, and will read them out
   // after encoding. Then encoder can work happily always and we can preserve
   // the timestamps in captured frames for other purpose.
-  presentation_timestamp_ += base::TimeDelta::FromMicroseconds(
+  presentation_timestamp_ += base::Microseconds(
       base::Time::kMicrosecondsPerSecond / INITIAL_FRAMERATE);
   DCHECK(frame_timestamp_map_.find(presentation_timestamp_) ==
          frame_timestamp_map_.end());

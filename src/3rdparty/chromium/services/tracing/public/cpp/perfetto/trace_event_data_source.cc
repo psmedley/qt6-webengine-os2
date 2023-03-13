@@ -65,7 +65,7 @@
 #include "third_party/perfetto/protos/perfetto/trace/track_event/process_descriptor.pbzero.h"
 #include "third_party/perfetto/protos/perfetto/trace/track_event/track_descriptor.pbzero.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/application_status_listener.h"
 #include "base/android/build_info.h"
 #include "base/trace_event/application_state_proto_android.h"
@@ -87,7 +87,7 @@ namespace {
 TraceEventMetadataSource* g_trace_event_metadata_source_for_testing = nullptr;
 
 void EmitRecurringUpdates() {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   static const ChromeProcessDescriptor::ProcessType process_type =
       GetProcessType(
           base::trace_event::TraceLog::GetInstance()->process_name());
@@ -196,7 +196,7 @@ void TraceEventMetadataSource::AddGeneratorFunction(
 void TraceEventMetadataSource::WriteMetadataPacket(
     perfetto::protos::pbzero::ChromeMetadataPacket* metadata_proto,
     bool privacy_filtering_enabled) {
-#if defined(OS_ANDROID) && defined(OFFICIAL_BUILD)
+#if BUILDFLAG(IS_ANDROID) && defined(OFFICIAL_BUILD)
   // Version code is only set for official builds on Android.
   const char* version_code_str =
       base::android::BuildInfo::GetInstance()->package_version_code();
@@ -206,7 +206,7 @@ void TraceEventMetadataSource::WriteMetadataPacket(
     DCHECK(res);
     metadata_proto->set_chrome_version_code(version_code);
   }
-#endif  // defined(OS_ANDROID) && defined(OFFICIAL_BUILD)
+#endif  // BUILDFLAG(IS_ANDROID) && defined(OFFICIAL_BUILD)
 
   AutoLockWithDeferredTaskPosting lock(lock_);
 
@@ -216,23 +216,23 @@ void TraceEventMetadataSource::WriteMetadataPacket(
   }
 }
 
-std::unique_ptr<base::DictionaryValue>
+absl::optional<base::Value>
 TraceEventMetadataSource::GenerateTraceConfigMetadataDict() {
   AutoLockWithDeferredTaskPosting lock(lock_);
   if (chrome_config_.empty()) {
-    return nullptr;
+    return absl::nullopt;
   }
 
-  auto metadata_dict = std::make_unique<base::DictionaryValue>();
+  base::Value metadata_dict(base::Value::Type::DICTIONARY);
   // If argument filtering is enabled, we need to check if the trace config is
   // allowlisted before emitting it.
   // TODO(eseckler): Figure out a way to solve this without calling directly
   // into IsMetadataAllowlisted().
   if (!parsed_chrome_config_->IsArgumentFilterEnabled() ||
       IsMetadataAllowlisted("trace-config")) {
-    metadata_dict->SetString("trace-config", chrome_config_);
+    metadata_dict.SetStringKey("trace-config", chrome_config_);
   } else {
-    metadata_dict->SetString("trace-config", "__stripped__");
+    metadata_dict.SetStringKey("trace-config", "__stripped__");
   }
 
   chrome_config_ = std::string();
@@ -308,7 +308,7 @@ void TraceEventMetadataSource::GenerateJsonMetadataFromGenerator(
   DCHECK(origin_task_runner_->RunsTasksInCurrentSequence());
 
   auto write_to_bundle = [&generator](ChromeEventBundle* bundle) {
-    std::unique_ptr<base::DictionaryValue> metadata_dict = generator.Run();
+    absl::optional<base::Value> metadata_dict = generator.Run();
     if (!metadata_dict)
       return;
     for (auto it : metadata_dict->DictItems()) {
@@ -364,22 +364,21 @@ void TraceEventMetadataSource::GenerateJsonMetadataFromGenerator(
 #endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 }
 
-std::unique_ptr<base::DictionaryValue>
-TraceEventMetadataSource::GenerateLegacyMetadataDict() {
+base::Value TraceEventMetadataSource::GenerateLegacyMetadataDict() {
   DCHECK(!privacy_filtering_enabled_);
 
-  auto merged_metadata = std::make_unique<base::DictionaryValue>();
+  base::Value merged_metadata(base::Value::Type::DICTIONARY);
   std::vector<JsonMetadataGeneratorFunction> json_generators;
   {
     base::AutoLock lock(lock_);
     json_generators = json_generator_functions_;
   }
   for (auto& generator : json_generators) {
-    std::unique_ptr<base::DictionaryValue> metadata_dict = generator.Run();
+    absl::optional<base::Value> metadata_dict = generator.Run();
     if (!metadata_dict) {
       continue;
     }
-    merged_metadata->MergeDictionary(metadata_dict.get());
+    merged_metadata.MergeDictionary(&(*metadata_dict));
   }
 
   base::trace_event::MetadataFilterPredicate metadata_filter =
@@ -388,10 +387,9 @@ TraceEventMetadataSource::GenerateLegacyMetadataDict() {
   // This out-of-band generation of the global metadata is only used by the
   // crash service uploader path, which always requires privacy filtering.
   CHECK(metadata_filter);
-  for (base::DictionaryValue::Iterator it(*merged_metadata); !it.IsAtEnd();
-       it.Advance()) {
-    if (!metadata_filter.Run(it.key())) {
-      merged_metadata->SetString(it.key(), "__stripped__");
+  for (auto it : merged_metadata.DictItems()) {
+    if (!metadata_filter.Run(it.first)) {
+      it.second = base::Value("__stripped__");
     }
   }
 
@@ -679,7 +677,8 @@ void TraceEventDataSource::RegisterStartupHooks() {
   RegisterTracedValueProtoWriter();
   base::trace_event::EnableTypedTraceEvents(
       &TraceEventDataSource::OnAddTypedTraceEvent,
-      &TraceEventDataSource::OnAddTracePacket);
+      &TraceEventDataSource::OnAddTracePacket,
+      &TraceEventDataSource::OnAddEmptyPacket);
 #endif  // !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
 }
 
@@ -737,7 +736,7 @@ void TraceEventDataSource::OnStopTracingDone() {
 }
 
 // static
-TrackEventThreadLocalEventSink* TraceEventDataSource::GetOrPrepareEventSink() {
+TrackEventThreadLocalEventSink* TraceEventDataSource::GetOrPrepareEventSink(bool create_if_needed) {
   // Avoid re-entrancy, which can happen during PostTasks (the taskqueue can
   // emit trace events). We discard the events in this case, as any PostTasking
   // to deal with these events later would break the event ordering that the
@@ -771,10 +770,11 @@ TrackEventThreadLocalEventSink* TraceEventDataSource::GetOrPrepareEventSink() {
     if (new_session_flags.session_id != thread_local_event_sink->session_id()) {
       delete thread_local_event_sink;
       thread_local_event_sink = nullptr;
+      ThreadLocalEventSinkSlot()->Set(nullptr);
     }
   }
 
-  if (!thread_local_event_sink) {
+  if (!thread_local_event_sink && create_if_needed) {
     thread_local_event_sink = GetInstance()->CreateThreadLocalEventSink();
     ThreadLocalEventSinkSlot()->Set(thread_local_event_sink);
   }
@@ -822,14 +822,13 @@ void TraceEventDataSource::SetupStartupTracing(
   config_for_trace_log.SetTraceBufferSizeInKb(0);
   config_for_trace_log.SetTraceBufferSizeInEvents(0);
 
+  RegisterWithTraceLog(config_for_trace_log);
+
+#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   uint8_t modes = base::trace_event::TraceLog::RECORDING_MODE;
   if (!trace_config.event_filters().empty()) {
     modes |= base::trace_event::TraceLog::FILTERING_MODE;
   }
-
-  RegisterWithTraceLog(config_for_trace_log);
-
-#if !BUILDFLAG(USE_PERFETTO_CLIENT_LIBRARY)
   base::trace_event::TraceLog::GetInstance()->SetEnabled(trace_config, modes);
 #endif
 }
@@ -1216,6 +1215,7 @@ void TraceEventDataSource::Flush(
 void TraceEventDataSource::ClearIncrementalState() {
   TrackEventThreadLocalEventSink::ClearIncrementalState();
   EmitTrackDescriptor();
+  base::trace_event::TraceLog::GetInstance()->OnIncrementalStateCleared();
 }
 
 std::unique_ptr<perfetto::TraceWriter>
@@ -1312,6 +1312,15 @@ base::trace_event::TracePacketHandle TraceEventDataSource::OnAddTracePacket() {
     return thread_local_event_sink->AddTracePacket();
   }
   return base::trace_event::TracePacketHandle();
+}
+
+// static
+void TraceEventDataSource::OnAddEmptyPacket() {
+  auto* thread_local_event_sink = GetOrPrepareEventSink(false);
+  if (thread_local_event_sink) {
+    // GetThreadIsInTraceEventTLS() is handled by the sink for trace packets.
+    thread_local_event_sink->AddEmptyPacket();
+  }
 }
 
 // static
@@ -1437,17 +1446,17 @@ void TraceEventDataSource::EmitTrackDescriptor() {
   // the writer is only destroyed on the perfetto sequence in this case.
   perfetto::TraceWriter* writer;
   bool privacy_filtering_enabled;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   bool is_system_producer;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
   {
     AutoLockWithDeferredTaskPosting lock(lock_);
     writer = trace_writer_.get();
     privacy_filtering_enabled = privacy_filtering_enabled_;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     is_system_producer =
         producer_ == PerfettoTracedProcess::Get()->system_producer();
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
   }
 
   if (!writer) {
@@ -1483,8 +1492,11 @@ void TraceEventDataSource::EmitTrackDescriptor() {
   process->set_pid(process_id);
   process->set_start_timestamp_ns(
       process_creation_time_ticks_.since_origin().InNanoseconds());
-  if (!privacy_filtering_enabled && !process_name.empty()) {
+  if (!privacy_filtering_enabled) {
     process->set_process_name(process_name);
+    for (const auto& label : TraceLog::GetInstance()->process_labels()) {
+      process->add_process_labels(label.second);
+    }
   }
 
   ChromeProcessDescriptor* chrome_process =
@@ -1505,7 +1517,7 @@ void TraceEventDataSource::EmitTrackDescriptor() {
     chrome_process->set_crash_trace_id(*crash_trace_id);
   }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Host app package name is only recorded if the corresponding TraceLog
   // setting is set to true and privacy filtering is disabled or this is a
   // system trace.
@@ -1519,7 +1531,7 @@ void TraceEventDataSource::EmitTrackDescriptor() {
           base::android::BuildInfo::GetInstance()->host_package_name());
     }
   }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   // TODO(eseckler): Set other fields on |chrome_process|.
 

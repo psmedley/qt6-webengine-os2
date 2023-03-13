@@ -7,16 +7,19 @@
 
 #include "include/sksl/DSLStatement.h"
 
+#include "include/private/SkSLDefines.h"
 #include "include/sksl/DSLBlock.h"
 #include "include/sksl/DSLExpression.h"
-#include "src/sksl/SkSLCompiler.h"
-#include "src/sksl/dsl/priv/DSLWriter.h"
+#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLThreadContext.h"
 #include "src/sksl/ir/SkSLBlock.h"
+#include "src/sksl/ir/SkSLExpression.h"
 #include "src/sksl/ir/SkSLExpressionStatement.h"
 #include "src/sksl/ir/SkSLNop.h"
 
 #if !defined(SKSL_STANDALONE) && SK_SUPPORT_GPU
-#include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
 #endif
 
 namespace SkSL {
@@ -31,40 +34,43 @@ DSLStatement::DSLStatement(DSLBlock block)
 DSLStatement::DSLStatement(DSLExpression expr) {
     std::unique_ptr<SkSL::Expression> skslExpr = expr.release();
     if (skslExpr) {
-        fStatement = SkSL::ExpressionStatement::Make(DSLWriter::Context(), std::move(skslExpr));
+        fStatement = SkSL::ExpressionStatement::Make(ThreadContext::Context(), std::move(skslExpr));
     }
 }
 
 DSLStatement::DSLStatement(std::unique_ptr<SkSL::Expression> expr)
-    : fStatement(SkSL::ExpressionStatement::Make(DSLWriter::Context(), std::move(expr))) {
-    SkASSERT(this->valid());
+    : fStatement(SkSL::ExpressionStatement::Make(ThreadContext::Context(), std::move(expr))) {
+    SkASSERT(this->hasValue());
 }
 
 DSLStatement::DSLStatement(std::unique_ptr<SkSL::Statement> stmt)
     : fStatement(std::move(stmt)) {
-    SkASSERT(this->valid());
+    SkASSERT(this->hasValue());
 }
 
-DSLStatement::DSLStatement(DSLPossibleExpression expr, PositionInfo pos)
+DSLStatement::DSLStatement(DSLPossibleExpression expr, Position pos)
     : DSLStatement(DSLExpression(std::move(expr), pos)) {}
 
-DSLStatement::DSLStatement(DSLPossibleStatement stmt, PositionInfo pos) {
-    DSLWriter::ReportErrors(pos);
-    if (stmt.valid()) {
+DSLStatement::DSLStatement(DSLPossibleStatement stmt, Position pos) {
+    ThreadContext::ReportErrors(pos);
+    if (stmt.hasValue()) {
         fStatement = std::move(stmt.fStatement);
     } else {
         fStatement = SkSL::Nop::Make();
+    }
+    if (pos.valid() && !fStatement->fPosition.valid()) {
+        fStatement->fPosition = pos;
     }
 }
 
 DSLStatement::~DSLStatement() {
 #if !defined(SKSL_STANDALONE) && SK_SUPPORT_GPU
-    if (fStatement && DSLWriter::InFragmentProcessor()) {
-        DSLWriter::CurrentEmitArgs()->fFragBuilder->codeAppend(this->release());
+    if (fStatement && ThreadContext::InFragmentProcessor()) {
+        ThreadContext::CurrentEmitArgs()->fFragBuilder->codeAppend(this->release());
         return;
     }
 #endif
-    SkASSERTF(!fStatement || !DSLWriter::Settings().fAssertDSLObjectsReleased,
+    SkASSERTF(!fStatement || !ThreadContext::Settings().fAssertDSLObjectsReleased,
               "Statement destroyed without being incorporated into program (see "
               "ProgramSettings::fAssertDSLObjectsReleased)");
 }
@@ -80,11 +86,12 @@ DSLPossibleStatement::~DSLPossibleStatement() {
 }
 
 DSLStatement operator,(DSLStatement left, DSLStatement right) {
+    Position pos = left.fStatement->fPosition;
     StatementArray stmts;
     stmts.reserve_back(2);
     stmts.push_back(left.release());
     stmts.push_back(right.release());
-    return DSLStatement(SkSL::Block::MakeUnscoped(/*offset=*/-1, std::move(stmts)));
+    return DSLStatement(SkSL::Block::Make(pos, std::move(stmts), Block::Kind::kCompoundStatement));
 }
 
 } // namespace dsl

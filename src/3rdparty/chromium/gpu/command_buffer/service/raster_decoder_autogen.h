@@ -117,6 +117,7 @@ error::Error RasterDecoderImpl::HandleBeginRasterCHROMIUMImmediate(
   gpu::raster::MsaaMode msaa_mode =
       static_cast<gpu::raster::MsaaMode>(c.msaa_mode);
   GLboolean can_use_lcd_text = static_cast<GLboolean>(c.can_use_lcd_text);
+  GLboolean visible = static_cast<GLboolean>(c.visible);
   uint32_t mailbox_size;
   if (!gles2::GLES2Util::ComputeDataSize<GLbyte, 16>(1, &mailbox_size)) {
     return error::kOutOfBounds;
@@ -131,7 +132,7 @@ error::Error RasterDecoderImpl::HandleBeginRasterCHROMIUMImmediate(
     return error::kOutOfBounds;
   }
   DoBeginRasterCHROMIUM(sk_color, needs_clear, msaa_sample_count, msaa_mode,
-                        can_use_lcd_text, mailbox);
+                        can_use_lcd_text, visible, mailbox);
   return error::kNoError;
 }
 
@@ -140,10 +141,6 @@ error::Error RasterDecoderImpl::HandleRasterCHROMIUM(
     const volatile void* cmd_data) {
   const volatile raster::cmds::RasterCHROMIUM& c =
       *static_cast<const volatile raster::cmds::RasterCHROMIUM*>(cmd_data);
-  if (!features().chromium_raster_transport) {
-    return error::kUnknownCommand;
-  }
-
   GLuint raster_shm_id = static_cast<GLuint>(c.raster_shm_id);
   GLuint raster_shm_offset = static_cast<GLuint>(c.raster_shm_offset);
   GLuint raster_shm_size = static_cast<GLuint>(c.raster_shm_size);
@@ -433,6 +430,34 @@ RasterDecoderImpl::HandleConvertYUVAMailboxesToRGBINTERNALImmediate(
   }
   DoConvertYUVAMailboxesToRGBINTERNAL(planes_yuv_color_space, plane_config,
                                       subsampling, mailboxes);
+  return error::kNoError;
+}
+
+error::Error
+RasterDecoderImpl::HandleConvertRGBAToYUVAMailboxesINTERNALImmediate(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  const volatile raster::cmds::ConvertRGBAToYUVAMailboxesINTERNALImmediate& c =
+      *static_cast<const volatile raster::cmds::
+                       ConvertRGBAToYUVAMailboxesINTERNALImmediate*>(cmd_data);
+  GLenum planes_yuv_color_space = static_cast<GLenum>(c.planes_yuv_color_space);
+  GLenum plane_config = static_cast<GLenum>(c.plane_config);
+  GLenum subsampling = static_cast<GLenum>(c.subsampling);
+  uint32_t mailboxes_size;
+  if (!gles2::GLES2Util::ComputeDataSize<GLbyte, 80>(1, &mailboxes_size)) {
+    return error::kOutOfBounds;
+  }
+  if (mailboxes_size > immediate_data_size) {
+    return error::kOutOfBounds;
+  }
+  volatile const GLbyte* mailboxes =
+      gles2::GetImmediateDataAs<volatile const GLbyte*>(c, mailboxes_size,
+                                                        immediate_data_size);
+  if (mailboxes == nullptr) {
+    return error::kOutOfBounds;
+  }
+  DoConvertRGBAToYUVAMailboxesINTERNAL(planes_yuv_color_space, plane_config,
+                                       subsampling, mailboxes);
   return error::kNoError;
 }
 

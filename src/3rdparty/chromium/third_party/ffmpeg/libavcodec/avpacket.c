@@ -22,13 +22,12 @@
 #include <string.h>
 
 #include "libavutil/avassert.h"
-#include "libavutil/common.h"
-#include "libavutil/internal.h"
+#include "libavutil/intreadwrite.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/mem.h"
+#include "libavutil/rational.h"
 
-#include "bytestream.h"
-#include "internal.h"
+#include "defs.h"
 #include "packet.h"
 #include "packet_internal.h"
 
@@ -44,6 +43,9 @@ void av_init_packet(AVPacket *pkt)
     pkt->buf                  = NULL;
     pkt->side_data            = NULL;
     pkt->side_data_elems      = 0;
+    pkt->opaque               = NULL;
+    pkt->opaque_ref           = NULL;
+    pkt->time_base            = av_make_q(0, 1);
 }
 #endif
 
@@ -54,6 +56,7 @@ static void get_packet_defaults(AVPacket *pkt)
     pkt->pts             = AV_NOPTS_VALUE;
     pkt->dts             = AV_NOPTS_VALUE;
     pkt->pos             = -1;
+    pkt->time_base       = av_make_q(0, 1);
 }
 
 AVPacket *av_packet_alloc(void)
@@ -137,7 +140,14 @@ int av_grow_packet(AVPacket *pkt, int grow_by)
 
         if (new_size + data_offset > pkt->buf->size ||
             !av_buffer_is_writable(pkt->buf)) {
-            int ret = av_buffer_realloc(&pkt->buf, new_size + data_offset);
+            int ret;
+
+            // allocate slightly more than requested to avoid excessive
+            // reallocations
+            if (new_size + data_offset < INT_MAX - new_size/16)
+                new_size += new_size/16;
+
+            ret = av_buffer_realloc(&pkt->buf, new_size + data_offset);
             if (ret < 0) {
                 pkt->data = old_data;
                 return ret;
@@ -374,7 +384,7 @@ int av_packet_shrink_side_data(AVPacket *pkt, enum AVPacketSideDataType type,
 
 int av_packet_copy_props(AVPacket *dst, const AVPacket *src)
 {
-    int i;
+    int i, ret;
 
     dst->pts                  = src->pts;
     dst->dts                  = src->dts;
@@ -382,9 +392,16 @@ int av_packet_copy_props(AVPacket *dst, const AVPacket *src)
     dst->duration             = src->duration;
     dst->flags                = src->flags;
     dst->stream_index         = src->stream_index;
-
+    dst->opaque               = src->opaque;
+    dst->time_base            = src->time_base;
+    dst->opaque_ref           = NULL;
     dst->side_data            = NULL;
     dst->side_data_elems      = 0;
+
+    ret = av_buffer_replace(&dst->opaque_ref, src->opaque_ref);
+    if (ret < 0)
+        return ret;
+
     for (i = 0; i < src->side_data_elems; i++) {
         enum AVPacketSideDataType type = src->side_data[i].type;
         size_t size = src->side_data[i].size;
@@ -392,6 +409,7 @@ int av_packet_copy_props(AVPacket *dst, const AVPacket *src)
         uint8_t *dst_data = av_packet_new_side_data(dst, type, size);
 
         if (!dst_data) {
+            av_buffer_unref(&dst->opaque_ref);
             av_packet_free_side_data(dst);
             return AVERROR(ENOMEM);
         }
@@ -404,6 +422,7 @@ int av_packet_copy_props(AVPacket *dst, const AVPacket *src)
 void av_packet_unref(AVPacket *pkt)
 {
     av_packet_free_side_data(pkt);
+    av_buffer_unref(&pkt->opaque_ref);
     av_buffer_unref(&pkt->buf);
     get_packet_defaults(pkt);
 }
@@ -514,13 +533,12 @@ void av_packet_rescale_ts(AVPacket *pkt, AVRational src_tb, AVRational dst_tb)
         pkt->duration = av_rescale_q(pkt->duration, src_tb, dst_tb);
 }
 
-int avpriv_packet_list_put(PacketList **packet_buffer,
-                           PacketList **plast_pktl,
+int avpriv_packet_list_put(PacketList *packet_buffer,
                            AVPacket      *pkt,
                            int (*copy)(AVPacket *dst, const AVPacket *src),
                            int flags)
 {
-    PacketList *pktl = av_malloc(sizeof(PacketList));
+    PacketListEntry *pktl = av_malloc(sizeof(*pktl));
     int ret;
 
     if (!pktl)
@@ -544,44 +562,41 @@ int avpriv_packet_list_put(PacketList **packet_buffer,
 
     pktl->next = NULL;
 
-    if (*packet_buffer)
-        (*plast_pktl)->next = pktl;
+    if (packet_buffer->head)
+        packet_buffer->tail->next = pktl;
     else
-        *packet_buffer = pktl;
+        packet_buffer->head = pktl;
 
     /* Add the packet in the buffered packet list. */
-    *plast_pktl = pktl;
+    packet_buffer->tail = pktl;
     return 0;
 }
 
-int avpriv_packet_list_get(PacketList **pkt_buffer,
-                           PacketList **pkt_buffer_end,
+int avpriv_packet_list_get(PacketList *pkt_buffer,
                            AVPacket      *pkt)
 {
-    PacketList *pktl;
-    if (!*pkt_buffer)
+    PacketListEntry *pktl = pkt_buffer->head;
+    if (!pktl)
         return AVERROR(EAGAIN);
-    pktl        = *pkt_buffer;
     *pkt        = pktl->pkt;
-    *pkt_buffer = pktl->next;
-    if (!pktl->next)
-        *pkt_buffer_end = NULL;
+    pkt_buffer->head = pktl->next;
+    if (!pkt_buffer->head)
+        pkt_buffer->tail = NULL;
     av_freep(&pktl);
     return 0;
 }
 
-void avpriv_packet_list_free(PacketList **pkt_buf, PacketList **pkt_buf_end)
+void avpriv_packet_list_free(PacketList *pkt_buf)
 {
-    PacketList *tmp = *pkt_buf;
+    PacketListEntry *tmp = pkt_buf->head;
 
     while (tmp) {
-        PacketList *pktl = tmp;
+        PacketListEntry *pktl = tmp;
         tmp = pktl->next;
         av_packet_unref(&pktl->pkt);
         av_freep(&pktl);
     }
-    *pkt_buf     = NULL;
-    *pkt_buf_end = NULL;
+    pkt_buf->head = pkt_buf->tail = NULL;
 }
 
 int ff_side_data_set_encoder_stats(AVPacket *pkt, int quality, int64_t *error, int error_count, int pict_type)

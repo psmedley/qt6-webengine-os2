@@ -44,9 +44,8 @@ void LanguagesHandler::RegisterMessages() {
 }
 
 void LanguagesHandler::HandleGetProspectiveUILanguage(
-    const base::ListValue* args) {
-  const base::Value* callback_id;
-  CHECK(args->Get(0, &callback_id));
+    const base::Value::List& args) {
+  const base::Value& callback_id = args[0];
 
   AllowJavascript();
 
@@ -61,25 +60,24 @@ void LanguagesHandler::HandleGetProspectiveUILanguage(
         language::prefs::kApplicationLocale);
   }
 
-  ResolveJavascriptCallback(*callback_id, base::Value(locale));
+  ResolveJavascriptCallback(callback_id, base::Value(locale));
 }
 
 void LanguagesHandler::HandleSetProspectiveUILanguage(
-    const base::ListValue* args) {
+    const base::Value::List& args) {
   AllowJavascript();
-  CHECK_EQ(1U, args->GetSize());
+  CHECK_EQ(1U, args.size());
 
-  std::string language_code;
-  CHECK(args->GetString(0, &language_code));
-
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   PrefService* prefs = g_browser_process->local_state();
+  const std::string& language_code = args[0].GetString();
   prefs->SetString(language::prefs::kApplicationLocale, language_code);
 #elif BUILDFLAG(IS_CHROMEOS_ASH)
   // Secondary users and public session users cannot change the locale.
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
   const user_manager::User* user =
-      chromeos::ProfileHelper::Get()->GetUserByProfile(profile_);
+      ash::ProfileHelper::Get()->GetUserByProfile(profile_);
+  const std::string& language_code = args[0].GetString();
   if (user &&
       user->GetAccountId() == user_manager->GetPrimaryUser()->GetAccountId() &&
       user->GetType() != user_manager::USER_TYPE_PUBLIC_ACCOUNT) {

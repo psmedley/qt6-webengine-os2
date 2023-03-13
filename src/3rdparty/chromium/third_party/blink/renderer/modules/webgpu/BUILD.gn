@@ -6,7 +6,6 @@ import("//third_party/blink/renderer/modules/modules.gni")
 
 blink_modules_sources("webgpu") {
   sources = [
-    "dawn_callback.h",
     "dawn_conversions.cc",
     "dawn_conversions.h",
     "dawn_enum_conversions.cc",
@@ -77,7 +76,6 @@ blink_modules_sources("webgpu") {
     "gpu_swap_chain.h",
     "gpu_texture.cc",
     "gpu_texture.h",
-    "gpu_texture_usage.cc",
     "gpu_texture_usage.h",
     "gpu_texture_view.cc",
     "gpu_texture_view.h",
@@ -85,12 +83,29 @@ blink_modules_sources("webgpu") {
     "gpu_uncaptured_error_event.h",
     "gpu_validation_error.cc",
     "gpu_validation_error.h",
+    "texture_utils.cc",
+    "texture_utils.h",
   ]
   jumbo_excluded_sources = [ "dawn_enum_conversions.cc" ]
 
   deps = [
     "//gpu/command_buffer/client:webgpu_interface",
     "//services/metrics/public/cpp:ukm_builders",
-    "//third_party/dawn/src/dawn:dawn_headers",
+    "//third_party/blink/renderer/modules/webcodecs:webcodecs",
+    "//third_party/dawn/include/dawn:headers",
+  ]
+}
+
+source_set("unit_tests") {
+  testonly = true
+  sources = [ "gpu_context_lost_test.cc" ]
+
+  deps = [
+    "//base/test:test_support",
+    "//third_party/blink/renderer/controller:blink_bindings_test_sources",
+    "//third_party/blink/renderer/core",
+    "//third_party/blink/renderer/core:testing",
+    "//third_party/blink/renderer/modules",
+    "//third_party/blink/renderer/platform:test_support",
   ]
 }

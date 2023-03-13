@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/containers/id_map.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/supports_user_data.h"
@@ -41,6 +40,11 @@ class NetworkingPrivateServiceClient
   explicit NetworkingPrivateServiceClient(
       std::unique_ptr<wifi::WiFiService> wifi_service);
 
+  NetworkingPrivateServiceClient(const NetworkingPrivateServiceClient&) =
+      delete;
+  NetworkingPrivateServiceClient& operator=(
+      const NetworkingPrivateServiceClient&) = delete;
+
   // KeyedService
   void Shutdown() override;
 
@@ -53,12 +57,12 @@ class NetworkingPrivateServiceClient
                 DictionaryCallback success_callback,
                 FailureCallback failure_callback) override;
   void SetProperties(const std::string& guid,
-                     std::unique_ptr<base::DictionaryValue> properties_dict,
+                     base::Value properties_dict,
                      bool allow_set_shared_config,
                      VoidCallback success_callback,
                      FailureCallback failure_callback) override;
   void CreateNetwork(bool shared,
-                     std::unique_ptr<base::DictionaryValue> properties_dict,
+                     base::Value properties_dict,
                      StringCallback success_callback,
                      FailureCallback failure_callback) override;
   void ForgetNetwork(const std::string& guid,
@@ -97,8 +101,8 @@ class NetworkingPrivateServiceClient
                                    FailureCallback failure_callback) override;
   base::Value GetEnabledNetworkTypes() override;
   std::unique_ptr<DeviceStateList> GetDeviceStateList() override;
-  std::unique_ptr<base::DictionaryValue> GetGlobalPolicy() override;
-  std::unique_ptr<base::DictionaryValue> GetCertificateLists() override;
+  base::Value GetGlobalPolicy() override;
+  base::Value GetCertificateLists() override;
   bool EnableNetworkType(const std::string& type) override;
   bool DisableNetworkType(const std::string& type) override;
   bool RequestScan(const std::string& type) override;
@@ -173,8 +177,6 @@ class NetworkingPrivateServiceClient
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   // Use WeakPtrs for callbacks from |wifi_service_|.
   base::WeakPtrFactory<NetworkingPrivateServiceClient> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateServiceClient);
 };
 
 }  // namespace extensions

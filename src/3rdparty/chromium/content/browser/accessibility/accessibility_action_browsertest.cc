@@ -20,6 +20,7 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "net/base/data_url.h"
+#include "net/base/escape.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/accessibility/accessibility_switches.h"
 #include "ui/accessibility/ax_enums.mojom.h"
@@ -69,7 +70,8 @@ class AccessibilityActionBrowserTest : public ContentBrowserTest {
     AccessibilityNotificationWaiter waiter(shell()->web_contents(),
                                            ui::kAXModeComplete,
                                            ax::mojom::Event::kLoadComplete);
-    GURL html_data_url("data:text/html," + html);
+    GURL html_data_url("data:text/html," +
+                       net::EscapeQueryParamValue(html, false));
     EXPECT_TRUE(NavigateToURL(shell(), html_data_url));
     waiter.WaitForNotification();
   }
@@ -216,6 +218,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   ASSERT_NE(nullptr, target);
   EXPECT_EQ(8.0, target->GetFloatAttribute(
                      ax::mojom::FloatAttribute::kValueForRange));
+  // Numerical ranges (see ui::IsRangeValueSupported) shouldn't have
+  // ax::mojom::StringAttribute::kValue set unless they use aria-valuetext.
+  EXPECT_FALSE(target->HasStringAttribute(ax::mojom::StringAttribute::kValue));
 
   // Increment, should result in value changing from 8 to 10.
   {
@@ -291,12 +296,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest, CanvasGetImage) {
           c.beginPath();
           c.moveTo(0, 0.5);
           c.lineTo(4, 0.5);
-          c.strokeStyle = '%23ff0000';
+          c.strokeStyle = '#ff0000';
           c.stroke();
           c.beginPath();
           c.moveTo(0, 1.5);
           c.lineTo(4, 1.5);
-          c.strokeStyle = '%230000ff';
+          c.strokeStyle = '#0000ff';
           c.stroke();
         </script>
       </body>
@@ -333,9 +338,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityCanvasActionBrowserTest,
       </canvas>
       <script>
         var c = document.getElementById('c').getContext('2d');
-        c.fillStyle = '%2300ff00';
+        c.fillStyle = '#00ff00';
         c.fillRect(0, 0, 40, 10);
-        c.fillStyle = '%23ff00ff';
+        c.fillStyle = '#ff00ff';
         c.fillRect(0, 10, 40, 10);
       </script>
     </body>
@@ -463,13 +468,13 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, TextareaSetValue) {
   // which contain all of the line break information.
   //
   // We should do it with accessibility flags instead. http://crbug.com/672205
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // Check that it really does contain two lines.
   BrowserAccessibility::AXPosition start_position =
       target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
-          ui::AXBoundaryBehavior::CrossBoundary);
+          ui::AXBoundaryBehavior::kCrossBoundary);
   EXPECT_EQ(5, end_of_line_1->text_offset());
 #endif
 }
@@ -485,11 +490,11 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   ASSERT_NE(nullptr, target);
   EXPECT_EQ(u"Before", target->GetValueForControl());
 
-  AccessibilityNotificationWaiter waiter2(
+  AccessibilityNotificationWaiter waiter(
       shell()->web_contents(), ui::kAXModeComplete,
       ui::AXEventGenerator::Event::VALUE_IN_TEXT_FIELD_CHANGED);
   GetManager()->SetValue(*target, "Line1\nLine2");
-  waiter2.WaitForNotification();
+  waiter.WaitForNotification();
 
   EXPECT_EQ(u"Line1\nLine2", target->GetValueForControl());
 
@@ -497,13 +502,13 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   // which contain all of the line break information.
   //
   // We should do it with accessibility flags instead. http://crbug.com/672205
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // Check that it really does contain two lines.
   BrowserAccessibility::AXPosition start_position =
       target->CreateTextPositionAt(0);
   BrowserAccessibility::AXPosition end_of_line_1 =
       start_position->CreateNextLineEndPosition(
-          ui::AXBoundaryBehavior::CrossBoundary);
+          ui::AXBoundaryBehavior::kCrossBoundary);
   EXPECT_EQ(5, end_of_line_1->text_offset());
 #endif
 }
@@ -756,8 +761,8 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   GetManager()->DoDefaultAction(*target);
   waiter2.WaitForNotification();
 
-  auto&& control_list = target->GetData().GetIntListAttribute(
-      ax::mojom::IntListAttribute::kControlsIds);
+  auto&& control_list =
+      target->GetIntListAttribute(ax::mojom::IntListAttribute::kControlsIds);
   EXPECT_EQ(2u, control_list.size());
 
   auto find_radio1 =
@@ -813,7 +818,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, FocusLostOnDeletedNode) {
 
 // Action::kScrollToMakeVisible does not seem reliable on Android and we are
 // currently only using it for desktop screen readers.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
   LoadInitialAccessibilityTreeFromHtml(R"HTML(
       <!DOCTYPE html>
@@ -951,7 +956,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ScrollIntoView) {
     EXPECT_FALSE(doc_left_third.Contains(bounds));
   }
 }
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ClickSVG) {
   // Create an svg link element that has the shape of a small, red square.
@@ -973,19 +978,20 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest, ClickSVG) {
   BrowserAccessibility* target_node =
       FindNode(ax::mojom::Role::kSvgRoot, "svg");
   ASSERT_NE(target_node, nullptr);
+  EXPECT_EQ(1U, target_node->PlatformChildCount());
   GetManager()->DoDefaultAction(*target_node);
   click_waiter.WaitForNotification();
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // This waiter times out on some Android try bots.
   // TODO(akihiroota): Refactor test to be applicable to all platforms.
   WaitForAccessibilityTreeToContainNodeWithName(shell()->web_contents(),
                                                 "SVG link was clicked!");
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)
 }
 
 // This test ony makes sense on platforms where the popup menu is implemented
 // internally as an HTML page in a popup, not where it's a native popup.
-#if defined(OS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(USE_ATK)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(USE_ATK)
 IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
                        OpenSelectPopupWithNoAXMenuList) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
@@ -1025,6 +1031,6 @@ IN_PROC_BROWSER_TEST_F(AccessibilityActionBrowserTest,
   ASSERT_TRUE(listbox);
   EXPECT_EQ(3U, listbox->PlatformChildCount());
 }
-#endif  // defined(OS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(USE_ATK)
+#endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_CHROMEOS_ASH) || defined(USE_ATK)
 
 }  // namespace content

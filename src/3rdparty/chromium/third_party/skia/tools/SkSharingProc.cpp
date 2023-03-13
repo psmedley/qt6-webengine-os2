@@ -11,6 +11,7 @@
 #include "include/core/SkData.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkSerialProcs.h"
+#include "include/core/SkStream.h"
 
 namespace {
     sk_sp<SkData> collectNonTextureImagesProc(SkImage* img, void* ctx) {
@@ -29,7 +30,7 @@ void SkSharingSerialContext::collectNonTextureImagesFromPicture(
     SkSerialProcs tempProc;
     tempProc.fImageCtx = sharingCtx;
     tempProc.fImageProc = collectNonTextureImagesProc;
-    auto ns = SkNullWStream();
+    SkNullWStream ns;
     pic->serialize(&ns, &tempProc);
 }
 

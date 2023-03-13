@@ -11,11 +11,12 @@
 #include <vector>
 
 #include "base/component_export.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/metrics/user_metrics.h"
+#include "base/no_destructor.h"
 #include "base/sequence_checker.h"
 #include "base/thread_annotations.h"
 #include "base/threading/thread_local.h"
@@ -25,6 +26,7 @@
 #include "base/trace_event/typed_macros.h"
 #include "services/tracing/public/cpp/perfetto/perfetto_traced_process.h"
 #include "services/tracing/public/cpp/perfetto/track_event_thread_local_event_sink.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/perfetto/protos/perfetto/trace/chrome/chrome_metadata.pbzero.h"
 #include "third_party/perfetto/protos/perfetto/trace/chrome/chrome_trace_event.pbzero.h"
 
@@ -55,8 +57,11 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventMetadataSource
  public:
   static TraceEventMetadataSource* GetInstance();
 
+  TraceEventMetadataSource(const TraceEventMetadataSource&) = delete;
+  TraceEventMetadataSource& operator=(const TraceEventMetadataSource&) = delete;
+
   using JsonMetadataGeneratorFunction =
-      base::RepeatingCallback<std::unique_ptr<base::DictionaryValue>()>;
+      base::RepeatingCallback<absl::optional<base::Value>()>;
 
   using MetadataGeneratorFunction = base::RepeatingCallback<void(
       perfetto::protos::pbzero::ChromeMetadataPacket*,
@@ -77,7 +82,7 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventMetadataSource
   // metadata fields to be uploaded as POST args in addition to being
   // embedded in the trace. TODO(oysteine): Remove when only the
   // UMA uploader path is used.
-  std::unique_ptr<base::DictionaryValue> GenerateLegacyMetadataDict();
+  base::Value GenerateLegacyMetadataDict();
 
   // PerfettoTracedProcess::DataSourceBase implementation:
   void StartTracingImpl(
@@ -118,7 +123,7 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventMetadataSource
 
   void WriteMetadataPacket(perfetto::protos::pbzero::ChromeMetadataPacket*,
                            bool privacy_filtering_enabled);
-  std::unique_ptr<base::DictionaryValue> GenerateTraceConfigMetadataDict();
+  absl::optional<base::Value> GenerateTraceConfigMetadataDict();
 
   // All members are protected by |lock_|.
   // TODO(crbug.com/1138893): Change annotations to GUARDED_BY
@@ -140,8 +145,6 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventMetadataSource
   std::unique_ptr<base::trace_event::TraceConfig> parsed_chrome_config_
       GUARDED_BY(lock_);
   bool emit_metadata_at_start_ GUARDED_BY(lock_) = false;
-
-  DISALLOW_COPY_AND_ASSIGN(TraceEventMetadataSource);
 };
 
 // This class acts as a bridge between the TraceLog and
@@ -165,6 +168,9 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource :
   };
 
   static TraceEventDataSource* GetInstance();
+
+  TraceEventDataSource(const TraceEventDataSource&) = delete;
+  TraceEventDataSource& operator=(const TraceEventDataSource&) = delete;
 
   // Destroys and recreates the global instance for testing.
   static void ResetForTesting();
@@ -231,7 +237,8 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource :
   std::unique_ptr<perfetto::TraceWriter> CreateTraceWriterLocked();
   TrackEventThreadLocalEventSink* CreateThreadLocalEventSink();
 
-  static TrackEventThreadLocalEventSink* GetOrPrepareEventSink();
+  // Returns the event sink for the current thread, creates it if none unless |!create_if_needed|.
+  static TrackEventThreadLocalEventSink* GetOrPrepareEventSink(bool create_if_needed = true);
 
   // Callback from TraceLog / typed macros, can be called from any thread.
   static void OnAddLegacyTraceEvent(
@@ -250,6 +257,7 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource :
       const base::ThreadTicks& thread_now,
       base::trace_event::ThreadInstructionCount thread_instruction_now);
   static base::trace_event::TracePacketHandle OnAddTracePacket();
+  static void OnAddEmptyPacket();
 
   // Extracts UMA histogram names that should be logged in traces and logs their
   // starting values.
@@ -280,7 +288,7 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource :
   // base::AutoLock to protect code paths which may post tasks.
   // TODO(eseckler): Use GUARDED_BY annotations on all fields below.
   base::Lock lock_;  // Protects subsequent members.
-  PerfettoProducer* producer_ GUARDED_BY(lock_) = nullptr;
+  raw_ptr<PerfettoProducer> producer_ GUARDED_BY(lock_) = nullptr;
   uint32_t target_buffer_ = 0;
   std::unique_ptr<perfetto::TraceWriter> trace_writer_;
   bool is_enabled_ = false;
@@ -302,8 +310,6 @@ class COMPONENT_EXPORT(TRACING_CPP) TraceEventDataSource :
   int process_id_ = base::kNullProcessId;
   base::ActionCallback user_action_callback_ =
       base::BindRepeating(&TraceEventDataSource::OnUserActionSampleCallback);
-
-  DISALLOW_COPY_AND_ASSIGN(TraceEventDataSource);
 };
 
 }  // namespace tracing

@@ -5,15 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_SHARED_STORAGE_SHARED_STORAGE_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_SHARED_STORAGE_SHARED_STORAGE_H_
 
-#include "mojo/public/cpp/bindings/pending_associated_remote.h"
-#include "mojo/public/cpp/bindings/pending_remote.h"
-#include "mojo/public/cpp/bindings/remote.h"
+#include "mojo/public/cpp/bindings/associated_remote.h"
 #include "third_party/blink/public/mojom/feature_observer/feature_observer.mojom-blink.h"
 #include "third_party/blink/public/mojom/shared_storage/shared_storage.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -73,11 +71,14 @@ class MODULES_EXPORT SharedStorage final : public ScriptWrappable {
 
   SharedStorageWorklet* worklet(ScriptState*, ExceptionState&);
 
- private:
   mojom::blink::SharedStorageDocumentService* GetSharedStorageDocumentService(
       ExecutionContext* execution_context);
 
-  mojo::Remote<mojom::blink::SharedStorageDocumentService>
+  mojom::blink::SharedStorageDocumentService*
+  GetEmptySharedStorageDocumentService();
+
+ private:
+  mojo::AssociatedRemote<mojom::blink::SharedStorageDocumentService>
       shared_storage_document_service_;
 
   Member<SharedStorageWorklet> shared_storage_worklet_;

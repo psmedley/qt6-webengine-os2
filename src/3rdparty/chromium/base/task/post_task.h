@@ -13,13 +13,12 @@
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/memory/ref_counted.h"
-#include "base/post_task_and_reply_with_result_internal.h"
-#include "base/sequenced_task_runner.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/post_task_and_reply_with_result_internal.h"
+#include "base/task/sequenced_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/task/single_thread_task_runner_thread_mode.h"
+#include "base/task/task_runner.h"
 #include "base/task/task_traits.h"
-#include "base/task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 
@@ -183,7 +182,7 @@ BASE_EXPORT scoped_refptr<SingleThreadTaskRunner> CreateSingleThreadTaskRunner(
     SingleThreadTaskRunnerThreadMode thread_mode =
         SingleThreadTaskRunnerThreadMode::SHARED);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Returns a SingleThreadTaskRunner whose PostTask invocations result in
 // scheduling tasks using |traits| in a COM Single-Threaded Apartment on a
 // thread determined by |thread_mode|. See
@@ -200,7 +199,7 @@ BASE_EXPORT scoped_refptr<SingleThreadTaskRunner> CreateCOMSTATaskRunner(
     const TaskTraits& traits,
     SingleThreadTaskRunnerThreadMode thread_mode =
         SingleThreadTaskRunnerThreadMode::SHARED);
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 // Helpers to send a Delete/ReleaseSoon to a new SequencedTaskRunner created
 // from |traits|. The semantics match base::PostTask in that the deletion is

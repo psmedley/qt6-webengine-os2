@@ -8,6 +8,7 @@
 #include <string>
 
 #include "ui/ozone/platform/wayland/common/wayland_object.h"
+#include "ui/platform_window/extensions/wayland_extension.h"
 
 namespace gfx {
 class Rect;
@@ -75,8 +76,13 @@ class ShellToplevelWrapper {
   // Tells if the surface has been AckConfigured at least once.
   virtual bool IsConfigured() = 0;
 
-  // Sets a desired window geometry once wayland requests client to do so.
+  // Sets a desired window geometry in surface local coordinates that specifies
+  // the content area of the surface.
   virtual void SetWindowGeometry(const gfx::Rect& bounds) = 0;
+
+  // Requests a desired window position and size in global screen coordinates.
+  // The compositor may or may not filfill the request.
+  virtual void RequestWindowBounds(const gfx::Rect& bounds) = 0;
 
   // Sets the minimum size for the top level.
   virtual void SetMinSize(int32_t width, int32_t height) = 0;
@@ -94,6 +100,14 @@ class ShellToplevelWrapper {
   // wayland compositor to update the decoration mode for a surface associated
   // with this top level window.
   virtual void SetDecoration(DecorationMode decoration) = 0;
+
+  // Request that the server set the orientation lock to the provided lock type.
+  // This is only accepted if the requesting window is running in immersive
+  // fullscreen mode and in a tablet configuration.
+  virtual void Lock(WaylandOrientationLockType lock_type) = 0;
+
+  // Request that the server remove the applied orientation lock.
+  virtual void Unlock() = 0;
 };
 
 // Look for |value| in |wl_array| in C++ style.

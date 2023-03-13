@@ -7,17 +7,22 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <mutex>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 
 #include "base/allocator/partition_allocator/starscan/metadata_allocator.h"
 #include "base/allocator/partition_allocator/starscan/starscan_fwd.h"
-#include "base/metrics/histogram_functions.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 
-namespace base {
+namespace partition_alloc {
+
+class StatsReporter;
+
 namespace internal {
 
 #define FOR_ALL_PCSCAN_SCANNER_SCOPES(V) \
@@ -69,11 +74,12 @@ class StatsCollector final {
     using PerThreadEvents =
         std::array<DeferredTraceEvent, static_cast<size_t>(IdType::kNumIds)>;
     using UnderlyingMap = std::unordered_map<
-        PlatformThreadId,
+        ::base::PlatformThreadId,
         PerThreadEvents,
-        std::hash<PlatformThreadId>,
+        std::hash<::base::PlatformThreadId>,
         std::equal_to<>,
-        MetadataAllocator<std::pair<const PlatformThreadId, PerThreadEvents>>>;
+        MetadataAllocator<
+            std::pair<const ::base::PlatformThreadId, PerThreadEvents>>>;
 
     inline void RegisterBeginEventFromCurrentThread(IdType id);
     inline void RegisterEndEventFromCurrentThread(IdType id);
@@ -123,16 +129,16 @@ class StatsCollector final {
   void IncreaseSweptSize(size_t size) { swept_size_ += size; }
   size_t swept_size() const { return swept_size_; }
 
+  void IncreaseDiscardedQuarantineSize(size_t size) {
+    discarded_quarantine_size_ += size;
+  }
+
   base::TimeDelta GetOverallTime() const;
-  void ReportTracesAndHists() const;
+  void ReportTracesAndHists(partition_alloc::StatsReporter& reporter) const;
 
  private:
   using MetadataString =
       std::basic_string<char, std::char_traits<char>, MetadataAllocator<char>>;
-  static constexpr char kTraceCategory[] = "partition_alloc";
-
-  static constexpr const char* ToTracingString(ScannerId id);
-  static constexpr const char* ToTracingString(MutatorId id);
 
   MetadataString ToUMAString(ScannerId id) const;
   MetadataString ToUMAString(MutatorId id) const;
@@ -156,15 +162,17 @@ class StatsCollector final {
 
   template <Context context>
   void ReportTracesAndHistsImpl(
+      partition_alloc::StatsReporter& reporter,
       const DeferredTraceEventMap<context>& event_map) const;
 
-  void ReportSurvivalRate() const;
+  void ReportSurvivalRate(partition_alloc::StatsReporter& reporter) const;
 
   DeferredTraceEventMap<Context::kMutator> mutator_trace_events_;
   DeferredTraceEventMap<Context::kScanner> scanner_trace_events_;
 
   std::atomic<size_t> survived_quarantine_size_{0u};
   size_t swept_size_ = 0u;
+  size_t discarded_quarantine_size_ = 0u;
   const char* process_name_ = nullptr;
   const size_t quarantine_last_size_ = 0u;
 };
@@ -193,44 +201,6 @@ inline void StatsCollector::DeferredTraceEventMap<
   PA_DCHECK(!event.start_time.is_null());
   PA_DCHECK(event.end_time.is_null());
   event.end_time = now;
-}
-
-inline constexpr const char* StatsCollector::ToTracingString(ScannerId id) {
-  switch (id) {
-    case ScannerId::kClear:
-      return "PCScan.Scanner.Clear";
-    case ScannerId::kScan:
-      return "PCScan.Scanner.Scan";
-    case ScannerId::kSweep:
-      return "PCScan.Scanner.Sweep";
-    case ScannerId::kOverall:
-      return "PCScan.Scanner";
-    case ScannerId::kNumIds:
-#if defined(__clang__)  || defined(__GNUC__)
-      __builtin_unreachable();
-#else
-      __assume(0);
-#endif
-  }
-}
-
-inline constexpr const char* StatsCollector::ToTracingString(MutatorId id) {
-  switch (id) {
-    case MutatorId::kClear:
-      return "PCScan.Mutator.Clear";
-    case MutatorId::kScanStack:
-      return "PCScan.Mutator.ScanStack";
-    case MutatorId::kScan:
-      return "PCScan.Mutator.Scan";
-    case MutatorId::kOverall:
-      return "PCScan.Mutator";
-    case MutatorId::kNumIds:
-#if defined(__clang__)  || defined(__GNUC__)
-      __builtin_unreachable();
-#else
-      __assume(0);
-#endif
-  }
 }
 
 inline StatsCollector::MetadataString StatsCollector::ToUMAString(
@@ -281,6 +251,13 @@ inline StatsCollector::MetadataString StatsCollector::ToUMAString(
 #undef FOR_ALL_PCSCAN_SCANNER_SCOPES
 
 }  // namespace internal
-}  // namespace base
+}  // namespace partition_alloc
+
+// TODO(crbug.com/1151236): Remove this when migration is complete.
+namespace base::internal {
+
+using ::partition_alloc::internal::StatsCollector;
+
+}  // namespace base::internal
 
 #endif  // BASE_ALLOCATOR_PARTITION_ALLOCATOR_STARSCAN_STATS_COLLECTOR_H_

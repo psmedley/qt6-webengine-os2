@@ -6,9 +6,13 @@ import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
 import * as Root from '../../core/root/root.js';
+import type * as Platform from '../../core/platform/platform.js';
 import * as EmulationModel from '../../models/emulation/emulation.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as MobileThrottling from '../mobile_throttling/mobile_throttling.js';
+import * as EmulationComponents from './components/components.js';
+
+import deviceModeToolbarStyles from './deviceModeToolbar.css.legacy.js';
 
 const UIStrings = {
   /**
@@ -201,8 +205,8 @@ export class DeviceModeToolbar {
   private readonly persistenceSetting: Common.Settings.Setting<{device: string, orientation: string, mode: string}>;
   private spanButton!: UI.Toolbar.ToolbarButton;
   private modeButton!: UI.Toolbar.ToolbarButton;
-  private widthInput!: HTMLInputElement;
-  private heightInput!: HTMLInputElement;
+  private widthInput: EmulationComponents.DeviceSizeInputElement.SizeInputElement;
+  private heightInput: EmulationComponents.DeviceSizeInputElement.SizeInputElement;
   private deviceScaleItem!: UI.Toolbar.ToolbarMenuButton;
   private deviceSelectItem!: UI.Toolbar.ToolbarMenuButton;
   private scaleItem!: UI.Toolbar.ToolbarMenuButton;
@@ -210,11 +214,7 @@ export class DeviceModeToolbar {
   private experimentalButton!: UI.Toolbar.ToolbarToggle|null;
   private cachedDeviceScale!: number|null;
   private cachedUaType!: string|null;
-  private updateWidthInput!: (arg0: string) => void;
-  private widthItem?: UI.Toolbar.ToolbarItem;
   private xItem?: UI.Toolbar.ToolbarItem;
-  private updateHeightInput?: ((arg0: string) => void);
-  private heightItem?: UI.Toolbar.ToolbarItem;
   private throttlingConditionsItem?: UI.Toolbar.ToolbarMenuButton;
   private cachedModelType?: EmulationModel.DeviceModeModel.Type;
   private cachedScale?: number;
@@ -226,10 +226,6 @@ export class DeviceModeToolbar {
       showMediaInspectorSetting: Common.Settings.Setting<boolean>,
       showRulersSetting: Common.Settings.Setting<boolean>) {
     this.model = model;
-    const device = model.device();
-    if (device) {
-      this.recordDeviceChange(device, null);
-    }
     this.showMediaInspectorSetting = showMediaInspectorSetting;
     this.showRulersSetting = showRulersSetting;
 
@@ -258,6 +254,15 @@ export class DeviceModeToolbar {
 
     const mainToolbar = new UI.Toolbar.Toolbar('', this.elementInternal);
     mainToolbar.makeWrappable();
+    this.widthInput = new EmulationComponents.DeviceSizeInputElement.SizeInputElement(i18nString(UIStrings.width));
+    this.widthInput.addEventListener('sizechanged', ({size: width}) => {
+      this.model.setWidthAndScaleToFit(width);
+    });
+    this.heightInput =
+        new EmulationComponents.DeviceSizeInputElement.SizeInputElement(i18nString(UIStrings.heightLeaveEmptyForFull));
+    this.heightInput.addEventListener('sizechanged', ({size: height}) => {
+      this.model.setHeightAndScaleToFit(height);
+    });
     this.fillMainToolbar(mainToolbar);
 
     const rightContainer = this.elementInternal.createChild('div', 'device-mode-toolbar-spacer');
@@ -294,16 +299,6 @@ export class DeviceModeToolbar {
     }
   }
 
-  private recordDeviceChange(
-      device: EmulationModel.EmulatedDevices.EmulatedDevice,
-      oldDevice: EmulationModel.EmulatedDevices.EmulatedDevice|null): void {
-    if (device !== oldDevice && device && device.isDualScreen) {
-      // When we start emulating a device, whether we start a new emulation session, or switch to
-      // a new device, if the device is dual screen, we count this once.
-      Host.userMetrics.dualScreenDeviceEmulated(Host.UserMetrics.DualScreenDeviceEmulated.DualScreenDeviceSelected);
-    }
-  }
-
   private createEmptyToolbarElement(): Element {
     const element = document.createElement('div');
     element.classList.add('device-mode-empty-toolbar-element');
@@ -320,14 +315,7 @@ export class DeviceModeToolbar {
   }
 
   private fillMainToolbar(toolbar: UI.Toolbar.Toolbar): void {
-    const widthInput = UI.UIUtils.createInput('device-mode-size-input', 'text');
-    widthInput.maxLength = 4;
-    widthInput.title = i18nString(UIStrings.width);
-    this.updateWidthInput = UI.UIUtils.bindInput(
-        widthInput, this.applyWidth.bind(this), EmulationModel.DeviceModeModel.DeviceModeModel.widthValidator, true);
-    this.widthInput = widthInput;
-    this.widthItem = this.wrapToolbarItem(widthInput);
-    toolbar.appendToolbarItem(this.widthItem);
+    toolbar.appendToolbarItem(new UI.Toolbar.ToolbarItem(this.widthInput));
 
     const xElement = document.createElement('div');
     xElement.classList.add('device-mode-x');
@@ -335,33 +323,7 @@ export class DeviceModeToolbar {
     this.xItem = this.wrapToolbarItem(xElement);
     toolbar.appendToolbarItem(this.xItem);
 
-    const heightInput = UI.UIUtils.createInput('device-mode-size-input', 'text');
-    heightInput.maxLength = 4;
-    heightInput.title = i18nString(UIStrings.heightLeaveEmptyForFull);
-    this.updateHeightInput = UI.UIUtils.bindInput(heightInput, this.applyHeight.bind(this), validateHeight, true);
-    this.heightInput = heightInput;
-    this.heightItem = this.wrapToolbarItem(heightInput);
-    toolbar.appendToolbarItem(this.heightItem);
-
-    function validateHeight(value: string): {
-      valid: boolean,
-      errorMessage: (string|undefined),
-    } {
-      if (!value) {
-        return {valid: true, errorMessage: undefined};
-      }
-      return EmulationModel.DeviceModeModel.DeviceModeModel.heightValidator(value);
-    }
-  }
-
-  private applyWidth(value: string): void {
-    const width = value ? Number(value) : 0;
-    this.model.setWidthAndScaleToFit(width);
-  }
-
-  private applyHeight(value: string): void {
-    const height = value ? Number(value) : 0;
-    this.model.setHeightAndScaleToFit(height);
+    toolbar.appendToolbarItem(new UI.Toolbar.ToolbarItem(this.heightInput));
   }
 
   private fillRightToolbar(toolbar: UI.Toolbar.Toolbar): void {
@@ -428,7 +390,7 @@ export class DeviceModeToolbar {
 
   private experimentalClicked(): void {
     Host.InspectorFrontendHost.InspectorFrontendHostInstance.openInNewTab(
-        'chrome://flags/#enable-experimental-web-platform-features');
+        'chrome://flags/#enable-experimental-web-platform-features' as Platform.DevToolsPath.UrlString);
   }
 
   private fillOptionsToolbar(toolbar: UI.Toolbar.Toolbar): void {
@@ -441,7 +403,7 @@ export class DeviceModeToolbar {
   private appendScaleMenuItems(contextMenu: UI.ContextMenu.ContextMenu): void {
     if (this.model.type() === EmulationModel.DeviceModeModel.Type.Device) {
       contextMenu.footerSection().appendItem(
-          i18nString(UIStrings.fitToWindowF, {PH1: this.getPrettyZoomPercentage()}),
+          i18nString(UIStrings.fitToWindowF, {PH1: this.getPrettyFitZoomPercentage()}),
           this.onScaleMenuChanged.bind(this, this.model.fitScale()), false);
     }
     contextMenu.footerSection().appendCheckboxItem(
@@ -545,14 +507,13 @@ export class DeviceModeToolbar {
   private wrapToolbarItem(element: Element): UI.Toolbar.ToolbarItem {
     const container = document.createElement('div');
     const shadowRoot = UI.Utils.createShadowRootWithCoreStyles(
-        container, {cssFile: 'panels/emulation/deviceModeToolbar.css', delegatesFocus: undefined});
+        container, {cssFile: deviceModeToolbarStyles, delegatesFocus: undefined});
     shadowRoot.appendChild(element);
     return new UI.Toolbar.ToolbarItem(container);
   }
 
   private emulateDevice(device: EmulationModel.EmulatedDevices.EmulatedDevice): void {
     const scale = this.autoAdjustScaleSetting.get() ? undefined : this.model.scaleSetting().get();
-    this.recordDeviceChange(device, this.model.device());
     this.model.emulate(
         EmulationModel.DeviceModeModel.Type.Device, device, this.lastMode.get(device) || device.modes[0], scale);
   }
@@ -603,7 +564,7 @@ export class DeviceModeToolbar {
     }
   }
 
-  private deviceListChanged(this: DeviceModeToolbar): void {
+  private deviceListChanged(): void {
     const device = this.model.device();
     if (!device) {
       return;
@@ -640,7 +601,6 @@ export class DeviceModeToolbar {
       return;
     }
 
-    Host.userMetrics.dualScreenDeviceEmulated(Host.UserMetrics.DualScreenDeviceEmulated.SpanButtonClicked);
     const scale = this.autoAdjustScaleSetting.get() ? undefined : this.model.scaleSetting().get();
     const mode = this.model.mode();
     if (!mode) {
@@ -697,12 +657,14 @@ export class DeviceModeToolbar {
       return;
     }
 
-    const contextMenu = new UI.ContextMenu.ContextMenu(
-        event.data, false, this.modeButton.element.totalOffsetLeft(),
-        this.modeButton.element.totalOffsetTop() + (this.modeButton.element as HTMLElement).offsetHeight);
+    const contextMenu = new UI.ContextMenu.ContextMenu(event.data, {
+      useSoftMenu: false,
+      x: this.modeButton.element.totalOffsetLeft(),
+      y: this.modeButton.element.totalOffsetTop() + (this.modeButton.element as HTMLElement).offsetHeight,
+    });
     addOrientation(EmulationModel.EmulatedDevices.Vertical, i18nString(UIStrings.portrait));
     addOrientation(EmulationModel.EmulatedDevices.Horizontal, i18nString(UIStrings.landscape));
-    contextMenu.show();
+    void contextMenu.show();
 
     function addOrientation(orientation: string, title: string): void {
       if (!device) {
@@ -732,6 +694,10 @@ export class DeviceModeToolbar {
     }
   }
 
+  private getPrettyFitZoomPercentage(): string {
+    return `${(this.model.fitScale() * 100).toFixed(0)}`;
+  }
+
   private getPrettyZoomPercentage(): string {
     return `${(this.model.scale() * 100).toFixed(0)}`;
   }
@@ -758,13 +724,11 @@ export class DeviceModeToolbar {
     }
 
     const size = this.model.appliedDeviceSize();
-    if (this.updateHeightInput) {
-      this.updateHeightInput(
-          this.model.type() === EmulationModel.DeviceModeModel.Type.Responsive && this.model.isFullHeight() ?
-              '' :
-              String(size.height));
-    }
-    this.updateWidthInput(String(size.width));
+    this.widthInput.size = String(size.width);
+    this.heightInput.size =
+        this.model.type() === EmulationModel.DeviceModeModel.Type.Responsive && this.model.isFullHeight() ?
+        '' :
+        String(size.height);
     this.heightInput.placeholder = String(size.height);
 
     if (this.model.scale() !== this.cachedScale) {

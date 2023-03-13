@@ -5,7 +5,9 @@
 #ifndef COMPONENTS_FEED_CORE_V2_PUBLIC_WEB_FEED_SUBSCRIPTIONS_H_
 #define COMPONENTS_FEED_CORE_V2_PUBLIC_WEB_FEED_SUBSCRIPTIONS_H_
 
+#include <ostream>
 #include <string>
+
 #include "base/callback.h"
 #include "components/feed/core/v2/public/types.h"
 
@@ -24,14 +26,18 @@ class WebFeedSubscriptions {
   };
   // Follow a web feed given information about a web page. Calls `callback` when
   // complete. The callback parameter reports whether the url is now considered
-  // followed.
+  // followed. This always creates a non-durable request.
   virtual void FollowWebFeed(
       const WebFeedPageInformation& page_info,
       base::OnceCallback<void(FollowWebFeedResult)> callback) = 0;
 
   // Follow a web feed given a web feed ID.
+  // If `is_durable_request` is true, the request to follow will be persisted
+  // and retried later if necessary. `callback` provides the result of the
+  // initial Follow request, but not any later retries.
   virtual void FollowWebFeed(
       const std::string& web_feed_id,
+      bool is_durable_request,
       base::OnceCallback<void(FollowWebFeedResult)> callback) = 0;
 
   struct UnfollowWebFeedResult {
@@ -43,8 +49,12 @@ class WebFeedSubscriptions {
 
   // Follow a web feed given a URL. Calls `callback` when complete. The callback
   // parameter reports whether the url is now considered followed.
+  // If `is_durable_request` is true, the request to follow will be persisted
+  // and retried later if necessary. `callback` provides the result of the
+  // initial Follow request, but not any later retries.
   virtual void UnfollowWebFeed(
       const std::string& web_feed_id,
+      bool is_durable_request,
       base::OnceCallback<void(UnfollowWebFeedResult)> callback) = 0;
 
   // Web Feed lookup for pages. These functions fetch `WebFeedMetadata` for any
@@ -76,6 +86,10 @@ class WebFeedSubscriptions {
   virtual void RefreshSubscriptions(
       base::OnceCallback<void(RefreshResult)> callback) = 0;
 
+  // Force a refresh of the server-recommended web feeds.
+  virtual void RefreshRecommendedFeeds(
+      base::OnceCallback<void(RefreshResult)> callback) = 0;
+
   // Whether the user has subscribed to at least one web feed. May require
   // fetching data from the server if cached data is not fresh. If fetching
   // fails, returns the last-known state.
@@ -86,6 +100,9 @@ class WebFeedSubscriptions {
   // fails, returns the last-known state.
   virtual void SubscribedWebFeedCount(
       base::OnceCallback<void(int)> callback) = 0;
+
+  // Output debugging information for snippets-internals.
+  virtual void DumpStateForDebugging(std::ostream& ss) {}
 };
 
 }  // namespace feed

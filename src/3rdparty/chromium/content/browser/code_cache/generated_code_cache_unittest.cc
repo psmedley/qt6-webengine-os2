@@ -9,8 +9,10 @@
 
 #include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/task_environment.h"
+#include "base/time/time.h"
 #include "content/public/test/browser_task_environment.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/network_isolation_key.h"
@@ -132,7 +134,7 @@ class GeneratedCodeCacheTest : public testing::Test {
   bool received_;
   bool received_null_;
   base::FilePath cache_path_;
-  disk_cache::Backend* backend_;
+  raw_ptr<disk_cache::Backend> backend_;
 };
 
 constexpr char GeneratedCodeCacheTest::kInitialUrl[];

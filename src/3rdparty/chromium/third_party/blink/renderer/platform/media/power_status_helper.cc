@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "third_party/blink/public/platform/media/power_status_helper.h"
+#include "third_party/blink/renderer/platform/media/power_status_helper.h"
 
 #include <utility>
 
@@ -10,12 +10,10 @@
 #include "base/check_op.h"
 #include "base/metrics/histogram_macros.h"
 #include "media/base/pipeline_metadata.h"
-#include "services/device/public/mojom/battery_status.mojom.h"
+#include "services/device/public/mojom/battery_status.mojom-blink.h"
 
 namespace blink {
 namespace {
-
-using ::device::mojom::BatteryStatusPtr;
 
 static constexpr const char* kBatteryDeltaHistogram =
     "Media.PlaybackPower.BatteryDelta";
@@ -109,7 +107,7 @@ absl::optional<int> PowerStatusHelper::BucketFor(
 
   int bucket = 0;
 
-  if (codec == media::VideoCodec::kCodecH264)
+  if (codec == media::VideoCodec::kH264)
     bucket |= Bits::kCodecBitsH264;
   else if (profile == media::VP9PROFILE_PROFILE0)
     bucket |= Bits::kCodecBitsVP9Profile0;
@@ -207,7 +205,7 @@ void PowerStatusHelper::OnAnyStateChange() {
 }
 
 void PowerStatusHelper::OnBatteryStatus(
-    device::mojom::BatteryStatusPtr battery_status) {
+    device::mojom::blink::BatteryStatusPtr battery_status) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   QueryNextStatus();

@@ -32,6 +32,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t help;
   arg_def_t debugmode;
   arg_def_t outputfile;
+  arg_def_t use_nv12;
   arg_def_t use_yv12;
   arg_def_t use_i420;
   arg_def_t use_i422;
@@ -114,11 +115,15 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t arnr_maxframes;
   arg_def_t arnr_strength;
   arg_def_t tune_metric;
+  arg_def_t dist_metric;
   arg_def_t cq_level;
   arg_def_t max_intra_rate_pct;
 #if CONFIG_AV1_ENCODER
   arg_def_t cpu_used_av1;
   arg_def_t rowmtarg;
+#if CONFIG_FRAME_PARALLEL_ENCODE
+  arg_def_t fpmtarg;
+#endif
   arg_def_t tile_cols;
   arg_def_t tile_rows;
   arg_def_t enable_tpl_model;
@@ -194,6 +199,7 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t error_resilient_mode;
   arg_def_t aq_mode;
   arg_def_t deltaq_mode;
+  arg_def_t deltaq_strength;
   arg_def_t deltalf_mode;
   arg_def_t frame_periodic_boost;
   arg_def_t gf_cbr_boost_pct;
@@ -219,10 +225,14 @@ typedef struct av1_codec_arg_definitions {
   arg_def_t vbr_corpus_complexity_lap;
   arg_def_t fwd_kf_dist;
   arg_def_t enable_tx_size_search;
+  arg_def_t loopfilter_control;
   arg_def_t two_pass_input;
   arg_def_t two_pass_output;
   arg_def_t two_pass_width;
   arg_def_t two_pass_height;
+  arg_def_t second_pass_log;
+  arg_def_t auto_intra_tools_off;
+  arg_def_t strict_level_conformance;
 #endif  // CONFIG_AV1_ENCODER
 } av1_codec_arg_definitions_t;
 

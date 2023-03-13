@@ -42,17 +42,17 @@
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/web/web_security_policy.h"
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
+#include "chrome/renderer/extensions/file_browser_handler_custom_bindings.h"
 #include "chrome/renderer/extensions/platform_keys_natives.h"
+#if defined(USE_CUPS)
+#include "chrome/renderer/extensions/printing_hooks_delegate.h"
+#endif
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "chrome/renderer/extensions/accessibility_private_hooks_delegate.h"
-#include "chrome/renderer/extensions/file_browser_handler_custom_bindings.h"
 #include "chrome/renderer/extensions/file_manager_private_custom_bindings.h"
-#if defined(USE_CUPS)
-#include "chrome/renderer/extensions/printing_hooks_delegate.h"
-#endif
 #endif
 
 using extensions::NativeHandler;
@@ -70,16 +70,15 @@ void ChromeExtensionsDispatcherDelegate::RegisterNativeHandlers(
       "sync_file_system",
       std::unique_ptr<NativeHandler>(
           new extensions::SyncFileSystemCustomBindings(context)));
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
+  module_system->RegisterNativeHandler(
+      "file_browser_handler",
+      std::make_unique<extensions::FileBrowserHandlerCustomBindings>(context));
   module_system->RegisterNativeHandler(
       "platform_keys_natives",
       std::make_unique<extensions::PlatformKeysNatives>(context));
-#endif  // BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#endif  // BUILDFLAG(IS_CHROMEOS)
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  module_system->RegisterNativeHandler(
-      "file_browser_handler",
-      std::unique_ptr<NativeHandler>(
-          new extensions::FileBrowserHandlerCustomBindings(context)));
   module_system->RegisterNativeHandler(
       "file_manager_private",
       std::unique_ptr<NativeHandler>(
@@ -142,23 +141,21 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
   source_map->RegisterSource("tts", IDR_TTS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("ttsEngine", IDR_TTS_ENGINE_CUSTOM_BINDINGS_JS);
 
-#if BUILDFLAG(IS_CHROMEOS_ASH) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_CHROMEOS)
   source_map->RegisterSource("enterprise.platformKeys",
                              IDR_ENTERPRISE_PLATFORM_KEYS_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("enterprise.platformKeys.internalAPI",
-                             IDR_ENTERPRISE_PLATFORM_KEYS_INTERNAL_API_JS);
   source_map->RegisterSource("enterprise.platformKeys.KeyPair",
                              IDR_ENTERPRISE_PLATFORM_KEYS_KEY_PAIR_JS);
   source_map->RegisterSource("enterprise.platformKeys.SubtleCrypto",
                              IDR_ENTERPRISE_PLATFORM_KEYS_SUBTLE_CRYPTO_JS);
   source_map->RegisterSource("enterprise.platformKeys.Token",
                              IDR_ENTERPRISE_PLATFORM_KEYS_TOKEN_JS);
+  source_map->RegisterSource("fileBrowserHandler",
+                             IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("platformKeys",
                              IDR_PLATFORM_KEYS_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("platformKeys.getPublicKeyUtil",
                              IDR_PLATFORM_KEYS_GET_PUBLIC_KEY_JS);
-  source_map->RegisterSource("platformKeys.internalAPI",
-                             IDR_PLATFORM_KEYS_INTERNAL_API_JS);
   source_map->RegisterSource("platformKeys.Key", IDR_PLATFORM_KEYS_KEY_JS);
   source_map->RegisterSource("platformKeys.SubtleCrypto",
                              IDR_PLATFORM_KEYS_SUBTLE_CRYPTO_JS);
@@ -168,8 +165,6 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   source_map->RegisterSource("certificateProvider",
                              IDR_CERTIFICATE_PROVIDER_CUSTOM_BINDINGS_JS);
-  source_map->RegisterSource("fileBrowserHandler",
-                             IDR_FILE_BROWSER_HANDLER_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("fileManagerPrivate",
                              IDR_FILE_MANAGER_PRIVATE_CUSTOM_BINDINGS_JS);
   source_map->RegisterSource("fileSystemProvider",
@@ -178,13 +173,13 @@ void ChromeExtensionsDispatcherDelegate::PopulateSourceMap(
                              IDR_TERMINAL_PRIVATE_CUSTOM_BINDINGS_JS);
 
   // IME service on Chrome OS.
-  source_map->RegisterSource("chromeos.ime.mojom.ime_service.mojom",
+  source_map->RegisterSource("ash.ime.mojom.ime_service.mojom",
                              IDR_IME_SERVICE_MOJOM_JS);
-  source_map->RegisterSource("chromeos.ime.mojom.input_engine.mojom",
+  source_map->RegisterSource("ash.ime.mojom.input_engine.mojom",
                              IDR_IME_SERVICE_INPUT_ENGINE_MOJOM_JS);
-  source_map->RegisterSource("chromeos.ime.mojom.input_method.mojom",
+  source_map->RegisterSource("ash.ime.mojom.input_method.mojom",
                              IDR_IME_SERVICE_INPUT_METHOD_MOJOM_JS);
-  source_map->RegisterSource("chromeos.ime.mojom.input_method_host.mojom",
+  source_map->RegisterSource("ash.ime.mojom.input_method_host.mojom",
                              IDR_IME_SERVICE_INPUT_METHOD_HOST_MOJOM_JS);
   source_map->RegisterSource("chromeos.ime.service",
                              IDR_IME_SERVICE_BINDINGS_JS);
@@ -254,7 +249,7 @@ void ChromeExtensionsDispatcherDelegate::InitializeBindingsSystem(
       ->SetDelegate(
           std::make_unique<extensions::AccessibilityPrivateHooksDelegate>());
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
-#if BUILDFLAG(IS_CHROMEOS_ASH) && defined(USE_CUPS)
+#if BUILDFLAG(IS_CHROMEOS) && defined(USE_CUPS)
   bindings->GetHooksForAPI("printing")
       ->SetDelegate(std::make_unique<extensions::PrintingHooksDelegate>());
 #endif

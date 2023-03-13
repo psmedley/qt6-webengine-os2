@@ -13,15 +13,16 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/values.h"
+#include "components/value_store/value_store.h"
 #include "crypto/encryptor.h"
 #include "crypto/symmetric_key.h"
 #include "extensions/browser/api/lock_screen_data/operation_result.h"
 #include "extensions/browser/api/storage/local_value_store_cache.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/value_store/value_store.h"
+
+using value_store::ValueStore;
 
 namespace extensions {
 namespace lock_screen_data {
@@ -81,12 +82,11 @@ OperationResult DecryptData(const std::string& data,
 // |item_id|.
 bool IsItemRegistered(ValueStore* store, const std::string& item_id) {
   ValueStore::ReadResult read = store->Get(kStoreKeyRegisteredItems);
-
-  const base::DictionaryValue* registered_items = nullptr;
-  return read.status().ok() &&
-         read.settings().GetDictionary(kStoreKeyRegisteredItems,
-                                       &registered_items) &&
-         registered_items->HasKey(item_id);
+  if (!read.status().ok())
+    return false;
+  const base::Value* registered_items =
+      read.settings().FindDictKey(kStoreKeyRegisteredItems);
+  return registered_items && registered_items->FindKey(item_id);
 }
 
 // Gets a dictionary value that contains set of all registered data items from
@@ -99,7 +99,7 @@ void GetRegisteredItems(OperationResult* result,
                         ValueStore* store) {
   ValueStore::ReadResult read = store->Get(kStoreKeyRegisteredItems);
 
-  values->Clear();
+  values->DictClear();
 
   if (!read.status().ok()) {
     *result = OperationResult::kFailed;
@@ -150,7 +150,7 @@ void RegisterItem(OperationResult* result,
     return;
   }
 
-  if (dict->HasKey(item_id)) {
+  if (dict->FindKey(item_id)) {
     *result = OperationResult::kAlreadyRegistered;
     return;
   }
@@ -250,10 +250,9 @@ void DeleteImpl(OperationResult* result,
     return;
   }
 
-  base::DictionaryValue* registered_items = nullptr;
-  if (!read.settings().GetDictionary(kStoreKeyRegisteredItems,
-                                     &registered_items) ||
-      !registered_items->RemoveKey(item_id)) {
+  base::Value* registered_items =
+      read.settings().FindDictKey(kStoreKeyRegisteredItems);
+  if (!registered_items || !registered_items->RemoveKey(item_id)) {
     *result = OperationResult::kNotFound;
     return;
   }

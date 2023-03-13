@@ -192,9 +192,8 @@ bool HeapprofdConfigToClientConfiguration(
                     HEAPPROFD_HEAP_NAME_SZ - 1);
       continue;
     }
-    strncpy(&cli_config->heaps[n].name[0], heap.c_str(),
-            sizeof(cli_config->heaps[0].name));
-    cli_config->heaps[n].name[sizeof(cli_config->heaps[0].name) - 1] = '\0';
+    base::StringCopy(&cli_config->heaps[n].name[0], heap.c_str(),
+                     sizeof(cli_config->heaps[n].name));
     cli_config->heaps[n].interval = interval;
     n++;
   }
@@ -1028,7 +1027,10 @@ void HeapprofdProducer::HandleAllocRecord(AllocRecord* alloc_rec) {
   const auto& prefixes = ds.config.skip_symbol_prefix();
   if (!prefixes.empty()) {
     for (unwindstack::FrameData& frame_data : alloc_rec->frames) {
-      const std::string& map = frame_data.map_name;
+      if (frame_data.map_info == nullptr) {
+        continue;
+      }
+      const std::string& map = frame_data.map_info->name();
       if (std::find_if(prefixes.cbegin(), prefixes.cend(),
                        [&map](const std::string& prefix) {
                          return base::StartsWith(map, prefix);

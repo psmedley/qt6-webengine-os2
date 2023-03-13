@@ -82,7 +82,7 @@ ReportBadMessageCallback ReceiverSetState::GetBadMessageCallback() {
   return base::BindOnce(
       [](ReportBadMessageCallback error_callback,
          base::WeakPtr<ReceiverSetState> receiver_set, ReceiverId receiver_id,
-         const std::string& error) {
+         base::StringPiece error) {
         std::move(error_callback).Run(error);
         if (receiver_set)
           receiver_set->Remove(receiver_id);
@@ -107,6 +107,17 @@ bool ReceiverSetState::Remove(ReceiverId id) {
   return true;
 }
 
+bool ReceiverSetState::RemoveWithReason(ReceiverId id,
+                                        uint32_t custom_reason_code,
+                                        const std::string& description) {
+  auto it = entries_.find(id);
+  if (it == entries_.end())
+    return false;
+  it->second->receiver().ResetWithReason(custom_reason_code, description);
+  entries_.erase(it);
+  return true;
+}
+
 void ReceiverSetState::FlushForTesting() {
   // We avoid flushing while iterating over |entries_| because this set may be
   // mutated during individual flush operations.  Instead, snapshot the
@@ -127,7 +138,7 @@ void ReceiverSetState::FlushForTesting() {
   }
 }
 
-void ReceiverSetState::SetDispatchContext(const void* context,
+void ReceiverSetState::SetDispatchContext(void* context,
                                           ReceiverId receiver_id) {
   current_context_ = context;
   current_receiver_ = receiver_id;

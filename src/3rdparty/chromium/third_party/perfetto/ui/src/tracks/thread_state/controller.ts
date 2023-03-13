@@ -33,7 +33,7 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
   private maxDurNs = 0;
 
   async onSetup() {
-    await this.queryV2(`
+    await this.query(`
       create view ${this.tableName('thread_state')} as
       select
         id,
@@ -46,7 +46,7 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
       where utid = ${this.config.utid} and utid != 0
     `);
 
-    const queryRes = await this.queryV2(`
+    const queryRes = await this.query(`
       select ifnull(max(dur), 0) as maxDur
       from ${this.tableName('thread_state')}
     `);
@@ -68,6 +68,7 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
       select
         (ts + ${bucketNs / 2}) / ${bucketNs} * ${bucketNs} as tsq,
         ts,
+        state = 'S' as is_sleep,
         max(dur) as dur,
         ifnull(cast(cpu as integer), -1) as cpu,
         state,
@@ -77,11 +78,11 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
       where
         ts >= ${startNs - this.maxDurNs} and
         ts <= ${endNs}
-      group by tsq, state, ioWait
-      order by tsq, state, ioWait
+      group by tsq, is_sleep
+      order by tsq
     `;
 
-    const queryRes = await this.queryV2(query);
+    const queryRes = await this.query(query);
     const numRows = queryRes.numRows();
 
     const data: Data = {
@@ -97,9 +98,11 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
       cpu: new Int8Array(numRows),
     };
 
-    const stringIndexes =
-        new Map<{shortState: string; ioWait: boolean | undefined}, number>();
-    function internState(shortState: string, ioWait: boolean|undefined) {
+    const stringIndexes = new Map<
+        {shortState: string | undefined; ioWait: boolean | undefined},
+        number>();
+    function internState(
+        shortState: string|undefined, ioWait: boolean|undefined) {
       let idx = stringIndexes.get({shortState, ioWait});
       if (idx !== undefined) return idx;
       idx = data.strings.length;
@@ -126,7 +129,7 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
       endNsQ = Math.max(endNsQ, startNsQ + bucketNs);
 
       const cpu = it.cpu;
-      const state = it.state || '[null]';
+      const state = it.state || undefined;
       const ioWait = it.ioWait === null ? undefined : !!it.ioWait;
       const id = it.id;
 
@@ -144,8 +147,7 @@ class ThreadStateTrackController extends TrackController<Config, Data> {
   }
 
   async onDestroy() {
-    await this.queryV2(
-        `drop table if exists ${this.tableName('thread_state')}`);
+    await this.query(`drop view if exists ${this.tableName('thread_state')}`);
   }
 }
 

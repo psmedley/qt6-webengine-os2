@@ -13,6 +13,7 @@
 #include <spirv_msl.hpp>
 
 #include "common/apple_platform_utils.h"
+#include "libANGLE/renderer/ShaderInterfaceVariableInfoMap.h"
 #include "libANGLE/renderer/glslang_wrapper_utils.h"
 #include "libANGLE/renderer/metal/DisplayMtl.h"
 
@@ -399,10 +400,11 @@ void GlslangGetShaderSpirvCode(const gl::ProgramState &programState,
         ResetGlslangProgramInterfaceInfo(&xfbOnlyInterfaceInfo);
 
         options.enableTransformFeedbackEmulation = true;
-
+        UniformBindingIndexMap uniformBindingIndexMap;
         GlslangAssignLocations(options, programState, resources.varyingPacking,
                                gl::ShaderType::Vertex, gl::ShaderType::InvalidEnum, true,
-                               &xfbOnlyInterfaceInfo, xfbOnlyVSVariableInfoMapOut);
+                               &xfbOnlyInterfaceInfo, &uniformBindingIndexMap,
+                               xfbOnlyVSVariableInfoMapOut);
     }
 }
 

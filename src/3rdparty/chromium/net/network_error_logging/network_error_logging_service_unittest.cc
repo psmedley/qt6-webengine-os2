@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
@@ -78,7 +77,7 @@ class NetworkErrorLoggingServiceTest : public ::testing::TestWithParam<bool> {
     details.server_ip = server_ip.IsValid() ? server_ip : kServerIP_;
     details.method = std::move(method);
     details.status_code = status_code;
-    details.elapsed_time = base::TimeDelta::FromSeconds(1);
+    details.elapsed_time = base::Seconds(1);
     details.type = error_type;
     details.reporting_upload_depth = 0;
 
@@ -106,7 +105,7 @@ class NetworkErrorLoggingServiceTest : public ::testing::TestWithParam<bool> {
     details.protocol = "http/1.1";
     details.method = "GET";
     details.status_code = 200;
-    details.elapsed_time = base::TimeDelta::FromMilliseconds(1234);
+    details.elapsed_time = base::Milliseconds(1234);
     details.user_agent = kUserAgent_;
     return details;
   }
@@ -219,9 +218,9 @@ class NetworkErrorLoggingServiceTest : public ::testing::TestWithParam<bool> {
 void ExpectDictDoubleValue(double expected_value,
                            const base::DictionaryValue& value,
                            const std::string& key) {
-  double double_value = 0.0;
-  EXPECT_TRUE(value.GetDouble(key, &double_value)) << key;
-  EXPECT_DOUBLE_EQ(expected_value, double_value) << key;
+  absl::optional<double> double_value = value.FindDoubleKey(key);
+  ASSERT_TRUE(double_value) << key;
+  EXPECT_DOUBLE_EQ(expected_value, *double_value) << key;
 }
 
 TEST_P(NetworkErrorLoggingServiceTest, CreateService) {
@@ -1035,7 +1034,7 @@ TEST_P(NetworkErrorLoggingServiceTest, RemoveSomeBrowsingData) {
 
   // Remove policy for kOrigin_ but not kOriginDifferentHost_
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   EXPECT_EQ(1u, PolicyCount());
@@ -1253,7 +1252,8 @@ TEST_P(NetworkErrorLoggingServiceTest, SuccessReportQueued_SignedExchange) {
                               NetworkErrorLoggingService::kInnerUrlKey);
   base::ExpectStringValue(
       kCertUrl_.spec(),
-      sxg_body->FindKey(NetworkErrorLoggingService::kCertUrlKey)->GetList()[0]);
+      sxg_body->FindKey(NetworkErrorLoggingService::kCertUrlKey)
+          ->GetListDeprecated()[0]);
 }
 
 TEST_P(NetworkErrorLoggingServiceTest, FailureReportQueued_SignedExchange) {
@@ -1304,7 +1304,8 @@ TEST_P(NetworkErrorLoggingServiceTest, FailureReportQueued_SignedExchange) {
                               NetworkErrorLoggingService::kInnerUrlKey);
   base::ExpectStringValue(
       kCertUrl_.spec(),
-      sxg_body->FindKey(NetworkErrorLoggingService::kCertUrlKey)->GetList()[0]);
+      sxg_body->FindKey(NetworkErrorLoggingService::kCertUrlKey)
+          ->GetListDeprecated()[0]);
 }
 
 TEST_P(NetworkErrorLoggingServiceTest, MismatchingSubdomain_SignedExchange) {
@@ -1376,7 +1377,7 @@ TEST_P(NetworkErrorLoggingServiceTest, EvictAllExpiredPoliciesFirst) {
   FinishLoading(true /* load_success */);
 
   EXPECT_EQ(100u, PolicyCount());
-  clock.Advance(base::TimeDelta::FromSeconds(86401));  // max_age is 86400 sec
+  clock.Advance(base::Seconds(86401));  // max_age is 86400 sec
   // Expired policies are allowed to linger before hitting the policy limit.
   EXPECT_EQ(100u, PolicyCount());
 
@@ -1400,7 +1401,7 @@ TEST_P(NetworkErrorLoggingServiceTest, EvictLeastRecentlyUsedPolicy) {
   for (size_t i = 0; i < NetworkErrorLoggingService::kMaxPolicies; ++i) {
     service()->OnHeader(MakeNetworkIsolationKey(i), MakeOrigin(i), kServerIP_,
                         kHeader_);
-    clock.Advance(base::TimeDelta::FromSeconds(1));
+    clock.Advance(base::Seconds(1));
   }
   // Make the rest of the test run synchronously.
   FinishLoading(true /* load_success */);
@@ -1411,7 +1412,7 @@ TEST_P(NetworkErrorLoggingServiceTest, EvictLeastRecentlyUsedPolicy) {
   // expired, so the least recently used (i.e. least recently added) policy
   // should be evicted.
   service()->OnHeader(kNik_, kOrigin_, kServerIP_, kHeader_);
-  clock.Advance(base::TimeDelta::FromSeconds(1));
+  clock.Advance(base::Seconds(1));
   EXPECT_EQ(PolicyCount(), NetworkErrorLoggingService::kMaxPolicies);
 
   EXPECT_FALSE(
@@ -1429,12 +1430,12 @@ TEST_P(NetworkErrorLoggingServiceTest, EvictLeastRecentlyUsedPolicy) {
   // identified correctly.
   service()->OnRequest(
       MakeRequestDetails(kNik_, kOrigin_.GetURL(), ERR_CONNECTION_REFUSED));
-  clock.Advance(base::TimeDelta::FromSeconds(1));
+  clock.Advance(base::Seconds(1));
   for (size_t i = NetworkErrorLoggingService::kMaxPolicies - 1; i >= 1; --i) {
     service()->OnRequest(MakeRequestDetails(MakeNetworkIsolationKey(i),
                                             MakeOrigin(i).GetURL(),
                                             ERR_CONNECTION_REFUSED));
-    clock.Advance(base::TimeDelta::FromSeconds(1));
+    clock.Advance(base::Seconds(1));
   }
   service()->OnHeader(kNik_, kOriginSubdomain_, kServerIP_, kHeader_);
   EXPECT_EQ(PolicyCount(), NetworkErrorLoggingService::kMaxPolicies);
@@ -1495,7 +1496,7 @@ TEST_P(NetworkErrorLoggingServiceTest, SendsCommandsToStoreSynchronous) {
   // Removes policy1 but not policy2.
   EXPECT_EQ(2, store()->StoredPoliciesCount());
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   expected_commands.emplace_back(
@@ -1542,7 +1543,7 @@ TEST_P(NetworkErrorLoggingServiceTest, SendsCommandsToStoreDeferred) {
 
   // Removes policy1 but not policy2.
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   EXPECT_TRUE(store()->VerifyCommands(expected_commands));
@@ -1621,7 +1622,7 @@ TEST_P(NetworkErrorLoggingServiceTest,
 
   // Removes policy1 but not policy2.
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   expected_commands.emplace_back(
@@ -1664,7 +1665,7 @@ TEST_P(NetworkErrorLoggingServiceTest, SendsCommandsToStoreDeferredLoadFailed) {
 
   // Removes policy1 but not policy2.
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   EXPECT_TRUE(store()->VerifyCommands(expected_commands));
@@ -1746,7 +1747,7 @@ TEST_P(NetworkErrorLoggingServiceTest, DoNothingIfShutDown) {
   service()->QueueSignedExchangeReport(MakeSignedExchangeReportDetails(
       kNik_, false, "sxg.failed", kUrl_, kInnerUrl_, kCertUrl_, kServerIP_));
   service()->RemoveBrowsingData(
-      base::BindRepeating([](const GURL& origin) -> bool {
+      base::BindRepeating([](const url::Origin& origin) -> bool {
         return origin.host() == "example.com";
       }));
   service()->RemoveAllBrowsingData();

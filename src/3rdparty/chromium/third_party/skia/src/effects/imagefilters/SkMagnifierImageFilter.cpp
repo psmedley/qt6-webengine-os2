@@ -18,9 +18,9 @@
 ////////////////////////////////////////////////////////////////////////////////
 #if SK_SUPPORT_GPU
 #include "src/core/SkRuntimeEffectPriv.h"
-#include "src/gpu/GrColorSpaceXform.h"
-#include "src/gpu/effects/GrSkSLFP.h"
-#include "src/gpu/effects/GrTextureEffect.h"
+#include "src/gpu/ganesh/GrColorSpaceXform.h"
+#include "src/gpu/ganesh/effects/GrSkSLFP.h"
+#include "src/gpu/ganesh/effects/GrTextureEffect.h"
 #endif
 
 namespace {
@@ -126,7 +126,7 @@ static std::unique_ptr<GrFragmentProcessor> make_magnifier_fp(
                 weight = min(min(delta_squared.x, delta_squared.y), 1.0);
             }
 
-            return sample(src, mix(coord, zoom_coord, weight));
+            return src.eval(mix(coord, zoom_coord, weight));
         }
     )");
 
@@ -176,6 +176,7 @@ sk_sp<SkSpecialImage> SkMagnifierImageFilter::onFilterImage(const Context& ctx,
         SkASSERT(inputView.asTextureProxy());
 
         const auto isProtected = inputView.proxy()->isProtected();
+        const auto origin = inputView.origin();
 
         offset->fX = bounds.left();
         offset->fY = bounds.top();
@@ -204,7 +205,7 @@ sk_sp<SkSpecialImage> SkMagnifierImageFilter::onFilterImage(const Context& ctx,
         }
 
         return DrawWithFP(context, std::move(fp), bounds, ctx.colorType(), ctx.colorSpace(),
-                          ctx.surfaceProps(), isProtected);
+                          ctx.surfaceProps(), origin, isProtected);
     }
 #endif
 

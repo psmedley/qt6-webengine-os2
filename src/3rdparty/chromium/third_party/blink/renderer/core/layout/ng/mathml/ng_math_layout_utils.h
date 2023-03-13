@@ -97,6 +97,7 @@ MinMaxSizes GetMinMaxSizesForVerticalStretchyOperator(const ComputedStyle&,
                                                       UChar character);
 
 bool IsUnderOverLaidOutAsSubSup(const NGBlockNode& node);
+bool IsTextOnlyToken(const NGBlockNode& node);
 bool IsOperatorWithSpecialShaping(const NGBlockNode& node);
 
 LayoutUnit MathTableBaseline(const ComputedStyle&, LayoutUnit block_offset);
@@ -106,11 +107,23 @@ LayoutUnit MathTableBaseline(const ComputedStyle&, LayoutUnit block_offset);
 // See https://mathml-refresh.github.io/mathml-core/#embellished-operators
 struct MathMLEmbellishedOperatorProperties {
   bool has_movablelimits;
+  bool is_large_op;
+  bool is_stretchy;
+  bool is_vertical;
   LayoutUnit lspace;
   LayoutUnit rspace;
 };
 absl::optional<MathMLEmbellishedOperatorProperties>
 GetMathMLEmbellishedOperatorProperties(const NGBlockNode&);
+
+bool IsStretchyOperator(const NGBlockNode& node, bool stretch_axis_is_vertical);
+inline bool IsBlockAxisStretchyOperator(const NGBlockNode& node) {
+  return IsStretchyOperator(node, true);
+}
+inline bool IsInlineAxisStretchyOperator(const NGBlockNode& node) {
+  return IsStretchyOperator(node, false);
+}
+
 }  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_MATHML_NG_MATH_LAYOUT_UTILS_H_

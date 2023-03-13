@@ -128,7 +128,7 @@ der::Input SequenceValueFromString(const std::string* s) {
 }
 
 VerifyCertChainTest::VerifyCertChainTest()
-    : user_initial_policy_set{AnyPolicy()} {}
+    : user_initial_policy_set{der::Input(kAnyPolicyOid)} {}
 VerifyCertChainTest::~VerifyCertChainTest() = default;
 
 bool VerifyCertChainTest::HasHighSeverityErrors() const {
@@ -225,7 +225,7 @@ bool ReadVerifyCertChainTestFromFile(const std::string& file_path_ascii,
       ReadCertChainFromFile(chain_path, &test->chain);
     } else if (GetValue("utc_time: ", line_piece, &value, &has_time)) {
       if (value == "DEFAULT") {
-        value = "201103120000Z";
+        value = "211005120000Z";
       }
       if (!der::ParseUTCTime(der::Input(&value), &test->time)) {
         ADD_FAILURE() << "Failed parsing UTC time";
@@ -246,6 +246,9 @@ bool ReadVerifyCertChainTestFromFile(const std::string& file_path_ascii,
     } else if (GetValue("last_cert_trust: ", line_piece, &value, &has_trust)) {
       if (value == "TRUSTED_ANCHOR") {
         test->last_cert_trust = CertificateTrust::ForTrustAnchor();
+      } else if (value == "TRUSTED_ANCHOR_WITH_EXPIRATION") {
+        test->last_cert_trust =
+            CertificateTrust::ForTrustAnchorEnforcingExpiration();
       } else if (value == "TRUSTED_ANCHOR_WITH_CONSTRAINTS") {
         test->last_cert_trust =
             CertificateTrust::ForTrustAnchorEnforcingConstraints();

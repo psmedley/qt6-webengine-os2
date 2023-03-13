@@ -70,6 +70,10 @@ class BypassSimpleHostnamesRule : public SchemeHostPortMatcherRule {
  public:
   BypassSimpleHostnamesRule() = default;
 
+  BypassSimpleHostnamesRule(const BypassSimpleHostnamesRule&) = delete;
+  BypassSimpleHostnamesRule& operator=(const BypassSimpleHostnamesRule&) =
+      delete;
+
   SchemeHostPortMatcherResult Evaluate(const GURL& url) const override {
     return ((url.host_piece().find('.') == std::string::npos) &&
             !url.HostIsIPAddress())
@@ -78,14 +82,15 @@ class BypassSimpleHostnamesRule : public SchemeHostPortMatcherRule {
   }
 
   std::string ToString() const override { return kBypassSimpleHostnames; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(BypassSimpleHostnamesRule);
 };
 
 class SubtractImplicitBypassesRule : public SchemeHostPortMatcherRule {
  public:
   SubtractImplicitBypassesRule() = default;
+
+  SubtractImplicitBypassesRule(const SubtractImplicitBypassesRule&) = delete;
+  SubtractImplicitBypassesRule& operator=(const SubtractImplicitBypassesRule&) =
+      delete;
 
   SchemeHostPortMatcherResult Evaluate(const GURL& url) const override {
     return ProxyBypassRules::MatchesImplicitRules(url)
@@ -94,9 +99,6 @@ class SubtractImplicitBypassesRule : public SchemeHostPortMatcherRule {
   }
 
   std::string ToString() const override { return kSubtractImplicitBypasses; }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SubtractImplicitBypassesRule);
 };
 
 std::unique_ptr<SchemeHostPortMatcherRule> ParseRule(
@@ -248,7 +250,7 @@ bool ProxyBypassRules::MatchesImplicitRules(const GURL& url) {
   //     [FE80::]/10
   return IsLocalhost(url) || IsIPv4MappedLoopback(url) ||
          IsLinkLocalIP(url)
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
          // See http://crbug.com/904889
          || (url.host_piece() == "loopback") ||
          (url.host_piece() == "loopback.")

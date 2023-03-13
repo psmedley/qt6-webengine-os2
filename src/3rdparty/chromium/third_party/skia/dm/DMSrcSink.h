@@ -42,26 +42,32 @@ typedef ImplicitString Path;
 class Result {
 public:
     enum class Status : int { Ok, Fatal, Skip };
-    Result(Status status, const SkString& s) : fMsg(s), fStatus(status) {}
-    Result(Status status, const char* s) : fMsg(s), fStatus(status) {}
-    template <typename... Args> Result (Status status, const char* s, Args... args)
-        : fMsg(SkStringPrintf(s, args...)), fStatus(status) {}
+
+    Result(Status status, SkString msg) : fMsg(std::move(msg)), fStatus(status) {}
 
     Result(const Result&)            = default;
     Result& operator=(const Result&) = default;
 
-    static Result Ok() { return Result(Status::Ok, nullptr); }
+    static Result Ok() { return Result{Status::Ok, {}}; }
 
-    static Result Fatal(const SkString& s) { return Result(Status::Fatal, s); }
-    static Result Fatal(const char* s) { return Result(Status::Fatal, s); }
-    template <typename... Args> static Result Fatal(const char* s, Args... args) {
-        return Result(Status::Fatal, s, args...);
+    static Result Fatal(const char* fmt, ...) SK_PRINTF_LIKE(1, 2) {
+        SkString msg;
+        va_list args;
+        va_start(args, fmt);
+        msg.printVAList(fmt, args);
+        va_end(args);
+
+        return Result{Status::Fatal, std::move(msg)};
     }
 
-    static Result Skip(const SkString& s) { return Result(Status::Skip, s); }
-    static Result Skip(const char* s) { return Result(Status::Skip, s); }
-    template <typename... Args> static Result Skip(const char* s, Args... args) {
-        return Result(Status::Skip, s, args...);
+    static Result Skip(const char* fmt, ...) SK_PRINTF_LIKE(1, 2) {
+        SkString msg;
+        va_list args;
+        va_start(args, fmt);
+        msg.printVAList(fmt, args);
+        va_end(args);
+
+        return Result{Status::Skip, std::move(msg)};
     }
 
     bool isOk() { return fStatus == Status::Ok; }
@@ -297,39 +303,17 @@ public:
 
 private:
     // Generates a kTileCount x kTileCount filmstrip with evenly distributed frames.
-    static constexpr int      kTileCount = 5;
+    inline static constexpr int      kTileCount = 5;
 
     // Fit kTileCount x kTileCount frames to a 1000x1000 film strip.
-    static constexpr SkScalar kTargetSize = 1000;
-    static constexpr SkScalar kTileSize = kTargetSize / kTileCount;
+    inline static constexpr SkScalar kTargetSize = 1000;
+    inline static constexpr SkScalar kTileSize = kTargetSize / kTileCount;
 
     Path                      fPath;
 };
 #endif
 
-#if defined(SK_ENABLE_SKRIVE)
-class SkRiveSrc final : public Src {
-public:
-    explicit SkRiveSrc(Path path);
-
-    Result draw(GrDirectContext*, SkCanvas*) const override;
-    SkISize size() const override;
-    Name name() const override;
-    bool veto(SinkFlags) const override;
-
-private:
-    // Generates a kTileCount x kTileCount filmstrip with evenly distributed frames.
-    static constexpr int      kTileCount  = 5;
-
-    // Fit kTileCount x kTileCount frames to a 1000x1000 film strip.
-    static constexpr SkScalar kTargetSize = 1000;
-    static constexpr SkScalar kTileSize   = kTargetSize / kTileCount;
-
-    const Path fPath;
-};
-#endif
-
-#if defined(SK_XML)
+#if defined(SK_ENABLE_SVG)
 } // namespace DM
 
 class SkSVGDOM;
@@ -352,7 +336,7 @@ private:
 
     using INHERITED = Src;
 };
-#endif // SK_XML
+#endif // SK_ENABLE_SVG
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 
 class MSKPSrc : public Src {
@@ -389,7 +373,8 @@ public:
     Result draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
     Result onDraw(const Src&, SkBitmap*, SkWStream*, SkString*,
                   const GrContextOptions& baseOptions,
-                  std::function<void(GrDirectContext*)> initContext = nullptr) const;
+                  std::function<void(GrDirectContext*)> initContext = nullptr,
+                  std::function<SkCanvas*(SkCanvas*)> wrapCanvas = nullptr) const;
 
     sk_gpu_test::GrContextFactory::ContextType contextType() const { return fContextType; }
     const sk_gpu_test::GrContextFactory::ContextOverrides& contextOverrides() const {
@@ -424,6 +409,15 @@ private:
     sk_sp<SkColorSpace>                               fColorSpace;
     GrContextOptions                                  fBaseContextOptions;
     sk_gpu_test::MemoryCache                          fMemoryCache;
+};
+
+// Wrap a gpu canvas in one that routes all text draws through GrSlugs.
+// Note that text blobs that have an RSXForm aren't converted.
+class GPUSlugSink : public GPUSink {
+public:
+    GPUSlugSink(const SkCommandLineConfigGpu*, const GrContextOptions&);
+
+    Result draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 };
 
 class GPUThreadTestingSink : public GPUSink {
@@ -539,7 +533,7 @@ public:
 
 class RasterSink : public Sink {
 public:
-    explicit RasterSink(SkColorType, sk_sp<SkColorSpace> = nullptr);
+    explicit RasterSink(SkColorType);
 
     Result draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
     const char* fileExtension() const override { return "png"; }
@@ -549,12 +543,6 @@ public:
 private:
     SkColorType         fColorType;
     sk_sp<SkColorSpace> fColorSpace;
-};
-
-class ThreadedSink : public RasterSink {
-public:
-    explicit ThreadedSink(SkColorType, sk_sp<SkColorSpace> = nullptr);
-    Result draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 };
 
 class SKPSink : public Sink {
@@ -585,6 +573,27 @@ private:
     int fPageIndex;
 };
 
+#ifdef SK_GRAPHITE_ENABLED
+
+class GraphiteSink : public Sink {
+public:
+    using ContextType = skiatest::graphite::ContextFactory::ContextType;
+
+    GraphiteSink(const SkCommandLineConfigGraphite*);
+
+    Result draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+    bool serial() const override { return true; }
+    const char* fileExtension() const override { return "png"; }
+    SinkFlags flags() const override { return SinkFlags{ SinkFlags::kGPU, SinkFlags::kDirect }; }
+
+private:
+    ContextType fContextType;
+    SkColorType fColorType;
+    SkAlphaType fAlphaType;
+    bool        fTestPrecompile;
+};
+
+#endif
 
 /*~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~*/
 

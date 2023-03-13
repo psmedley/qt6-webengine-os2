@@ -8,14 +8,12 @@
 
 #include "base/bind.h"
 #include "base/containers/flat_map.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/task/post_task.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/test/scoped_path_override.h"
@@ -156,7 +154,9 @@ class MockPingManagerImpl : public PingManager {
   MockPingManagerImpl(const MockPingManagerImpl&) = delete;
   MockPingManagerImpl& operator=(const MockPingManagerImpl&) = delete;
 
-  void SendPing(const Component& component, Callback callback) override;
+  void SendPing(const Component& component,
+                const PersistedData& metadata,
+                Callback callback) override;
 
   const std::vector<PingData>& ping_data() const;
 
@@ -176,6 +176,7 @@ MockPingManagerImpl::MockPingManagerImpl(scoped_refptr<Configurator> config)
 MockPingManagerImpl::~MockPingManagerImpl() = default;
 
 void MockPingManagerImpl::SendPing(const Component& component,
+                                   const PersistedData& metadata,
                                    Callback callback) {
   PingData ping_data;
   ping_data.id = component.id_;
@@ -274,7 +275,7 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -304,10 +305,8 @@ TEST_F(UpdateClientTest, OneCrxNoUpdate) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
       EXPECT_EQ(id, ids_to_check.front());
@@ -398,14 +397,14 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
         const std::vector<std::string>& ids) {
       CrxComponent crx1;
       crx1.name = "test_jebg";
-      crx1.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx1.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx1.version = base::Version("0.9");
       crx1.installer = base::MakeRefCounted<TestInstaller>();
       crx1.crx_format_requirement = crx_file::VerifierFormat::CRX3;
 
       CrxComponent crx2;
       crx2.name = "test_abag";
-      crx2.pk_hash.assign(abag_hash, abag_hash + base::size(abag_hash));
+      crx2.pk_hash.assign(abag_hash, abag_hash + std::size(abag_hash));
       crx2.version = base::Version("2.2");
       crx2.installer = base::MakeRefCounted<TestInstaller>();
       crx2.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -435,7 +434,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -462,7 +460,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoUpdate) {
       </response>
       */
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(2u, ids_to_check.size());
 
       ProtocolParser::Results results;
@@ -654,14 +651,14 @@ TEST_F(UpdateClientTest, TwoCrxUpdateFirstServerIgnoresSecond) {
         const std::vector<std::string>& ids) {
       CrxComponent crx1;
       crx1.name = "test_jebg";
-      crx1.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx1.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx1.version = base::Version("0.9");
       crx1.installer = base::MakeRefCounted<TestInstaller>();
       crx1.crx_format_requirement = crx_file::VerifierFormat::CRX3;
 
       CrxComponent crx2;
       crx2.name = "test_abag";
-      crx2.pk_hash.assign(abag_hash, abag_hash + base::size(abag_hash));
+      crx2.pk_hash.assign(abag_hash, abag_hash + std::size(abag_hash));
       crx2.version = base::Version("2.2");
       crx2.installer = base::MakeRefCounted<TestInstaller>();
       crx2.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -691,7 +688,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateFirstServerIgnoresSecond) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -715,7 +711,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateFirstServerIgnoresSecond) {
       </response>
       */
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(2u, ids_to_check.size());
 
       ProtocolParser::Results results;
@@ -892,7 +887,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoCrxComponentData) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -921,7 +916,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoCrxComponentData) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -945,7 +939,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoCrxComponentData) {
       </response>
       */
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
 
       ProtocolParser::Results results;
@@ -1130,7 +1123,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateNoCrxComponentDataAtAll) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       NOTREACHED();
     }
@@ -1208,14 +1200,14 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
         const std::vector<std::string>& ids) {
       CrxComponent crx1;
       crx1.name = "test_jebg";
-      crx1.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx1.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx1.version = base::Version("0.9");
       crx1.installer = base::MakeRefCounted<TestInstaller>();
       crx1.crx_format_requirement = crx_file::VerifierFormat::CRX3;
 
       CrxComponent crx2;
       crx2.name = "test_ihfo";
-      crx2.pk_hash.assign(ihfo_hash, ihfo_hash + base::size(ihfo_hash));
+      crx2.pk_hash.assign(ihfo_hash, ihfo_hash + std::size(ihfo_hash));
       crx2.version = base::Version("0.8");
       crx2.installer = base::MakeRefCounted<TestInstaller>();
       crx2.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -1245,7 +1237,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -1284,7 +1275,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateDownloadTimeout) {
       */
 
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(2u, ids_to_check.size());
 
       ProtocolParser::Results results;
@@ -1513,7 +1503,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
 
       CrxComponent crx;
       crx.name = "test_ihfo";
-      crx.pk_hash.assign(ihfo_hash, ihfo_hash + base::size(ihfo_hash));
+      crx.pk_hash.assign(ihfo_hash, ihfo_hash + std::size(ihfo_hash));
       crx.installer = installer;
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
       if (num_calls == 1) {
@@ -1549,7 +1539,6 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdate) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
 
@@ -1928,7 +1917,7 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
 
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = installer;
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -1958,7 +1947,6 @@ TEST_F(UpdateClientTest, OneCrxInstallError) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -2131,7 +2119,7 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
 
       CrxComponent crx;
       crx.name = "test_ihfo";
-      crx.pk_hash.assign(ihfo_hash, ihfo_hash + base::size(ihfo_hash));
+      crx.pk_hash.assign(ihfo_hash, ihfo_hash + std::size(ihfo_hash));
       crx.installer = installer;
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
       if (num_calls == 1) {
@@ -2167,7 +2155,6 @@ TEST_F(UpdateClientTest, OneCrxDiffUpdateFailsFullUpdateSucceeds) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
 
@@ -2480,7 +2467,7 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -2514,10 +2501,8 @@ TEST_F(UpdateClientTest, OneCrxNoUpdateQueuedCall) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
       EXPECT_EQ(id, ids_to_check.front());
@@ -2630,7 +2615,7 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.0");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -2659,7 +2644,6 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -2684,7 +2668,6 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
       </response>
       */
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
 
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
@@ -2848,14 +2831,16 @@ TEST_F(UpdateClientTest, OneCrxInstall) {
   EXPECT_EQ(ComponentState::kUpdated, items[5].state);
   EXPECT_STREQ("jebgalgnebhfojomionfpkfelancnnkf", items[5].id.c_str());
 
-  const base::DictionaryValue* dict =
+  const base::Value* dict =
       config()->GetPrefService()->GetDictionary("updateclientdata");
-  std::string pv;
-  dict->GetString("apps.jebgalgnebhfojomionfpkfelancnnkf.pv", &pv);
-  EXPECT_STREQ("1.0", pv.c_str());
-  std::string fingerprint;
-  dict->GetString("apps.jebgalgnebhfojomionfpkfelancnnkf.fp", &fingerprint);
-  EXPECT_STREQ("some-fingerprint", fingerprint.c_str());
+  const std::string* pv =
+      dict->FindStringPath("apps.jebgalgnebhfojomionfpkfelancnnkf.pv");
+  ASSERT_TRUE(pv);
+  EXPECT_STREQ("1.0", pv->c_str());
+  const std::string* fingerprint =
+      dict->FindStringPath("apps.jebgalgnebhfojomionfpkfelancnnkf.fp");
+  ASSERT_TRUE(fingerprint);
+  EXPECT_STREQ("some-fingerprint", fingerprint->c_str());
 
   update_client->RemoveObserver(&observer);
 }
@@ -2892,7 +2877,6 @@ TEST_F(UpdateClientTest, OneCrxInstallNoCrxComponentData) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       NOTREACHED();
     }
@@ -2975,7 +2959,7 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.0");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3015,10 +2999,8 @@ TEST_F(UpdateClientTest, ConcurrentInstallSameCRX) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
       EXPECT_EQ(id, ids_to_check.front());
@@ -3141,7 +3123,6 @@ TEST_F(UpdateClientTest, EmptyIdList) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       NOTREACHED();
     }
@@ -3200,7 +3181,6 @@ TEST_F(UpdateClientTest, SendUninstallPing) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       NOTREACHED();
     }
@@ -3244,71 +3224,11 @@ TEST_F(UpdateClientTest, SendUninstallPing) {
           config(), base::MakeRefCounted<MockPingManager>(config()),
           &MockUpdateChecker::Create);
 
+  CrxComponent crx;
+  crx.app_id = "jebgalgnebhfojomionfpkfelancnnkf";
+  crx.version = base::Version("1.2.3.4");
   update_client->SendUninstallPing(
-      "jebgalgnebhfojomionfpkfelancnnkf", base::Version("1.2.3.4"), 10,
-      base::BindOnce(&CompletionCallbackMock::Callback, quit_closure()));
-
-  RunThreads();
-}
-
-TEST_F(UpdateClientTest, SendRegistrationPing) {
-  class CompletionCallbackMock {
-   public:
-    static void Callback(base::OnceClosure quit_closure, Error error) {
-      std::move(quit_closure).Run();
-    }
-  };
-
-  class MockUpdateChecker : public UpdateChecker {
-   public:
-    static std::unique_ptr<UpdateChecker> Create(
-        scoped_refptr<Configurator> config,
-        PersistedData* metadata) {
-      return std::make_unique<MockUpdateChecker>();
-    }
-
-    void CheckForUpdates(
-        const std::string& session_id,
-        const std::vector<std::string>& ids_to_check,
-        const IdToComponentPtrMap& components,
-        const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
-        UpdateCheckCallback update_check_callback) override {
-      NOTREACHED();
-    }
-  };
-
-  class MockCrxDownloader : public CrxDownloader {
-   public:
-    MockCrxDownloader() : CrxDownloader(nullptr) {}
-
-   private:
-    ~MockCrxDownloader() override = default;
-
-    void DoStartDownload(const GURL& url) override { EXPECT_TRUE(false); }
-  };
-
-  class MockPingManager : public MockPingManagerImpl {
-   public:
-    explicit MockPingManager(scoped_refptr<Configurator> config)
-        : MockPingManagerImpl(config) {}
-
-   protected:
-    ~MockPingManager() override {
-      const auto ping_data = MockPingManagerImpl::ping_data();
-      EXPECT_EQ(1u, ping_data.size());
-      EXPECT_EQ("jebgalgnebhfojomionfpkfelancnnkf", ping_data[0].id);
-      EXPECT_EQ(base::Version("1.2.3.4"), ping_data[0].next_version);
-    }
-  };
-
-  scoped_refptr<UpdateClient> update_client =
-      base::MakeRefCounted<UpdateClientImpl>(
-          config(), base::MakeRefCounted<MockPingManager>(config()),
-          &MockUpdateChecker::Create);
-
-  update_client->SendRegistrationPing(
-      "jebgalgnebhfojomionfpkfelancnnkf", base::Version("1.2.3.4"),
+      crx, 10,
       base::BindOnce(&CompletionCallbackMock::Callback, quit_closure()));
 
   RunThreads();
@@ -3321,7 +3241,7 @@ TEST_F(UpdateClientTest, RetryAfter) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3370,7 +3290,6 @@ TEST_F(UpdateClientTest, RetryAfter) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
 
@@ -3512,15 +3431,15 @@ TEST_F(UpdateClientTest, TwoCrxUpdateOneUpdateDisabled) {
         const std::vector<std::string>& ids) {
       CrxComponent crx1;
       crx1.name = "test_jebg";
-      crx1.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx1.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx1.version = base::Version("0.9");
       crx1.installer = base::MakeRefCounted<TestInstaller>();
       crx1.crx_format_requirement = crx_file::VerifierFormat::CRX3;
-      crx1.supports_group_policy_enable_component_updates = true;
+      crx1.updates_enabled = false;
 
       CrxComponent crx2;
       crx2.name = "test_ihfo";
-      crx2.pk_hash.assign(ihfo_hash, ihfo_hash + base::size(ihfo_hash));
+      crx2.pk_hash.assign(ihfo_hash, ihfo_hash + std::size(ihfo_hash));
       crx2.version = base::Version("0.8");
       crx2.installer = base::MakeRefCounted<TestInstaller>();
       crx2.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3550,7 +3469,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateOneUpdateDisabled) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -3588,12 +3506,7 @@ TEST_F(UpdateClientTest, TwoCrxUpdateOneUpdateDisabled) {
       </response>
       */
 
-      // UpdateClient reads the state of |enabled_component_updates| from the
-      // configurator instance, persists its value in the corresponding
-      // update context, and propagates it down to each of the update actions,
-      // and further down to the UpdateChecker instance.
       EXPECT_FALSE(session_id.empty());
-      EXPECT_FALSE(enabled_component_updates);
       EXPECT_EQ(2u, ids_to_check.size());
 
       ProtocolParser::Results results;
@@ -3707,7 +3620,6 @@ TEST_F(UpdateClientTest, TwoCrxUpdateOneUpdateDisabled) {
   };
 
   // Disables updates for the components declaring support for the group policy.
-  config()->SetEnabledComponentUpdates(false);
   SetMockCrxDownloader<MockCrxDownloader>();
   scoped_refptr<UpdateClient> update_client =
       base::MakeRefCounted<UpdateClientImpl>(
@@ -3792,7 +3704,7 @@ TEST_F(UpdateClientTest, OneCrxUpdateCheckFails) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3821,10 +3733,8 @@ TEST_F(UpdateClientTest, OneCrxUpdateCheckFails) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
       EXPECT_EQ(id, ids_to_check.front());
@@ -3914,7 +3824,7 @@ TEST_F(UpdateClientTest, OneCrxErrorUnknownApp) {
       {
         CrxComponent crx;
         crx.name = "test_jebg";
-        crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+        crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
         crx.version = base::Version("0.9");
         crx.installer = base::MakeRefCounted<TestInstaller>();
         crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3923,7 +3833,7 @@ TEST_F(UpdateClientTest, OneCrxErrorUnknownApp) {
       {
         CrxComponent crx;
         crx.name = "test_abag";
-        crx.pk_hash.assign(abag_hash, abag_hash + base::size(abag_hash));
+        crx.pk_hash.assign(abag_hash, abag_hash + std::size(abag_hash));
         crx.version = base::Version("0.1");
         crx.installer = base::MakeRefCounted<TestInstaller>();
         crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3932,7 +3842,7 @@ TEST_F(UpdateClientTest, OneCrxErrorUnknownApp) {
       {
         CrxComponent crx;
         crx.name = "test_ihfo";
-        crx.pk_hash.assign(ihfo_hash, ihfo_hash + base::size(ihfo_hash));
+        crx.pk_hash.assign(ihfo_hash, ihfo_hash + std::size(ihfo_hash));
         crx.version = base::Version("0.2");
         crx.installer = base::MakeRefCounted<TestInstaller>();
         crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3941,7 +3851,7 @@ TEST_F(UpdateClientTest, OneCrxErrorUnknownApp) {
       {
         CrxComponent crx;
         crx.name = "test_gjpm";
-        crx.pk_hash.assign(gjpm_hash, gjpm_hash + base::size(gjpm_hash));
+        crx.pk_hash.assign(gjpm_hash, gjpm_hash + std::size(gjpm_hash));
         crx.version = base::Version("0.3");
         crx.installer = base::MakeRefCounted<TestInstaller>();
         crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -3972,10 +3882,8 @@ TEST_F(UpdateClientTest, OneCrxErrorUnknownApp) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(4u, ids_to_check.size());
 
       const std::string update_response =
@@ -4127,7 +4035,6 @@ TEST_F(UpdateClientTest, ActionRun_Install) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -4153,7 +4060,6 @@ TEST_F(UpdateClientTest, ActionRun_Install) {
       </response>
       */
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
 
       const std::string id = "gjpmebpgbhcamgdgjcmnjfhggjpgcimm";
@@ -4252,10 +4158,10 @@ TEST_F(UpdateClientTest, ActionRun_Install) {
       EXPECT_EQ(1, event1.FindKey("eventresult")->GetInt());
       EXPECT_EQ(1877345072, event1.FindKey("errorcode")->GetInt());
 
-      // "<event eventtype=\"3\" eventresult=\"1\" previousversion=\"0.0\" "
+      // "<event eventtype=\"2\" eventresult=\"1\" previousversion=\"0.0\" "
       // "nextversion=\"1.0\"/>",
       const auto& event2 = events()[2];
-      EXPECT_EQ(3, event2.FindKey("eventtype")->GetInt());
+      EXPECT_EQ(2, event2.FindKey("eventtype")->GetInt());
       EXPECT_EQ(1, event1.FindKey("eventresult")->GetInt());
       EXPECT_EQ("0.0", event0.FindKey("previousversion")->GetString());
       EXPECT_EQ("1.0", event0.FindKey("nextversion")->GetString());
@@ -4284,7 +4190,7 @@ TEST_F(UpdateClientTest, ActionRun_Install) {
 
         CrxComponent crx;
         crx.name = "test_niea";
-        crx.pk_hash.assign(gjpm_hash, gjpm_hash + base::size(gjpm_hash));
+        crx.pk_hash.assign(gjpm_hash, gjpm_hash + std::size(gjpm_hash));
         crx.version = base::Version("0.0");
         crx.installer = base::MakeRefCounted<VersionedTestInstaller>();
         crx.action_handler = action_handler;
@@ -4318,7 +4224,6 @@ TEST_F(UpdateClientTest, ActionRun_NoUpdate) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       /*
       Mock the following response:
@@ -4443,7 +4348,7 @@ TEST_F(UpdateClientTest, ActionRun_NoUpdate) {
 
             CrxComponent crx;
             crx.name = "test_niea";
-            crx.pk_hash.assign(gjpm_hash, gjpm_hash + base::size(gjpm_hash));
+            crx.pk_hash.assign(gjpm_hash, gjpm_hash + std::size(gjpm_hash));
             crx.version = base::Version("1.0");
             crx.installer =
                 base::MakeRefCounted<ReadOnlyTestInstaller>(unpack_path);
@@ -4471,7 +4376,7 @@ TEST_F(UpdateClientTest, CustomAttributeNoUpdate) {
         const std::vector<std::string>& ids) {
       CrxComponent crx;
       crx.name = "test_jebg";
-      crx.pk_hash.assign(jebg_hash, jebg_hash + base::size(jebg_hash));
+      crx.pk_hash.assign(jebg_hash, jebg_hash + std::size(jebg_hash));
       crx.version = base::Version("0.9");
       crx.installer = base::MakeRefCounted<TestInstaller>();
       crx.crx_format_requirement = crx_file::VerifierFormat::CRX3;
@@ -4501,10 +4406,8 @@ TEST_F(UpdateClientTest, CustomAttributeNoUpdate) {
         const std::vector<std::string>& ids_to_check,
         const IdToComponentPtrMap& components,
         const base::flat_map<std::string, std::string>& additional_attributes,
-        bool enabled_component_updates,
         UpdateCheckCallback update_check_callback) override {
       EXPECT_FALSE(session_id.empty());
-      EXPECT_TRUE(enabled_component_updates);
       EXPECT_EQ(1u, ids_to_check.size());
       const std::string id = "jebgalgnebhfojomionfpkfelancnnkf";
       EXPECT_EQ(id, ids_to_check.front());

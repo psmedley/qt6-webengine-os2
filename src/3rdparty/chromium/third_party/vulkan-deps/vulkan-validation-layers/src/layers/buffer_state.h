@@ -1,7 +1,7 @@
-/* Copyright (c) 2015-2021 The Khronos Group Inc.
- * Copyright (c) 2015-2021 Valve Corporation
- * Copyright (c) 2015-2021 LunarG, Inc.
- * Copyright (C) 2015-2021 Google Inc.
+/* Copyright (c) 2015-2022 The Khronos Group Inc.
+ * Copyright (c) 2015-2022 Valve Corporation
+ * Copyright (c) 2015-2022 LunarG, Inc.
+ * Copyright (C) 2015-2022 Google Inc.
  * Modifications Copyright (C) 2020 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,32 +27,26 @@
  */
 #pragma once
 #include "device_memory_state.h"
+#include "range_vector.h"
+
+class ValidationStateTracker;
 
 class BUFFER_STATE : public BINDABLE {
   public:
     const safe_VkBufferCreateInfo safe_create_info;
     const VkBufferCreateInfo &createInfo;
     VkDeviceAddress deviceAddress;
-    VkMemoryRequirements requirements;
+    const VkMemoryRequirements requirements;
     bool memory_requirements_checked;
 
-    BUFFER_STATE(VkBuffer buff, const VkBufferCreateInfo *pCreateInfo)
-        : BINDABLE(buff, kVulkanObjectTypeBuffer, (pCreateInfo->flags & VK_BUFFER_CREATE_SPARSE_BINDING_BIT) != 0,
-                   (pCreateInfo->flags & VK_BUFFER_CREATE_PROTECTED_BIT) == 0, GetExternalHandleType(pCreateInfo)),
-          safe_create_info(pCreateInfo),
-          createInfo(*safe_create_info.ptr()),
-          deviceAddress(0),
-          requirements(),
-          memory_requirements_checked(false) {}
+    BUFFER_STATE(ValidationStateTracker *dev_data, VkBuffer buff, const VkBufferCreateInfo *pCreateInfo);
 
     BUFFER_STATE(BUFFER_STATE const &rh_obj) = delete;
 
     VkBuffer buffer() const { return handle_.Cast<VkBuffer>(); }
 
-  private:
-    static inline VkExternalMemoryHandleTypeFlags GetExternalHandleType(const VkBufferCreateInfo *pCreateInfo) {
-        auto *external_memory_info = LvlFindInChain<VkExternalMemoryBufferCreateInfo>(pCreateInfo->pNext);
-        return external_memory_info ? external_memory_info->handleTypes : 0;
+    sparse_container::range<VkDeviceAddress> DeviceAddressRange() const {
+        return {deviceAddress, deviceAddress + createInfo.size};
     }
 };
 
@@ -60,14 +54,15 @@ class BUFFER_VIEW_STATE : public BASE_NODE {
   public:
     const VkBufferViewCreateInfo create_info;
     std::shared_ptr<BUFFER_STATE> buffer_state;
-    const VkFormatFeatureFlags format_features;
+    const VkFormatFeatureFlags2KHR format_features;
 
     BUFFER_VIEW_STATE(const std::shared_ptr<BUFFER_STATE> &bf, VkBufferView bv, const VkBufferViewCreateInfo *ci,
-                      VkFormatFeatureFlags ff)
-        : BASE_NODE(bv, kVulkanObjectTypeBufferView), create_info(*ci), buffer_state(bf), format_features(ff) {
-        if (buffer_state) {
-            buffer_state->AddParent(this);
-        }
+                      VkFormatFeatureFlags2KHR ff)
+        : BASE_NODE(bv, kVulkanObjectTypeBufferView), create_info(*ci), buffer_state(bf), format_features(ff) {}
+
+    void LinkChildNodes() override {
+        // Connect child node(s), which cannot safely be done in the constructor.
+        buffer_state->AddParent(this);
     }
     virtual ~BUFFER_VIEW_STATE() {
         if (!Destroyed()) {
@@ -86,4 +81,5 @@ class BUFFER_VIEW_STATE : public BASE_NODE {
         }
         BASE_NODE::Destroy();
     }
+    bool Invalid() const override { return Destroyed() || !buffer_state || buffer_state->Invalid(); }
 };

@@ -19,6 +19,8 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "config_components.h"
+
 #include "libavutil/channel_layout.h"
 #include "avformat.h"
 #include "avio_internal.h"
@@ -478,6 +480,7 @@ static int mpegps_read_packet(AVFormatContext *s,
 {
     MpegDemuxContext *m = s->priv_data;
     AVStream *st;
+    FFStream *sti;
     int len, startcode, i, es_type, ret;
     int pcm_dvd = 0;
     int request_probe= 0;
@@ -614,17 +617,17 @@ skip:
     st = avformat_new_stream(s, NULL);
     if (!st)
         goto skip;
+    sti = ffstream(st);
     st->id                = startcode;
     st->codecpar->codec_type = type;
     st->codecpar->codec_id   = codec_id;
     if (   st->codecpar->codec_id == AV_CODEC_ID_PCM_MULAW
         || st->codecpar->codec_id == AV_CODEC_ID_PCM_ALAW) {
-        st->codecpar->channels = 1;
-        st->codecpar->channel_layout = AV_CH_LAYOUT_MONO;
+        st->codecpar->ch_layout = (AVChannelLayout)AV_CHANNEL_LAYOUT_MONO;
         st->codecpar->sample_rate = 8000;
     }
-    st->internal->request_probe     = request_probe;
-    st->internal->need_parsing      = AVSTREAM_PARSE_FULL;
+    sti->request_probe = request_probe;
+    sti->need_parsing  = AVSTREAM_PARSE_FULL;
 
 found:
     if (st->discard >= AVDISCARD_ALL)

@@ -7,11 +7,17 @@
 
 #include "include/sksl/DSLRuntimeEffects.h"
 
-#include "include/effects/SkRuntimeEffect.h"
+#include "include/core/SkTypes.h"
+#include "include/private/SkSLProgramKind.h"
 #include "include/sksl/DSLCore.h"
-#include "src/sksl/SkSLCompiler.h"
-#include "src/sksl/SkSLIRGenerator.h"
-#include "src/sksl/dsl/priv/DSLWriter.h"
+#include "include/sksl/SkSLPosition.h"
+#include "src/sksl/SkSLContext.h"
+#include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/SkSLThreadContext.h"
+#include "src/sksl/ir/SkSLProgram.h"
+
+#include <memory>
+#include <utility>
 
 namespace SkSL {
 
@@ -21,7 +27,7 @@ namespace dsl {
 
 void StartRuntimeShader(SkSL::Compiler* compiler) {
     Start(compiler, SkSL::ProgramKind::kRuntimeShader);
-    SkSL::ProgramSettings& settings = DSLWriter::Settings();
+    SkSL::ProgramSettings& settings = ThreadContext::Context().fConfig->fSettings;
     SkASSERT(settings.fInlineThreshold == SkSL::kDefaultInlineThreshold);
     settings.fInlineThreshold = 0;
     SkASSERT(!settings.fAllowNarrowingConversions);
@@ -30,14 +36,13 @@ void StartRuntimeShader(SkSL::Compiler* compiler) {
 
 sk_sp<SkRuntimeEffect> EndRuntimeShader(SkRuntimeEffect::Options options) {
     std::unique_ptr<SkSL::Program> program = ReleaseProgram();
-    SkRuntimeEffect::Result result;
+    ThreadContext::ReportErrors(Position{});
+    sk_sp<SkRuntimeEffect> result;
     if (program) {
-        result = SkRuntimeEffect::MakeForShader(std::move(program), options);
-        // TODO(skbug.com/11862): propagate errors properly
-        SkASSERTF(result.effect, "%s\n", result.errorText.c_str());
+        result = SkRuntimeEffect::MakeForShader(std::move(program), options, &GetErrorReporter());
     }
     End();
-    return result.effect;
+    return result;
 }
 
 #endif // SKSL_STANDALONE

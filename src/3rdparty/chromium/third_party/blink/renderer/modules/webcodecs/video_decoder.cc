@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/metrics/histogram_macros.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/time/time.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/limits.h"
@@ -21,6 +21,7 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_encoded_video_chunk.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_color_space_init.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_decoder_config.h"
@@ -28,7 +29,6 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/webcodecs/allow_shared_buffer_source_util.h"
-#include "third_party/blink/renderer/modules/webcodecs/codec_config_eval.h"
 #include "third_party/blink/renderer/modules/webcodecs/encoded_video_chunk.h"
 #include "third_party/blink/renderer/modules/webcodecs/gpu_factories_retriever.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_color_space.h"
@@ -37,10 +37,10 @@
 #include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/to_v8.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/libaom/libaom_buildflags.h"
@@ -48,18 +48,18 @@
 #include "ui/gfx/geometry/size.h"
 
 #if BUILDFLAG(ENABLE_LIBAOM)
-#include "third_party/libaom/source/libaom/aom/aom_decoder.h"
-#include "third_party/libaom/source/libaom/aom/aomdx.h"
+#include "third_party/libaom/source/libaom/aom/aom_decoder.h"  // nogncheck
+#include "third_party/libaom/source/libaom/aom/aomdx.h"        // nogncheck
 #endif
 
 #if BUILDFLAG(ENABLE_LIBVPX)
-#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"
-#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"
+#include "third_party/libvpx/source/libvpx/vpx/vp8dx.h"        // nogncheck
+#include "third_party/libvpx/source/libvpx/vpx/vpx_decoder.h"  // nogncheck
 #endif
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-#include "media/filters/h264_to_annex_b_bitstream_converter.h"
-#include "media/formats/mp4/box_definitions.h"
+#include "media/filters/h264_to_annex_b_bitstream_converter.h"  // nogncheck
+#include "media/formats/mp4/box_definitions.h"                  // nogncheck
 #endif
 
 namespace blink {
@@ -71,6 +71,12 @@ void DecoderSupport_OnKnown(
     std::unique_ptr<VideoDecoder::MediaConfigType> media_config,
     ScriptPromiseResolver* resolver,
     media::GpuVideoAcceleratorFactories* gpu_factories) {
+  if (!gpu_factories) {
+    support->setSupported(false);
+    resolver->Resolve(support);
+    return;
+  }
+
   DCHECK(gpu_factories->IsDecoderSupportKnown());
   support->setSupported(
       gpu_factories->IsDecoderConfigSupportedOrUnknown(*media_config) ==
@@ -80,9 +86,9 @@ void DecoderSupport_OnKnown(
 
 bool ParseCodecString(const String& codec_string,
                       media::VideoType& out_video_type,
-                      String& out_console_message) {
+                      String& js_error_message) {
   bool is_codec_ambiguous = true;
-  media::VideoCodec codec = media::kUnknownVideoCodec;
+  media::VideoCodec codec = media::VideoCodec::kUnknown;
   media::VideoCodecProfile profile = media::VIDEO_CODEC_PROFILE_UNKNOWN;
   media::VideoColorSpace color_space = media::VideoColorSpace::REC709();
   uint8_t level = 0;
@@ -91,77 +97,16 @@ bool ParseCodecString(const String& codec_string,
                                    &codec, &profile, &level, &color_space);
 
   if (!parse_succeeded) {
-    out_console_message = "Failed to parse codec string.";
+    js_error_message = "Failed to parse codec string.";
     return false;
   }
 
   if (is_codec_ambiguous) {
-    out_console_message = "Codec string is ambiguous.";
+    js_error_message = "Codec string is ambiguous.";
     return false;
   }
 
   out_video_type = {codec, profile, level, color_space};
-  return true;
-}
-
-// TODO(crbug.com/1179970): rename out_console_message.
-// TODO(crbug.com/1181443): Make this a pure virtual in DecoderTemplate, and
-// refactor its uses.
-// TODO(crbug.com/1198324): Merge shared logic with VideoFramePlaneInit.
-bool IsValidConfig(const VideoDecoderConfig& config,
-                   media::VideoType& out_video_type,
-                   String& out_console_message) {
-  if (!ParseCodecString(config.codec(), out_video_type, out_console_message))
-    return false;
-
-  if (config.hasCodedWidth() || config.hasCodedHeight()) {
-    if (!config.hasCodedWidth()) {
-      out_console_message =
-          "Invalid config, codedHeight specified without codedWidth.";
-      return false;
-    }
-    if (!config.hasCodedHeight()) {
-      out_console_message =
-          "Invalid config, codedWidth specified without codedHeight.";
-      return false;
-    }
-
-    const uint32_t coded_width = config.codedWidth();
-    const uint32_t coded_height = config.codedHeight();
-    if (coded_width == 0 || coded_width > media::limits::kMaxDimension ||
-        coded_height == 0 || coded_height > media::limits::kMaxDimension) {
-      // TODO(crbug.com/1212865): Exceeding implementation limits should not
-      // throw in isConfigSupported() (the config is valid, just unsupported).
-      out_console_message = String::Format("Invalid coded size (%u, %u).",
-                                           coded_width, coded_height);
-      return false;
-    }
-  }
-
-  if (config.hasDisplayAspectWidth() || config.hasDisplayAspectHeight()) {
-    if (!config.hasDisplayAspectWidth()) {
-      out_console_message =
-          "Invalid config, displayAspectHeight specified without "
-          "displayAspectWidth.";
-      return false;
-    }
-    if (!config.hasDisplayAspectHeight()) {
-      out_console_message =
-          "Invalid config, displayAspectWidth specified without "
-          "displayAspectHeight.";
-      return false;
-    }
-
-    uint32_t display_aspect_width = config.displayAspectWidth();
-    uint32_t display_aspect_height = config.displayAspectHeight();
-    if (display_aspect_width == 0 || display_aspect_height == 0) {
-      out_console_message =
-          String::Format("Invalid display aspect (%u, %u).",
-                         display_aspect_width, display_aspect_height);
-      return false;
-    }
-  }
-
   return true;
 }
 
@@ -225,8 +170,8 @@ void ParseVpxKeyFrame(const media::DecoderBuffer& buffer,
   vpx_codec_stream_info_t stream_info = {0};
   stream_info.sz = sizeof(vpx_codec_stream_info_t);
   auto status = vpx_codec_peek_stream_info(
-      codec == media::kCodecVP8 ? &vpx_codec_vp8_dx_algo
-                                : &vpx_codec_vp9_dx_algo,
+      codec == media::VideoCodec::kVP8 ? &vpx_codec_vp8_dx_algo
+                                       : &vpx_codec_vp9_dx_algo,
       buffer.data(), static_cast<uint32_t>(buffer.data_size()), &stream_info);
   *is_key_frame = (status == VPX_CODEC_OK) && stream_info.is_kf;
 #endif
@@ -276,8 +221,6 @@ void VideoDecoderTraits::InitializeDecoder(
 void VideoDecoderTraits::UpdateDecoderLog(const MediaDecoderType& decoder,
                                           const MediaConfigType& media_config,
                                           media::MediaLog* media_log) {
-  media_log->SetProperty<media::MediaLogProperty::kFrameTitle>(
-      std::string("VideoDecoder(WebCodecs)"));
   media_log->SetProperty<media::MediaLogProperty::kVideoDecoderName>(
       decoder.GetDecoderType());
   media_log->SetProperty<media::MediaLogProperty::kIsPlatformVideoDecoder>(
@@ -286,14 +229,14 @@ void VideoDecoderTraits::UpdateDecoderLog(const MediaDecoderType& decoder,
       std::vector<MediaConfigType>{media_config});
   MEDIA_LOG(INFO, media_log)
       << "Initialized VideoDecoder: " << media_config.AsHumanReadableString();
-  UMA_HISTOGRAM_ENUMERATION("Blink.WebCodecs.VideoDecoder.Codec",
-                            media_config.codec(), media::kVideoCodecMax + 1);
+  base::UmaHistogramEnumeration("Blink.WebCodecs.VideoDecoder.Codec",
+                                media_config.codec());
 }
 
 // static
-media::StatusOr<VideoDecoderTraits::OutputType*> VideoDecoderTraits::MakeOutput(
-    scoped_refptr<MediaOutputType> output,
-    ExecutionContext* context) {
+media::DecoderStatus::Or<VideoDecoderTraits::OutputType*>
+VideoDecoderTraits::MakeOutput(scoped_refptr<MediaOutputType> output,
+                               ExecutionContext* context) {
   return MakeGarbageCollected<VideoDecoderTraits::OutputType>(std::move(output),
                                                               context);
 }
@@ -321,51 +264,55 @@ VideoDecoder* VideoDecoder::Create(ScriptState* script_state,
 ScriptPromise VideoDecoder::isConfigSupported(ScriptState* script_state,
                                               const VideoDecoderConfig* config,
                                               ExceptionState& exception_state) {
+  String js_error_message;
+  absl::optional<media::VideoType> video_type =
+      IsValidVideoDecoderConfig(*config, &js_error_message /* out */);
+
+  if (!video_type) {
+    exception_state.ThrowTypeError(js_error_message);
+    return ScriptPromise();
+  }
+
   HardwarePreference hw_pref = GetHardwareAccelerationPreference(*config);
 
   if (hw_pref == HardwarePreference::kPreferHardware)
     return IsAcceleratedConfigSupported(script_state, config, exception_state);
 
-  media::VideoType video_type;
-  String console_message;
-
-  if (!IsValidConfig(*config, video_type, console_message)) {
-    exception_state.ThrowTypeError(console_message);
-    return ScriptPromise();
-  }
-
   // Accept all supported configs if we are not requiring hardware only.
   VideoDecoderSupport* support = VideoDecoderSupport::Create();
-  support->setSupported(media::IsSupportedVideoType(video_type));
+  support->setSupported(media::IsSupportedVideoType(*video_type));
 
   auto* config_copy = CopyConfig(*config, exception_state);
   if (exception_state.HadException())
     return ScriptPromise();
 
   support->setConfig(config_copy);
-  return ScriptPromise::Cast(script_state, ToV8(support, script_state));
+
+  return ScriptPromise::Cast(
+      script_state, ToV8Traits<VideoDecoderSupport>::ToV8(script_state, support)
+                        .ToLocalChecked());
 }
 
 ScriptPromise VideoDecoder::IsAcceleratedConfigSupported(
     ScriptState* script_state,
     const VideoDecoderConfig* config,
     ExceptionState& exception_state) {
-  String console_message;
-  auto media_config = std::make_unique<MediaConfigType>();
-  CodecConfigEval config_eval;
+  String js_error_message;
+  DCHECK(IsValidVideoDecoderConfig(*config, &js_error_message));
+
+  absl::optional<MediaConfigType> media_config;
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
   std::unique_ptr<media::H264ToAnnexBBitstreamConverter> h264_converter;
   std::unique_ptr<media::mp4::AVCDecoderConfigurationRecord> h264_avcc;
-  config_eval = MakeMediaVideoDecoderConfig(
-      *config, *media_config, h264_converter, h264_avcc, console_message);
+  media_config = MakeMediaVideoDecoderConfig(*config, h264_converter, h264_avcc,
+                                             &js_error_message);
 #else
-  config_eval =
-      MakeMediaVideoDecoderConfig(*config, *media_config, console_message);
+  media_config = MakeMediaVideoDecoderConfig(*config, &js_error_message);
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
-  if (config_eval != CodecConfigEval::kSupported) {
-    exception_state.ThrowTypeError(console_message);
+  if (!media_config) {
+    exception_state.ThrowTypeError(js_error_message);
     return ScriptPromise();
   }
 
@@ -380,7 +327,8 @@ ScriptPromise VideoDecoder::IsAcceleratedConfigSupported(
 
   RetrieveGpuFactoriesWithKnownDecoderSupport(CrossThreadBindOnce(
       &DecoderSupport_OnKnown, WrapCrossThreadPersistent(support),
-      std::move(media_config), WrapCrossThreadPersistent(resolver)));
+      std::make_unique<MediaConfigType>(*media_config),
+      WrapCrossThreadPersistent(resolver)));
 
   return promise;
 }
@@ -400,19 +348,79 @@ void VideoDecoder::SetHardwarePreference(HardwarePreference preference) {
 }
 
 // static
-// TODO(crbug.com/1179970): rename out_console_message.
-CodecConfigEval VideoDecoder::MakeMediaVideoDecoderConfig(
+// TODO(crbug.com/1198324): Merge shared logic with VideoFramePlaneInit.
+absl::optional<media::VideoType> VideoDecoder::IsValidVideoDecoderConfig(
+    const VideoDecoderConfig& config,
+    String* js_error_message) {
+  media::VideoType video_type;
+  if (!ParseCodecString(config.codec(), video_type, *js_error_message))
+    return absl::nullopt;
+
+  if (config.hasCodedWidth() || config.hasCodedHeight()) {
+    if (!config.hasCodedWidth()) {
+      *js_error_message =
+          "Invalid config, codedHeight specified without codedWidth.";
+      return absl::nullopt;
+    }
+    if (!config.hasCodedHeight()) {
+      *js_error_message =
+          "Invalid config, codedWidth specified without codedHeight.";
+      return absl::nullopt;
+    }
+
+    const uint32_t coded_width = config.codedWidth();
+    const uint32_t coded_height = config.codedHeight();
+    if (coded_width == 0 || coded_width > media::limits::kMaxDimension ||
+        coded_height == 0 || coded_height > media::limits::kMaxDimension) {
+      // TODO(crbug.com/1212865): Exceeding implementation limits should not
+      // throw in isConfigSupported() (the config is valid, just unsupported).
+      *js_error_message = String::Format("Invalid coded size (%u, %u).",
+                                         coded_width, coded_height);
+      return absl::nullopt;
+    }
+  }
+
+  if (config.hasDisplayAspectWidth() || config.hasDisplayAspectHeight()) {
+    if (!config.hasDisplayAspectWidth()) {
+      *js_error_message =
+          "Invalid config, displayAspectHeight specified without "
+          "displayAspectWidth.";
+      return absl::nullopt;
+    }
+    if (!config.hasDisplayAspectHeight()) {
+      *js_error_message =
+          "Invalid config, displayAspectWidth specified without "
+          "displayAspectHeight.";
+      return absl::nullopt;
+    }
+
+    uint32_t display_aspect_width = config.displayAspectWidth();
+    uint32_t display_aspect_height = config.displayAspectHeight();
+    if (display_aspect_width == 0 || display_aspect_height == 0) {
+      *js_error_message =
+          String::Format("Invalid display aspect (%u, %u).",
+                         display_aspect_width, display_aspect_height);
+      return absl::nullopt;
+    }
+  }
+
+  return video_type;
+}
+
+// static
+absl::optional<media::VideoDecoderConfig>
+VideoDecoder::MakeMediaVideoDecoderConfig(
     const ConfigType& config,
-    MediaConfigType& out_media_config,
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
     std::unique_ptr<media::H264ToAnnexBBitstreamConverter>& out_h264_converter,
     std::unique_ptr<media::mp4::AVCDecoderConfigurationRecord>& out_h264_avcc,
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
-    String& out_console_message) {
-  media::VideoType video_type;
+    String* js_error_message) {
 
-  if (!IsValidConfig(config, video_type, out_console_message))
-    return CodecConfigEval::kInvalid;
+  absl::optional<media::VideoType> video_type =
+      IsValidVideoDecoderConfig(config, js_error_message /* out */);
+  if (!video_type)
+    return absl::nullopt;
 
   std::vector<uint8_t> extra_data;
   if (config.hasDescription()) {
@@ -426,7 +434,7 @@ CodecConfigEval VideoDecoder::MakeMediaVideoDecoderConfig(
   }
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-  if (video_type.codec == media::kCodecH264 && !extra_data.empty()) {
+  if (video_type->codec == media::VideoCodec::kH264 && !extra_data.empty()) {
     out_h264_avcc =
         std::make_unique<media::mp4::AVCDecoderConfigurationRecord>();
     out_h264_converter =
@@ -434,17 +442,17 @@ CodecConfigEval VideoDecoder::MakeMediaVideoDecoderConfig(
     if (!out_h264_converter->ParseConfiguration(
             extra_data.data(), static_cast<uint32_t>(extra_data.size()),
             out_h264_avcc.get())) {
-      out_console_message = "Failed to parse avcC.";
-      return CodecConfigEval::kInvalid;
+      *js_error_message = "Failed to parse avcC.";
+      return absl::nullopt;
     }
   } else {
     out_h264_avcc.reset();
     out_h264_converter.reset();
   }
 #else
-  if (video_type.codec == media::kCodecH264) {
-    out_console_message = "H.264 decoding is not supported.";
-    return CodecConfigEval::kUnsupported;
+  if (video_type->codec == media::VideoCodec::kH264) {
+    *js_error_message = "H.264 decoding is not supported.";
+    return absl::nullopt;
   }
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
@@ -470,21 +478,22 @@ CodecConfigEval VideoDecoder::MakeMediaVideoDecoderConfig(
   // TODO(crbug.com/1138680): Ensure that this default value is acceptable
   // under the WebCodecs spec. Should be BT.709 for YUV, sRGB for RGB, or
   // whatever was explicitly set for codec strings that include a color space.
-  media::VideoColorSpace media_color_space = video_type.color_space;
+  media::VideoColorSpace media_color_space = video_type->color_space;
   if (config.hasColorSpace()) {
     VideoColorSpace* color_space =
         MakeGarbageCollected<VideoColorSpace>(config.colorSpace());
     media_color_space = color_space->ToMediaColorSpace();
   }
 
-  out_media_config.Initialize(
-      video_type.codec, video_type.profile,
-      media::VideoDecoderConfig::AlphaMode::kIsOpaque, media_color_space,
-      media::kNoTransformation, coded_size, visible_rect, natural_size,
-      extra_data, media::EncryptionScheme::kUnencrypted);
-  out_media_config.set_aspect_ratio(aspect_ratio);
+  media::VideoDecoderConfig media_config;
+  media_config.Initialize(video_type->codec, video_type->profile,
+                          media::VideoDecoderConfig::AlphaMode::kIsOpaque,
+                          media_color_space, media::kNoTransformation,
+                          coded_size, visible_rect, natural_size, extra_data,
+                          media::EncryptionScheme::kUnencrypted);
+  media_config.set_aspect_ratio(aspect_ratio);
 
-  return CodecConfigEval::kSupported;
+  return media_config;
 }
 
 VideoDecoder::VideoDecoder(ScriptState* script_state,
@@ -495,23 +504,29 @@ VideoDecoder::VideoDecoder(ScriptState* script_state,
                     WebFeature::kWebCodecs);
 }
 
-CodecConfigEval VideoDecoder::MakeMediaConfig(const ConfigType& config,
-                                              MediaConfigType* out_media_config,
-                                              String* out_console_message) {
-  DCHECK(out_media_config);
-  DCHECK(out_console_message);
-  auto result = MakeMediaVideoDecoderConfig(config, *out_media_config,
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-                                            h264_converter_ /* out */,
-                                            h264_avcc_ /* out */,
-#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
-                                            *out_console_message);
-  if (result == CodecConfigEval::kSupported)
-    current_codec_ = out_media_config->codec();
-  return result;
+bool VideoDecoder::IsValidConfig(const ConfigType& config,
+                                 String* js_error_message) {
+  return IsValidVideoDecoderConfig(config, js_error_message /* out */)
+      .has_value();
 }
 
-media::StatusOr<scoped_refptr<media::DecoderBuffer>>
+absl::optional<media::VideoDecoderConfig> VideoDecoder::MakeMediaConfig(
+    const ConfigType& config,
+    String* js_error_message) {
+  DCHECK(js_error_message);
+  absl::optional<media::VideoDecoderConfig> media_config =
+      MakeMediaVideoDecoderConfig(config,
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+                                  h264_converter_ /* out */,
+                                  h264_avcc_ /* out */,
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+                                  js_error_message /* out */);
+  if (media_config)
+    current_codec_ = media_config->codec();
+  return media_config;
+}
+
+media::DecoderStatus::Or<scoped_refptr<media::DecoderBuffer>>
 VideoDecoder::MakeDecoderBuffer(const InputType& chunk, bool verify_key_frame) {
   scoped_refptr<media::DecoderBuffer> decoder_buffer = chunk.buffer();
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
@@ -523,16 +538,18 @@ VideoDecoder::MakeDecoderBuffer(const InputType& chunk, bool verify_key_frame) {
     uint32_t output_size = h264_converter_->CalculateNeededOutputBufferSize(
         src, static_cast<uint32_t>(src_size), h264_avcc_.get());
     if (!output_size) {
-      return media::Status(media::StatusCode::kH264ParsingError,
-                           "Unable to determine size of bitstream buffer.");
+      return media::DecoderStatus(
+          media::DecoderStatus::Codes::kMalformedBitstream,
+          "Unable to determine size of bitstream buffer.");
     }
 
     std::vector<uint8_t> buf(output_size);
     if (!h264_converter_->ConvertNalUnitStreamToByteStream(
             src, static_cast<uint32_t>(src_size), h264_avcc_.get(), buf.data(),
             &output_size)) {
-      return media::Status(media::StatusCode::kH264ParsingError,
-                           "Unable to convert NALU to byte stream.");
+      return media::DecoderStatus(
+          media::DecoderStatus::Codes::kMalformedBitstream,
+          "Unable to convert NALU to byte stream.");
     }
 
     decoder_buffer = media::DecoderBuffer::CopyFrom(buf.data(), output_size);
@@ -543,17 +560,20 @@ VideoDecoder::MakeDecoderBuffer(const InputType& chunk, bool verify_key_frame) {
 
   bool is_key_frame = chunk.type() == "key";
   if (verify_key_frame) {
-    if (current_codec_ == media::kCodecVP9 ||
-        current_codec_ == media::kCodecVP8) {
+    if (current_codec_ == media::VideoCodec::kVP9 ||
+        current_codec_ == media::VideoCodec::kVP8) {
       ParseVpxKeyFrame(*decoder_buffer, current_codec_, &is_key_frame);
-    } else if (current_codec_ == media::kCodecAV1) {
+    } else if (current_codec_ == media::VideoCodec::kAV1) {
       ParseAv1KeyFrame(*decoder_buffer, &is_key_frame);
-    } else if (current_codec_ == media::kCodecH264) {
+    } else if (current_codec_ == media::VideoCodec::kH264) {
       ParseH264KeyFrame(*decoder_buffer, &is_key_frame);
     }
 
-    if (!is_key_frame)
-      return media::Status(media::StatusCode::kKeyFrameRequired);
+    if (!is_key_frame) {
+      return media::DecoderStatus(
+          media::DecoderStatus::Codes::kKeyFrameRequired,
+          "A key frame is required after configure() or flush().");
+    }
   }
 
   return decoder_buffer;

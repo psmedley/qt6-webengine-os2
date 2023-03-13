@@ -65,7 +65,7 @@
 #include "third_party/blink/renderer/core/xml/parser/xml_document_parser_scope.h"
 #include "third_party/blink/renderer/core/xml/parser/xml_parser_input.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
@@ -982,8 +982,6 @@ void XMLDocumentParser::StartElementNs(const AtomicString& local_name,
   AtomicString adjusted_uri = uri;
   if (parsing_fragment_ && adjusted_uri.IsNull()) {
     if (!prefix.IsNull()) {
-      // TODO(https://crbug.com/1239288) Assign `default_namespace_uri_` to
-      // `adjusted_uri` when `prefix` is not found.
       auto it = prefix_to_namespace_map_.find(prefix);
       if (it != prefix_to_namespace_map_.end())
         adjusted_uri = it->value;
@@ -1409,7 +1407,7 @@ static xmlEntityPtr GetXHTMLEntity(const xmlChar* name) {
     return nullptr;
 
   constexpr size_t kSharedXhtmlEntityResultLength =
-      base::size(g_shared_xhtml_entity_result);
+      std::size(g_shared_xhtml_entity_result);
   size_t entity_length_in_utf8;
   // Unlike HTML parser, XML parser parses the content of named
   // entities. So we need to escape '&' and '<'.

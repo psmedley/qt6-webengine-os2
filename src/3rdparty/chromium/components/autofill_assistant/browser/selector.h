@@ -9,7 +9,6 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "components/autofill_assistant/browser/client_status.h"
 #include "components/autofill_assistant/browser/service.pb.h"
 
@@ -37,9 +36,9 @@ struct Selector {
   explicit Selector(const std::vector<std::string>& s)
       : Selector(ToSelectorProto(s)) {}
 
-  Selector(Selector&& other);
+  Selector(Selector&& other) noexcept;
   Selector(const Selector& other);
-  Selector& operator=(Selector&& other);
+  Selector& operator=(Selector&& other) noexcept;
   Selector& operator=(const Selector& other);
 
   bool operator<(const Selector& other) const;

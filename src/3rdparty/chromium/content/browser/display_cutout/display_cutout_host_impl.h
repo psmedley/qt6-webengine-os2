@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_DISPLAY_CUTOUT_DISPLAY_CUTOUT_HOST_IMPL_H_
 #define CONTENT_BROWSER_DISPLAY_CUTOUT_DISPLAY_CUTOUT_HOST_IMPL_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/render_frame_host_receiver_set.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -19,6 +20,10 @@ class WebContentsImpl;
 class DisplayCutoutHostImpl : public blink::mojom::DisplayCutoutHost {
  public:
   explicit DisplayCutoutHostImpl(WebContentsImpl*);
+
+  DisplayCutoutHostImpl(const DisplayCutoutHostImpl&) = delete;
+  DisplayCutoutHostImpl& operator=(const DisplayCutoutHostImpl&) = delete;
+
   ~DisplayCutoutHostImpl() override;
 
   // Binds a new receiver for the specified frame.
@@ -73,9 +78,7 @@ class DisplayCutoutHostImpl : public blink::mojom::DisplayCutoutHost {
   RenderFrameHostReceiverSet<blink::mojom::DisplayCutoutHost> receivers_;
 
   // Weak pointer to the owning |WebContentsImpl| instance.
-  WebContentsImpl* web_contents_impl_;
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayCutoutHostImpl);
+  raw_ptr<WebContentsImpl> web_contents_impl_;
 };
 
 }  // namespace content

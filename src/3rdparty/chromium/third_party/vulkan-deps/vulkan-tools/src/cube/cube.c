@@ -292,6 +292,23 @@ void dumpVec4(const char *note, vec4 vector) {
     fflush(stdout);
 }
 
+char const *to_string(VkPhysicalDeviceType const type) {
+    switch (type) {
+        case VK_PHYSICAL_DEVICE_TYPE_OTHER:
+            return "Other";
+        case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+            return "IntegratedGpu";
+        case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+            return "DiscreteGpu";
+        case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+            return "VirtualGpu";
+        case VK_PHYSICAL_DEVICE_TYPE_CPU:
+            return "Cpu";
+        default:
+            return "Unknown";
+    }
+}
+
 typedef struct {
     VkImage image;
     VkCommandBuffer cmd;
@@ -446,6 +463,7 @@ struct demo {
     bool validate_checks_disabled;
     bool use_break;
     bool suppress_popups;
+    bool force_errors;
 
     PFN_vkCreateDebugUtilsMessengerEXT CreateDebugUtilsMessengerEXT;
     PFN_vkDestroyDebugUtilsMessengerEXT DestroyDebugUtilsMessengerEXT;
@@ -633,6 +651,10 @@ static void demo_flush_init_cmd(struct demo *demo) {
 
     VkFence fence;
     VkFenceCreateInfo fence_ci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .pNext = NULL, .flags = 0};
+    if (demo->force_errors) {
+        // Remove sType to intentionally force validation layer errors.
+        fence_ci.sType = 0;
+    }
     err = vkCreateFence(demo->device, &fence_ci, NULL, &fence);
     assert(!err);
 
@@ -1063,8 +1085,8 @@ static void demo_draw(struct demo *demo) {
     VkSubmitInfo submit_info;
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.pNext = NULL;
-    submit_info.pWaitDstStageMask = &pipe_stage_flags;
     pipe_stage_flags = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    submit_info.pWaitDstStageMask = &pipe_stage_flags;
     submit_info.waitSemaphoreCount = 1;
     submit_info.pWaitSemaphores = &demo->image_acquired_semaphores[demo->frame_index];
     submit_info.commandBufferCount = 1;
@@ -1445,6 +1467,11 @@ static void demo_prepare_depth(struct demo *demo) {
         .flags = 0,
         .viewType = VK_IMAGE_VIEW_TYPE_2D,
     };
+
+    if (demo->force_errors) {
+        // Intentionally force a bad pNext value to generate a validation layer error
+        view.pNext = &image;
+    }
 
     VkMemoryRequirements mem_reqs;
     VkResult U_ASSERT_ONLY err;
@@ -3154,6 +3181,7 @@ static void demo_init_vk(struct demo *demo) {
     /* Look for instance extensions */
     VkBool32 surfaceExtFound = 0;
     VkBool32 platformSurfaceExtFound = 0;
+    bool portabilityEnumerationActive = false;
     memset(demo->extension_names, 0, sizeof(demo->extension_names));
 
     err = vkEnumerateInstanceExtensionProperties(NULL, &instance_extension_count, NULL);
@@ -3216,6 +3244,12 @@ static void demo_init_vk(struct demo *demo) {
                 if (demo->validate) {
                     demo->extension_names[demo->enabled_extension_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
                 }
+            }
+            // We want cube to be able to enumerate drivers that support the portability_subset extension, so we have to enable the
+            // portability enumeration extension.
+            if (!strcmp(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME, instance_extensions[i].extensionName)) {
+                portabilityEnumerationActive = true;
+                demo->extension_names[demo->enabled_extension_count++] = VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
             }
             assert(demo->enabled_extension_count < 64);
         }
@@ -3293,6 +3327,7 @@ static void demo_init_vk(struct demo *demo) {
     VkInstanceCreateInfo inst_info = {
         .sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
         .pNext = NULL,
+        .flags = (portabilityEnumerationActive ? VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR : 0),
         .pApplicationInfo = &app,
         .enabledLayerCount = demo->enabled_layer_count,
         .ppEnabledLayerNames = (const char *const *)instance_validation_layers,
@@ -3408,8 +3443,8 @@ static void demo_init_vk(struct demo *demo) {
     {
         VkPhysicalDeviceProperties physicalDeviceProperties;
         vkGetPhysicalDeviceProperties(demo->gpu, &physicalDeviceProperties);
-        fprintf(stderr, "Selected GPU %d: %s, type: %u\n", demo->gpu_number, physicalDeviceProperties.deviceName,
-                physicalDeviceProperties.deviceType);
+        fprintf(stderr, "Selected GPU %d: %s, type: %s\n", demo->gpu_number, physicalDeviceProperties.deviceName,
+                to_string(physicalDeviceProperties.deviceType));
     }
     free(physical_devices);
 
@@ -3914,7 +3949,7 @@ static void demo_init_connection(struct demo *demo) {
 
     demo->connection = xcb_connect(NULL, &scr);
     if (xcb_connection_has_error(demo->connection) > 0) {
-        printf("Cannot find a compatible Vulkan installable client driver (ICD).\nExiting ...\n");
+        printf("Cannot connect to XCB.\nExiting ...\n");
         fflush(stdout);
         exit(1);
     }
@@ -3928,7 +3963,7 @@ static void demo_init_connection(struct demo *demo) {
     demo->display = wl_display_connect(NULL);
 
     if (demo->display == NULL) {
-        printf("Cannot find a compatible Vulkan installable client driver (ICD).\nExiting ...\n");
+        printf("Cannot connect to wayland.\nExiting ...\n");
         fflush(stdout);
         exit(1);
     }
@@ -4010,6 +4045,10 @@ static void demo_init(struct demo *demo, int argc, char **argv) {
             i++;
             continue;
         }
+        if (strcmp(argv[i], "--force_errors") == 0) {
+            demo->force_errors = true;
+            continue;
+        }
 
 #if defined(ANDROID)
         ERR_EXIT("Usage: vkcube [--validate]\n", "Usage");
@@ -4021,6 +4060,7 @@ static void demo_init(struct demo *demo, int argc, char **argv) {
             "\t[--gpu_number <index of physical device>]\n"
             "\t[--present_mode <present mode enum>]\n"
             "\t[--width <width>] [--height <height>]\n"
+            "\t[--force_errors]\n"
             "\t<present_mode_enum>\n"
             "\t\tVK_PRESENT_MODE_IMMEDIATE_KHR = %d\n"
             "\t\tVK_PRESENT_MODE_MAILBOX_KHR = %d\n"

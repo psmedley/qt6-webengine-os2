@@ -7,8 +7,10 @@
 
 #include <string>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "content/common/content_export.h"
+#include "device/fido/public_key_credential_descriptor.h"
 #include "third_party/blink/public/mojom/webauthn/authenticator.mojom-forward.h"
 
 class GURL;
@@ -33,7 +35,8 @@ class CONTENT_EXPORT WebAuthRequestSecurityChecker
   enum class RequestType {
     kMakeCredential,
     kMakePaymentCredential,
-    kGetAssertion
+    kGetAssertion,
+    kGetPaymentCredentialAssertion
   };
 
   explicit WebAuthRequestSecurityChecker(RenderFrameHost* host);
@@ -65,12 +68,16 @@ class CONTENT_EXPORT WebAuthRequestSecurityChecker
   //   https://html.spec.whatwg.org/multipage/origin.html#is-a-registrable-domain-suffix-of-or-is-equal-to
   blink::mojom::AuthenticatorStatus ValidateDomainAndRelyingPartyID(
       const url::Origin& caller_origin,
-      const std::string& relying_party_id);
+      const std::string& relying_party_id,
+      RequestType request_type);
 
   // Checks whether a given URL is an a-priori authenticated URL.
   // https://w3c.github.io/webappsec-credential-management/#dom-credentialuserdata-iconurl
   blink::mojom::AuthenticatorStatus ValidateAPrioriAuthenticatedUrl(
       const GURL& url);
+
+  [[nodiscard]] bool DeduplicateCredentialDescriptorListAndValidateLength(
+      std::vector<device::PublicKeyCredentialDescriptor>* list);
 
  protected:
   friend class base::RefCounted<WebAuthRequestSecurityChecker>;
@@ -81,7 +88,7 @@ class CONTENT_EXPORT WebAuthRequestSecurityChecker
   // entire ancestor chain. |origin| is the origin of the frame being checked.
   bool IsSameOriginWithAncestors(const url::Origin& origin);
 
-  RenderFrameHost* render_frame_host_;
+  raw_ptr<RenderFrameHost> render_frame_host_;
 };
 
 }  // namespace content

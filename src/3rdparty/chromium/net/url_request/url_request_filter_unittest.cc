@@ -6,13 +6,14 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/task_environment.h"
 #include "net/base/request_priority.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_context_builder.h"
 #include "net/url_request/url_request_interceptor.h"
 #include "net/url_request/url_request_job.h"
 #include "net/url_request/url_request_test_job.h"
@@ -26,13 +27,18 @@ namespace {
 class TestURLRequestInterceptor : public URLRequestInterceptor {
  public:
   TestURLRequestInterceptor() : job_(nullptr) {}
+
+  TestURLRequestInterceptor(const TestURLRequestInterceptor&) = delete;
+  TestURLRequestInterceptor& operator=(const TestURLRequestInterceptor&) =
+      delete;
+
   ~TestURLRequestInterceptor() override = default;
 
   // URLRequestInterceptor implementation:
   std::unique_ptr<URLRequestJob> MaybeInterceptRequest(
       URLRequest* request) const override {
     job_ = new URLRequestTestJob(request);
-    return base::WrapUnique<URLRequestJob>(job_);
+    return base::WrapUnique<URLRequestJob>(job_.get());
   }
 
   // Is |job| the URLRequestJob generated during interception?
@@ -41,24 +47,22 @@ class TestURLRequestInterceptor : public URLRequestInterceptor {
   }
 
  private:
-  mutable URLRequestTestJob* job_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestURLRequestInterceptor);
+  mutable raw_ptr<URLRequestTestJob> job_;
 };
 
 TEST(URLRequestFilter, BasicMatching) {
   base::test::TaskEnvironment task_environment(
       base::test::TaskEnvironment::MainThreadType::IO);
   TestDelegate delegate;
-  TestURLRequestContext request_context;
+  auto context = CreateTestURLRequestContextBuilder()->Build();
   URLRequestFilter* filter = URLRequestFilter::GetInstance();
 
   const GURL kUrl1("http://foo.com/");
-  std::unique_ptr<URLRequest> request1(request_context.CreateRequest(
+  std::unique_ptr<URLRequest> request1(context->CreateRequest(
       kUrl1, DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   const GURL kUrl2("http://bar.com/");
-  std::unique_ptr<URLRequest> request2(request_context.CreateRequest(
+  std::unique_ptr<URLRequest> request2(context->CreateRequest(
       kUrl2, DEFAULT_PRIORITY, &delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
 
   // Check AddUrlInterceptor checks for invalid URLs.

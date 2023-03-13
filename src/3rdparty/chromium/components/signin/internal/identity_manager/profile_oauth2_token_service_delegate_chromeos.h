@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "components/account_manager_core/account.h"
@@ -20,6 +20,7 @@
 #include "services/network/public/cpp/network_connection_tracker.h"
 
 class AccountTrackerService;
+class SigninClient;
 
 namespace signin {
 class ProfileOAuth2TokenServiceDelegateChromeOS
@@ -31,10 +32,17 @@ class ProfileOAuth2TokenServiceDelegateChromeOS
   // `NetworkConnectorTracker`, and `account_manager::AccountManagerFacade`.
   // These objects must all outlive `this` delegate.
   ProfileOAuth2TokenServiceDelegateChromeOS(
+      SigninClient* signin_client,
       AccountTrackerService* account_tracker_service,
       network::NetworkConnectionTracker* network_connection_tracker,
       account_manager::AccountManagerFacade* account_manager_facade,
       bool is_regular_profile);
+
+  ProfileOAuth2TokenServiceDelegateChromeOS(
+      const ProfileOAuth2TokenServiceDelegateChromeOS&) = delete;
+  ProfileOAuth2TokenServiceDelegateChromeOS& operator=(
+      const ProfileOAuth2TokenServiceDelegateChromeOS&) = delete;
+
   ~ProfileOAuth2TokenServiceDelegateChromeOS() override;
 
   // ProfileOAuth2TokenServiceDelegate overrides.
@@ -92,6 +100,7 @@ class ProfileOAuth2TokenServiceDelegateChromeOS
                                   const GoogleServiceAuthError& error);
 
   // Non-owning pointers.
+  SigninClient* const signin_client_;
   AccountTrackerService* const account_tracker_service_;
   network::NetworkConnectionTracker* const network_connection_tracker_;
   account_manager::AccountManagerFacade* const account_manager_facade_;
@@ -119,8 +128,6 @@ class ProfileOAuth2TokenServiceDelegateChromeOS
 
   SEQUENCE_CHECKER(sequence_checker_);
   base::WeakPtrFactory<ProfileOAuth2TokenServiceDelegateChromeOS> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ProfileOAuth2TokenServiceDelegateChromeOS);
 };
 
 }  // namespace signin

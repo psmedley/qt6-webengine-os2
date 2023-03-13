@@ -8,14 +8,12 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/feature_list.h"
 #include "components/pdf/browser/pdf_stream_delegate.h"
 #include "components/pdf/browser/plugin_response_writer.h"
 #include "content/public/browser/url_loader_request_interceptor.h"
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
-#include "pdf/pdf_features.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/mojom/fetch_api.mojom-shared.h"
 #include "services/network/public/mojom/url_loader.mojom-forward.h"
@@ -31,13 +29,12 @@ void FinishLoader(std::unique_ptr<PluginResponseWriter> /*response_writer*/) {
 }
 
 void CreateLoaderAndStart(
-    const GURL& source_url,
-    const GURL& original_url,
+    const PdfStreamDelegate::StreamInfo& stream_info,
     const network::ResourceRequest& request,
     mojo::PendingReceiver<network::mojom::URLLoader> receiver,
     mojo::PendingRemote<network::mojom::URLLoaderClient> client) {
-  auto response_writer = std::make_unique<PluginResponseWriter>(
-      source_url, original_url, std::move(client));
+  auto response_writer =
+      std::make_unique<PluginResponseWriter>(stream_info, std::move(client));
 
   auto* unowned_response_writer = response_writer.get();
   unowned_response_writer->Start(
@@ -51,9 +48,6 @@ std::unique_ptr<content::URLLoaderRequestInterceptor>
 PdfURLLoaderRequestInterceptor::MaybeCreateInterceptor(
     int frame_tree_node_id,
     std::unique_ptr<PdfStreamDelegate> stream_delegate) {
-  if (!base::FeatureList::IsEnabled(chrome_pdf::features::kPdfUnseasoned))
-    return nullptr;
-
   return std::make_unique<PdfURLLoaderRequestInterceptor>(
       frame_tree_node_id, std::move(stream_delegate));
 }
@@ -99,8 +93,7 @@ PdfURLLoaderRequestInterceptor::CreateRequestHandler(
   if (tentative_resource_request.url != stream->original_url)
     return {};
 
-  return base::BindOnce(&CreateLoaderAndStart, std::move(stream->stream_url),
-                        std::move(stream->original_url));
+  return base::BindOnce(&CreateLoaderAndStart, std::move(stream.value()));
 }
 
 }  // namespace pdf

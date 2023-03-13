@@ -10,6 +10,7 @@
 
 #include "base/check_op.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/time/time.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -110,7 +111,7 @@ std::unique_ptr<base::Value> AsValue(const SkRRect& rrect) {
 std::unique_ptr<base::Value> AsValue(const SkMatrix& matrix) {
   std::unique_ptr<base::ListValue> val(new base::ListValue());
   for (int i = 0; i < 9; ++i)
-    val->Append(AsValue(matrix[i]));
+    val->Append(base::Value::FromUniquePtrValue(AsValue(matrix[i])));
 
   return std::move(val);
 }
@@ -153,8 +154,10 @@ std::unique_ptr<base::Value> AsValue(const SkColorFilter& filter) {
   SkScalar color_matrix[20];
   if (filter.asAColorMatrix(color_matrix)) {
     std::unique_ptr<base::ListValue> color_matrix_val(new base::ListValue());
-    for (unsigned i = 0; i < 20; ++i)
-      color_matrix_val->Append(AsValue(color_matrix[i]));
+    for (unsigned i = 0; i < 20; ++i) {
+      color_matrix_val->Append(
+          base::Value::FromUniquePtrValue(AsValue(color_matrix[i])));
+    }
 
     val->SetKey("color_matrix",
                 base::Value::FromUniquePtrValue(std::move(color_matrix_val)));
@@ -321,7 +324,7 @@ std::unique_ptr<base::Value> AsListValue(const T array[], size_t count) {
   std::unique_ptr<base::ListValue> val(new base::ListValue());
 
   for (size_t i = 0; i < count; ++i)
-    val->Append(AsValue(array[i]));
+    val->Append(base::Value::FromUniquePtrValue(AsValue(array[i])));
 
   return std::move(val);
 }
@@ -357,25 +360,26 @@ public:
     base::TimeDelta ticks = base::TimeTicks::Now() - start_ticks_;
     op_record_->SetDouble("cmd_time", ticks.InMillisecondsF());
 
-    canvas_->op_records_.Append(std::move(op_record_));
+    canvas_->op_records_.Append(
+        base::Value::FromUniquePtrValue(std::move(op_record_)));
   }
 
   void addParam(const char name[], std::unique_ptr<base::Value> value) {
     std::unique_ptr<base::DictionaryValue> param(new base::DictionaryValue());
     param->SetKey(name, base::Value::FromUniquePtrValue(std::move(value)));
 
-    op_params_->Append(std::move(param));
+    op_params_->Append(base::Value::FromUniquePtrValue(std::move(param)));
   }
 
   const SkPaint* paint() const { return &filtered_paint_; }
 
 private:
-  BenchmarkingCanvas* canvas_;
-  std::unique_ptr<base::DictionaryValue> op_record_;
-  base::ListValue* op_params_;
-  base::TimeTicks start_ticks_;
+ raw_ptr<BenchmarkingCanvas> canvas_;
+ std::unique_ptr<base::DictionaryValue> op_record_;
+ raw_ptr<base::ListValue> op_params_;
+ base::TimeTicks start_ticks_;
 
-  SkPaint filtered_paint_;
+ SkPaint filtered_paint_;
 };
 
 BenchmarkingCanvas::BenchmarkingCanvas(SkCanvas* canvas)
@@ -387,7 +391,7 @@ BenchmarkingCanvas::BenchmarkingCanvas(SkCanvas* canvas)
 BenchmarkingCanvas::~BenchmarkingCanvas() = default;
 
 size_t BenchmarkingCanvas::CommandCount() const {
-  return op_records_.GetSize();
+  return op_records_.GetListDeprecated().size();
 }
 
 const base::ListValue& BenchmarkingCanvas::Commands() const {
@@ -395,15 +399,10 @@ const base::ListValue& BenchmarkingCanvas::Commands() const {
 }
 
 double BenchmarkingCanvas::GetTime(size_t index) {
-  const base::DictionaryValue* op;
-  if (!op_records_.GetDictionary(index, &op))
+  const base::Value& op = op_records_.GetListDeprecated()[index];
+  if (!op.is_dict())
     return 0;
-
-  double t;
-  if (!op->GetDouble("cmd_time", &t))
-    return 0;
-
-  return t;
+  return op.FindDoubleKey("cmd_time").value_or(0);
 }
 
 void BenchmarkingCanvas::willSave() {

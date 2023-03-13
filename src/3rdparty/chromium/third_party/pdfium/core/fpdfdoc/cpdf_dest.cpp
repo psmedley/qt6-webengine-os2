@@ -41,9 +41,11 @@ CPDF_Dest CPDF_Dest::Create(CPDF_Document* pDoc, const CPDF_Object* pDest) {
   if (!pDest)
     return CPDF_Dest(nullptr);
 
-  if (pDest->IsString() || pDest->IsName())
-    return CPDF_Dest(CPDF_NameTree::LookupNamedDest(pDoc, pDest->GetString()));
-
+  if (pDest->IsString() || pDest->IsName()) {
+    // TODO(tsepez): make CPDF_Dest constructor take retained args.
+    return CPDF_Dest(
+        CPDF_NameTree::LookupNamedDest(pDoc, pDest->GetString()).Get());
+  }
   return CPDF_Dest(pDest->AsArray());
 }
 
@@ -127,15 +129,15 @@ bool CPDF_Dest::GetXYZ(bool* pHasX,
   return true;
 }
 
-unsigned long CPDF_Dest::GetNumParams() const {
+size_t CPDF_Dest::GetNumParams() const {
   if (!m_pArray || m_pArray->size() < 2)
     return 0;
 
-  unsigned long maxParamsForFitType = kZoomModeMaxParamCount[GetZoomMode()];
-  unsigned long numParamsInArray = m_pArray->size() - 2;
+  size_t maxParamsForFitType = kZoomModeMaxParamCount[GetZoomMode()];
+  size_t numParamsInArray = m_pArray->size() - 2;
   return std::min(maxParamsForFitType, numParamsInArray);
 }
 
-float CPDF_Dest::GetParam(int index) const {
+float CPDF_Dest::GetParam(size_t index) const {
   return m_pArray ? m_pArray->GetNumberAt(2 + index) : 0;
 }

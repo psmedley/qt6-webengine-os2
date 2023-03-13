@@ -475,7 +475,12 @@
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/sprep/spreplocal.mk?rcl=797b7c
     "stringprep": { "filterType": "exclude" },
-    "translit": { "filterType": "exclude" },
+    "translit": {
+      "filterType": "language",
+      "includelist": [
+         "root"
+      ]
+    },
 // Based on the ICU63 version of
 // https://cs.chromium.org/chromium/src/third_party/icu/source/data/unit/reslocal.mk?rcl=797b7c
 // Includes the items from UNIT_ALIAS_SOURCE and UNIT_SOURCE
@@ -854,6 +859,20 @@
         "-/*/202"
       ]
     },
+// Based on https://cs.chromium.org/chromium/src/third_party/icu/patches/data.build.patch?rcl=797b7c
+// +# Chromium : To save space, use '-R' option (exclude collation rules. just
+// +# include the compiled binary data.)
+// +GENRBOPTS=-k -R
+    {
+      "categories": [
+        "coll_tree"
+      ],
+      "rules": [
+	"-/UCARules",
+	"-/collations/*/Sequence"
+      ]
+    },
+// The following rules must be placed below "-/collations/*/Sequence" to avoid keeping empty unihan, big5han and gb2312han
 // Based on remove_legacy_chinese_codepoint_collation
 // # big5han and gb2312han collation do not make any sense and nobody uses them.
     {
@@ -869,19 +888,6 @@
         "-/*/unihan",
         "-/*/big5han",
         "-/*/gb2312han"
-      ]
-    },
-// Based on https://cs.chromium.org/chromium/src/third_party/icu/patches/data.build.patch?rcl=797b7c
-// +# Chromium : To save space, use '-R' option (exclude collation rules. just
-// +# include the compiled binary data.)
-// +GENRBOPTS=-k -R
-    {
-      "categories": [
-        "coll_tree"
-      ],
-      "rules": [
-	"-/UCARules",
-	"-/collations/*/Sequence"
       ]
     },
 // Based on filter_unit_data
@@ -1497,7 +1503,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/buddhist"
+        "+/calendar/buddhist",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/buddhist/DateTimeSkeletons"
       ]
     },
     {
@@ -1514,7 +1524,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/chinese"
+        "+/calendar/chinese",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/chinese/DateTimeSkeletons"
       ]
     },
     {
@@ -1531,7 +1545,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/dangi"
+        "+/calendar/dangi",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/dangi/DateTimeSkeletons"
       ]
     },
     {
@@ -1549,7 +1567,12 @@
         "+/calendar/gregorian",
         "+/calendar/generic",
         "+/calendar/ethiopic",
-        "+/calendar/ethiopic-amete-alem"
+        "+/calendar/ethiopic-amete-alem",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/ethiopic/DateTimeSkeletons",
+        "-/calendar/ethiopic-amete-alem/DateTimeSkeletons"
       ]
     },
     {
@@ -1566,7 +1589,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/hebrew"
+        "+/calendar/hebrew",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/hebrew/DateTimeSkeletons"
       ]
     },
     {
@@ -1586,7 +1613,11 @@
 //       # Other Islamic calendar formats are not in locales other than root.
 //       # ar-SA's default is islamic-umalqura, but its format entries are
 //       # specified in root via aliases.
-        "+/calendar/islamic"
+        "+/calendar/islamic",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/islamic/DateTimeSkeletons"
       ]
     },
     {
@@ -1604,7 +1635,12 @@
         "+/calendar/gregorian",
         "+/calendar/generic",
         "+/calendar/persian",
-        "+/calendar/islamic"
+        "+/calendar/islamic",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/persian/DateTimeSkeletons",
+        "-/calendar/islamic/DateTimeSkeletons"
       ]
     },
     {
@@ -1621,7 +1657,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/japanese"
+        "+/calendar/japanese",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/japanese/DateTimeSkeletons"
       ]
     },
     {
@@ -1640,7 +1680,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/indian"
+        "+/calendar/indian",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/indian/DateTimeSkeletons"
       ]
     },
     {
@@ -1657,7 +1701,11 @@
         "+/calendar/default",
         "+/calendar/gregorian",
         "+/calendar/generic",
-        "+/calendar/roc"
+        "+/calendar/roc",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/roc/DateTimeSkeletons"
       ]
     },
     {
@@ -1694,7 +1742,25 @@
 // # The same is true of eras and monthNames for Islamic calendar.
         "-/calendar/japanese/eras",
         "-/calendar/islamic/eras",
-        "-/calendar/islamic/monthNames"
+        "-/calendar/islamic/monthNames",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons",
+        "-/calendar/buddhist/DateTimeSkeletons",
+        "-/calendar/chinese/DateTimeSkeletons",
+        "-/calendar/roc/DateTimeSkeletons",
+        "-/calendar/dangi/DateTimeSkeletons",
+        "-/calendar/ethiopic/DateTimeSkeletons",
+        "-/calendar/ethiopic-amete-alem/DateTimeSkeletons",
+        "-/calendar/japanese/DateTimeSkeletons",
+        "-/calendar/hebrew/DateTimeSkeletons",
+        "-/calendar/islamic/DateTimeSkeletons",
+        "-/calendar/islamic-umalqura/DateTimeSkeletons",
+        "-/calendar/islamic-civil/DateTimeSkeletons",
+        "-/calendar/islamic-tbla/DateTimeSkeletons",
+        "-/calendar/islamic-rgsa/DateTimeSkeletons",
+        "-/calendar/persian/DateTimeSkeletons",
+        "-/calendar/indian/DateTimeSkeletons"
       ]
     },
     {
@@ -1721,7 +1787,10 @@
         "-/calendar/*",
         "+/calendar/default",
         "+/calendar/gregorian",
-        "+/calendar/generic"
+        "+/calendar/generic",
+        "-/calendar/default/DateTimeSkeletons",
+        "-/calendar/gregorian/DateTimeSkeletons",
+        "-/calendar/generic/DateTimeSkeletons"
       ]
     },
 // Based on abridge_locale_data_for_non_ui_languages
@@ -1731,7 +1800,6 @@
         "locales_tree"
       ],
       "files": {
-        "filterType": "language",
         "includelist": [
 // Created by diff scripts/chrome_ui_languages.list scripts/accept_lang.list|egrep "^>"|egrep -v "#"|cut -c3-10
           "ach",
@@ -1826,51 +1894,122 @@
         "+/Version"
       ]
     },
-// Based on
-// https://cs.chromium.org/chromium/src/third_party/icu/android/patch_locale.sh?rcl=797b7c
-// # On Android Java API is used to get lang data, except for the language and
-// # script names for zh_Hans and zh_Hant which are not supported by Java API.
-// # Here remove all lang data except those names.
-// # See the comments in GetDisplayNameForLocale() (in Chromium's
-// # src/ui/base/l10n/l10n_util.cc) about why we need the scripts.
+// Based on filter_display_language_names
     {
       "categories": [
         "lang_tree"
       ],
       "rules": [
-        "-/Keys",
         "-/Languages",
         "-/Languages%long",
-        "-/Languages%short",
         "-/Languages%menu",
         "-/Languages%variant",
-        "-/Scripts",
-        "-/Scripts%long",
-        "-/Scripts%short",
-        "-/Scripts%variant",
-        "-/Scripts%stand-alone",
+        "+/*/af",
+        "+/*/am",
+        "+/*/ar",
+        "+/*/az",
+        "+/*/bg",
+        "+/*/bn",
+        "+/*/ca",
+        "+/*/cs",
+        "+/*/da",
+        "+/*/de",
+        "+/*/el",
+        "+/*/en",
+        "+/*/es",
+        "+/*/et",
+        "+/*/eu",
+        "+/*/fa",
+        "+/*/fi",
+        "+/*/fil",
+        "+/*/fr",
+        "+/*/gl",
+        "+/*/gu",
+        "+/*/he",
+        "+/*/hi",
+        "+/*/hr",
+        "+/*/hu",
+        "+/*/hy",
+        "+/*/id",
+        "+/*/in",
+        "+/*/is",
+        "+/*/it",
+        "+/*/iw",
+        "+/*/ja",
+        "+/*/ka",
+        "+/*/kk",
+        "+/*/km",
+        "+/*/kn",
+        "+/*/ko",
+        "+/*/ky",
+        "+/*/lo",
+        "+/*/lt",
+        "+/*/lv",
+        "+/*/mk",
+        "+/*/ml",
+        "+/*/mn",
+        "+/*/mo",
+        "+/*/mr",
+        "+/*/ms",
+        "+/*/my",
+        "+/*/nb",
+        "+/*/ne",
+        "+/*/nl",
+        "+/*/no",
+        "+/*/pa",
+        "+/*/pl",
+        "+/*/pt",
+        "+/*/ro",
+        "+/*/ru",
+        "+/*/sh",
+        "+/*/si",
+        "+/*/sk",
+        "+/*/sl",
+        "+/*/sq",
+        "+/*/sr",
+        "+/*/sr_Latn",
+        "+/*/sv",
+        "+/*/sw",
+        "+/*/ta",
+        "+/*/te",
+        "+/*/th",
+        "+/*/tl",
+        "+/*/tr",
+        "+/*/uk",
+        "+/*/ur",
+        "+/*/uz",
+        "+/*/vi",
+        "+/*/zh",
+        "+/*/zu",
+        "+/*/ar_001",
+        "+/*/az_Arab",
+        "+/*/de_AT",
+        "+/*/de_CH",
+        "+/*/en_AU",
+        "+/*/en_CA",
+        "+/*/en_GB",
+        "+/*/en_US",
+        "+/*/es_419",
+        "+/*/es_ES",
+        "+/*/es_MX",
+        "+/*/fa_AF",
+        "+/*/fr_CA",
+        "+/*/fr_CH",
+        "+/*/nl_BE",
+        "+/*/pt_BR",
+        "+/*/pt_PT",
+        "+/*/ro_MD",
+        "+/*/sr_ME",
+        "+/*/sw_CD",
+        "+/*/zh_Hans",
+        "+/*/zh_Hant",
+        "-/Keys",
         "-/Types",
         "-/Types%short",
-        "-/Variants",
-        "-/calendar",
+        "+/Types/calendar",
         "-/characterLabelPattern",
-        "-/codePatterns",
-        "-/localeDisplayPattern",
-        "+/Languages/zh",
-        "+/Languages%long/zh",
-        "+/Languages%short/zh",
-        "+/Languages%variant/zh",
-        "+/Scripts/Hans",
-        "+/Scripts%long/Hans",
-        "+/Scripts%short/Hans",
-        "+/Scripts%variant/Hans",
-        "+/Scripts%stand-alone/Hans",
-        "+/Scripts/Hant",
-        "+/Scripts%long/Hant",
-        "+/Scripts%short/Hant",
-        "+/Scripts%variant/Hant",
-        "+/Scripts%stand-alone/Hant",
-        "+/Types/calendar"
+        "-/Variants",
+        "+/Variants/OXENDICT"
       ]
     },
     {
@@ -1908,6 +2047,15 @@
         "+/timeData",
         "+/weekData",
         "+/weekData%variant"
+      ]
+    },
+    {
+      "categories": [
+        "translit"
+      ],
+      "rules": [
+        "-/*",
+        "+/RuleBasedTransliteratorIDs/Latin-ASCII"
       ]
     },
 // Remove all the Version

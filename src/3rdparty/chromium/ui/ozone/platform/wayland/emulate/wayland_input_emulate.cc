@@ -219,9 +219,11 @@ void WaylandInputEmulate::OnWindowConfigured(gfx::AcceleratedWidget widget,
   // will be size of the last attached buffer or 0x0).
   //
   // This is needed as running some tests doesn't result in sending frames that
-  // require buffers to be created.;
+  // require buffers to be created.
   auto buffer_size = wayland_proxy->GetWindowBounds(widget).size();
-  DCHECK(!buffer_size.IsEmpty());
+  // Adjust the buffer size in case if the window was created with empty size.
+  if (buffer_size.IsEmpty())
+    buffer_size.SetSize(1, 1);
   test_surface->buffer = wayland_proxy->CreateShmBasedWlBuffer(buffer_size);
 
   auto* wlsurface = wayland_proxy->GetWlSurfaceForAcceleratedWidget(widget);
@@ -320,10 +322,10 @@ void WaylandInputEmulate::Global(void* data,
                                  uint32_t version) {
   auto* emulate = static_cast<WaylandInputEmulate*>(data);
   if (strcmp(interface, "weston_test") == 0) {
-    const struct wl_interface* interface =
+    const struct wl_interface* wayland_interface =
         static_cast<const struct wl_interface*>(&weston_test_interface);
     emulate->weston_test_ = static_cast<struct weston_test*>(
-        wl_registry_bind(registry, name, interface, version));
+        wl_registry_bind(registry, name, wayland_interface, version));
   }
 }
 

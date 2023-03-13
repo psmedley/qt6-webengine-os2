@@ -8,6 +8,7 @@ import cssAngleStyles from './cssAngle.css.js';
 
 import type {Angle} from './CSSAngleUtils.js';
 import {AngleUnit, convertAngleUnit, getNewAngleFromEvent, getNextUnit, parseText, roundAngleByUnit} from './CSSAngleUtils.js';
+import {ValueChangedEvent} from './InlineEditorUtils.js';
 
 import type {CSSAngleEditorData} from './CSSAngleEditor.js';
 import {CSSAngleEditor} from './CSSAngleEditor.js';
@@ -20,28 +21,21 @@ const styleMap = LitHtml.Directives.styleMap;
 const ContextAwareProperties = new Set(['color', 'background', 'background-color']);
 
 export class PopoverToggledEvent extends Event {
+  static readonly eventName = 'popovertoggled';
   data: {open: boolean};
 
   constructor(open: boolean) {
-    super('popovertoggled', {});
+    super(PopoverToggledEvent.eventName, {});
     this.data = {open};
   }
 }
 
-export class ValueChangedEvent extends Event {
-  data: {value: string};
-
-  constructor(value: string) {
-    super('valuechanged', {});
-    this.data = {value};
-  }
-}
-
 export class UnitChangedEvent extends Event {
+  static readonly eventName = 'unitchanged';
   data: {value: string};
 
   constructor(value: string) {
-    super('unitchanged', {});
+    super(UnitChangedEvent.eventName, {});
     this.data = {value};
   }
 }
@@ -72,7 +66,6 @@ export class CSSAngle extends HTMLElement {
   private popoverStyleTop = '';
   private popoverStyleLeft = '';
   private onMinifyingAction = this.minify.bind(this);
-  private onAngleUpdate = this.updateAngle.bind(this);
 
   connectedCallback(): void {
     this.shadow.adoptedStyleSheets = [cssAngleStyles];
@@ -228,8 +221,7 @@ export class CSSAngle extends HTMLElement {
             .data=${{
               angle: this.angle,
             } as CSSAngleSwatchData}>
-          </${CSSAngleSwatch.litTagName}><slot></slot>
-        </div>
+          </${CSSAngleSwatch.litTagName}><slot></slot></div>
         ${this.popoverOpen ? this.renderPopover() : null}
       </div>
     `, this.shadow, {
@@ -254,7 +246,9 @@ export class CSSAngle extends HTMLElement {
       style=${styleMap({top: this.popoverStyleTop, left: this.popoverStyleLeft})}
       .data=${{
         angle: this.angle,
-        onAngleUpdate: this.onAngleUpdate,
+        onAngleUpdate: (angle: Angle):void => {
+          this.updateAngle(angle);
+        },
         background: contextualBackground,
       } as CSSAngleEditorData}
     ></${CSSAngleEditor.litTagName}>

@@ -17,7 +17,8 @@
 #include <windows.h>
 #include <string.h>
 
-#include "base/cxx17_backports.h"
+#include <iterator>
+
 #include "gtest/gtest.h"
 #include "test/win/win_multiprocess.h"
 #include "util/misc/from_pointer_cast.h"
@@ -44,7 +45,7 @@ TEST(ProcessReaderWin, SelfBasic) {
   EXPECT_EQ(process_reader.GetProcessInfo().ProcessID(), GetCurrentProcessId());
 
   static constexpr char kTestMemory[] = "Some test memory";
-  char buffer[base::size(kTestMemory)];
+  char buffer[std::size(kTestMemory)];
   ASSERT_TRUE(process_reader.Memory()->Read(
       reinterpret_cast<uintptr_t>(kTestMemory), sizeof(kTestMemory), &buffer));
   EXPECT_STREQ(kTestMemory, buffer);
@@ -55,6 +56,10 @@ constexpr char kTestMemory[] = "Read me from another process";
 class ProcessReaderChild final : public WinMultiprocess {
  public:
   ProcessReaderChild() : WinMultiprocess() {}
+
+  ProcessReaderChild(const ProcessReaderChild&) = delete;
+  ProcessReaderChild& operator=(const ProcessReaderChild&) = delete;
+
   ~ProcessReaderChild() {}
 
  private:
@@ -86,8 +91,6 @@ class ProcessReaderChild final : public WinMultiprocess {
     // the pipe.
     CheckedReadFileAtEOF(ReadPipeHandle());
   }
-
-  DISALLOW_COPY_AND_ASSIGN(ProcessReaderChild);
 };
 
 TEST(ProcessReaderWin, ChildBasic) {
@@ -115,6 +118,12 @@ TEST(ProcessReaderWin, SelfOneThread) {
 class ProcessReaderChildThreadSuspendCount final : public WinMultiprocess {
  public:
   ProcessReaderChildThreadSuspendCount() : WinMultiprocess() {}
+
+  ProcessReaderChildThreadSuspendCount(
+      const ProcessReaderChildThreadSuspendCount&) = delete;
+  ProcessReaderChildThreadSuspendCount& operator=(
+      const ProcessReaderChildThreadSuspendCount&) = delete;
+
   ~ProcessReaderChildThreadSuspendCount() {}
 
  private:
@@ -185,13 +194,11 @@ class ProcessReaderChildThreadSuspendCount final : public WinMultiprocess {
     // the pipe.
     CheckedReadFileAtEOF(ReadPipeHandle());
 
-    for (size_t i = 0; i < base::size(threads); ++i)
+    for (size_t i = 0; i < std::size(threads); ++i)
       done.Signal();
     for (auto& thread : threads)
       thread.Join();
   }
-
-  DISALLOW_COPY_AND_ASSIGN(ProcessReaderChildThreadSuspendCount);
 };
 
 TEST(ProcessReaderWin, ChildThreadSuspendCounts) {

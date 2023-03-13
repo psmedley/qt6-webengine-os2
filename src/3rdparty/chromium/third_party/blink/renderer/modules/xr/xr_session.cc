@@ -6,12 +6,11 @@
 
 #include <algorithm>
 #include <memory>
+#include <string>
 #include <utility>
 
-#include "base/containers/contains.h"
-#include "third_party/blink/renderer/core/inspector/console_message.h"
-
 #include "base/auto_reset.h"
+#include "base/containers/contains.h"
 #include "base/cxx17_backports.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/trace_event/trace_event.h"
@@ -28,6 +27,8 @@
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/probe/async_task_context.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer.h"
 #include "third_party/blink/renderer/core/resize_observer/resize_observer_entry.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
@@ -43,6 +44,7 @@
 #include "third_party/blink/renderer/modules/xr/xr_frame.h"
 #include "third_party/blink/renderer/modules/xr/xr_frame_provider.h"
 #include "third_party/blink/renderer/modules/xr/xr_hit_test_source.h"
+#include "third_party/blink/renderer/modules/xr/xr_image_tracking_result.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_source_event.h"
 #include "third_party/blink/renderer/modules/xr/xr_input_sources_change_event.h"
 #include "third_party/blink/renderer/modules/xr/xr_light_probe.h"
@@ -59,9 +61,9 @@
 #include "third_party/blink/renderer/modules/xr/xr_webgl_layer.h"
 #include "third_party/blink/renderer/platform/bindings/enumeration_base.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
-#include "third_party/blink/renderer/platform/geometry/float_point_3d.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/transforms/transformation_matrix.h"
+#include "ui/gfx/geometry/point3_f.h"
 
 namespace blink {
 
@@ -143,8 +145,7 @@ std::unique_ptr<TransformationMatrix> getPoseMatrix(
       device::Pose(pose->position.value_or(gfx::Point3F()),
                    pose->orientation.value_or(gfx::Quaternion()));
 
-  return std::make_unique<TransformationMatrix>(
-      device_pose.ToTransform().matrix());
+  return std::make_unique<TransformationMatrix>(device_pose.ToTransform());
 }
 
 absl::optional<device::mojom::blink::EntityTypeForHitTest>
@@ -230,6 +231,7 @@ constexpr char XRSession::kAnchorsFeatureNotSupported[];
 constexpr char XRSession::kPlanesFeatureNotSupported[];
 constexpr char XRSession::kDepthSensingFeatureNotSupported[];
 constexpr char XRSession::kRawCameraAccessFeatureNotSupported[];
+constexpr char XRSession::kCannotCancelHitTestSource[];
 
 class XRSession::XRSessionResizeObserverDelegate final
     : public ResizeObserver::Delegate {
@@ -293,6 +295,7 @@ void XRSession::MetricsReporter::ReportFeatureUsed(
     case XRSessionFeature::DEPTH:
     case XRSessionFeature::IMAGE_TRACKING:
     case XRSessionFeature::HAND_INPUT:
+    case XRSessionFeature::SECONDARY_VIEWS:
       // Not recording metrics for these features currently.
       break;
   }
@@ -356,7 +359,7 @@ XRSession::XRSession(
   UpdateVisibilityState();
 
   // Clamp to a reasonable min/max size for the default framebuffer scale.
-  default_framebuffer_scale_ =
+  recommended_framebuffer_scale_ =
       base::clamp(device_config->default_framebuffer_scale,
                   kMinDefaultFramebufferScale, kMaxDefaultFramebufferScale);
 
@@ -504,22 +507,18 @@ const String& XRSession::depthDataFormat(ExceptionState& exception_state) {
 
 void XRSession::UpdateViews(
     const Vector<device::mojom::blink::XRViewPtr>& views) {
-  bool updated = false;
+  if (views.IsEmpty()) {
+    // If there are no views provided for this frame, keep the views we
+    // currently have from the previous frame.
+    return;
+  }
 
   if (pending_views_.size() != views.size()) {
     pending_views_.resize(views.size());
-    updated = true;
   }
 
   for (wtf_size_t i = 0; i < views.size(); i++) {
-    if (!pending_views_[i] || !pending_views_[i]->Equals(*views[i])) {
       pending_views_[i] = views[i].Clone();
-      updated = true;
-    }
-  }
-
-  if (updated) {
-    update_views_next_frame_ = true;
   }
 }
 
@@ -822,15 +821,14 @@ ScriptPromise XRSession::requestHitTestSource(
 
   device::mojom::blink::XRRayPtr ray_mojo = device::mojom::blink::XRRay::New();
 
-  ray_mojo->origin = FloatPoint3D(origin_from_ray.MapPoint({0, 0, 0}));
+  ray_mojo->origin = origin_from_ray.MapPoint({0, 0, 0});
 
   // Zero out the translation of origin_from_ray matrix to correctly map a 3D
   // vector.
   origin_from_ray.Translate3d(-origin_from_ray.M41(), -origin_from_ray.M42(),
                               -origin_from_ray.M43());
 
-  auto direction = origin_from_ray.MapPoint({0, 0, -1});
-  ray_mojo->direction = {direction.X(), direction.Y(), direction.Z()};
+  ray_mojo->direction = origin_from_ray.MapPoint({0, 0, -1}).OffsetFromOrigin();
 
   auto* resolver = MakeGarbageCollected<ScriptPromiseResolver>(script_state);
   ScriptPromise promise = resolver->Promise();
@@ -1014,7 +1012,7 @@ void XRSession::OnEnvironmentProviderError() {
 void XRSession::ProcessAnchorsData(
     const device::mojom::blink::XRAnchorsData* tracked_anchors_data,
     double timestamp) {
-  TRACE_EVENT0("xr", __func__);
+  TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("xr.debug"), __func__);
 
   if (!tracked_anchors_data) {
     DVLOG(3) << __func__ << ": tracked_anchors_data is null";
@@ -1364,40 +1362,44 @@ void XRSession::HandleShutdown() {
 
 double XRSession::NativeFramebufferScale() const {
   if (immersive()) {
-    DCHECK(default_framebuffer_scale_);
+    DCHECK(recommended_framebuffer_scale_);
 
-    // Return the inverse of the default scale, since that's what we'll need to
-    // multiply the default size by to get back to the native size.
-    return 1.0 / default_framebuffer_scale_;
+    // Return the inverse of the recommended scale, since that's what we'll need
+    // to multiply the recommended size by to get back to the native size.
+    return 1.0 / recommended_framebuffer_scale_;
   }
   return 1.0;
 }
 
-DoubleSize XRSession::DefaultFramebufferSize() const {
+double XRSession::RecommendedFramebufferScale() const {
+  return recommended_framebuffer_scale_;
+}
+
+gfx::SizeF XRSession::RecommendedFramebufferSize() const {
   if (!immersive()) {
-    return OutputCanvasSize();
+    return gfx::SizeF(OutputCanvasSize());
   }
 
-  double scale = default_framebuffer_scale_;
-  double width = 0;
-  double height = 0;
+  float scale = recommended_framebuffer_scale_;
+  float width = 0;
+  float height = 0;
 
   // For the moment, concatenate all the views into a big strip.
   // Won't scale well for displays that use more than a stereo pair.
   for (const auto& view : pending_views_) {
     width += view->viewport.width();
-    height = std::max(height, static_cast<double>(view->viewport.height()));
+    height = std::max<float>(height, view->viewport.height());
   }
 
-  return DoubleSize(width * scale, height * scale);
+  return gfx::SizeF(width * scale, height * scale);
 }
 
-DoubleSize XRSession::OutputCanvasSize() const {
+gfx::Size XRSession::OutputCanvasSize() const {
   if (!render_state_->output_canvas()) {
-    return DoubleSize();
+    return gfx::Size();
   }
 
-  return DoubleSize(output_width_, output_height_);
+  return gfx::Size(output_width_, output_height_);
 }
 
 void XRSession::OnFocusChanged() {
@@ -1519,7 +1521,6 @@ void XRSession::ApplyPendingRenderState() {
   if (pending_render_state_.size() > 0) {
     prev_base_layer_ = render_state_->baseLayer();
     HTMLCanvasElement* prev_ouput_canvas = render_state_->output_canvas();
-    update_views_next_frame_ = true;
 
     // Loop through each pending render state and apply it to the active one.
     for (auto& init : pending_render_state_) {
@@ -1567,7 +1568,7 @@ void XRSession::ApplyPendingRenderState() {
 
 void XRSession::UpdatePresentationFrameState(
     double timestamp,
-    const device::mojom::blink::VRPosePtr& frame_pose,
+    const device::mojom::blink::VRPosePtr& mojo_from_viewer_pose,
     const device::mojom::blink::XRFrameDataPtr& frame_data,
     int16_t frame_id,
     bool emulated_position) {
@@ -1578,26 +1579,32 @@ void XRSession::UpdatePresentationFrameState(
   if (ended_)
     return;
 
-  // Apply dynamic viewport scaling if available.
-  if (frame_data && supports_viewport_scaling_) {
-    float gpu_load = frame_data->rendering_time_ratio;
-    absl::optional<double> scale = absl::nullopt;
-    if (gpu_load > 0.0f) {
-      if (!viewport_scaler_) {
-        // Lazily create an instance of the viewport scaler on first use.
-        viewport_scaler_ = std::make_unique<XRSessionViewportScaler>();
-      }
+  if (frame_data) {
+    // Views need to be updated first, since views() creates a new set of views.
+    UpdateViews(frame_data->views);
 
-      viewport_scaler_->UpdateRenderingTimeRatio(gpu_load);
-      scale = viewport_scaler_->Scale();
-      DVLOG(3) << __func__ << ": gpu_load=" << gpu_load << " scale=" << *scale;
-    }
-    for (XRViewData* view : views()) {
-      view->SetRecommendedViewportScale(scale);
+    // Apply dynamic viewport scaling if available.
+    if (supports_viewport_scaling_) {
+      float gpu_load = frame_data->rendering_time_ratio;
+      absl::optional<double> scale = absl::nullopt;
+      if (gpu_load > 0.0f) {
+        if (!viewport_scaler_) {
+          // Lazily create an instance of the viewport scaler on first use.
+          viewport_scaler_ = std::make_unique<XRSessionViewportScaler>();
+        }
+
+        viewport_scaler_->UpdateRenderingTimeRatio(gpu_load);
+        scale = viewport_scaler_->Scale();
+        DVLOG(3) << __func__ << ": gpu_load=" << gpu_load
+                 << " scale=" << *scale;
+      }
+      for (XRViewData* view : views()) {
+        view->SetRecommendedViewportScale(scale);
+      }
     }
   }
 
-  mojo_from_viewer_ = getPoseMatrix(frame_pose);
+  mojo_from_viewer_ = getPoseMatrix(mojo_from_viewer_pose);
   DVLOG(2) << __func__ << " : mojo_from_viewer_ valid? "
            << (mojo_from_viewer_ ? true : false);
 
@@ -1831,11 +1838,7 @@ void XRSession::OnFrame(
 
     XRFrame* presentation_frame = CreatePresentationFrame(true);
 
-    // Make sure that any frame-bounded changed to the views array take effect.
-    if (update_views_next_frame_) {
-      views_dirty_ = true;
-      update_views_next_frame_ = false;
-    }
+    views_updated_this_frame_ = false;
 
     // If the device has opted in, mark the viewports as modifiable
     // at the start of an animation frame:
@@ -1937,7 +1940,6 @@ void XRSession::UpdateCanvasDimensions(Element* element) {
     devicePixelRatio = window->GetFrame()->DevicePixelRatio();
   }
 
-  update_views_next_frame_ = true;
   output_width_ = element->OffsetWidth() * devicePixelRatio;
   output_height_ = element->OffsetHeight() * devicePixelRatio;
 
@@ -2212,24 +2214,48 @@ const HeapVector<Member<XRViewData>>& XRSession::views() {
   // always hold true, however, so the view configuration should ultimately come
   // from the backing service. See also XRWebGLLayer::UpdateViewports() which
   // assumes that the views are arranged as follows.
-  if (views_dirty_) {
+  if (!views_updated_this_frame_) {
     if (immersive()) {
       // In immersive mode the projection and view matrices must be aligned with
       // the device's physical optics.
+
+      // Views shouldn't be re-created on each frame because they contain
+      // viewport scaling information, such as requested viewport scales.
+      // However, if the number of views changed or if the order of the views
+      // changed, we should recreate the views since we aren't able to match
+      // the old views to the new views.
+      bool create_views = false;
       if (views_.size() != pending_views_.size()) {
         views_.clear();
         views_.resize(pending_views_.size());
+        create_views = true;
+
+        if (render_state_->baseLayer()) {
+          render_state_->baseLayer()->OnResize();
+        }
       }
 
-      for (wtf_size_t i = 0; i < pending_views_.size(); ++i) {
-        views_[i] = MakeGarbageCollected<XRViewData>(pending_views_[i],
-                                                     render_state_->depthNear(),
-                                                     render_state_->depthFar());
+      for (wtf_size_t i = 0; !create_views && i < pending_views_.size(); ++i) {
+        if (views_[i]->Eye() == pending_views_[i]->eye) {
+          views_[i]->UpdateView(pending_views_[i], render_state_->depthNear(),
+                                render_state_->depthFar());
+        } else {
+          create_views = true;
+        }
+      }
+
+      if (create_views) {
+        for (wtf_size_t i = 0; i < pending_views_.size(); ++i) {
+          views_[i] = MakeGarbageCollected<XRViewData>(
+              pending_views_[i], render_state_->depthNear(),
+              render_state_->depthFar());
+        }
       }
     } else {
       if (views_.IsEmpty()) {
         views_.emplace_back(MakeGarbageCollected<XRViewData>(
-            device::mojom::blink::XREye::kNone));
+            device::mojom::blink::XREye::kNone,
+            gfx::Rect(0, 0, output_width_, output_height_)));
       }
 
       float aspect = 1.0f;
@@ -2251,7 +2277,7 @@ const HeapVector<Member<XRViewData>>& XRSession::views() {
           render_state_->depthFar());
     }
 
-    views_dirty_ = false;
+    views_updated_this_frame_ = true;
   }
 
   return views_;

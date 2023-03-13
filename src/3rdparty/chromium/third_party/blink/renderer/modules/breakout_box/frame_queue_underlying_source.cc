@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/modules/breakout_box/frame_queue_underlying_source.h"
 
-#include "base/bind_post_task.h"
+#include "base/task/bind_post_task.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
@@ -108,11 +108,11 @@ ScriptPromise FrameQueueUnderlyingSource<NativeFrameType>::Start(
     if (!StartFrameDelivery()) {
       // There is only one way in which this can fail for now. Perhaps
       // implementations should return their own failure messages.
-      return ScriptPromise::RejectWithDOMException(
+      return ScriptPromise::Reject(
           script_state,
-          DOMException::Create("Invalid track",
-                               DOMException::GetErrorName(
-                                   DOMExceptionCode::kInvalidStateError)));
+          V8ThrowDOMException::CreateOrEmpty(
+              script_state->GetIsolate(), DOMExceptionCode::kInvalidStateError,
+              "Invalid track"));
     }
   }
 
@@ -131,7 +131,7 @@ ScriptPromise FrameQueueUnderlyingSource<NativeFrameType>::Cancel(
 template <typename NativeFrameType>
 bool FrameQueueUnderlyingSource<NativeFrameType>::HasPendingActivity() const {
   MutexLocker locker(mutex_);
-  return (num_pending_pulls_ > 0) && Controller();
+  return (num_pending_pulls_ > 0) && GetExecutionContext();
 }
 
 template <typename NativeFrameType>
@@ -154,7 +154,7 @@ void FrameQueueUnderlyingSource<NativeFrameType>::Close() {
     return;
 
   is_closed_ = true;
-  if (Controller()) {
+  if (GetExecutionContext()) {
     StopFrameDelivery();
     CloseController();
   }
@@ -266,18 +266,27 @@ double FrameQueueUnderlyingSource<NativeFrameType>::DesiredSizeForTesting()
 
 template <typename NativeFrameType>
 void FrameQueueUnderlyingSource<NativeFrameType>::TransferSource(
-    FrameQueueUnderlyingSource<NativeFrameType>* transferred_source) {
+    CrossThreadPersistent<FrameQueueUnderlyingSource<NativeFrameType>>
+        transferred_source) {
   DCHECK(realm_task_runner_->RunsTasksInCurrentSequence());
   MutexLocker locker(mutex_);
   DCHECK(!transferred_source_);
-  transferred_source_ = transferred_source;
+  transferred_source_ = std::move(transferred_source);
   CloseController();
   frame_queue_handle_.Invalidate();
 }
 
 template <typename NativeFrameType>
+void FrameQueueUnderlyingSource<NativeFrameType>::ClearTransferredSource() {
+  MutexLocker locker(mutex_);
+  transferred_source_.Clear();
+}
+
+template <typename NativeFrameType>
 void FrameQueueUnderlyingSource<NativeFrameType>::CloseController() {
   DCHECK(realm_task_runner_->RunsTasksInCurrentSequence());
+  // This can be called during stream construction while Controller() is still
+  // false.
   if (Controller())
     Controller()->Close();
 }

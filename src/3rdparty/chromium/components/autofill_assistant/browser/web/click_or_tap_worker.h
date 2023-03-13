@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/callback.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/action_strategy.pb.h"
 #include "components/autofill_assistant/browser/client_status.h"
@@ -31,7 +32,7 @@ class ClickOrTapWorker : public WebControllerWorker {
   using Callback = base::OnceCallback<void(const ClientStatus&)>;
 
   // Send a click or tap event to the the |elemsent|.
-  void Start(const ElementFinder::Result& element,
+  void Start(const ElementFinderResult& element,
              ClickType click_type,
              Callback callback);
 
@@ -52,7 +53,7 @@ class ClickOrTapWorker : public WebControllerWorker {
       const DevtoolsClient::ReplyStatus& reply_status,
       std::unique_ptr<input::DispatchTouchEventResult> result);
 
-  DevtoolsClient* const devtools_client_;
+  const raw_ptr<DevtoolsClient> devtools_client_;
   Callback callback_;
   ClickType click_type_;
   std::string node_frame_id_;

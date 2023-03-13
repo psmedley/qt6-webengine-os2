@@ -33,10 +33,13 @@ import type * as SDK from '../../../../core/sdk/sdk.js';
 import * as UI from '../../legacy.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 
+import type {WindowChangedWithPositionEvent} from './OverviewGrid.js';
 import {Events as OverviewGridEvents, OverviewGrid} from './OverviewGrid.js';
 import type {Calculator} from './TimelineGrid.js';
+import timelineOverviewInfoStyles from './timelineOverviewInfo.css.js';
 
-export class TimelineOverviewPane extends UI.Widget.VBox {
+export class TimelineOverviewPane extends Common.ObjectWrapper.eventMixin<EventTypes, typeof UI.Widget.VBox>(
+    UI.Widget.VBox) {
   private readonly overviewCalculator: TimelineOverviewCalculator;
   private readonly overviewGrid: OverviewGrid;
   private readonly cursorArea: HTMLElement;
@@ -65,7 +68,7 @@ export class TimelineOverviewPane extends UI.Widget.VBox {
     this.cursorArea.addEventListener('mouseleave', this.hideCursor.bind(this), true);
 
     this.overviewGrid.setResizeEnabled(false);
-    this.overviewGrid.addEventListener(OverviewGridEvents.WindowChanged, this.onWindowChanged, this);
+    this.overviewGrid.addEventListener(OverviewGridEvents.WindowChangedWithPosition, this.onWindowChanged, this);
     this.overviewGrid.setClickHandler(this.onClick.bind(this));
     this.overviewControls = [];
     this.markers = new Map();
@@ -91,7 +94,7 @@ export class TimelineOverviewPane extends UI.Widget.VBox {
     this.cursorPosition = mouseEvent.offsetX + target.offsetLeft;
     this.cursorElement.style.left = this.cursorPosition + 'px';
     this.cursorElement.style.visibility = 'visible';
-    this.overviewInfo.setContent(this.buildOverviewInfo());
+    void this.overviewInfo.setContent(this.buildOverviewInfo());
   }
 
   private async buildOverviewInfo(): Promise<DocumentFragment> {
@@ -150,7 +153,7 @@ export class TimelineOverviewPane extends UI.Widget.VBox {
   }
 
   scheduleUpdate(): void {
-    this.updateThrottler.schedule(async () => {
+    void this.updateThrottler.schedule(async () => {
       this.update();
     });
   }
@@ -208,7 +211,7 @@ export class TimelineOverviewPane extends UI.Widget.VBox {
     return this.overviewControls.some(control => control.onClick(event));
   }
 
-  private onWindowChanged(event: Common.EventTarget.EventTargetEvent): void {
+  private onWindowChanged(event: Common.EventTarget.EventTargetEvent<WindowChangedWithPositionEvent>): void {
     if (this.muteOnWindowChanged) {
       return;
     }
@@ -254,6 +257,15 @@ export class TimelineOverviewPane extends UI.Widget.VBox {
 export enum Events {
   WindowChanged = 'WindowChanged',
 }
+
+export interface WindowChangedEvent {
+  startTime: number;
+  endTime: number;
+}
+
+export type EventTypes = {
+  [Events.WindowChanged]: WindowChangedEvent,
+};
 
 export class TimelineOverviewCalculator implements Calculator {
   private minimumBoundaryInternal!: number;
@@ -376,8 +388,8 @@ export class TimelineOverviewBase extends UI.Widget.VBox implements TimelineOver
   reset(): void {
   }
 
-  overviewInfoPromise(_x: number): Promise<Element|null> {
-    return Promise.resolve((null as Element | null));
+  async overviewInfoPromise(_x: number): Promise<Element|null> {
+    return null;
   }
 
   setCalculator(calculator: TimelineOverviewCalculator): void {
@@ -415,7 +427,7 @@ export class OverviewInfo {
     this.visible = false;
     this.element = UI.Utils
                        .createShadowRootWithCoreStyles(this.glassPane.contentElement, {
-                         cssFile: 'ui/legacy/components/perf_ui/timelineOverviewInfo.css',
+                         cssFile: [timelineOverviewInfoStyles],
                          delegatesFocus: undefined,
                        })
                        .createChild('div', 'overview-info');

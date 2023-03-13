@@ -20,7 +20,6 @@
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/metrics/user_metrics.h"
-#include "base/task/post_task.h"
 #include "base/threading/scoped_blocking_call.h"
 #include "content/browser/android/java/gin_java_bridge_dispatcher_host.h"
 #include "content/browser/media/media_web_contents_observer.h"
@@ -36,6 +35,7 @@
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "third_party/blink/public/mojom/input/input_handler.mojom-blink.h"
 #include "ui/accessibility/ax_assistant_structure.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/accessibility/ax_tree_update.h"
@@ -323,7 +323,12 @@ ScopedJavaLocalRef<jobject> WebContentsAndroid::GetRenderFrameHostFromId(
 ScopedJavaLocalRef<jobjectArray> WebContentsAndroid::GetAllRenderFrameHosts(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) const {
-  std::vector<RenderFrameHost*> frames = web_contents_->GetAllFrames();
+  std::vector<RenderFrameHost*> frames;
+  web_contents_->ForEachRenderFrameHost(base::BindRepeating(
+      [](std::vector<RenderFrameHost*>* frames, RenderFrameHostImpl* rfh) {
+        frames->push_back(rfh);
+      },
+      &frames));
   ScopedJavaLocalRef<jobjectArray> jframes =
       Java_WebContentsImpl_createRenderFrameHostArray(env, frames.size());
   for (size_t i = 0; i < frames.size(); i++) {
@@ -351,10 +356,10 @@ bool WebContentsAndroid::IsLoading(JNIEnv* env,
   return web_contents_->IsLoading();
 }
 
-bool WebContentsAndroid::IsLoadingToDifferentDocument(
+bool WebContentsAndroid::ShouldShowLoadingUI(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) const {
-  return web_contents_->IsLoadingToDifferentDocument();
+  return web_contents_->ShouldShowLoadingUI();
 }
 
 void WebContentsAndroid::DispatchBeforeUnload(JNIEnv* env,
@@ -520,29 +525,32 @@ void WebContentsAndroid::ScrollFocusedEditableNodeIntoView(
   auto* input_handler = web_contents_->GetFocusedFrameWidgetInputHandler();
   if (!input_handler)
     return;
-  RenderFrameHostImpl* rfh = web_contents_->GetMainFrame();
   bool should_overlay_content =
-      rfh && rfh->ShouldVirtualKeyboardOverlayContent();
+      web_contents_->GetPrimaryPage().virtual_keyboard_overlays_content();
   if (!should_overlay_content)
     input_handler->ScrollFocusedEditableNodeIntoRect(gfx::Rect());
 }
 
-void WebContentsAndroid::SelectWordAroundCaretAck(bool did_select,
-                                                  int start_adjust,
-                                                  int end_adjust) {
+void WebContentsAndroid::SelectAroundCaretAck(
+    blink::mojom::SelectAroundCaretResultPtr result) {
   RenderWidgetHostViewAndroid* rwhva = GetRenderWidgetHostViewAndroid();
-  if (rwhva)
-    rwhva->SelectWordAroundCaretAck(did_select, start_adjust, end_adjust);
+  if (rwhva) {
+    rwhva->SelectAroundCaretAck(std::move(result));
+  }
 }
 
-void WebContentsAndroid::SelectWordAroundCaret(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
+void WebContentsAndroid::SelectAroundCaret(JNIEnv* env,
+                                           const JavaParamRef<jobject>& obj,
+                                           jint granularity,
+                                           jboolean should_show_handle,
+                                           jboolean should_show_context_menu) {
   auto* input_handler = web_contents_->GetFocusedFrameWidgetInputHandler();
   if (!input_handler)
     return;
-  input_handler->SelectWordAroundCaret(
-      base::BindOnce(&WebContentsAndroid::SelectWordAroundCaretAck,
+  input_handler->SelectAroundCaret(
+      static_cast<blink::mojom::SelectionGranularity>(granularity),
+      should_show_handle, should_show_context_menu,
+      base::BindOnce(&WebContentsAndroid::SelectAroundCaretAck,
                      weak_factory_.GetWeakPtr()));
 }
 
@@ -557,8 +565,8 @@ void WebContentsAndroid::AdjustSelectionByCharacterOffset(
 }
 
 bool WebContentsAndroid::InitializeRenderFrameForJavaScript() {
-  if (!web_contents_->GetFrameTree()
-           ->root()
+  if (!web_contents_->GetPrimaryFrameTree()
+           .root()
            ->render_manager()
            ->InitializeMainRenderFrameForImmediateUse()) {
     LOG(ERROR) << "Failed to initialize RenderFrame to evaluate javascript";
@@ -729,7 +737,7 @@ void WebContentsAndroid::RequestAccessibilitySnapshot(
           ui::AXMode(ui::kAXModeComplete.mode() | ui::AXMode::kHTMLMetadata),
           /* exclude_offscreen= */ false,
           /* max_nodes= */ 5000,
-          /* timeout= */ base::TimeDelta::FromSeconds(2));
+          /* timeout= */ base::Seconds(2));
 }
 
 ScopedJavaLocalRef<jstring> WebContentsAndroid::GetEncoding(
@@ -765,7 +773,7 @@ int WebContentsAndroid::DownloadImage(
     jint max_bitmap_size,
     jboolean bypass_cache,
     const base::android::JavaParamRef<jobject>& jcallback) {
-  const uint32_t preferred_size = 0;
+  const gfx::Size preferred_size;
   return web_contents_->DownloadImage(
       *url::GURLAndroid::ToNativeGURL(env, jurl), is_fav_icon, preferred_size,
       max_bitmap_size, bypass_cache,
@@ -916,7 +924,7 @@ void WebContentsAndroid::SetDisplayCutoutSafeArea(
     int bottom,
     int right) {
   web_contents()->SetDisplayCutoutSafeArea(
-      gfx::Insets(top, left, bottom, right));
+      gfx::Insets::TLBR(top, left, bottom, right));
 }
 
 void WebContentsAndroid::NotifyRendererPreferenceUpdate(

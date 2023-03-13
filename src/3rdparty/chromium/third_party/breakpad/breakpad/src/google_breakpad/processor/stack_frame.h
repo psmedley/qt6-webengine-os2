@@ -50,8 +50,12 @@ struct StackFrame {
     FRAME_TRUST_CFI_SCAN,  // Found while scanning stack using call frame info
     FRAME_TRUST_FP,        // Derived from frame pointer
     FRAME_TRUST_CFI,       // Derived from call frame info
-    FRAME_TRUST_PREWALKED, // Explicitly provided by some external stack walker.
-    FRAME_TRUST_CONTEXT    // Given as instruction pointer in a context
+    // Explicitly provided by some external stack walker.
+    FRAME_TRUST_PREWALKED,
+    FRAME_TRUST_CONTEXT,   // Given as instruction pointer in a context
+    FRAME_TRUST_INLINE,    // Found by inline records in symbol files.
+    // Derived from leaf function by simulating a return.
+    FRAME_TRUST_LEAF,
   };
 
   StackFrame()
@@ -60,9 +64,10 @@ struct StackFrame {
         function_name(),
         function_base(),
         source_file_name(),
-        source_line(),
+        source_line(0),
         source_line_base(),
-        trust(FRAME_TRUST_NONE) {}
+        trust(FRAME_TRUST_NONE),
+        is_multiple(false) {}
   virtual ~StackFrame() {}
 
   // Return a string describing how this stack frame was found
@@ -81,7 +86,11 @@ struct StackFrame {
         return "previous frame's frame pointer";
       case StackFrame::FRAME_TRUST_SCAN:
         return "stack scanning";
-      default:
+      case StackFrame::FRAME_TRUST_INLINE:
+        return "inline record";
+      case StackFrame::FRAME_TRUST_LEAF:
+        return "simulating a return from leaf function";
+    default:
         return "unknown";
     }
   }
@@ -137,6 +146,12 @@ struct StackFrame {
   // Amount of trust the stack walker has in the instruction pointer
   // of this frame.
   FrameTrust trust;
+
+  // True if the frame corresponds to multiple functions, for example as the
+  // result of identical code folding by the linker. In that case the function
+  // name, filename, etc. information above represents the state of an arbitrary
+  // one of these functions.
+  bool is_multiple;
 };
 
 }  // namespace google_breakpad

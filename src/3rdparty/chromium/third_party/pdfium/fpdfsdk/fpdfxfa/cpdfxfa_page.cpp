@@ -174,25 +174,25 @@ float CPDFXFA_Page::GetPageHeight() const {
   return 0.0f;
 }
 
-Optional<CFX_PointF> CPDFXFA_Page::DeviceToPage(
+absl::optional<CFX_PointF> CPDFXFA_Page::DeviceToPage(
     const FX_RECT& rect,
     int rotate,
     const CFX_PointF& device_point) const {
   CXFA_FFPageView* pPageView = GetXFAPageView();
   if (!m_pPDFPage && !pPageView)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   CFX_Matrix page2device = GetDisplayMatrix(rect, rotate);
   return page2device.GetInverse().Transform(device_point);
 }
 
-Optional<CFX_PointF> CPDFXFA_Page::PageToDevice(
+absl::optional<CFX_PointF> CPDFXFA_Page::PageToDevice(
     const FX_RECT& rect,
     int rotate,
     const CFX_PointF& page_point) const {
   CXFA_FFPageView* pPageView = GetXFAPageView();
   if (!m_pPDFPage && !pPageView)
-    return pdfium::nullopt;
+    return absl::nullopt;
 
   CFX_Matrix page2device = GetDisplayMatrix(rect, rotate);
   return page2device.Transform(page_point);
@@ -227,7 +227,7 @@ CPDFSDK_Annot* CPDFXFA_Page::GetNextXFAAnnot(CPDFSDK_Annot* pSDKAnnot) const {
   if (!pWidgetIterator)
     return nullptr;
 
-  return pSDKAnnot->GetPageView()->GetAnnotByXFAWidget(
+  return pSDKAnnot->GetPageView()->GetAnnotForFFWidget(
       pWidgetIterator->MoveToNext());
 }
 
@@ -237,7 +237,7 @@ CPDFSDK_Annot* CPDFXFA_Page::GetPrevXFAAnnot(CPDFSDK_Annot* pSDKAnnot) const {
   if (!pWidgetIterator)
     return nullptr;
 
-  return pSDKAnnot->GetPageView()->GetAnnotByXFAWidget(
+  return pSDKAnnot->GetPageView()->GetAnnotForFFWidget(
       pWidgetIterator->MoveToPrevious());
 }
 
@@ -248,7 +248,7 @@ CPDFSDK_Annot* CPDFXFA_Page::GetFirstXFAAnnot(
   if (!pWidgetIterator)
     return nullptr;
 
-  return page_view->GetAnnotByXFAWidget(pWidgetIterator->MoveToFirst());
+  return page_view->GetAnnotForFFWidget(pWidgetIterator->MoveToFirst());
 }
 
 CPDFSDK_Annot* CPDFXFA_Page::GetLastXFAAnnot(
@@ -258,7 +258,7 @@ CPDFSDK_Annot* CPDFXFA_Page::GetLastXFAAnnot(
   if (!pWidgetIterator)
     return nullptr;
 
-  return page_view->GetAnnotByXFAWidget(pWidgetIterator->MoveToLast());
+  return page_view->GetAnnotForFFWidget(pWidgetIterator->MoveToLast());
 }
 
 int CPDFXFA_Page::HasFormFieldAtPoint(const CFX_PointF& point) const {
@@ -304,7 +304,7 @@ void CPDFXFA_Page::DrawFocusAnnot(CFX_RenderDevice* pDevice,
       xfaView->CreateGCedFormWidgetIterator(Mask<XFA_WidgetStatus>{
           XFA_WidgetStatus::kVisible, XFA_WidgetStatus::kViewable});
 
-  while (1) {
+  while (true) {
     CXFA_FFWidget* pWidget = pWidgetIterator->MoveToNext();
     if (!pWidget)
       break;

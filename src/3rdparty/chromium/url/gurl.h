@@ -13,6 +13,7 @@
 
 #include "base/component_export.h"
 #include "base/debug/alias.h"
+#include "base/debug/crash_logging.h"
 #include "base/strings/string_piece.h"
 #include "third_party/perfetto/include/perfetto/tracing/traced_value_forward.h"
 #include "url/third_party/mozilla/url_parse.h"
@@ -163,10 +164,10 @@ class COMPONENT_EXPORT(URL) GURL {
   // It is an error to replace components of an invalid URL. The result will
   // be the empty URL.
   //
-  // Note that we use the more general url::Replacements type to give
-  // callers extra flexibility rather than our override.
-  GURL ReplaceComponents(const url::Replacements<char>& replacements) const;
-  GURL ReplaceComponents(const url::Replacements<char16_t>& replacements) const;
+  // Note that this intentionally disallows direct use of url::Replacements,
+  // which is harder to use correctly.
+  GURL ReplaceComponents(const Replacements& replacements) const;
+  GURL ReplaceComponents(const ReplacementsW& replacements) const;
 
   // A helper function that is equivalent to replacing the path with a slash
   // and clearing out everything after that. We sometimes need to know just the
@@ -197,7 +198,13 @@ class COMPONENT_EXPORT(URL) GURL {
   //
   // It is an error to get the origin of an invalid URL. The result
   // will be the empty URL.
-  GURL GetOrigin() const;
+  //
+  // WARNING: Please avoid converting urls into origins if at all possible!
+  // //docs/security/origin-vs-url.md is a list of gotchas that can result. Such
+  // conversions will likely return a wrong result for about:blank and/or
+  // in the presence of iframe.sandbox attribute. Prefer to get origins directly
+  // from the source (e.g. RenderFrameHost::GetLastCommittedOrigin).
+  GURL DeprecatedGetOriginAsURL() const;
 
   // A helper function to return a GURL stripped from the elements that are not
   // supposed to be sent as HTTP referrer: username, password and ref fragment.
@@ -261,6 +268,10 @@ class COMPONENT_EXPORT(URL) GURL {
   bool SchemeIsBlob() const {
     return SchemeIs(url::kBlobScheme);
   }
+
+  // Returns true if the scheme is a local scheme, as defined in Fetch:
+  // https://fetch.spec.whatwg.org/#local-scheme
+  bool SchemeIsLocal() const;
 
   // For most URLs, the "content" is everything after the scheme (skipping the
   // scheme delimiting colon) and before the fragment (skipping the fragment
@@ -471,7 +482,7 @@ class COMPONENT_EXPORT(URL) GURL {
     return base::StringPiece(&spec_[comp.begin], comp.len);
   }
 
-  void ProcessFileOrFileSystemURLAfterReplaceComponents(GURL& url) const;
+  void ProcessFileSystemURLAfterReplaceComponents();
 
   // The actual text of the URL, in canonical ASCII form.
   std::string spec_;
@@ -512,5 +523,21 @@ bool operator!=(const base::StringPiece& spec, const GURL& x);
 // preserved in crash dumps.
 #define DEBUG_ALIAS_FOR_GURL(var_name, url) \
   DEBUG_ALIAS_FOR_CSTR(var_name, (url).possibly_invalid_spec().c_str(), 128)
+
+namespace url::debug {
+
+class COMPONENT_EXPORT(URL) ScopedUrlCrashKey {
+ public:
+  ScopedUrlCrashKey(base::debug::CrashKeyString* crash_key, const GURL& value);
+  ~ScopedUrlCrashKey();
+
+  ScopedUrlCrashKey(const ScopedUrlCrashKey&) = delete;
+  ScopedUrlCrashKey& operator=(const ScopedUrlCrashKey&) = delete;
+
+ private:
+  base::debug::ScopedCrashKeyString scoped_string_value_;
+};
+
+}  // namespace url::debug
 
 #endif  // URL_GURL_H_

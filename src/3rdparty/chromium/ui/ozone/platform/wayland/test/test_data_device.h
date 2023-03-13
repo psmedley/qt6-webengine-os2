@@ -9,7 +9,6 @@
 
 #include <cstdint>
 
-#include "base/macros.h"
 #include "ui/ozone/platform/wayland/test/mock_surface.h"
 #include "ui/ozone/platform/wayland/test/test_selection_device_manager.h"
 
@@ -22,6 +21,7 @@ extern const struct wl_data_device_interface kTestDataDeviceImpl;
 
 class TestDataOffer;
 class TestDataSource;
+class TestDataDeviceManager;
 
 class TestDataDevice : public TestSelectionDevice {
  public:
@@ -31,7 +31,13 @@ class TestDataDevice : public TestSelectionDevice {
                            uint32_t serial) = 0;
   };
 
-  TestDataDevice(wl_resource* resource, wl_client* client);
+  TestDataDevice(wl_resource* resource,
+                 wl_client* client,
+                 TestDataDeviceManager* manager);
+
+  TestDataDevice(const TestDataDevice&) = delete;
+  TestDataDevice& operator=(const TestDataDevice&) = delete;
+
   ~TestDataDevice() override;
 
   void set_drag_delegate(DragDelegate* delegate) { drag_delegate_ = delegate; }
@@ -57,7 +63,7 @@ class TestDataDevice : public TestSelectionDevice {
   wl_client* client_ = nullptr;
   DragDelegate* drag_delegate_ = nullptr;
 
-  DISALLOW_COPY_AND_ASSIGN(TestDataDevice);
+  TestDataDeviceManager* const manager_;
 };
 
 }  // namespace wl

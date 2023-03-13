@@ -8,11 +8,13 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_backdrop.h"
 #include "ash/public/cpp/window_properties.h"
+#include "ash/services/multidevice_setup/multidevice_setup_service.h"
+#include "ash/services/multidevice_setup/public/cpp/url_provider.h"
 #include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/system/sys_info.h"
 #include "chrome/browser/ash/login/ui/oobe_dialog_size_utils.h"
-#include "chrome/browser/chromeos/multidevice_setup/multidevice_setup_service_factory.h"
+#include "chrome/browser/ash/multidevice_setup/multidevice_setup_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -25,9 +27,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/multidevice_setup_resources.h"
 #include "chrome/grit/multidevice_setup_resources_map.h"
-#include "chromeos/grit/chromeos_resources.h"
-#include "chromeos/services/multidevice_setup/multidevice_setup_service.h"
-#include "chromeos/services/multidevice_setup/public/cpp/url_provider.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -129,7 +128,7 @@ MultiDeviceSetupDialogUI::MultiDeviceSetupDialogUI(content::WebUI* web_ui)
 MultiDeviceSetupDialogUI::~MultiDeviceSetupDialogUI() = default;
 
 void MultiDeviceSetupDialogUI::BindInterface(
-    mojo::PendingReceiver<chromeos::multidevice_setup::mojom::MultiDeviceSetup>
+    mojo::PendingReceiver<ash::multidevice_setup::mojom::MultiDeviceSetup>
         receiver) {
   MultiDeviceSetupService* service =
       MultiDeviceSetupServiceFactory::GetForProfile(

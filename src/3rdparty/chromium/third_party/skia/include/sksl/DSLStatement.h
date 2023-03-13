@@ -8,19 +8,16 @@
 #ifndef SKSL_DSL_STATEMENT
 #define SKSL_DSL_STATEMENT
 
-#include "include/core/SkString.h"
 #include "include/core/SkTypes.h"
 #include "include/private/SkSLStatement.h"
-#include "include/sksl/DSLErrorHandling.h"
 
 #include <memory>
-
-class GrGLSLShaderBuilder;
+#include <utility>
 
 namespace SkSL {
 
 class Expression;
-class Statement;
+class Position;
 
 namespace dsl {
 
@@ -28,7 +25,6 @@ class DSLBlock;
 class DSLExpression;
 class DSLPossibleExpression;
 class DSLPossibleStatement;
-class DSLVar;
 
 class DSLStatement {
 public:
@@ -36,31 +32,31 @@ public:
 
     DSLStatement(DSLExpression expr);
 
-    DSLStatement(DSLPossibleExpression expr, PositionInfo pos = PositionInfo::Capture());
+    DSLStatement(DSLPossibleExpression expr, Position pos = {});
 
-    DSLStatement(DSLPossibleStatement stmt, PositionInfo pos = PositionInfo::Capture());
+    DSLStatement(DSLPossibleStatement stmt, Position pos = {});
 
     DSLStatement(DSLBlock block);
 
     DSLStatement(DSLStatement&&) = default;
 
-    ~DSLStatement();
-
-    DSLStatement& operator=(DSLStatement&& other) = default;
-
-    bool valid() { return fStatement != nullptr; }
-
-    std::unique_ptr<SkSL::Statement> release() {
-        SkASSERT(this->valid());
-        return std::move(fStatement);
-    }
-
-private:
     DSLStatement(std::unique_ptr<SkSL::Statement> stmt);
 
     DSLStatement(std::unique_ptr<SkSL::Expression> expr);
 
-    std::unique_ptr<SkSL::Statement> releaseIfValid() {
+    ~DSLStatement();
+
+    DSLStatement& operator=(DSLStatement&& other) = default;
+
+    bool hasValue() { return fStatement != nullptr; }
+
+    std::unique_ptr<SkSL::Statement> release() {
+        SkASSERT(this->hasValue());
+        return std::move(fStatement);
+    }
+
+private:
+    std::unique_ptr<SkSL::Statement> releaseIfPossible() {
         return std::move(fStatement);
     }
 
@@ -76,11 +72,11 @@ private:
 
 /**
  * Represents a Statement which may have failed and/or have pending errors to report. Converting a
- * PossibleStatement into a Statement requires PositionInfo so that any pending errors can be
+ * PossibleStatement into a Statement requires a Position so that any pending errors can be
  * reported at the correct position.
  *
  * PossibleStatement is used instead of Statement in situations where it is not possible to capture
- * the PositionInfo at the time of Statement construction.
+ * the Position at the time of Statement construction.
  */
 class DSLPossibleStatement {
 public:
@@ -90,7 +86,7 @@ public:
 
     ~DSLPossibleStatement();
 
-    bool valid() { return fStatement != nullptr; }
+    bool hasValue() { return fStatement != nullptr; }
 
     std::unique_ptr<SkSL::Statement> release() {
         return DSLStatement(std::move(*this)).release();

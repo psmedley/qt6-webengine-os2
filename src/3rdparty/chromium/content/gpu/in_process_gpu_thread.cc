@@ -5,11 +5,13 @@
 #include "content/gpu/in_process_gpu_thread.h"
 
 #include "base/command_line.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/config/gpu_preferences.h"
@@ -20,8 +22,9 @@
 #include "media/gpu/vaapi/vaapi_wrapper.h"
 #endif
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "base/android/jni_android.h"
+#include "content/common/android/cpu_affinity_setter.h"
 #endif
 
 namespace content {
@@ -41,7 +44,7 @@ InProcessGpuThread::~InProcessGpuThread() {
 void InProcessGpuThread::Init() {
   base::ThreadPriority io_thread_priority = base::ThreadPriority::NORMAL;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Call AttachCurrentThreadWithName, before any other AttachCurrentThread()
   // calls. The latter causes Java VM to assign Thread-??? to the thread name.
   // Please note calls to AttachCurrentThreadWithName after AttachCurrentThread
@@ -49,6 +52,12 @@ void InProcessGpuThread::Init() {
   base::android::AttachCurrentThreadWithName(thread_name());
   // Up the priority of the |io_thread_| on Android.
   io_thread_priority = base::ThreadPriority::DISPLAY;
+
+  if (base::GetFieldTrialParamByFeatureAsBool(
+          features::kBigLittleScheduling,
+          features::kBigLittleSchedulingGpuMainBigParam, false)) {
+    SetCpuAffinityForCurrentThread(base::CpuAffinityMode::kBigCoresOnly);
+  }
 #endif
 
   gpu_process_ = new GpuProcess(io_thread_priority);
@@ -87,7 +96,7 @@ public:
     Controller(std::unique_ptr<base::Thread> thread) : thread_(std::move(thread))
     {
         base::Thread::Options options;
-#if (defined(OS_WIN) || defined(OS_MAC)) && !defined(TOOLKIT_QT)
+#if (BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)) && !defined(TOOLKIT_QT)
         // WGL needs to create its own window and pump messages on it.
         options.message_loop_type = base::MessagePumpType::UI;
 #endif

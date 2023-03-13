@@ -2,19 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/* eslint-disable rulesdir/no_underscored_properties */
+import type * as Platform from '../../core/platform/platform.js';
 
 import type {TabbedPane} from './TabbedPane.js';
 import type {ToolbarItem, ToolbarMenuButton} from './Toolbar.js';
 import {ViewManager} from './ViewManager.js';
 import type {Widget} from './Widget.js';
 import {VBox} from './Widget.js';
+
 export interface View {
   viewId(): string;
 
-  title(): string;
+  title(): Platform.UIString.LocalizedString;
 
   isCloseable(): boolean;
+
+  isPreviewFeature(): boolean;
 
   isTransient(): boolean;
 
@@ -26,18 +29,21 @@ export interface View {
 }
 
 export class SimpleView extends VBox implements View {
-  _title: string;
-  constructor(title: string, isWebComponent?: boolean) {
+  readonly #title: Platform.UIString.LocalizedString;
+  readonly #viewId: string;
+
+  constructor(title: Platform.UIString.LocalizedString, isWebComponent?: boolean, viewId?: string) {
     super(isWebComponent);
-    this._title = title;
+    this.#title = title;
+    this.#viewId = viewId ?? title;
   }
 
   viewId(): string {
-    return this._title;
+    return this.#viewId;
   }
 
-  title(): string {
-    return this._title;
+  title(): Platform.UIString.LocalizedString {
+    return this.#title;
   }
 
   isCloseable(): boolean {
@@ -53,7 +59,7 @@ export class SimpleView extends VBox implements View {
   }
 
   widget(): Promise<Widget> {
-    return (Promise.resolve(this) as Promise<Widget>);
+    return Promise.resolve(this);
   }
 
   revealView(): Promise<void> {
@@ -61,6 +67,10 @@ export class SimpleView extends VBox implements View {
   }
 
   disposeView(): void {
+  }
+
+  isPreviewFeature(): boolean {
+    return false;
   }
 }
 

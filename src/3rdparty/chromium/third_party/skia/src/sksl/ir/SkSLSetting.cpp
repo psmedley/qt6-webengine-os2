@@ -5,8 +5,11 @@
  * found in the LICENSE file.
  */
 
-#include "src/sksl/SkSLIRGenerator.h"
 #include "src/sksl/ir/SkSLSetting.h"
+
+#include "include/sksl/SkSLErrorReporter.h"
+#include "src/sksl/SkSLProgramSettings.h"
+#include "src/sksl/ir/SkSLLiteral.h"
 #include "src/sksl/ir/SkSLVariableReference.h"
 
 namespace SkSL {
@@ -18,20 +21,20 @@ class CapsLookupMethod {
 public:
     virtual ~CapsLookupMethod() {}
     virtual const Type* type(const Context& context) const = 0;
-    virtual std::unique_ptr<Expression> value(const Context& context) const = 0;
+    virtual std::unique_ptr<Expression> value(const Context& context, Position pos) const = 0;
 };
 
 class BoolCapsLookup : public CapsLookupMethod {
 public:
-    using CapsFn = bool (ShaderCapsClass::*)() const;
+    using CapsFn = bool (ShaderCaps::*)() const;
 
     BoolCapsLookup(const CapsFn& fn) : fGetCap(fn) {}
 
     const Type* type(const Context& context) const override {
         return context.fTypes.fBool.get();
     }
-    std::unique_ptr<Expression> value(const Context& context) const override {
-        return BoolLiteral::Make(context, /*offset=*/-1, (context.fCaps.*fGetCap)());
+    std::unique_ptr<Expression> value(const Context& context, Position pos) const override {
+        return Literal::MakeBool(context, pos, (context.fCaps.*fGetCap)());
     }
 
 private:
@@ -40,15 +43,15 @@ private:
 
 class IntCapsLookup : public CapsLookupMethod {
 public:
-    using CapsFn = int (ShaderCapsClass::*)() const;
+    using CapsFn = int (ShaderCaps::*)() const;
 
     IntCapsLookup(const CapsFn& fn) : fGetCap(fn) {}
 
     const Type* type(const Context& context) const override {
         return context.fTypes.fInt.get();
     }
-    std::unique_ptr<Expression> value(const Context& context) const override {
-        return IntLiteral::Make(context, /*offset=*/-1, (context.fCaps.*fGetCap)());
+    std::unique_ptr<Expression> value(const Context& context, Position pos) const override {
+        return Literal::MakeInt(context, pos, (context.fCaps.*fGetCap)());
     }
 
 private:
@@ -61,23 +64,23 @@ public:
 
     CapsLookupTable(std::initializer_list<Pair> capsLookups) {
         for (auto& entry : capsLookups) {
-            fMap[entry.first] = std::unique_ptr<CapsLookupMethod>(entry.second);
+            fMap.set(entry.first, std::unique_ptr<CapsLookupMethod>(entry.second));
         }
     }
 
-    const CapsLookupMethod* lookup(skstd::string_view name) const {
-        auto iter = fMap.find(name);
-        return (iter != fMap.end()) ? iter->second.get() : nullptr;
+    const CapsLookupMethod* lookup(std::string_view name) const {
+        std::unique_ptr<CapsLookupMethod>* iter = fMap.find(name);
+        return iter ? iter->get() : nullptr;
     }
 
 private:
-    std::unordered_map<skstd::string_view, std::unique_ptr<CapsLookupMethod>> fMap;
+    SkTHashMap<std::string_view, std::unique_ptr<CapsLookupMethod>> fMap;
 };
 
 static const CapsLookupTable& caps_lookup_table() {
-    // Create a lookup table that converts strings into the equivalent ShaderCapsClass methods.
+    // Create a lookup table that converts strings into the equivalent ShaderCaps methods.
     static CapsLookupTable* sCapsLookupTable = new CapsLookupTable({
-    #define CAP(T, name) CapsLookupTable::Pair{#name, new T##CapsLookup{&ShaderCapsClass::name}}
+    #define CAP(T, name) CapsLookupTable::Pair{#name, new T##CapsLookup{&ShaderCaps::name}}
         CAP(Bool, fbFetchSupport),
         CAP(Bool, fbFetchNeedsCustomOutput),
         CAP(Bool, flatInterpolationSupport),
@@ -87,7 +90,6 @@ static const CapsLookupTable& caps_lookup_table() {
         CAP(Bool, mustDeclareFragmentShaderOutput),
         CAP(Bool, mustDoOpBetweenFloorAndAbs),
         CAP(Bool, mustGuardDivisionEvenAfterExplicitZeroCheck),
-        CAP(Bool, inBlendModesFailRandomlyForAllZeroVec),
         CAP(Bool, atan2ImplementedAsAtanYOverX),
         CAP(Bool, canUseAnyFunctionInShader),
         CAP(Bool, floatIs32Bits),
@@ -102,37 +104,37 @@ static const CapsLookupTable& caps_lookup_table() {
 
 }  // namespace
 
-static const Type* get_type(const Context& context, int offset, skstd::string_view name) {
+static const Type* get_type(const Context& context, Position pos, std::string_view name) {
     if (const CapsLookupMethod* caps = caps_lookup_table().lookup(name)) {
         return caps->type(context);
     }
 
-    context.errors().error(offset, "unknown capability flag '" + name + "'");
+    context.fErrors->error(pos, "unknown capability flag '" + std::string(name) + "'");
     return nullptr;
 }
 
-static std::unique_ptr<Expression> get_value(const Context& context, int offset,
-                                             const skstd::string_view& name) {
+static std::unique_ptr<Expression> get_value(const Context& context, Position pos,
+                                             const std::string_view& name) {
     if (const CapsLookupMethod* caps = caps_lookup_table().lookup(name)) {
-        return caps->value(context);
+        return caps->value(context, pos);
     }
 
-    context.errors().error(offset, "unknown capability flag '" + name + "'");
+    context.fErrors->error(pos, "unknown capability flag '" + std::string(name) + "'");
     return nullptr;
 }
 
-std::unique_ptr<Expression> Setting::Convert(const Context& context, int offset,
-                                             const skstd::string_view& name) {
+std::unique_ptr<Expression> Setting::Convert(const Context& context, Position pos,
+                                             const std::string_view& name) {
     SkASSERT(context.fConfig);
 
     if (context.fConfig->fSettings.fReplaceSettings) {
         // Insert the settings value directly into the IR.
-        return get_value(context, offset, name);
+        return get_value(context, pos, name);
     }
 
     // Generate a Setting IRNode.
-    const Type* type = get_type(context, offset, name);
-    return type ? std::make_unique<Setting>(offset, name, type) : nullptr;
+    const Type* type = get_type(context, pos, name);
+    return type ? std::make_unique<Setting>(pos, name, type) : nullptr;
 }
 
 }  // namespace SkSL

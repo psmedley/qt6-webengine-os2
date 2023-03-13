@@ -35,9 +35,9 @@ TfLiteStatus SplitOpBuilder::PopulateSubGraph(const TfLiteIntArray* inputs,
   const int axis_tensor_id = inputs->data[0];
   const auto& axis = context->tensors[axis_tensor_id];
   if (axis.allocation_type != kTfLiteMmapRo) {
-    context->ReportError(context,
-                         "Axis tensor doesn't have correct allocation type: %s",
-                         axis.name);
+    TF_LITE_KERNEL_LOG(context,
+                       "Axis tensor doesn't have correct allocation type: %s",
+                       axis.name);
     return kTfLiteError;
   }
   // We pad Hexagon tensor dimensions with 1 if dims.size < 4.
@@ -53,14 +53,7 @@ TfLiteStatus SplitOpBuilder::PopulateSubGraph(const TfLiteIntArray* inputs,
 
   // Input data tensor & min/max.
   AddInput(graph_builder_->GetHexagonTensorId(input_tensor_id));
-  TF_LITE_ENSURE_STATUS(
-      ComputeMinAndMaxQuantValues(input_tensor, &input_min_, &input_max_));
-  auto* input_min_const = graph_builder_->AddConstNodeWithData(
-      kScalarShape, reinterpret_cast<char*>(&input_min_), sizeof(input_min_));
-  auto* input_max_const = graph_builder_->AddConstNodeWithData(
-      kScalarShape, reinterpret_cast<char*>(&input_max_), sizeof(input_max_));
-  AddInput(TensorID(input_min_const->GetID(), 0));
-  AddInput(TensorID(input_max_const->GetID(), 0));
+  TF_LITE_ENSURE_STATUS(ComputeAndAddMinAndMax(context, input_tensor));
 
   // Output data tensors.
   for (int i = 0; i < outputs->size; ++i) {

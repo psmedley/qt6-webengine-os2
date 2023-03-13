@@ -19,6 +19,7 @@
 
 #include <cinttypes>
 
+#include "perfetto/ext/base/string_utils.h"
 #include "src/trace_processor/importers/common/track_tracker.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
@@ -35,14 +36,49 @@ namespace {
 const char* StringifyCounter(int32_t counter) {
   using protos::pbzero::PerfEvents;
   switch (counter) {
-    case (PerfEvents::SW_CPU_CLOCK):
+    // software:
+    case PerfEvents::SW_CPU_CLOCK:
       return "cpu-clock";
-    case (PerfEvents::SW_PAGE_FAULTS):
+    case PerfEvents::SW_PAGE_FAULTS:
       return "page-faults";
-    case (PerfEvents::HW_CPU_CYCLES):
+    case PerfEvents::SW_TASK_CLOCK:
+      return "task-clock";
+    case PerfEvents::SW_CONTEXT_SWITCHES:
+      return "context-switches";
+    case PerfEvents::SW_CPU_MIGRATIONS:
+      return "cpu-migrations";
+    case PerfEvents::SW_PAGE_FAULTS_MIN:
+      return "minor-faults";
+    case PerfEvents::SW_PAGE_FAULTS_MAJ:
+      return "major-faults";
+    case PerfEvents::SW_ALIGNMENT_FAULTS:
+      return "alignment-faults";
+    case PerfEvents::SW_EMULATION_FAULTS:
+      return "emulation-faults";
+    case PerfEvents::SW_DUMMY:
+      return "dummy";
+    // hardware:
+    case PerfEvents::HW_CPU_CYCLES:
       return "cpu-cycles";
-    case (PerfEvents::HW_INSTRUCTIONS):
+    case PerfEvents::HW_INSTRUCTIONS:
       return "instructions";
+    case PerfEvents::HW_CACHE_REFERENCES:
+      return "cache-references";
+    case PerfEvents::HW_CACHE_MISSES:
+      return "cache-misses";
+    case PerfEvents::HW_BRANCH_INSTRUCTIONS:
+      return "branch-instructions";
+    case PerfEvents::HW_BRANCH_MISSES:
+      return "branch-misses";
+    case PerfEvents::HW_BUS_CYCLES:
+      return "bus-cycles";
+    case PerfEvents::HW_STALLED_CYCLES_FRONTEND:
+      return "stalled-cycles-frontend";
+    case PerfEvents::HW_STALLED_CYCLES_BACKEND:
+      return "stalled-cycles-backend";
+    case PerfEvents::HW_REF_CPU_CYCLES:
+      return "ref-cycles";
+
     default:
       break;
   }
@@ -72,11 +108,10 @@ StringId InternTimebaseCounterName(
     PerfEvents::RawEvent::Decoder raw(timebase.raw_event());
     // This doesn't follow any pre-existing naming scheme, but aims to be a
     // short-enough default that is distinguishable.
-    char buf[128] = {};
-    snprintf(buf, sizeof(buf),
-             "raw.0x%" PRIx32 ".0x%" PRIx64 ".0x%" PRIx64 ".0x%" PRIx64,
-             raw.type(), raw.config(), raw.config1(), raw.config2());
-    return context->storage->InternString(buf);
+    base::StackString<128> name(
+        "raw.0x%" PRIx32 ".0x%" PRIx64 ".0x%" PRIx64 ".0x%" PRIx64, raw.type(),
+        raw.config(), raw.config1(), raw.config2());
+    return context->storage->InternString(name.string_view());
   }
 
   PERFETTO_DLOG("Could not name the perf timebase counter");

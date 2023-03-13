@@ -93,14 +93,31 @@ class AbstractRebaseliningCommand(Command):
               'should be used to retrieve results from.'))
     flag_specific_option = optparse.make_option(
         '--flag-specific',
+        # TODO: build the list from builders.json
+        choices=["disable-layout-ng", "highdpi"],
         default=None,
         action='store',
         help=(
             'Name of a flag-specific configuration defined in '
             'FlagSpecificConfig. This option will rebaseline '
             'results for the given FlagSpecificConfig while ignoring results '
-            'from other builders. Highdpi is the only suported config '
-            'at this time.'))
+            'from other builders.'))
+    resultDB_option = optparse.make_option(
+        '--resultDB',
+        default=False,
+        action='store_true',
+        help=('Fetch results from resultDB(WIP). '
+              'Works with --test-name-file '
+              'and positional parameters'))
+
+    fetch_url_option = optparse.make_option(
+        '--fetch-url',
+        default=None,
+        action='store',
+        help=('Comma separated list of complete urls to fetch the baseline '
+              'artifact from. Developers do not need this option while '
+              'using rebaseline-cl. Default is empty. '
+              'When this is empty baselines will not be downloaded'))
 
     def __init__(self, options=None):
         super(AbstractRebaseliningCommand, self).__init__(options=options)
@@ -206,7 +223,7 @@ class TestBaselineSet(object):
 
     def _iter_combinations(self):
         """Iterates through (test, build, port) combinations."""
-        for test_prefix, build_port_pairs in self._test_prefix_map.iteritems():
+        for test_prefix, build_port_pairs in self._test_prefix_map.items():
             if not self._prefix_mode:
                 for build, port_name in build_port_pairs:
                     yield (test_prefix, build, port_name)
@@ -311,11 +328,33 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             if not self._tool.builders.is_wpt_builder(builder):
                 port = self._tool.port_factory.get_from_builder_name(builder)
                 fallback_path = port.baseline_search_path()
-                if fallback_path not in builders_to_fallback_paths.values():
+                if fallback_path not in list(
+                        builders_to_fallback_paths.values()):
                     builders_to_fallback_paths[builder] = fallback_path
             else:
                 wpt_builders.add(builder)
         return set(builders_to_fallback_paths) | wpt_builders
+
+    def baseline_fetch_url_resultdb(self, test_name, build):
+        # TODO(preethim): Consider doing QueryArtifacts do a walk of that list for
+        # test of interest than sending out the RPC for every test.
+        webtest_results_resultdb = self._tool.results_fetcher.fetch_results_from_resultdb_layout_tests(
+            self._tool, build, True)
+        artifact_fetch_urls = []
+        if webtest_results_resultdb:
+            results_list = webtest_results_resultdb.test_results_resultdb()
+            done = False
+            for result in results_list:
+                if done:
+                    break
+                if test_name in result['testId']:
+                    artifact_list = self._tool.results_fetcher.get_artifact_list_for_test(
+                        self._tool, result['name'])
+                    for artifact in artifact_list:
+                        if 'actual' in artifact['artifactId']:
+                            artifact_fetch_urls.append(artifact['fetchUrl'])
+                        done = True
+        return artifact_fetch_urls
 
     def _rebaseline_commands(self, test_baseline_set, options):
         path_to_blink_tool = self._tool.path()
@@ -323,6 +362,8 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         copy_baseline_commands = []
         rebaseline_commands = []
         lines_to_remove = {}
+        fetch_urls = []
+        suffixes = []
 
         builders_to_fetch_from = self._builders_to_fetch_from(
             test_baseline_set.all_builders())
@@ -330,7 +371,13 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             if build.builder_name not in builders_to_fetch_from:
                 continue
 
-            suffixes = self._suffixes_for_actual_failures(test, build)
+            if options.resultDB:
+                fetch_urls = self.baseline_fetch_url_resultdb(test, build)
+                suffixes = list(
+                    self._suffixes_for_actual_failures_resultdb(test, build))
+            else:
+                suffixes = list(self._suffixes_for_actual_failures(
+                    test, build))
             if not suffixes:
                 # Only try to remove the expectation if the test
                 #   1. ran and passed ([ Skip ], [ WontFix ] should be kept)
@@ -345,6 +392,9 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                     lines_to_remove[test].append(port_name)
                 continue
 
+            # Sorting it here so we can have a deterministic order for comparing
+            # the suffixes in unit tests.
+            suffixes.sort()
             args = []
             if options.verbose:
                 args.append('--verbose')
@@ -361,7 +411,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             # We may be rebaselining only a subset of all platforms, in which
             # case we need to copy any existing baselines first to avoid clobbering
             # results from platforms that were not run. See
-            # https://chromium.googlesource.com/chromium/src/+/master/docs/testing/web_test_baseline_fallback.md#rebaseline
+            # https://chromium.googlesource.com/chromium/src/+/main/docs/testing/web_test_baseline_fallback.md#rebaseline
             #
             # However when running in modes that don't interact with the optimizer,
             # we don't want to do this copying.
@@ -385,10 +435,16 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                         build.builder_name)):
                 args.extend(['--flag-specific', options.flag_specific])
 
-            step_name = self._tool.results_fetcher.get_layout_test_step_name(
-                build)
+            step_name = ""
+            if not options.resultDB:
+                step_name = self._tool.results_fetcher.get_layout_test_step_name(
+                    build)
             if step_name:
                 args.extend(['--step-name', step_name])
+
+            if options.resultDB:
+                args.append('--resultDB')
+                args.extend(['--fetch-url', ','.join(fetch_urls)])
 
             rebaseline_command = [
                 self._tool.executable, path_to_blink_tool,
@@ -404,7 +460,9 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         change_set = ChangeSet()
         for _, stdout, _ in command_results:
             updated = False
-            for line in filter(None, stdout.splitlines()):
+            for line in stdout.splitlines():
+                if not line:
+                    continue
                 try:
                     parsed_line = json.loads(line)
                     change_set.update(ChangeSet.from_dict(parsed_line))
@@ -416,7 +474,10 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
                 _log.debug('Could not add file based off output "%s"', stdout)
         return change_set
 
-    def _optimize_baselines(self, test_baseline_set, verbose=False):
+    def _optimize_baselines(self,
+                            test_baseline_set,
+                            verbose=False,
+                            resultDB=False):
         """Returns a list of commands to run in parallel to de-duplicate baselines."""
         tests_to_suffixes = collections.defaultdict(set)
         builders_to_fetch_from = self._builders_to_fetch_from(
@@ -430,17 +491,21 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             if self._tool.builders.is_wpt_builder(build.builder_name):
                 continue
 
-            # For flag_specific(highdpi) we skip both 'copy existing baselines'
+            # For flag_specific we skip both 'copy existing baselines'
             # and  optimizer.
             if self._tool.builders.is_flag_specific_builder(
                     build.builder_name):
                 continue
 
-            tests_to_suffixes[test].update(
-                self._suffixes_for_actual_failures(test, build))
+            if resultDB:
+                tests_to_suffixes[test].update(
+                    self._suffixes_for_actual_failures_resultdb(test, build))
+            else:
+                tests_to_suffixes[test].update(
+                    self._suffixes_for_actual_failures(test, build))
 
         optimize_commands = []
-        for test, suffixes in tests_to_suffixes.iteritems():
+        for test, suffixes in tests_to_suffixes.items():
             # No need to optimize baselines for a test with no failures.
             if not suffixes:
                 continue
@@ -450,7 +515,9 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             args = ['--no-manifest-update']
             if verbose:
                 args.append('--verbose')
-            args.extend(['--suffixes', ','.join(suffixes), test])
+            suffixes_list = list(suffixes)
+            suffixes_list.sort()
+            args.extend(['--suffixes', ','.join(suffixes_list), test])
             path_to_blink_tool = self._tool.path()
             cwd = self._tool.git().checkout_root
             command = [
@@ -461,7 +528,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         return optimize_commands
 
     def _update_expectations_files(self, lines_to_remove):
-        tests = lines_to_remove.keys()
+        tests = list(lines_to_remove.keys())
         to_remove = collections.defaultdict(set)
         all_versions = frozenset([
             config.version.lower() for config in self._tool.port_factory.get().
@@ -493,7 +560,7 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
             expectations_dict={
                 path: self._tool.filesystem.read_text_file(path)
             })
-        system_remover = SystemConfigurationRemover(test_expectations)
+        system_remover = SystemConfigurationRemover(self._tool.filesystem, test_expectations)
         for test, versions in to_remove.items():
             system_remover.remove_os_versions(test, versions)
         system_remover.update_expectations()
@@ -535,10 +602,8 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
         copy_baseline_commands, rebaseline_commands, extra_lines_to_remove = self._rebaseline_commands(
             test_baseline_set, options)
         lines_to_remove = {}
-
         self._run_in_parallel(copy_baseline_commands)
         lines_to_remove = self._run_in_parallel(rebaseline_commands)
-
         for test in extra_lines_to_remove:
             if test in lines_to_remove:
                 lines_to_remove[test] = (
@@ -551,7 +616,8 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
 
         if options.optimize:
             self._run_in_parallel(
-                self._optimize_baselines(test_baseline_set, options.verbose))
+                self._optimize_baselines(test_baseline_set, options.verbose,
+                                         options.resultDB))
 
         self._tool.git().add_list(self.unstaged_baselines())
 
@@ -586,6 +652,20 @@ class AbstractParallelRebaselineCommand(AbstractRebaseliningCommand):
 
     def _web_tests_dir(self):
         return self._tool.port_factory.get().web_tests_dir()
+
+    def _suffixes_for_actual_failures_resultdb(self, test, build):
+        suffixes = set()
+        fetch_url_list = self.baseline_fetch_url_resultdb(test, build)
+        for artifact_fetch_url in fetch_url_list:
+            if 'actual_image' in artifact_fetch_url:
+                suffixes.add('png')
+            if 'actual_text' in artifact_fetch_url:
+                suffixes.add('txt')
+            if 'actual_audio' in artifact_fetch_url:
+                suffixes.add('wav')
+            if self._tool.builders.is_wpt_builder(build.builder_name):
+                suffixes.add('txt')
+        return suffixes
 
     def _suffixes_for_actual_failures(self, test, build):
         """Gets the baseline suffixes for actual mismatch failures in some results.

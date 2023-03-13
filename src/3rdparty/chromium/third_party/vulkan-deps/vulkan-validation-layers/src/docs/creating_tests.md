@@ -31,7 +31,11 @@ ASSERT_NO_FATAL_FAILURE(Init());
 
 // or
 
-ASSERT_NO_FATAL_FAILURE(InitFramework(m_errorMonitor));
+ASSERT_NO_FATAL_FAILURE(InitFramework());
+ASSERT_NO_FATAL_FAILURE(InitState());
+
+// For Best Practices tests
+ASSERT_NO_FATAL_FAILURE(InitBestPracticesFramework());
 ASSERT_NO_FATAL_FAILURE(InitState());
 ```
 
@@ -46,24 +50,19 @@ Adding extension support is quite easy.
 Here is an example of adding `VK_KHR_sampler_ycbcr_conversion` with all the extensions it requires as well. Note, most extensions will have only 1 or 2 dependency extensions needed
 
 ```cpp
-bool mp_extensions = InstanceExtensionSupported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME, 1);
-if (mp_extensions) {
-    m_instance_extension_names.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
-}
-ASSERT_NO_FATAL_FAILURE(InitFramework(m_errorMonitor));
-mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_MAINTENANCE1_EXTENSION_NAME);
-mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
-mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
-mp_extensions = mp_extensions && DeviceExtensionSupported(gpu(), nullptr, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
-if (mp_extensions) {
-    m_device_extension_names.push_back(VK_KHR_MAINTENANCE1_EXTENSION_NAME);
-    m_device_extension_names.push_back(VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME);
-    m_device_extension_names.push_back(VK_KHR_BIND_MEMORY_2_EXTENSION_NAME);
-    m_device_extension_names.push_back(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
-} else {
-    printf("%s test requires KHR multiplane extensions, not available.  Skipping.\n", kSkipPrefix);
+// Setup extensions, including dependent instance and device extensions. This call should be made before any call to InitFramework
+AddRequiredExtensions(VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
+
+//  Among other things, this will create the VkInstance and VkPhysicalDevice that will be used for the test.
+ASSERT_NO_FATAL_FAILURE(InitFramework());
+
+// Check that all extensions and their dependencies were enabled successfully
+if (!AreRequestedExtensionsEnabled()) {
+    printf("%s test requires %s extensions which are not available.\n", kSkipPrefix, VK_KHR_SAMPLER_YCBCR_CONVERSION_EXTENSION_NAME);
     return;
 }
+
+// Finish initializing state, including creating the VkDevice (whith extensions added) that will be used for the test
 ASSERT_NO_FATAL_FAILURE(InitState());
 ```
 
@@ -82,7 +81,7 @@ If a certain version of Vulkan is needed a test writer can call
 
 ```cpp
 SetTargetApiVersion(VK_API_VERSION_1_1);
-ASSERT_NO_FATAL_FAILURE(InitFramework(m_errorMonitor));
+ASSERT_NO_FATAL_FAILURE(InitFramework());
 ```
 
 Later in the test it can also be checked
@@ -102,7 +101,7 @@ PFN_vkBindImageMemory2KHR vkBindImageMemory2Function = nullptr;
 if (DeviceValidationVersion() >= VK_API_VERSION_1_1) {
     vkBindImageMemory2Function = vk::BindImageMemory2;
 } else {
-    vkBindImageMemory2Function = (PFN_vkBindImageMemory2KHR)vk::GetDeviceProcAddr(m_device->handle(), "vkBindImageMemory2KHR");
+    vkBindImageMemory2Function = reinterpret_cast<PFN_vkBindImageMemory2KHR>(vk::GetDeviceProcAddr(m_device->handle(), "vkBindImageMemory2KHR"));
 }
 
 // later in code
@@ -126,8 +125,11 @@ m_errorMonitor->VerifyFound();
 
 - For making sure there is no error (positive test)
 ```cpp
+// This should be the first call in the test to ensure there are no "silent failures" during test setup
 m_errorMonitor->ExpectSuccess();
+...
 vk::BindBufferMemory(m_device->device(), buffer, buffer_mem, 0);
+...
 m_errorMonitor->VerifyNotFound();
 ```
 
@@ -191,12 +193,37 @@ formatProps.optimalTilingFeatures |= VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT;
 fpvkSetPhysicalDeviceFormatPropertiesEXT(gpu(), VK_FORMAT_R32G32B32A32_UINT, formatProps);
 ```
 
+If you are in need of `VkFormatProperties3` the following is an example how to use the layer
+
+```cpp
+PFN_vkSetPhysicalDeviceFormatProperties2EXT fpvkSetPhysicalDeviceFormatProperties2EXT = nullptr;
+PFN_vkGetOriginalPhysicalDeviceFormatProperties2EXT fpvkGetOriginalPhysicalDeviceFormatProperties2EXT = nullptr;
+if (!LoadDeviceProfileLayer(fpvkSetPhysicalDeviceFormatProperties2EXT, fpvkGetOriginalPhysicalDeviceFormatProperties2EXT)) {
+    printf("%s Failed to device profile layer.\n", kSkipPrefix);
+    return;
+}
+
+auto fmt_props_3 = LvlInitStruct<VkFormatProperties3>();
+auto fmt_props = LvlInitStruct<VkFormatProperties2>(&fmt_props_3);
+
+// Removes unwanted support
+fpvkGetOriginalPhysicalDeviceFormatProperties2EXT(gpu(), image_format, &fmt_props);
+// VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT == VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT
+// Need to edit both VkFormatFeatureFlags/VkFormatFeatureFlags2
+fmt_props.formatProperties.optimalTilingFeatures = (fmt_props.formatProperties.optimalTilingFeatures & ~VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT);
+fmt_props_3.optimalTilingFeatures = (fmt_props_3.optimalTilingFeatures & ~VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT);
+// Was added with VkFormatFeatureFlags2 so only need to edit here
+fmt_props_3.optimalTilingFeatures = (fmt_props_3.optimalTilingFeatures & ~VK_FORMAT_FEATURE_2_STORAGE_WRITE_WITHOUT_FORMAT_BIT);
+fpvkSetPhysicalDeviceFormatProperties2EXT(gpu(), image_format, fmt_props);
+
+```
+
 ### Device Profile Limits
 
 When using the device profile layer for limits, the test maybe need to call `vkSetPhysicalDeviceLimitsEXT` prior to creating the `VkDevice` for some validation state tracking
 
 ```cpp
-ASSERT_NO_FATAL_FAILURE(InitFramework(m_errorMonitor));
+ASSERT_NO_FATAL_FAILURE(InitFramework());
 
 PFN_vkSetPhysicalDeviceLimitsEXT fpvkSetPhysicalDeviceLimitsEXT = nullptr;
 PFN_vkGetOriginalPhysicalDeviceLimitsEXT fpvkGetOriginalPhysicalDeviceLimitsEXT = nullptr;

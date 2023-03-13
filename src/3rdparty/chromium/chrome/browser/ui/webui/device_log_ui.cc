@@ -9,7 +9,6 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/macros.h"
 #include "base/values.h"
 #include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/url_constants.h"
@@ -29,14 +28,18 @@ namespace {
 class DeviceLogMessageHandler : public content::WebUIMessageHandler {
  public:
   DeviceLogMessageHandler() {}
+
+  DeviceLogMessageHandler(const DeviceLogMessageHandler&) = delete;
+  DeviceLogMessageHandler& operator=(const DeviceLogMessageHandler&) = delete;
+
   ~DeviceLogMessageHandler() override {}
 
   // WebUIMessageHandler implementation.
   void RegisterMessages() override {
-    web_ui()->RegisterMessageCallback(
+    web_ui()->RegisterDeprecatedMessageCallback(
         "getLog", base::BindRepeating(&DeviceLogMessageHandler::GetLog,
                                       base::Unretained(this)));
-    web_ui()->RegisterMessageCallback(
+    web_ui()->RegisterDeprecatedMessageCallback(
         "clearLog", base::BindRepeating(&DeviceLogMessageHandler::ClearLog,
                                         base::Unretained(this)));
   }
@@ -44,7 +47,7 @@ class DeviceLogMessageHandler : public content::WebUIMessageHandler {
  private:
   void GetLog(const base::ListValue* value) {
     AllowJavascript();
-    std::string callback_id = value->GetList()[0].GetString();
+    std::string callback_id = value->GetListDeprecated()[0].GetString();
     base::Value data(device_event_log::GetAsString(
         device_event_log::NEWEST_FIRST, "json", "",
         device_event_log::LOG_LEVEL_DEBUG, 0));
@@ -54,8 +57,6 @@ class DeviceLogMessageHandler : public content::WebUIMessageHandler {
   void ClearLog(const base::ListValue* value) const {
     device_event_log::ClearAll();
   }
-
-  DISALLOW_COPY_AND_ASSIGN(DeviceLogMessageHandler);
 };
 
 }  // namespace

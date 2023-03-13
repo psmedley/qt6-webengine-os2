@@ -9,14 +9,14 @@
 #define SKSL_DSL_CASE
 
 #include "include/private/SkSLDefines.h"
+#include "include/private/SkTArray.h"
 #include "include/sksl/DSLExpression.h"
 #include "include/sksl/DSLStatement.h"
+#include "include/sksl/SkSLPosition.h"
 
-#include <memory>
+#include <utility>
 
 namespace SkSL {
-
-class Statement;
 
 namespace dsl {
 
@@ -36,9 +36,11 @@ public:
         static_cast<void>(unused);
     }
 
-    DSLCase(DSLExpression value, SkTArray<DSLStatement> statements);
+    DSLCase(DSLExpression value, SkTArray<DSLStatement> statements,
+            Position pos = {});
 
-    DSLCase(DSLExpression value, SkSL::StatementArray statements);
+    DSLCase(DSLExpression value, SkSL::StatementArray statements,
+            Position pos = {});
 
     DSLCase(DSLCase&&);
 
@@ -51,6 +53,7 @@ public:
 private:
     DSLExpression fValue;
     SkSL::StatementArray fStatements;
+    Position fPosition;
 
     friend class DSLCore;
 

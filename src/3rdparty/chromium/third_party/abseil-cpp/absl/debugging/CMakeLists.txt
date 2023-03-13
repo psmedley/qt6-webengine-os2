@@ -25,6 +25,7 @@ absl_cc_library(
     "internal/stacktrace_emscripten-inl.inc"
     "internal/stacktrace_generic-inl.inc"
     "internal/stacktrace_powerpc-inl.inc"
+    "internal/stacktrace_riscv-inl.inc"
     "internal/stacktrace_unimplemented-inl.inc"
     "internal/stacktrace_win32-inl.inc"
     "internal/stacktrace_x86-inl.inc"
@@ -92,6 +93,7 @@ absl_cc_test(
     GTest::gmock
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     examine_stack
@@ -146,6 +148,7 @@ absl_cc_test(
     GTest::gmock
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     debugging_internal
@@ -167,6 +170,7 @@ absl_cc_library(
     absl::raw_logging_internal
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     demangle_internal
@@ -297,6 +301,7 @@ absl_cc_test(
     GTest::gmock_main
 )
 
+# Internal-only target, do not depend on directly.
 absl_cc_library(
   NAME
     stack_consumption

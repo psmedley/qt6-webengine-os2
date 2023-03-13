@@ -12,8 +12,10 @@
 #include "base/feature_list.h"
 #include "base/lazy_instance.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/ptr_util.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
+#include "build/build_config.h"
 #include "cc/trees/ukm_manager.h"
 #include "content/common/agent_scheduling_group.mojom.h"
 #include "content/public/common/content_client.h"
@@ -21,12 +23,12 @@
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/renderer/content_renderer_client.h"
+#include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view_visitor.h"
 #include "content/public/renderer/window_features_converter.h"
 #include "content/renderer/agent_scheduling_group.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_frame_proxy.h"
-#include "content/renderer/render_thread_impl.h"
 #include "third_party/blink/public/mojom/page/page.mojom.h"
 #include "third_party/blink/public/platform/impression_conversions.h"
 #include "third_party/blink/public/platform/modules/video_capture/web_video_capture_impl_manager.h"
@@ -73,6 +75,7 @@ WindowOpenDisposition RenderViewImpl::NavigationPolicyToDisposition(
     case blink::kWebNavigationPolicyNewWindow:
       return WindowOpenDisposition::NEW_WINDOW;
     case blink::kWebNavigationPolicyNewPopup:
+    case blink::kWebNavigationPolicyPictureInPicture:
       return WindowOpenDisposition::NEW_POPUP;
     default:
       NOTREACHED() << "Unexpected WebNavigationPolicy";
@@ -121,6 +124,10 @@ void RenderViewImpl::Initialize(
   webview_ = WebView::Create(
       this, params->hidden, params->is_prerendering,
       params->type == mojom::ViewWidgetType::kPortal ? true : false,
+      params->type == mojom::ViewWidgetType::kFencedFrame
+          ? params->fenced_frame_mode
+          : static_cast<absl::optional<blink::mojom::FencedFrameMode>>(
+                absl::nullopt),
       /*compositing_enabled=*/true, params->never_composited,
       opener_frame ? opener_frame->View() : nullptr,
       std::move(params->blink_page_broadcast),
@@ -132,6 +139,7 @@ void RenderViewImpl::Initialize(
 
   bool local_main_frame = params->main_frame->is_local_params();
 
+  webview_->SetRendererPreferences(params->renderer_preferences);
   webview_->SetWebPreferences(params->web_preferences);
 
   if (local_main_frame) {
@@ -152,14 +160,12 @@ void RenderViewImpl::Initialize(
   }
 
   // TODO(davidben): Move this state from Blink into content.
-  if (params->window_was_created_with_opener)
+  if (params->window_was_opened_by_another_window)
     GetWebView()->SetOpenedByDOM();
-
-  webview_->SetRendererPreferences(params->renderer_preferences);
 
   GetContentClient()->renderer()->WebViewCreated(webview_);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // TODO(sgurun): crbug.com/325351 Needed only for android webview's deprecated
   // HandleNavigation codepath.
   was_created_by_renderer_ = was_created_by_renderer;
@@ -304,20 +310,18 @@ WebView* RenderViewImpl::CreateView(
   mojom::CreateNewWindowStatus status;
   mojom::CreateNewWindowReplyPtr reply;
   auto* frame_host = creator_frame->GetFrameHost();
-  bool err = !frame_host->CreateNewWindow(std::move(params), &status, &reply);
-
-  // If creation of the window was blocked, return before consuming user
-  // activation. A frame that isn't itself activated shouldn't be able to
-  // consume the activation for the rest of the frame tree.
-  if (status == mojom::CreateNewWindowStatus::kBlocked)
+  if (!frame_host->CreateNewWindow(std::move(params), &status, &reply)) {
+    // The sync IPC failed, e.g. maybe the render process is in the middle of
+    // shutting down. Can't create a new window without the browser process,
+    // so just bail out.
     return nullptr;
+  }
 
-  consumed_user_gesture = creator->ConsumeTransientUserActivation(
-      blink::UserActivationUpdateSource::kBrowser);
-
-  // If there was an error or we should ignore the new window (e.g. because of
-  // `noopener`), return now that user activation was consumed.
-  if (err || status == mojom::CreateNewWindowStatus::kIgnore)
+  // If creation of the window was blocked (e.g. because this frame doesn't
+  // have user activation), return before consuming user activation. A frame
+  // that isn't allowed to open a window  shouldn't be able to consume the
+  // activation for the rest of the frame tree.
+  if (status == mojom::CreateNewWindowStatus::kBlocked)
     return nullptr;
 
   // For Android WebView, we support a pop-up like behavior for window.open()
@@ -331,6 +335,15 @@ WebView* RenderViewImpl::CreateView(
   // be checked directly in the browser side.
   if (status == mojom::CreateNewWindowStatus::kReuse)
     return GetWebView();
+
+  // Consume the transient user activation in the current renderer.
+  consumed_user_gesture = creator->ConsumeTransientUserActivation(
+      blink::UserActivationUpdateSource::kBrowser);
+
+  // If we should ignore the new window (e.g. because of `noopener`), return
+  // now that user activation was consumed.
+  if (status == mojom::CreateNewWindowStatus::kIgnore)
+    return nullptr;
 
   DCHECK(reply);
   DCHECK_NE(MSG_ROUTING_NONE, reply->route_id);
@@ -353,7 +366,7 @@ WebView* RenderViewImpl::CreateView(
   view_params->opener_frame_token = creator->GetFrameToken();
   DCHECK_EQ(GetRoutingID(), creator_frame->render_view()->GetRoutingID());
 
-  view_params->window_was_created_with_opener = true;
+  view_params->window_was_opened_by_another_window = true;
   view_params->renderer_preferences = webview_->GetRendererPreferences();
   view_params->web_preferences = webview_->GetWebPreferences();
   view_params->view_id = reply->route_id;

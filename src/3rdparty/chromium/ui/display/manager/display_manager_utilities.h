@@ -66,8 +66,11 @@ DISPLAY_MANAGER_EXPORT bool ComputeBoundary(const Display& display_a,
                                             gfx::Rect* a_edge_in_screen,
                                             gfx::Rect* b_edge_in_screen);
 
-// Sorts id list using |CompareDisplayIds| below.
+// Sorts id list using `CompareDisplayIds()` in display.h.
 DISPLAY_MANAGER_EXPORT void SortDisplayIdList(DisplayIdList* list);
+
+// Check if the list is sorted using `CompareDisplayIds()` in display.h.
+DISPLAY_MANAGER_EXPORT bool IsDisplayIdListSorted(const DisplayIdList& list);
 
 // Default id generator.
 class DefaultDisplayIdGenerator {
@@ -117,7 +120,10 @@ struct DISPLAY_MANAGER_EXPORT MixedMirrorModeParams {
 // Defines mirror modes used to change the display mode.
 enum class MirrorMode {
   kOff = 0,
+  // Normal mode, with one display mirrored to all other connected displays.
   kNormal,
+  // Mixed mode, with one display mirrored to one or more other displays, and
+  // the rest of the displays are in EXTENDED mode.
   kMixed,
 };
 

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_TABLE_LAYOUT_NG_TABLE_COLUMN_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LAYOUT_NG_TABLE_LAYOUT_NG_TABLE_COLUMN_H_
 
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 
@@ -16,6 +17,7 @@ class LayoutNGTable;
 class CORE_EXPORT LayoutNGTableColumn : public LayoutBox {
  public:
   explicit LayoutNGTableColumn(Element*);
+  void Trace(Visitor*) const override;
 
   LayoutNGTable* Table() const;
 

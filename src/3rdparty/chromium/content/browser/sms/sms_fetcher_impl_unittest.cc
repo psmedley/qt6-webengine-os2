@@ -5,6 +5,7 @@
 #include "content/browser/sms/sms_fetcher_impl.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/test/mock_callback.h"
 #include "content/browser/sms/test/mock_sms_provider.h"
 #include "content/public/browser/content_browser_client.h"
@@ -30,6 +31,10 @@ namespace {
 class MockContentBrowserClient : public ContentBrowserClient {
  public:
   MockContentBrowserClient() = default;
+
+  MockContentBrowserClient(const MockContentBrowserClient&) = delete;
+  MockContentBrowserClient& operator=(const MockContentBrowserClient&) = delete;
+
   ~MockContentBrowserClient() override = default;
 
   MOCK_METHOD3(
@@ -39,14 +44,15 @@ class MockContentBrowserClient : public ContentBrowserClient {
                         base::OnceCallback<void(absl::optional<OriginList>,
                                                 absl::optional<std::string>,
                                                 absl::optional<FailureType>)>));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockContentBrowserClient);
 };
 
 class MockSubscriber : public SmsFetcher::Subscriber {
  public:
   MockSubscriber() = default;
+
+  MockSubscriber(const MockSubscriber&) = delete;
+  MockSubscriber& operator=(const MockSubscriber&) = delete;
+
   ~MockSubscriber() override = default;
 
   MOCK_METHOD3(OnReceive,
@@ -54,14 +60,15 @@ class MockSubscriber : public SmsFetcher::Subscriber {
                     const std::string& one_time_code,
                     UserConsent));
   MOCK_METHOD1(OnFailure, void(FailureType failure_type));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockSubscriber);
 };
 
 class SmsFetcherImplTest : public RenderViewHostTestHarness {
  public:
   SmsFetcherImplTest() = default;
+
+  SmsFetcherImplTest(const SmsFetcherImplTest&) = delete;
+  SmsFetcherImplTest& operator=(const SmsFetcherImplTest&) = delete;
+
   ~SmsFetcherImplTest() override = default;
 
   void SetUp() override {
@@ -80,11 +87,9 @@ class SmsFetcherImplTest : public RenderViewHostTestHarness {
   MockSmsProvider* provider() { return &provider_; }
 
  private:
-  ContentBrowserClient* original_client_ = nullptr;
+  raw_ptr<ContentBrowserClient> original_client_ = nullptr;
   NiceMock<MockContentBrowserClient> client_;
   NiceMock<MockSmsProvider> provider_;
-
-  DISALLOW_COPY_AND_ASSIGN(SmsFetcherImplTest);
 };
 
 }  // namespace

@@ -9,11 +9,12 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/test/fake_layer_tree_frame_sink.h"
 #include "cc/test/test_task_graph_runner.h"
@@ -35,9 +36,9 @@ namespace blink {
 namespace {
 
 enum FailureMode {
-  NO_FAILURE,
-  BIND_CONTEXT_FAILURE,
-  GPU_CHANNEL_FAILURE,
+  kNoFailure,
+  kBindContextFailure,
+  kGpuChannelFailure,
 };
 
 class FakeLayerTreeViewDelegate : public StubLayerTreeViewDelegate {
@@ -183,11 +184,11 @@ class LayerTreeViewWithFrameSinkTracking : public LayerTreeView {
     failure_mode_ = failure_mode;
     expected_successes_ = expected_successes;
     switch (failure_mode_) {
-      case NO_FAILURE:
+      case kNoFailure:
         expected_requests_ = expected_successes;
         break;
-      case BIND_CONTEXT_FAILURE:
-      case GPU_CHANNEL_FAILURE:
+      case kBindContextFailure:
+      case kGpuChannelFailure:
         expected_requests_ = num_tries * std::max(1, expected_successes);
         break;
     }
@@ -200,7 +201,7 @@ class LayerTreeViewWithFrameSinkTracking : public LayerTreeView {
   base::RunLoop* run_loop_ = nullptr;
   int expected_successes_ = 0;
   int expected_requests_ = 0;
-  FailureMode failure_mode_ = NO_FAILURE;
+  FailureMode failure_mode_ = kNoFailure;
 };
 
 class LayerTreeViewWithFrameSinkTrackingTest : public testing::Test {
@@ -213,9 +214,7 @@ class LayerTreeViewWithFrameSinkTrackingTest : public testing::Test {
     settings.single_thread_proxy_scheduler = false;
     layer_tree_view_.Initialize(
         settings, blink::scheduler::GetSingleThreadTaskRunnerForTesting(),
-        /*compositor_thread=*/nullptr, &test_task_graph_runner_,
-        /*main_thread_pipeline=*/nullptr,
-        /*compositor_thread_pipeline=*/nullptr);
+        /*compositor_thread=*/nullptr, &test_task_graph_runner_);
   }
   LayerTreeViewWithFrameSinkTrackingTest(
       const LayerTreeViewWithFrameSinkTrackingTest&) = delete;
@@ -230,16 +229,16 @@ class LayerTreeViewWithFrameSinkTrackingTest : public testing::Test {
     // until the last attempt.
     int tries_before_success = kTries - (expected_successes ? 1 : 0);
     switch (failure_mode) {
-      case NO_FAILURE:
+      case kNoFailure:
         layer_tree_view_delegate_.set_num_failures_before_success(0);
         layer_tree_view_delegate_.set_num_requests_before_success(0);
         break;
-      case BIND_CONTEXT_FAILURE:
+      case kBindContextFailure:
         layer_tree_view_delegate_.set_num_failures_before_success(
             tries_before_success);
         layer_tree_view_delegate_.set_num_requests_before_success(0);
         break;
-      case GPU_CHANNEL_FAILURE:
+      case kGpuChannelFailure:
         layer_tree_view_delegate_.set_num_failures_before_success(0);
         layer_tree_view_delegate_.set_num_requests_before_success(
             tries_before_success);
@@ -265,35 +264,35 @@ class LayerTreeViewWithFrameSinkTrackingTest : public testing::Test {
 };
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedOnce) {
-  RunTest(1, NO_FAILURE);
+  RunTest(1, kNoFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedOnce_AfterNullChannel) {
-  RunTest(1, GPU_CHANNEL_FAILURE);
+  RunTest(1, kGpuChannelFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedOnce_AfterLostContext) {
-  RunTest(1, BIND_CONTEXT_FAILURE);
+  RunTest(1, kBindContextFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedTwice) {
-  RunTest(2, NO_FAILURE);
+  RunTest(2, kNoFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedTwice_AfterNullChannel) {
-  RunTest(2, GPU_CHANNEL_FAILURE);
+  RunTest(2, kGpuChannelFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, SucceedTwice_AfterLostContext) {
-  RunTest(2, BIND_CONTEXT_FAILURE);
+  RunTest(2, kBindContextFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, FailWithNullChannel) {
-  RunTest(0, GPU_CHANNEL_FAILURE);
+  RunTest(0, kGpuChannelFailure);
 }
 
 TEST_F(LayerTreeViewWithFrameSinkTrackingTest, FailWithLostContext) {
-  RunTest(0, BIND_CONTEXT_FAILURE);
+  RunTest(0, kBindContextFailure);
 }
 
 class VisibilityTestLayerTreeView : public LayerTreeView {
@@ -336,9 +335,7 @@ TEST(LayerTreeViewTest, VisibilityTest) {
   layer_tree_view.Initialize(
       cc::LayerTreeSettings(),
       blink::scheduler::GetSingleThreadTaskRunnerForTesting(),
-      /*compositor_thread=*/nullptr, &test_task_graph_runner,
-      /*main_thread_pipeline=*/nullptr,
-      /*compositor_thread_pipeline=*/nullptr);
+      /*compositor_thread=*/nullptr, &test_task_graph_runner);
 
   {
     // Make one request and stop immediately while invisible.
@@ -383,9 +380,7 @@ TEST(LayerTreeViewTest, RunPresentationCallbackOnSuccess) {
   layer_tree_view.Initialize(
       cc::LayerTreeSettings(),
       blink::scheduler::GetSingleThreadTaskRunnerForTesting(),
-      /*compositor_thread=*/nullptr, &test_task_graph_runner,
-      /*main_thread_pipeline=*/nullptr,
-      /*compositor_thread_pipeline=*/nullptr);
+      /*compositor_thread=*/nullptr, &test_task_graph_runner);
 
   // Register a callback for frame 1.
   base::TimeTicks callback_timestamp;
@@ -397,7 +392,7 @@ TEST(LayerTreeViewTest, RunPresentationCallbackOnSuccess) {
   // Respond with a failed presentation feedback for frame 1 and verify that the
   // callback is not called
   base::TimeTicks fail_timestamp =
-      base::TimeTicks::Now() + base::TimeDelta::FromMicroseconds(2);
+      base::TimeTicks::Now() + base::Microseconds(2);
   gfx::PresentationFeedback fail_feedback(fail_timestamp, base::TimeDelta(),
                                           gfx::PresentationFeedback::kFailure);
   layer_tree_view.DidPresentCompositorFrame(1, fail_feedback);
@@ -406,8 +401,7 @@ TEST(LayerTreeViewTest, RunPresentationCallbackOnSuccess) {
   // Respond with a successful presentation feedback for frame 2 and verify that
   // the callback for frame 1 is now called with presentation timestamp for
   // frame 2.
-  base::TimeTicks success_timestamp =
-      fail_timestamp + base::TimeDelta::FromMicroseconds(3);
+  base::TimeTicks success_timestamp = fail_timestamp + base::Microseconds(3);
   gfx::PresentationFeedback success_feedback(success_timestamp,
                                              base::TimeDelta(), 0);
   layer_tree_view.DidPresentCompositorFrame(2, success_feedback);

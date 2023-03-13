@@ -7,13 +7,13 @@
 
 #include <memory>
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/input/web_input_event_attribution.h"
 #include "third_party/blink/public/platform/scheduler/web_agent_group_scheduler.h"
 #include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/public/page_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/task_attribution_tracker.h"
 #include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -125,8 +125,8 @@ class PLATFORM_EXPORT ThreadScheduler {
 
   // Pauses the scheduler. See WebThreadScheduler::PauseRenderer for
   // details. May only be called from the main thread.
-  virtual std::unique_ptr<RendererPauseHandle> PauseScheduler()
-      WARN_UNUSED_RESULT = 0;
+  [[nodiscard]] virtual std::unique_ptr<RendererPauseHandle>
+  PauseScheduler() = 0;
 
   // Returns the current time recognized by the scheduler, which may perhaps
   // be based on a real or virtual time domain. Used by Timer.
@@ -151,12 +151,25 @@ class PLATFORM_EXPORT ThreadScheduler {
   // running on the compositor thread.
   virtual bool IsBeginMainFrameScheduled() const { return false; }
 
+  // Returns true if BeginMainFrame should be called soon, for example if it
+  // hasn't been called for a long period of time.
+  virtual bool DontDeferBeginMainFrame() const { return true; }
+
   // Associates |isolate| to the scheduler.
   virtual void SetV8Isolate(v8::Isolate* isolate) = 0;
+
+  // Returns the scheduler's TaskAttributionTracker is we're running on the main
+  // thread, or a nullptr otherwise.
+  virtual scheduler::TaskAttributionTracker* GetTaskAttributionTracker() {
+    return nullptr;
+  }
 
   // Test helpers.
 
   virtual scheduler::NonMainThreadSchedulerImpl* AsNonMainThreadScheduler() = 0;
+
+  virtual void InitializeTaskAttributionTracker(
+      std::unique_ptr<scheduler::TaskAttributionTracker>) {}
 
  private:
   // For GetWebMainThreadScheduler().

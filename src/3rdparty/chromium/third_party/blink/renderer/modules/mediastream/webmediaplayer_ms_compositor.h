@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/time.h"
 #include "cc/layers/surface_layer.h"
 #include "cc/layers/video_frame_provider.h"
 #include "media/base/media_util.h"
@@ -70,6 +71,10 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
       std::unique_ptr<WebVideoFrameSubmitter> submitter,
       WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
       const base::WeakPtr<WebMediaPlayerMS>& player);
+
+  WebMediaPlayerMSCompositor(const WebMediaPlayerMSCompositor&) = delete;
+  WebMediaPlayerMSCompositor& operator=(const WebMediaPlayerMSCompositor&) =
+      delete;
 
   // Can be called from any thread.
   cc::UpdateSubmissionStateCB GetUpdateSubmissionStateCallback() {
@@ -201,6 +206,11 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   void ReplaceCurrentFrameWithACopyInternal();
 
   void SetAlgorithmEnabledForTesting(bool algorithm_enabled);
+  void RecordFrameDisplayedStats(base::TimeTicks frame_displayed_time);
+  void RecordFrameDecodedStats(
+      absl::optional<base::TimeTicks> frame_received_time,
+      absl::optional<base::TimeDelta> frame_processing_time,
+      absl::optional<uint32_t> frame_rtp_timestamp);
 
   // Used for DCHECKs to ensure method calls executed in the correct thread,
   // which is renderer main thread in this class.
@@ -271,6 +281,15 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   bool stopped_;
   bool render_started_;
 
+  absl::optional<base::TimeTicks> last_enqueued_frame_receive_time_;
+  absl::optional<base::TimeTicks> last_enqueued_frame_decoded_time_;
+  absl::optional<base::TimeTicks> last_presented_frame_display_time_;
+  absl::optional<uint32_t> last_enqueued_frame_rtp_timestamp_;
+  absl::optional<base::TimeTicks> current_frame_receive_time_;
+  absl::optional<uint32_t> last_presented_frame_rtp_timestamp_;
+  absl::optional<uint32_t> current_frame_rtp_timestamp_;
+  int frame_enqueued_since_last_vsync_ GUARDED_BY(current_frame_lock_) = 0;
+
   // Called when a new frame is enqueued, either in RenderWithoutAlgorithm() or
   // in RenderUsingAlgorithm(). Used to fulfill video.requestAnimationFrame()
   // requests.
@@ -289,8 +308,6 @@ class MODULES_EXPORT WebMediaPlayerMSCompositor
   base::Lock current_frame_lock_;
 
   base::WeakPtrFactory<WebMediaPlayerMSCompositor> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMSCompositor);
 };
 
 struct WebMediaPlayerMSCompositorTraits {

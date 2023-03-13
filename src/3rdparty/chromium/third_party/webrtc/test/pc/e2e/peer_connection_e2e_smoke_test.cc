@@ -27,6 +27,10 @@
 #include "test/pc/e2e/stats_based_network_quality_metrics_reporter.h"
 #include "test/testsupport/file_utils.h"
 
+#if defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
+#include "modules/video_coding/codecs/test/objc_codec_factory_helper.h"  // nogncheck
+#endif
+
 namespace webrtc {
 namespace webrtc_pc_e2e {
 namespace {
@@ -56,9 +60,6 @@ class PeerConnectionE2EQualityTestSmokeTest : public ::testing::Test {
         testing::UnitTest::GetInstance()->current_test_info()->name(),
         *network_emulation_->time_controller(),
         /*audio_quality_analyzer=*/nullptr, std::move(video_quality_analyzer));
-    test::ScopedFieldTrials field_trials(
-        std::string(field_trial::GetFieldTrialString()) +
-        "WebRTC-UseStandardBytesStats/Enabled/");
   }
 
   std::pair<EmulatedNetworkManagerInterface*, EmulatedNetworkManagerInterface*>
@@ -88,15 +89,15 @@ class PeerConnectionE2EQualityTestSmokeTest : public ::testing::Test {
 
   void AddPeer(EmulatedNetworkManagerInterface* network,
                rtc::FunctionView<void(PeerConfigurer*)> configurer) {
-    fixture_->AddPeer(network->network_thread(), network->network_manager(),
-                      configurer);
+    fixture_->AddPeer(network->network_dependencies(), configurer);
   }
 
   void RunAndCheckEachVideoStreamReceivedFrames(const RunParams& run_params) {
     fixture_->Run(run_params);
 
     EXPECT_GE(fixture_->GetRealTestDuration(), run_params.run_duration);
-    for (auto stream_key : video_quality_analyzer_->GetKnownVideoStreams()) {
+    VideoStreamsInfo known_streams = video_quality_analyzer_->GetKnownStreams();
+    for (const StatsKey& stream_key : known_streams.GetStatsKeys()) {
       FrameCounters stream_conters =
           video_quality_analyzer_->GetPerStreamCounters().at(stream_key);
       // On some devices the pipeline can be too slow, so we actually can't
@@ -150,6 +151,10 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Smoke) {
     alice->SetAudioConfig(std::move(audio));
     alice->SetVideoCodecs(
         {VideoCodecConfig(cricket::kVp9CodecName, {{"profile-id", "0"}})});
+
+    alice->SetUseFlexFEC(true);
+    alice->SetUseUlpFEC(true);
+    alice->SetVideoEncoderBitrateMultiplier(1.1);
   });
   AddPeer(network_links.second, [](PeerConfigurer* charlie) {
     charlie->SetName("charlie");
@@ -166,6 +171,10 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Smoke) {
     charlie->SetAudioConfig(std::move(audio));
     charlie->SetVideoCodecs(
         {VideoCodecConfig(cricket::kVp9CodecName, {{"profile-id", "0"}})});
+
+    charlie->SetUseFlexFEC(true);
+    charlie->SetUseUlpFEC(true);
+    charlie->SetVideoEncoderBitrateMultiplier(1.1);
   });
   fixture()->AddQualityMetricsReporter(
       std::make_unique<StatsBasedNetworkQualityMetricsReporter>(
@@ -174,11 +183,62 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_Smoke) {
                {"charlie", network_links.second->endpoints()}}),
           network_emulation()));
   RunParams run_params(TimeDelta::Seconds(2));
-  run_params.use_flex_fec = true;
-  run_params.use_ulp_fec = true;
-  run_params.video_encoder_bitrate_multiplier = 1.1;
+  run_params.enable_flex_fec_support = true;
   RunAndCheckEachVideoStreamReceivedFrames(run_params);
 }
+
+#if defined(WEBRTC_MAC) || defined(WEBRTC_IOS)
+TEST_F(PeerConnectionE2EQualityTestSmokeTest, SmokeH264) {
+  std::pair<EmulatedNetworkManagerInterface*, EmulatedNetworkManagerInterface*>
+      network_links = CreateNetwork();
+
+  AddPeer(network_links.first, [](PeerConfigurer* alice) {
+    VideoConfig video(160, 120, 15);
+    video.stream_label = "alice-video";
+    video.sync_group = "alice-media";
+    alice->AddVideoConfig(std::move(video));
+
+    AudioConfig audio;
+    audio.stream_label = "alice-audio";
+    audio.mode = AudioConfig::Mode::kFile;
+    audio.input_file_name =
+        test::ResourcePath("pc_quality_smoke_test_alice_source", "wav");
+    audio.sampling_frequency_in_hz = 48000;
+    audio.sync_group = "alice-media";
+    alice->SetAudioConfig(std::move(audio));
+    alice->SetVideoCodecs({VideoCodecConfig(cricket::kH264CodecName)});
+    alice->SetVideoEncoderFactory(webrtc::test::CreateObjCEncoderFactory());
+    alice->SetVideoDecoderFactory(webrtc::test::CreateObjCDecoderFactory());
+  });
+  AddPeer(network_links.second, [](PeerConfigurer* charlie) {
+    charlie->SetName("charlie");
+    VideoConfig video(160, 120, 15);
+    video.stream_label = "charlie-video";
+    video.temporal_layers_count = 2;
+    charlie->AddVideoConfig(std::move(video));
+
+    AudioConfig audio;
+    audio.stream_label = "charlie-audio";
+    audio.mode = AudioConfig::Mode::kFile;
+    audio.input_file_name =
+        test::ResourcePath("pc_quality_smoke_test_bob_source", "wav");
+    charlie->SetAudioConfig(std::move(audio));
+    charlie->SetVideoCodecs({VideoCodecConfig(cricket::kH264CodecName)});
+    charlie->SetVideoEncoderFactory(webrtc::test::CreateObjCEncoderFactory());
+    charlie->SetVideoDecoderFactory(webrtc::test::CreateObjCDecoderFactory());
+  });
+
+  fixture()->AddQualityMetricsReporter(
+      std::make_unique<StatsBasedNetworkQualityMetricsReporter>(
+          std::map<std::string, std::vector<EmulatedEndpoint*>>(
+              {{"alice", network_links.first->endpoints()},
+               {"charlie", network_links.second->endpoints()}}),
+          network_emulation()));
+  RunParams run_params(TimeDelta::Seconds(2));
+  run_params.enable_flex_fec_support = true;
+  RunAndCheckEachVideoStreamReceivedFrames(run_params);
+}
+#endif
 
 // IOS debug builds can be quite slow, disabling to avoid issues with timeouts.
 #if defined(WEBRTC_IOS) && defined(WEBRTC_ARCH_ARM64) && !defined(NDEBUG)
@@ -222,10 +282,18 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_ChangeNetworkConditions) {
     alice->AddVideoConfig(std::move(video));
     alice->SetVideoCodecs(
         {VideoCodecConfig(cricket::kVp9CodecName, {{"profile-id", "0"}})});
+
+    alice->SetUseFlexFEC(true);
+    alice->SetUseUlpFEC(true);
+    alice->SetVideoEncoderBitrateMultiplier(1.1);
   });
   AddPeer(bob_network, [](PeerConfigurer* bob) {
     bob->SetVideoCodecs(
         {VideoCodecConfig(cricket::kVp9CodecName, {{"profile-id", "0"}})});
+
+    bob->SetUseFlexFEC(true);
+    bob->SetUseUlpFEC(true);
+    bob->SetVideoEncoderBitrateMultiplier(1.1);
   });
   fixture()->AddQualityMetricsReporter(
       std::make_unique<StatsBasedNetworkQualityMetricsReporter>(
@@ -241,9 +309,7 @@ TEST_F(PeerConnectionE2EQualityTestSmokeTest, MAYBE_ChangeNetworkConditions) {
   });
 
   RunParams run_params(TimeDelta::Seconds(2));
-  run_params.use_flex_fec = true;
-  run_params.use_ulp_fec = true;
-  run_params.video_encoder_bitrate_multiplier = 1.1;
+  run_params.enable_flex_fec_support = true;
   RunAndCheckEachVideoStreamReceivedFrames(run_params);
 }
 

@@ -14,6 +14,7 @@
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
+#include "components/signin/public/base/signin_client.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_immediate_error.h"
 #include "net/base/backoff_entry.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -49,13 +50,13 @@ std::vector<CoreAccountId> GetOAuthAccountIdsFromAccountKeys(
     const AccountTrackerService* const account_tracker_service) {
   std::vector<CoreAccountId> accounts;
   for (auto& account_key : account_keys) {
-    if (account_key.account_type != account_manager::AccountType::kGaia) {
+    if (account_key.account_type() != account_manager::AccountType::kGaia) {
       continue;
     }
 
     CoreAccountId account_id =
         account_tracker_service
-            ->FindAccountInfoByGaiaId(account_key.id /* gaia_id */)
+            ->FindAccountInfoByGaiaId(account_key.id() /* gaia_id */)
             .account_id;
     DCHECK(!account_id.empty());
     accounts.emplace_back(account_id);
@@ -138,11 +139,13 @@ class PersistentErrorsHelper : public base::RefCounted<PersistentErrorsHelper> {
 
 ProfileOAuth2TokenServiceDelegateChromeOS::
     ProfileOAuth2TokenServiceDelegateChromeOS(
+        SigninClient* signin_client,
         AccountTrackerService* account_tracker_service,
         network::NetworkConnectionTracker* network_connection_tracker,
         account_manager::AccountManagerFacade* account_manager_facade,
         bool is_regular_profile)
-    : account_tracker_service_(account_tracker_service),
+    : signin_client_(signin_client),
+      account_tracker_service_(account_tracker_service),
       network_connection_tracker_(network_connection_tracker),
       account_manager_facade_(account_manager_facade),
       backoff_entry_(&kBackoffPolicy),
@@ -350,7 +353,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnGetAccounts(
   std::vector<account_manager::Account> gaia_accounts;
   for (const auto& account : accounts) {
     pending_accounts_.emplace(account.key, account);
-    if (account.key.account_type == account_manager::AccountType::kGaia) {
+    if (account.key.account_type() == account_manager::AccountType::kGaia) {
       gaia_accounts.emplace_back(account);
     }
   }
@@ -380,7 +383,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::FinishLoadingCredentials(
       if (it != persistent_errors.end()) {
         FinishAddingPendingAccount(account, it->second);
       } else {
-        DCHECK_NE(account.key.account_type,
+        DCHECK_NE(account.key.account_type(),
                   account_manager::AccountType::kGaia);
         FinishAddingPendingAccount(account,
                                    GoogleServiceAuthError::AuthErrorNone());
@@ -421,7 +424,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::FinishAddingPendingAccount(
   pending_accounts_.erase(it);
   account_keys_.insert(account.key);
 
-  if (account.key.account_type != account_manager::AccountType::kGaia) {
+  if (account.key.account_type() != account_manager::AccountType::kGaia) {
     return;
   }
 
@@ -429,7 +432,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::FinishAddingPendingAccount(
   // associated with them (https://crbug.com/933307).
   DCHECK(!account.raw_email.empty());
   CoreAccountId account_id = account_tracker_service_->SeedAccountInfo(
-      account.key.id /* gaia_id */, account.raw_email);
+      account.key.id() /* gaia_id */, account.raw_email);
   DCHECK(!account_id.empty());
 
   // Don't call |FireAuthErrorChanged|, since we call it at the end of this
@@ -458,7 +461,7 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnAccountUpserted(
     return;
   }
 
-  if (account.key.account_type != account_manager::AccountType::kGaia) {
+  if (account.key.account_type() != account_manager::AccountType::kGaia) {
     // Don't request pending account status for non-Gaia accounts.
     FinishAddingPendingAccount(account,
                                GoogleServiceAuthError::AuthErrorNone());
@@ -492,12 +495,12 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::OnAccountRemoved(
   }
   account_keys_.erase(it);
 
-  if (account.key.account_type != account_manager::AccountType::kGaia) {
+  if (account.key.account_type() != account_manager::AccountType::kGaia) {
     return;
   }
   CoreAccountId account_id =
       account_tracker_service_
-          ->FindAccountInfoByGaiaId(account.key.id /* gaia_id */)
+          ->FindAccountInfoByGaiaId(account.key.id() /* gaia_id */)
           .account_id;
   DCHECK(!account_id.empty());
   UpdateAuthErrorInternal(account_id, GoogleServiceAuthError::AuthErrorNone(),
@@ -517,8 +520,14 @@ void ProfileOAuth2TokenServiceDelegateChromeOS::RevokeCredentials(
 }
 
 void ProfileOAuth2TokenServiceDelegateChromeOS::RevokeAllCredentials() {
-  // Signing out of Chrome is not possible on Chrome OS Ash / Lacros.
+#if BUILDFLAG(IS_CHROMEOS_LACROS)
+  DCHECK(!signin_client_->GetInitialPrimaryAccount().has_value());
+  ScopedBatchChange batch(this);
+  signin_client_->RemoveAllAccounts();
+#else
+  // Signing out of Chrome is not possible on Chrome OS Ash.
   NOTREACHED();
+#endif
 }
 
 const net::BackoffEntry*

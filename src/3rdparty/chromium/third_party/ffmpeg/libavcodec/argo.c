@@ -29,6 +29,7 @@
 
 #include "avcodec.h"
 #include "bytestream.h"
+#include "codec_internal.h"
 #include "internal.h"
 
 typedef struct ArgoContext {
@@ -58,7 +59,7 @@ static int decode_pal8(AVCodecContext *avctx, uint32_t *pal)
         return AVERROR_INVALIDDATA;
 
     for (int i = 0; i < count; i++)
-        pal[start + i] = (0xFF << 24U) | bytestream2_get_be24u(gb);
+        pal[start + i] = (0xFFU << 24) | bytestream2_get_be24u(gb);
 
     return 0;
 }
@@ -607,6 +608,9 @@ static int decode_frame(AVCodecContext *avctx, void *data,
     uint32_t chunk;
     int ret;
 
+    if (avpkt->size < 4)
+        return AVERROR_INVALIDDATA;
+
     bytestream2_init(gb, avpkt->data, avpkt->size);
 
     if ((ret = ff_reget_buffer(avctx, frame, 0)) < 0)
@@ -684,6 +688,11 @@ static av_cold int decode_init(AVCodecContext *avctx)
              return AVERROR_PATCHWELCOME;
     }
 
+    if (avctx->width % 2 || avctx->height % 2) {
+        avpriv_request_sample(s, "Odd dimensions\n");
+        return AVERROR_PATCHWELCOME;
+    }
+
     s->frame = av_frame_alloc();
     if (!s->frame)
         return AVERROR(ENOMEM);
@@ -724,16 +733,16 @@ static av_cold int decode_close(AVCodecContext *avctx)
     return 0;
 }
 
-const AVCodec ff_argo_decoder = {
-    .name           = "argo",
-    .long_name      = NULL_IF_CONFIG_SMALL("Argonaut Games Video"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_ARGO,
+const FFCodec ff_argo_decoder = {
+    .p.name         = "argo",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("Argonaut Games Video"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_ARGO,
     .priv_data_size = sizeof(ArgoContext),
     .init           = decode_init,
     .decode         = decode_frame,
     .flush          = decode_flush,
     .close          = decode_close,
-    .capabilities   = AV_CODEC_CAP_DR1,
+    .p.capabilities = AV_CODEC_CAP_DR1,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -31,13 +31,18 @@ DNRManifestHandler::DNRManifestHandler() = default;
 DNRManifestHandler::~DNRManifestHandler() = default;
 
 bool DNRManifestHandler::Parse(Extension* extension, std::u16string* error) {
-  DCHECK(extension->manifest()->HasKey(
+  DCHECK(extension->manifest()->FindKey(
       dnr_api::ManifestKeys::kDeclarativeNetRequest));
 
-  if (!PermissionsParser::HasAPIPermission(
-          extension, mojom::APIPermissionID::kDeclarativeNetRequest)) {
+  bool has_permission =
+      PermissionsParser::HasAPIPermission(
+          extension, mojom::APIPermissionID::kDeclarativeNetRequest) ||
+      PermissionsParser::HasAPIPermission(
+          extension,
+          mojom::APIPermissionID::kDeclarativeNetRequestWithHostAccess);
+  if (!has_permission) {
     *error = ErrorUtils::FormatErrorMessageUTF16(
-        errors::kDeclarativeNetRequestPermissionNeeded, kAPIPermission,
+        errors::kDeclarativeNetRequestPermissionNeeded,
         dnr_api::ManifestKeys::kDeclarativeNetRequest);
     return false;
   }

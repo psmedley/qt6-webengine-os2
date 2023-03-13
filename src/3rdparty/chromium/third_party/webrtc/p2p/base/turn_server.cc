@@ -16,6 +16,7 @@
 
 #include "absl/algorithm/container.h"
 #include "absl/memory/memory.h"
+#include "api/array_view.h"
 #include "api/packet_socket_factory.h"
 #include "api/transport/stun.h"
 #include "p2p/base/async_stun_tcp_socket.h"
@@ -139,7 +140,7 @@ TurnServer::~TurnServer() {
 
   for (ServerSocketMap::iterator it = server_listen_sockets_.begin();
        it != server_listen_sockets_.end(); ++it) {
-    rtc::AsyncSocket* socket = it->first;
+    rtc::Socket* socket = it->first;
     delete socket;
   }
 }
@@ -152,12 +153,15 @@ void TurnServer::AddInternalSocket(rtc::AsyncPacketSocket* socket,
   socket->SignalReadPacket.connect(this, &TurnServer::OnInternalPacket);
 }
 
-void TurnServer::AddInternalServerSocket(rtc::AsyncSocket* socket,
-                                         ProtocolType proto) {
+void TurnServer::AddInternalServerSocket(
+    rtc::Socket* socket,
+    ProtocolType proto,
+    std::unique_ptr<rtc::SSLAdapterFactory> ssl_adapter_factory) {
   RTC_DCHECK_RUN_ON(thread_);
+
   RTC_DCHECK(server_listen_sockets_.end() ==
              server_listen_sockets_.find(socket));
-  server_listen_sockets_[socket] = proto;
+  server_listen_sockets_[socket] = {proto, std::move(ssl_adapter_factory)};
   socket->SignalReadEvent.connect(this, &TurnServer::OnNewInternalConnection);
 }
 
@@ -169,25 +173,34 @@ void TurnServer::SetExternalSocketFactory(
   external_addr_ = external_addr;
 }
 
-void TurnServer::OnNewInternalConnection(rtc::AsyncSocket* socket) {
+void TurnServer::OnNewInternalConnection(rtc::Socket* socket) {
   RTC_DCHECK_RUN_ON(thread_);
   RTC_DCHECK(server_listen_sockets_.find(socket) !=
              server_listen_sockets_.end());
   AcceptConnection(socket);
 }
 
-void TurnServer::AcceptConnection(rtc::AsyncSocket* server_socket) {
+void TurnServer::AcceptConnection(rtc::Socket* server_socket) {
   // Check if someone is trying to connect to us.
   rtc::SocketAddress accept_addr;
-  rtc::AsyncSocket* accepted_socket = server_socket->Accept(&accept_addr);
+  rtc::Socket* accepted_socket = server_socket->Accept(&accept_addr);
   if (accepted_socket != NULL) {
-    ProtocolType proto = server_listen_sockets_[server_socket];
+    const ServerSocketInfo& info = server_listen_sockets_[server_socket];
+    if (info.ssl_adapter_factory) {
+      rtc::SSLAdapter* ssl_adapter =
+          info.ssl_adapter_factory->CreateAdapter(accepted_socket);
+      ssl_adapter->StartSSL("");
+      accepted_socket = ssl_adapter;
+    }
     cricket::AsyncStunTCPSocket* tcp_socket =
-        new cricket::AsyncStunTCPSocket(accepted_socket, false);
+        new cricket::AsyncStunTCPSocket(accepted_socket);
 
-    tcp_socket->SignalClose.connect(this, &TurnServer::OnInternalSocketClose);
+    tcp_socket->SubscribeClose(this,
+                               [this](rtc::AsyncPacketSocket* s, int err) {
+                                 OnInternalSocketClose(s, err);
+                               });
     // Finally add the socket so it can start communicating with the client.
-    AddInternalSocket(tcp_socket, proto);
+    AddInternalSocket(tcp_socket, info.proto);
   }
 }
 
@@ -412,7 +425,7 @@ void TurnServer::HandleAllocateRequest(TurnServerConnection* conn,
 std::string TurnServer::GenerateNonce(int64_t now) const {
   // Generate a nonce of the form hex(now + HMAC-MD5(nonce_key_, now))
   std::string input(reinterpret_cast<const char*>(&now), sizeof(now));
-  std::string nonce = rtc::hex_encode(input.c_str(), input.size());
+  std::string nonce = rtc::hex_encode(input);
   nonce += rtc::ComputeHmac(rtc::DIGEST_MD5, nonce_key_, input);
   RTC_DCHECK(nonce.size() == kNonceSize);
 
@@ -428,8 +441,8 @@ bool TurnServer::ValidateNonce(const std::string& nonce) const {
   // Decode the timestamp.
   int64_t then;
   char* p = reinterpret_cast<char*>(&then);
-  size_t len =
-      rtc::hex_decode(p, sizeof(then), nonce.substr(0, sizeof(then) * 2));
+  size_t len = rtc::hex_decode(rtc::ArrayView<char>(p, sizeof(then)),
+                               nonce.substr(0, sizeof(then) * 2));
   if (len != sizeof(then)) {
     return false;
   }
@@ -554,6 +567,7 @@ void TurnServer::DestroyInternalSocket(rtc::AsyncPacketSocket* socket) {
   InternalSocketMap::iterator iter = server_sockets_.find(socket);
   if (iter != server_sockets_.end()) {
     rtc::AsyncPacketSocket* socket = iter->first;
+    socket->UnsubscribeClose(this);
     socket->SignalReadPacket.disconnect(this);
     server_sockets_.erase(iter);
     std::unique_ptr<rtc::AsyncPacketSocket> socket_to_delete =
@@ -655,11 +669,6 @@ void TurnServerAllocation::HandleAllocateRequest(const TurnMessage* msg) {
       msg->GetByteString(STUN_ATTR_USERNAME);
   RTC_DCHECK(username_attr != NULL);
   username_ = username_attr->GetString();
-  const StunByteStringAttribute* origin_attr =
-      msg->GetByteString(STUN_ATTR_ORIGIN);
-  if (origin_attr) {
-    origin_ = origin_attr->GetString();
-  }
 
   // Figure out the lifetime and start the allocation timer.
   int lifetime_secs = ComputeLifetime(msg);

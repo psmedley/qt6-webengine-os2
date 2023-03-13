@@ -26,6 +26,7 @@
 #include "extensions/renderer/script_context_set.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
+#include "third_party/blink/public/platform/web_isolated_world_info.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_document.h"
@@ -33,12 +34,15 @@
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "v8/include/v8-container.h"
+#include "v8/include/v8-context.h"
+#include "v8/include/v8-isolate.h"
+#include "v8/include/v8-object.h"
+#include "v8/include/v8-primitive.h"
 
 namespace extensions {
 
 namespace {
-
-constexpr int kMainWorldId = 0;
 
 base::LazyInstance<std::set<const ExtensionFrameHelper*>>::DestructorAtExit
     g_frame_helpers = LAZY_INSTANCE_INITIALIZER;
@@ -334,6 +338,8 @@ void ExtensionFrameHelper::ReadyToCommitNavigation(
   if (!delayed_main_world_script_initialization_)
     return;
 
+  base::AutoReset<bool> auto_reset(&is_initializing_main_world_script_context_,
+                                   true);
   delayed_main_world_script_initialization_ = false;
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
   v8::Local<v8::Context> context =
@@ -349,8 +355,8 @@ void ExtensionFrameHelper::ReadyToCommitNavigation(
   // are many callers which will have to pass nullptr.
   ScriptContext::ScopedFrameDocumentLoader scoped_document_loader(
       render_frame()->GetWebFrame(), document_loader);
-  extension_dispatcher_->DidCreateScriptContext(render_frame()->GetWebFrame(),
-                                                context, kMainWorldId);
+  extension_dispatcher_->DidCreateScriptContext(
+      render_frame()->GetWebFrame(), context, blink::kMainDOMWorldId);
   // TODO(devlin): Add constants for main world id, no extension group.
 }
 
@@ -366,7 +372,12 @@ void ExtensionFrameHelper::DidCommitProvisionalLoad(
 void ExtensionFrameHelper::DidCreateScriptContext(
     v8::Local<v8::Context> context,
     int32_t world_id) {
-  if (world_id == kMainWorldId) {
+  if (world_id == blink::kMainDOMWorldId) {
+    // Accessing MainWorldScriptContext() in ReadyToCommitNavigation() may
+    // trigger the script context initializing, so we don't want to initialize a
+    // second time here.
+    if (is_initializing_main_world_script_context_)
+      return;
     if (render_frame()->IsBrowserSideNavigationPending()) {
       // Defer initializing the extensions script context now because it depends
       // on having the URL of the provisional load which isn't available at this
@@ -405,8 +416,6 @@ bool ExtensionFrameHelper::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ExtensionMsg_DeliverMessage, OnExtensionDeliverMessage)
     IPC_MESSAGE_HANDLER(ExtensionMsg_DispatchOnDisconnect,
                         OnExtensionDispatchOnDisconnect)
-    IPC_MESSAGE_HANDLER(ExtensionMsg_UpdateBrowserWindowId,
-                        OnUpdateBrowserWindowId)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -463,10 +472,6 @@ void ExtensionFrameHelper::SetTabId(int32_t tab_id) {
   tab_id_ = tab_id;
 }
 
-void ExtensionFrameHelper::OnUpdateBrowserWindowId(int browser_window_id) {
-  browser_window_id_ = browser_window_id;
-}
-
 void ExtensionFrameHelper::NotifyRenderViewType(mojom::ViewType type) {
   // TODO(devlin): It'd be really nice to be able to
   // DCHECK_EQ(mojom::ViewType::kInvalid, view_type_) here.
@@ -476,10 +481,9 @@ void ExtensionFrameHelper::NotifyRenderViewType(mojom::ViewType type) {
 void ExtensionFrameHelper::MessageInvoke(const std::string& extension_id,
                                          const std::string& module_name,
                                          const std::string& function_name,
-                                         const base::Value args) {
+                                         base::Value::List args) {
   extension_dispatcher_->InvokeModuleSystemMethod(
-      render_frame(), extension_id, module_name, function_name,
-      base::Value::AsListValue(args));
+      render_frame(), extension_id, module_name, function_name, args);
 }
 
 void ExtensionFrameHelper::ExecuteCode(mojom::ExecuteCodeParamsPtr param,
@@ -487,7 +491,8 @@ void ExtensionFrameHelper::ExecuteCode(mojom::ExecuteCodeParamsPtr param,
   // Sanity checks.
   if (param->injection->is_css()) {
     if (param->injection->get_css()->sources.empty()) {
-      mojo::ReportBadMessage("At least one CSS source must be specified.");
+      local_frame_receiver_.ReportBadMessage(
+          "At least one CSS source must be specified.");
       return;
     }
 
@@ -497,14 +502,15 @@ void ExtensionFrameHelper::ExecuteCode(mojom::ExecuteCodeParamsPtr param,
                               [](const mojom::CSSSourcePtr& source) {
                                 return source->key.has_value();
                               })) {
-      mojo::ReportBadMessage(
+      local_frame_receiver_.ReportBadMessage(
           "An injection key must be specified for CSS removal.");
       return;
     }
   } else {
     DCHECK(param->injection->is_js());  // Enforced by mojo.
     if (param->injection->get_js()->sources.empty()) {
-      mojo::ReportBadMessage("At least one JS source must be specified.");
+      local_frame_receiver_.ReportBadMessage(
+          "At least one JS source must be specified.");
       return;
     }
   }
@@ -554,6 +560,10 @@ void ExtensionFrameHelper::ExecuteDeclarativeScript(
     extension_dispatcher_->ExecuteDeclarativeScript(
         render_frame(), tab_id, extension_id, script_id, url);
   }
+}
+
+void ExtensionFrameHelper::UpdateBrowserWindowId(int32_t window_id) {
+  browser_window_id_ = window_id;
 }
 
 void ExtensionFrameHelper::OnDestruct() {

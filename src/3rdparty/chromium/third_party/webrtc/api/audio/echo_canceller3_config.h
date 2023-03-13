@@ -108,9 +108,11 @@ struct RTC_EXPORT EchoCanceller3Config {
   struct EpStrength {
     float default_gain = 1.f;
     float default_len = 0.83f;
+    float nearend_len = 0.83f;
     bool echo_can_saturate = true;
     bool bounded_erl = false;
     bool erle_onset_compensation_in_dominant_nearend = false;
+    bool use_conservative_tail_frequency_response = true;
   } ep_strength;
 
   struct EchoAudibility {
@@ -207,6 +209,7 @@ struct RTC_EXPORT EchoCanceller3Config {
       int hold_duration = 50;
       int trigger_threshold = 12;
       bool use_during_initial_phase = true;
+      bool use_unbounded_echo_spectrum = true;
     } dominant_nearend_detection;
 
     struct SubbandNearendDetection {
@@ -233,6 +236,13 @@ struct RTC_EXPORT EchoCanceller3Config {
     float floor_first_increase = 0.00001f;
     bool conservative_hf_suppression = false;
   } suppressor;
+
+  struct MultiChannel {
+    bool detect_stereo_content = true;
+    float stereo_detection_threshold = 0.0f;
+    int stereo_detection_timeout_threshold_seconds = 300;
+    float stereo_detection_hysteresis_seconds = 2.0f;
+  } multi_channel;
 };
 }  // namespace webrtc
 

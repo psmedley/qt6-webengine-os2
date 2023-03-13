@@ -1,3 +1,132 @@
+2022-01-28 v3.3.0
+  This release includes compression efficiency and perceptual quality
+  improvements, speedup and memory optimizations, some new features, and
+  several bug fixes.
+
+  - New Features
+    * AV1 RT: Introducing CDEF search level 5
+    * Changed real time speed 4 to behave the same as real time speed 5
+    * Add --deltaq-strength
+    * rtc: Allow scene-change and overshoot detection for svc
+    * rtc: Intra-only frame for svc
+    * AV1 RT: Option 2 for codec control AV1E_SET_ENABLE_CDEF to disable
+      CDEF on non-ref frames
+    * New codec controls AV1E_SET_LOOPFILTER_CONTROL and
+      AOME_GET_LOOPFILTER_LEVEL
+    * Improvements to three pass encoding
+
+  - Compression Efficiency Improvements
+    * Overall compression gains: 0.6%
+
+  - Perceptual Quality Improvements
+    * Improves the perceptual quality of high QP encoding for delta-q mode 4
+    * Auto select noise synthesis level for all intra
+
+  - Speedup and Memory Optimizations
+    * Added many SSE2 optimizations.
+    * Good quality 2-pass encoder speedups:
+      o Speed 2: 9%
+      o Speed 3: 12.5%
+      o Speed 4: 8%
+      o Speed 5: 3%
+      o Speed 6: 4%
+    * Real time mode encoder speedups:
+      o Speed 5: 2.6% BDRate gain, 4% speedup
+      o Speed 6: 3.5% BDRate gain, 4% speedup
+      o Speed 9: 1% BDRate gain, 3% speedup
+      o Speed 10: 3% BDRate gain, neutral speedup
+    * All intra encoding speedups (AVIF):
+      o Single thread - speed 6: 8%
+      o Single thread - speed 9: 15%
+      o Multi thread(8) - speed 6: 14%
+      o Multi thread(8) - speed 9: 34%
+
+  - Bug Fixes
+    * Issue 3163: Segmentation fault when using --enable-keyframe-filtering=2
+    * Issue 2436: Integer overflow in av1_warp_affine_c()
+    * Issue 3226: armv7 build failure due to gcc-11
+    * Issue 3195: Bug report on libaom (AddressSanitizer: heap-buffer-overflow)
+    * Issue 3191: Bug report on libaom (AddressSanitizer: SEGV on unknown
+      address)
+    * Issue 3176: Some SSE2/SADx4AvgTest.* tests fail on Windows
+    * Issue 3175: Some SSE2/SADSkipTest.* tests fail on Windows
+
+2021-10-13 v3.2.0
+  This release includes compression efficiency and perceptual quality
+  improvements, speedup and memory optimizations, as well as some new
+  features.
+
+  - New Features
+    * Introduced speeds 7, 8, and 9 for all intra mode.
+    * Introduced speed 10 for real time mode.
+    * Introduced an API that allows external partition decisions.
+    * SVC: added support for compound prediction.
+    * SVC: added support for fixed SVC modes.
+
+  - Compression Efficiency Improvements
+    * Intra-mode search improvement.
+    * Improved real time (RT) mode BDrate savings by ~5% (RT speed 5)
+      and ~12% (RT speed 6). The improvement was measured on the video
+      conference set.
+    * Improved real time mode for nonrd path (speed 7, 8, 9): BDrate
+      gains of ~3-5%.
+    * Rate control and RD adjustments based on ML research in VP9.
+      Gains of ~0.5-1.0% for HD.
+
+  - Perceptual Quality Improvements
+    * Added a new mode --deltaq-mode=3 to improve perceptual quality
+      based on a differential contrast model for still images.
+    * Added a new mode –deltaq-mode=4 to improve perceptual quality
+      based on user rated cq_level data set for still images.
+    * Weighting of some intra mode and partition size choices to better
+      manage and retain texture.
+
+  - Speedup and Memory Optimizations
+    * Further improved 2-pass good quality encoder speed:
+      o Speed 2 speedup: 18%
+      o Speed 3 speedup: 22%
+      o Speed 4 speedup: 37%
+      o Speed 5 speedup: 30%
+      o Speed 6 speedup: 20%
+    * Optimized the real time encoder (measured on the video conference
+      set):
+      o RT speed 5 speedup: 110%
+      o RT speed 6 speedup: 77%
+
+  - Bug Fixes
+    * Issue 3069: Fix one-pass mode keyframe placement off-by-one error.
+    * Issue 3156: Fix a bug in av1_quantize_lp AVX2 optimization.
+
+2021-09-29 v3.1.3
+  This release includes several bug fixes.
+
+  - Bug fixes:
+    The following four cmake changes should help the people building
+    libaom using MSVC.
+      1. exports: use CMAKE_SHARED_LIBRARY_PREFIX to determine lib name
+         https://aomedia-review.googlesource.com/c/aom/+/142342
+      2. aom_install: Install lib dlls to bindir
+         https://aomedia-review.googlesource.com/c/aom/+/146546
+      3. aom_install: use relpath for install
+         https://aomedia-review.googlesource.com/c/aom/+/146550
+      4. aom_install: don't exclude msvc from install
+         https://aomedia-review.googlesource.com/c/aom/+/146547
+
+    aom/aom_encoder.h: remove configure option reference
+    https://aomedia-review.googlesource.com/c/aom/+/146743
+
+    Issue 3113: Tests for detecting chroma subsampling in
+    av1_copy_and_extend_frame() do not work when y_width or y_height is
+    1
+
+    Issue 3115: image2yuvconfig() should calculate uv_crop_width and
+    uv_crop_height from y_crop_width and y_crop_height
+
+    Issue 3140: rc_overshoot_pct is documented as having a range of
+    0-1000, but is range checked against 0-100
+
+    Issue 3147: Build failure on Apple M1 arm64
+
 2021-07-20 v3.1.2
   This release includes several bug fixes.
 

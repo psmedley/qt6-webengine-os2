@@ -11,8 +11,9 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/observer_list.h"
 #include "base/system/sys_info.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
@@ -67,7 +68,7 @@ gpu::ContextCreationAttribs CreateAttributes(
   attributes.fail_if_major_perf_caveat = false;
   attributes.lose_context_when_out_of_memory = true;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (renderer_settings.color_space == gfx::ColorSpace::CreateSRGB()) {
     attributes.color_space = gpu::COLOR_SPACE_SRGB;
   } else if (renderer_settings.color_space ==
@@ -88,7 +89,7 @@ gpu::ContextCreationAttribs CreateAttributes(
   }
 
   attributes.enable_swap_timestamps_if_supported = true;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   return attributes;
 }
@@ -99,7 +100,7 @@ void UmaRecordContextLost(ContextLostReason reason) {
 
 gpu::SharedMemoryLimits SharedMemoryLimitsForRendererSettings(
     const RendererSettings& renderer_settings) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   return gpu::SharedMemoryLimits::ForDisplayCompositor(
       renderer_settings.initial_screen_size);
 #else

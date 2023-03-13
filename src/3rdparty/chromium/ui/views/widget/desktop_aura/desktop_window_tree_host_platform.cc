@@ -10,14 +10,15 @@
 
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "base/time/time.h"
+#include "build/build_config.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/transient_window_client.h"
 #include "ui/base/hit_test.h"
-#include "ui/base/ui_base_features.h"
+#include "ui/base/ui_base_types.h"
+#include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/paint_recorder.h"
 #include "ui/display/display.h"
@@ -113,8 +114,9 @@ ui::PlatformWindowInitProperties ConvertWidgetInitParamsToInitProperties(
   properties.activatable =
       params.activatable == Widget::InitParams::Activatable::kYes;
   properties.force_show_in_taskbar = params.force_show_in_taskbar;
-  properties.keep_on_top =
-      params.EffectiveZOrderLevel() != ui::ZOrderLevel::kNormal;
+  auto z_order = params.EffectiveZOrderLevel();
+  properties.keep_on_top = z_order != ui::ZOrderLevel::kNormal;
+  properties.is_security_surface = z_order == ui::ZOrderLevel::kSecuritySurface;
   properties.visible_on_all_workspaces = params.visible_on_all_workspaces;
   properties.remove_standard_frame = params.remove_standard_frame;
   properties.workspace = params.workspace;
@@ -125,17 +127,27 @@ ui::PlatformWindowInitProperties ConvertWidgetInitParamsToInitProperties(
     properties.parent_widget = params.parent->GetHost()->GetAcceleratedWidget();
 
 #if defined(USE_OZONE)
-  if (features::IsUsingOzonePlatform() &&
-      ui::OzonePlatform::GetInstance()
+  if (ui::OzonePlatform::GetInstance()
           ->GetPlatformProperties()
           .set_parent_for_non_top_level_windows) {
     // If context has been set, use that as the parent_widget so that Wayland
     // creates a correct hierarchy of windows.
-    if (params.context && params.context->GetHost()) {
-      properties.parent_widget =
-          params.context->GetHost()->GetAcceleratedWidget();
+    if (params.context) {
+      auto* host = params.context->GetHost();
+      // Use this context as a parent widget iff the host for a root window is
+      // set (this happens during OnNativeWidgetCreated). Otherwise, the context
+      // can be a native window of a WindowTreeHost created by
+      // WindowTreeHost::Create, which we don't want to have as a context (this
+      // happens in tests - called by TestScreen, AuraTestHelper,
+      // aura::DemoMain, and SitePerProcessBrowserTest).
+      if (host && host->window()->GetProperty(kHostForRootWindow))
+        properties.parent_widget = host->GetAcceleratedWidget();
     }
   }
+#endif
+
+#if BUILDFLAG(IS_FUCHSIA)
+  properties.enable_keyboard = true;
 #endif
 
   return properties;
@@ -195,19 +207,19 @@ void DesktopWindowTreeHostPlatform::Init(const Widget::InitParams& params) {
   if (params.type == Widget::InitParams::TYPE_WINDOW)
     GetContentWindow()->SetProperty(aura::client::kAnimationsDisabledKey, true);
 
-  // If we have a parent, record the parent/child relationship. We use this
-  // data during destruction to make sure that when we try to close a parent
-  // window, we also destroy all child windows.
-  if (params.parent && params.parent->GetHost()) {
-    window_parent_ =
-        static_cast<DesktopWindowTreeHostPlatform*>(params.parent->GetHost());
-    DCHECK(window_parent_);
-    window_parent_->window_children_.insert(this);
-  }
-
   ui::PlatformWindowInitProperties properties =
       ConvertWidgetInitParamsToInitProperties(params);
   AddAdditionalInitProperties(params, &properties);
+
+  // If we have a parent, record the parent/child relationship. We use this
+  // data during destruction to make sure that when we try to close a parent
+  // window, we also destroy all child windows.
+  if (properties.parent_widget) {
+    window_parent_ = DesktopWindowTreeHostPlatform::GetHostForWidget(
+        properties.parent_widget);
+    DCHECK(window_parent_);
+    window_parent_->window_children_.insert(this);
+  }
 
   // Calculate initial bounds.
   properties.bounds = ToPixelRect(params.bounds);
@@ -295,8 +307,7 @@ void DesktopWindowTreeHostPlatform::CloseNow() {
     return;
 
 #if defined(USE_OZONE)
-  if (features::IsUsingOzonePlatform())
-    SetWmDropHandler(platform_window(), nullptr);
+  SetWmDropHandler(platform_window(), nullptr);
 #endif
 
   platform_window()->PrepareForShutdown();
@@ -399,31 +410,24 @@ void DesktopWindowTreeHostPlatform::StackAtTop() {
 }
 
 void DesktopWindowTreeHostPlatform::CenterWindow(const gfx::Size& size) {
-  gfx::Size size_in_pixels = ToPixelRect(gfx::Rect(size)).size();
-  gfx::Rect parent_bounds_in_pixels = ToPixelRect(GetWorkAreaBoundsInScreen());
+  gfx::Rect parent_bounds = GetWorkAreaBoundsInScreen();
 
   // If |window_|'s transient parent bounds are big enough to contain |size|,
   // use them instead.
   if (wm::GetTransientParent(GetContentWindow())) {
     gfx::Rect transient_parent_rect =
         wm::GetTransientParent(GetContentWindow())->GetBoundsInScreen();
+    // Consider using the intersect of the work area.
     if (transient_parent_rect.height() >= size.height() &&
         transient_parent_rect.width() >= size.width()) {
-      parent_bounds_in_pixels = ToPixelRect(transient_parent_rect);
+      parent_bounds = transient_parent_rect;
     }
   }
 
-  gfx::Rect window_bounds_in_pixels(
-      parent_bounds_in_pixels.x() +
-          (parent_bounds_in_pixels.width() - size_in_pixels.width()) / 2,
-      parent_bounds_in_pixels.y() +
-          (parent_bounds_in_pixels.height() - size_in_pixels.height()) / 2,
-      size_in_pixels.width(), size_in_pixels.height());
-  // Don't size the window bigger than the parent, otherwise the user may not be
-  // able to close or move it.
-  window_bounds_in_pixels.AdjustToFit(parent_bounds_in_pixels);
+  gfx::Rect window_bounds_in_screen = parent_bounds;
+  window_bounds_in_screen.ClampToCenteredSize(size);
 
-  SetBoundsInPixels(window_bounds_in_pixels);
+  SetBoundsInDIP(window_bounds_in_screen);
 }
 
 void DesktopWindowTreeHostPlatform::GetWindowPlacement(
@@ -571,6 +575,10 @@ void DesktopWindowTreeHostPlatform::ClearNativeFocus() {
     aura::client::GetFocusClient(GetContentWindow())
         ->FocusWindow(GetContentWindow());
   }
+}
+
+bool DesktopWindowTreeHostPlatform::IsMoveLoopSupported() const {
+  return platform_window()->IsClientControlledWindowMovementSupported();
 }
 
 Widget::MoveLoopResult DesktopWindowTreeHostPlatform::RunMoveLoop(
@@ -721,6 +729,8 @@ gfx::Transform DesktopWindowTreeHostPlatform::GetRootTransform() const {
   // the display where it is shown.
   if (platform_window())
     display = GetDisplayNearestRootWindow();
+  else if (window_parent_)
+    display = window_parent_->GetDisplayNearestRootWindow();
 
   float scale = display.device_scale_factor();
   gfx::Transform transform;
@@ -789,13 +799,13 @@ void DesktopWindowTreeHostPlatform::OnActivationChanged(bool active) {
 
 absl::optional<gfx::Size>
 DesktopWindowTreeHostPlatform::GetMinimumSizeForWindow() {
-  return ToPixelRect(gfx::Rect(native_widget_delegate()->GetMinimumSize()))
+  return ToPixelRect(gfx::Rect(native_widget_delegate_->GetMinimumSize()))
       .size();
 }
 
 absl::optional<gfx::Size>
 DesktopWindowTreeHostPlatform::GetMaximumSizeForWindow() {
-  return ToPixelRect(gfx::Rect(native_widget_delegate()->GetMaximumSize()))
+  return ToPixelRect(gfx::Rect(native_widget_delegate_->GetMaximumSize()))
       .size();
 }
 
@@ -803,12 +813,26 @@ SkPath DesktopWindowTreeHostPlatform::GetWindowMaskForWindowShapeInPixels() {
   SkPath window_mask = GetWindowMask(GetWidget());
   // Convert SkPath in DIPs to pixels.
   if (!window_mask.isEmpty())
-    window_mask.transform(SkMatrix(GetRootTransform().matrix()));
+    window_mask.transform(GetRootTransform().matrix().asM33());
   return window_mask;
 }
 
 absl::optional<ui::MenuType> DesktopWindowTreeHostPlatform::GetMenuType() {
   return GetContentWindow()->GetProperty(aura::client::kMenuType);
+}
+
+absl::optional<ui::OwnedWindowAnchor>
+DesktopWindowTreeHostPlatform::GetOwnedWindowAnchorAndRectInPx() {
+  auto* anchor =
+      GetContentWindow()->GetProperty(aura::client::kOwnedWindowAnchor);
+  if (!anchor)
+    return absl::nullopt;
+  // Make a copy of the structure. Otherwise, conversion will result in
+  // overriding the stored property's value.
+  ui::OwnedWindowAnchor window_anchor = *anchor;
+  // Anchor rect must be translated from DIP to px.
+  window_anchor.anchor_rect = ToPixelRect(window_anchor.anchor_rect);
+  return window_anchor;
 }
 
 void DesktopWindowTreeHostPlatform::OnWorkspaceChanged() {
@@ -829,6 +853,14 @@ gfx::Rect DesktopWindowTreeHostPlatform::ToPixelRect(
   return gfx::ToEnclosingRect(rect_in_pixels);
 }
 
+Widget* DesktopWindowTreeHostPlatform::GetWidget() {
+  return native_widget_delegate_->AsWidget();
+}
+
+const Widget* DesktopWindowTreeHostPlatform::GetWidget() const {
+  return native_widget_delegate_->AsWidget();
+}
+
 void DesktopWindowTreeHostPlatform::ScheduleRelayout() {
   Widget* widget = native_widget_delegate_->AsWidget();
   NonClientView* non_client_view = widget->non_client_view();
@@ -846,19 +878,11 @@ void DesktopWindowTreeHostPlatform::ScheduleRelayout() {
   }
 }
 
-Widget* DesktopWindowTreeHostPlatform::GetWidget() {
-  return native_widget_delegate_->AsWidget();
-}
-
-const Widget* DesktopWindowTreeHostPlatform::GetWidget() const {
-  return native_widget_delegate_->AsWidget();
-}
-
 void DesktopWindowTreeHostPlatform::SetVisible(bool visible) {
   if (compositor())
     compositor()->SetVisible(visible);
 
-  native_widget_delegate()->OnNativeWidgetVisibilityChanged(visible);
+  native_widget_delegate_->OnNativeWidgetVisibilityChanged(visible);
 }
 
 void DesktopWindowTreeHostPlatform::AddAdditionalInitProperties(
@@ -884,7 +908,7 @@ display::Display DesktopWindowTreeHostPlatform::GetDisplayNearestRootWindow()
 // DesktopWindowTreeHost:
 
 // Linux subclasses this host and adds some Linux specific bits.
-#if !defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
 // static
 DesktopWindowTreeHost* DesktopWindowTreeHost::Create(
     internal::NativeWidgetDelegate* native_widget_delegate,

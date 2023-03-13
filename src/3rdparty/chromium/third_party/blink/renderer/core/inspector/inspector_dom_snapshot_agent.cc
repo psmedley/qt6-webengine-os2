@@ -102,11 +102,7 @@ String GetOriginUrl(const Node* node) {
   if (!isolate || !isolate->InContext() || !debugger)
     return String();
   v8::HandleScope handleScope(isolate);
-  // Try not getting the entire stack first.
-  String url = GetCurrentScriptUrl(/* maxStackSize=*/5);
-  if (!url.IsEmpty())
-    return url;
-  url = GetCurrentScriptUrl(/* maxStackSize=*/200);
+  String url = GetCurrentScriptUrl();
   if (!url.IsEmpty())
     return url;
   // If we did not get anything from the sync stack, let's try the slow
@@ -178,8 +174,8 @@ class DOMTreeIterator {
 // static
 PhysicalRect InspectorDOMSnapshotAgent::RectInDocument(
     const LayoutObject* layout_object) {
-  PhysicalRect rect_in_absolute = PhysicalRect::EnclosingRect(
-      layout_object->AbsoluteBoundingBoxFloatRect());
+  PhysicalRect rect_in_absolute =
+      PhysicalRect::EnclosingRect(layout_object->AbsoluteBoundingBoxRectF());
   LocalFrameView* local_frame_view = layout_object->GetFrameView();
   // Don't do frame to document coordinate transformation for layout view,
   // whose bounding box is not affected by scroll offset.
@@ -290,7 +286,7 @@ protocol::Response InspectorDOMSnapshotAgent::captureSnapshot(
 
   // Update layout before traversal of document so that we inspect a
   // current and consistent state of all trees.
-  inspected_frames_->Root()->View()->UpdateLifecycleToLayoutClean(
+  inspected_frames_->Root()->View()->UpdateLifecycleToCompositingInputsClean(
       DocumentUpdateReason::kInspector);
 
   strings_ = std::make_unique<protocol::Array<String>>();
@@ -331,7 +327,7 @@ protocol::Response InspectorDOMSnapshotAgent::captureSnapshot(
   *documents = std::move(documents_);
   *strings = std::move(strings_);
   css_property_filter_.reset();
-  paint_order_map_.reset();
+  paint_order_map_.Clear();
   string_table_.clear();
   document_order_map_.clear();
   documents_.reset();
@@ -436,11 +432,11 @@ void InspectorDOMSnapshotAgent::VisitDocument(Document* document) {
 
   if (document->View() && document->View()->LayoutViewport()) {
     auto offset = document->View()->LayoutViewport()->GetScrollOffset();
-    document_->setScrollOffsetX(offset.Width());
-    document_->setScrollOffsetY(offset.Height());
+    document_->setScrollOffsetX(offset.x());
+    document_->setScrollOffsetY(offset.y());
     auto contents_size = document->View()->LayoutViewport()->ContentsSize();
-    document_->setContentWidth(contents_size.Width());
-    document_->setContentHeight(contents_size.Height());
+    document_->setContentWidth(contents_size.width());
+    document_->setContentHeight(contents_size.height());
   }
 
   if (paint_order_map_) {
@@ -516,14 +512,17 @@ void InspectorDOMSnapshotAgent::VisitNode(Node* node,
   BuildLayoutTreeNode(node->GetLayoutObject(), node, index, contrast);
 
   if (origin_url_map_ && origin_url_map_->Contains(backend_node_id)) {
-    String origin_url =
-        origin_url_map_->DeprecatedAtOrEmptyValue(backend_node_id);
+    String origin_url = origin_url_map_->at(backend_node_id);
     // In common cases, it is implicit that a child node would have the same
     // origin url as its parent, so no need to mark twice.
-    if (!node->parentNode() ||
-        origin_url_map_->DeprecatedAtOrEmptyValue(
-            DOMNodeIds::IdForNode(node->parentNode())) != origin_url) {
-      SetRare(nodes->getOriginURL(nullptr), index, origin_url);
+    if (!node->parentNode()) {
+      SetRare(nodes->getOriginURL(nullptr), index, std::move(origin_url));
+    } else {
+      DOMNodeId parent_id = DOMNodeIds::IdForNode(node->parentNode());
+      auto it = origin_url_map_->find(parent_id);
+      String parent_url = it != origin_url_map_->end() ? it->value : String();
+      if (parent_url != origin_url)
+        SetRare(nodes->getOriginURL(nullptr), index, std::move(origin_url));
     }
   }
 
@@ -534,8 +533,9 @@ void InspectorDOMSnapshotAgent::VisitNode(Node* node,
   if (element) {
     if (auto* frame_owner = DynamicTo<HTMLFrameOwnerElement>(node)) {
       if (Document* doc = frame_owner->contentDocument()) {
-        SetRare(nodes->getContentDocumentIndex(nullptr), index,
-                document_order_map_.DeprecatedAtOrEmptyValue(doc));
+        auto it = document_order_map_.find(doc);
+        if (it != document_order_map_.end())
+          SetRare(nodes->getContentDocumentIndex(nullptr), index, it->value);
       }
     }
 
@@ -675,9 +675,15 @@ int InspectorDOMSnapshotAgent::BuildLayoutTreeNode(
 
   if (paint_order_map_) {
     PaintLayer* paint_layer = layout_object->EnclosingLayer();
-    DCHECK(paint_order_map_->Contains(paint_layer));
-    int paint_order = paint_order_map_->DeprecatedAtOrEmptyValue(paint_layer);
-    layout_tree_snapshot->getPaintOrders(nullptr)->emplace_back(paint_order);
+    const auto paint_order = paint_order_map_->find(paint_layer);
+    if (paint_order != paint_order_map_->end()) {
+      layout_tree_snapshot->getPaintOrders(nullptr)->emplace_back(
+          paint_order->value);
+    } else {
+      // Previously this returned the empty value if the paint order wasn't
+      // found. The empty value for this HashMap is 0, so just pick that here.
+      layout_tree_snapshot->getPaintOrders(nullptr)->emplace_back(0);
+    }
   }
 
   String text = layout_object->IsText()
@@ -754,10 +760,10 @@ InspectorDOMSnapshotAgent::BuildStylesForNode(Node* node) {
 }
 
 // static
-std::unique_ptr<InspectorDOMSnapshotAgent::PaintOrderMap>
+InspectorDOMSnapshotAgent::PaintOrderMap*
 InspectorDOMSnapshotAgent::BuildPaintLayerTree(Document* document) {
-  auto result = std::make_unique<PaintOrderMap>();
-  TraversePaintLayerTree(document, result.get());
+  auto* result = MakeGarbageCollected<PaintOrderMap>();
+  TraversePaintLayerTree(document, result);
   return result;
 }
 
@@ -788,7 +794,7 @@ void InspectorDOMSnapshotAgent::VisitPaintLayer(
     return;
   }
 
-  PaintLayerPaintOrderIterator iterator(*layer, kAllChildren);
+  PaintLayerPaintOrderIterator iterator(layer, kAllChildren);
   while (PaintLayer* child_layer = iterator.Next())
     VisitPaintLayer(child_layer, paint_order_map);
 }
@@ -796,6 +802,7 @@ void InspectorDOMSnapshotAgent::VisitPaintLayer(
 void InspectorDOMSnapshotAgent::Trace(Visitor* visitor) const {
   visitor->Trace(inspected_frames_);
   visitor->Trace(dom_debugger_agent_);
+  visitor->Trace(paint_order_map_);
   visitor->Trace(document_order_map_);
   visitor->Trace(css_value_cache_);
   InspectorBaseAgent::Trace(visitor);

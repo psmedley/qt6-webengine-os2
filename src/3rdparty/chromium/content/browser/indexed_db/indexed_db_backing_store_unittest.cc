@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <tuple>
 #include <utility>
 
 #include "base/barrier_closure.h"
@@ -15,23 +16,22 @@
 #include "base/callback.h"
 #include "base/check_op.h"
 #include "base/containers/span.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
+#include "base/memory/raw_ptr.h"
 #include "base/notreached.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/synchronization/waitable_event_watcher.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/thread_pool.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_clock.h"
-#include "components/services/storage/indexed_db/scopes/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
 #include "components/services/storage/indexed_db/scopes/varint_coding.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/leveldb_write_batch.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
@@ -161,8 +161,8 @@ class TestIDBFactory : public IndexedDBFactoryImpl {
   }
 
  private:
-  storage::mojom::BlobStorageContext* blob_storage_context_;
-  storage::mojom::FileSystemAccessContext* file_system_access_context_;
+  raw_ptr<storage::mojom::BlobStorageContext> blob_storage_context_;
+  raw_ptr<storage::mojom::FileSystemAccessContext> file_system_access_context_;
 };
 
 struct BlobWrite {
@@ -269,7 +269,7 @@ class MockFileSystemAccessContext
   }
 
   void DeserializeHandle(
-      const url::Origin& origin,
+      const blink::StorageKey& storage_key,
       const std::vector<uint8_t>& bits,
       mojo::PendingReceiver<::blink::mojom::FileSystemAccessTransferToken>
           token) override {
@@ -295,6 +295,10 @@ class IndexedDBBackingStoreTest : public testing::Test {
             base::MakeRefCounted<storage::MockQuotaManagerProxy>(
                 nullptr,
                 base::ThreadTaskRunnerHandle::Get())) {}
+
+  IndexedDBBackingStoreTest(const IndexedDBBackingStoreTest&) = delete;
+  IndexedDBBackingStoreTest& operator=(const IndexedDBBackingStoreTest&) =
+      delete;
 
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -352,11 +356,11 @@ class IndexedDBBackingStoreTest : public testing::Test {
         storage_key_state_handle_.storage_key_state()->lock_manager();
   }
 
-  std::vector<ScopeLock> CreateDummyLock() {
+  std::vector<LeveledLock> CreateDummyLock() {
     base::RunLoop loop;
-    ScopesLocksHolder locks_receiver;
+    LeveledLockHolder locks_receiver;
     bool success = lock_manager_->AcquireLocks(
-        {{0, {"01", "11"}, ScopesLockManager::LockType::kShared}},
+        {{0, {"01", "11"}, LeveledLockManager::LockType::kShared}},
         locks_receiver.AsWeakPtr(),
         base::BindLambdaForTesting([&loop]() { loop.Quit(); }));
     EXPECT_TRUE(success);
@@ -453,10 +457,10 @@ class IndexedDBBackingStoreTest : public testing::Test {
   scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
   scoped_refptr<IndexedDBContextImpl> idb_context_;
   std::unique_ptr<TestIDBFactory> idb_factory_;
-  DisjointRangeLockManager* lock_manager_;
+  raw_ptr<DisjointRangeLockManager> lock_manager_;
 
   IndexedDBStorageKeyStateHandle storage_key_state_handle_;
-  TestableIndexedDBBackingStore* backing_store_ = nullptr;
+  raw_ptr<TestableIndexedDBBackingStore> backing_store_ = nullptr;
   IndexedDBDataLossInfo data_loss_info_;
 
   // Sample keys and values that are consistent.
@@ -464,9 +468,6 @@ class IndexedDBBackingStoreTest : public testing::Test {
   IndexedDBKey key2_;
   IndexedDBValue value1_;
   IndexedDBValue value2_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBackingStoreTest);
 };
 
 enum class ExternalObjectTestType {
@@ -480,6 +481,11 @@ class IndexedDBBackingStoreTestWithExternalObjects
       public IndexedDBBackingStoreTest {
  public:
   IndexedDBBackingStoreTestWithExternalObjects() = default;
+
+  IndexedDBBackingStoreTestWithExternalObjects(
+      const IndexedDBBackingStoreTestWithExternalObjects&) = delete;
+  IndexedDBBackingStoreTestWithExternalObjects& operator=(
+      const IndexedDBBackingStoreTestWithExternalObjects&) = delete;
 
   virtual ExternalObjectTestType TestType() { return GetParam(); }
 
@@ -499,16 +505,14 @@ class IndexedDBBackingStoreTestWithExternalObjects
     // useful keys and values during tests
     if (IncludesBlobs()) {
       external_objects_.push_back(CreateBlobInfo(u"blob type", 1));
-      external_objects_.push_back(
-          CreateBlobInfo(u"file name", u"file type",
-                         base::Time::FromDeltaSinceWindowsEpoch(
-                             base::TimeDelta::FromMicroseconds(kTime1)),
-                         kBlobFileData1.size()));
-      external_objects_.push_back(
-          CreateBlobInfo(u"file name", u"file type",
-                         base::Time::FromDeltaSinceWindowsEpoch(
-                             base::TimeDelta::FromMicroseconds(kTime2)),
-                         kBlobFileData2.size()));
+      external_objects_.push_back(CreateBlobInfo(
+          u"file name", u"file type",
+          base::Time::FromDeltaSinceWindowsEpoch(base::Microseconds(kTime1)),
+          kBlobFileData1.size()));
+      external_objects_.push_back(CreateBlobInfo(
+          u"file name", u"file type",
+          base::Time::FromDeltaSinceWindowsEpoch(base::Microseconds(kTime2)),
+          kBlobFileData2.size()));
     }
     if (IncludesFileSystemAccessHandles()) {
       external_objects_.push_back(CreateFileSystemAccessHandle());
@@ -603,7 +607,7 @@ class IndexedDBBackingStoreTestWithExternalObjects
             EXPECT_EQ(a.last_modified(), b.last_modified());
             return false;
           }
-          FALLTHROUGH;
+          [[fallthrough]];
         case IndexedDBExternalObject::ObjectType::kBlob:
           if (a.type() != b.type()) {
             EXPECT_EQ(a.type(), b.type());
@@ -758,8 +762,6 @@ class IndexedDBBackingStoreTestWithExternalObjects
   std::vector<IndexedDBExternalObject> external_objects_;
 
   std::vector<std::string> blob_remote_uuids_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBBackingStoreTestWithExternalObjects);
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -1005,7 +1007,7 @@ TEST_P(IndexedDBBackingStoreTestWithExternalObjects, DeleteRange) {
       IndexedDBKeyRange(keys[1], keys[3], false, true),
       IndexedDBKeyRange(keys[0], keys[3], true, true)};
 
-  for (size_t i = 0; i < base::size(ranges); ++i) {
+  for (size_t i = 0; i < std::size(ranges); ++i) {
     const int64_t database_id = 1;
     const int64_t object_store_id = i + 1;
     const IndexedDBKeyRange& range = ranges[i];
@@ -1037,10 +1039,10 @@ TEST_P(IndexedDBBackingStoreTestWithExternalObjects, DeleteRange) {
             blink::mojom::IDBTransactionMode::ReadWrite);
     transaction1->Begin(CreateDummyLock());
     IndexedDBBackingStore::RecordIdentifier record;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (size_t j = 0; j < values.size(); ++j) {
       EXPECT_TRUE(backing_store()
                       ->PutRecord(transaction1.get(), database_id,
-                                  object_store_id, keys[i], &values[i], &record)
+                                  object_store_id, keys[j], &values[j], &record)
                       .ok());
     }
 
@@ -1100,7 +1102,7 @@ TEST_P(IndexedDBBackingStoreTestWithExternalObjects, DeleteRangeEmptyRange) {
       IndexedDBKeyRange(keys[2], keys[1], false, false),
       IndexedDBKeyRange(keys[2], keys[1], true, true)};
 
-  for (size_t i = 0; i < base::size(ranges); ++i) {
+  for (size_t i = 0; i < std::size(ranges); ++i) {
     const int64_t database_id = 1;
     const int64_t object_store_id = i + 1;
     const IndexedDBKeyRange& range = ranges[i];
@@ -1133,10 +1135,10 @@ TEST_P(IndexedDBBackingStoreTestWithExternalObjects, DeleteRangeEmptyRange) {
     transaction1->Begin(CreateDummyLock());
 
     IndexedDBBackingStore::RecordIdentifier record;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (size_t j = 0; j < values.size(); ++j) {
       EXPECT_TRUE(backing_store()
                       ->PutRecord(transaction1.get(), database_id,
-                                  object_store_id, keys[i], &values[i], &record)
+                                  object_store_id, keys[j], &values[j], &record)
                       .ok());
     }
     // Start committing transaction1.
@@ -1782,7 +1784,7 @@ TEST_F(IndexedDBBackingStoreTest, SchemaUpgradeWithoutBlobsSurvives) {
   // Set the schema to 2, which was before blob support.
   std::unique_ptr<LevelDBWriteBatch> write_batch = LevelDBWriteBatch::Create();
   const std::string schema_version_key = SchemaVersionKey::Encode();
-  ignore_result(indexed_db::PutInt(write_batch.get(), schema_version_key, 2));
+  std::ignore = indexed_db::PutInt(write_batch.get(), schema_version_key, 2);
   ASSERT_TRUE(backing_store()->db()->Write(write_batch.get()).ok());
   task_environment_.RunUntilIdle();
 
@@ -1898,7 +1900,7 @@ TEST_F(IndexedDBBackingStoreTestWithBlobs, SchemaUpgradeWithBlobsCorrupt) {
   // Set the schema to 2, which was before blob support.
   std::unique_ptr<LevelDBWriteBatch> write_batch = LevelDBWriteBatch::Create();
   const std::string schema_version_key = SchemaVersionKey::Encode();
-  ignore_result(indexed_db::PutInt(write_batch.get(), schema_version_key, 2));
+  std::ignore = indexed_db::PutInt(write_batch.get(), schema_version_key, 2);
   ASSERT_TRUE(backing_store()->db()->Write(write_batch.get()).ok());
 
   // Clean up on the IDB sequence.
@@ -2257,10 +2259,10 @@ TEST_P(IndexedDBBackingStoreTestWithExternalObjects, ClearObjectStoreObjects) {
             blink::mojom::IDBTransactionMode::ReadWrite);
     transaction1->Begin(CreateDummyLock());
     IndexedDBBackingStore::RecordIdentifier record;
-    for (size_t i = 0; i < values.size(); ++i) {
+    for (size_t j = 0; j < values.size(); ++j) {
       EXPECT_TRUE(backing_store()
                       ->PutRecord(transaction1.get(), database_id,
-                                  write_object_store_id, keys[i], &values[i],
+                                  write_object_store_id, keys[j], &values[j],
                                   &record)
                       .ok());
     }

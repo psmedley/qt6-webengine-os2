@@ -24,23 +24,23 @@
 #if SK_SUPPORT_GPU
 #include "include/gpu/GrRecordingContext.h"
 #include "src/core/SkRuntimeEffectPriv.h"
-#include "src/gpu/GrFragmentProcessor.h"
-#include "src/gpu/GrRecordingContextPriv.h"
-#include "src/gpu/GrResourceProvider.h"
-#include "src/gpu/GrShaderCaps.h"
-#include "src/gpu/GrStyle.h"
-#include "src/gpu/GrTextureProxy.h"
-#include "src/gpu/GrThreadSafeCache.h"
-#include "src/gpu/SkGr.h"
-#include "src/gpu/effects/GrMatrixEffect.h"
-#include "src/gpu/effects/GrSkSLFP.h"
-#include "src/gpu/effects/GrTextureEffect.h"
-#include "src/gpu/geometry/GrStyledShape.h"
-#include "src/gpu/glsl/GrGLSLFragmentShaderBuilder.h"
-#include "src/gpu/glsl/GrGLSLProgramDataManager.h"
-#include "src/gpu/glsl/GrGLSLUniformHandler.h"
+#include "src/gpu/ganesh/GrFragmentProcessor.h"
+#include "src/gpu/ganesh/GrRecordingContextPriv.h"
+#include "src/gpu/ganesh/GrResourceProvider.h"
+#include "src/gpu/ganesh/GrShaderCaps.h"
+#include "src/gpu/ganesh/GrStyle.h"
+#include "src/gpu/ganesh/GrTextureProxy.h"
+#include "src/gpu/ganesh/GrThreadSafeCache.h"
+#include "src/gpu/ganesh/SkGr.h"
+#include "src/gpu/ganesh/effects/GrMatrixEffect.h"
+#include "src/gpu/ganesh/effects/GrSkSLFP.h"
+#include "src/gpu/ganesh/effects/GrTextureEffect.h"
+#include "src/gpu/ganesh/geometry/GrStyledShape.h"
+#include "src/gpu/ganesh/glsl/GrGLSLFragmentShaderBuilder.h"
+#include "src/gpu/ganesh/glsl/GrGLSLProgramDataManager.h"
+#include "src/gpu/ganesh/glsl/GrGLSLUniformHandler.h"
 #if SK_GPU_V1
-#include "src/gpu/v1/SurfaceDrawContext_v1.h"
+#include "src/gpu/ganesh/v1/SurfaceDrawContext_v1.h"
 #endif // SK_GPU_V1
 #endif // SK_SUPPORT_GPU
 
@@ -789,9 +789,9 @@ static std::unique_ptr<GrFragmentProcessor> create_profile_effect(GrRecordingCon
     // 1 / textureRadius. This is done to avoid overflow in length().
     SkMatrix texM = SkMatrix::Scale(kProfileTextureWidth, 1.f);
 
-    static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
-    GrUniqueKey key;
-    GrUniqueKey::Builder builder(&key, kDomain, 1, "1-D Circular Blur");
+    static const skgpu::UniqueKey::Domain kDomain = skgpu::UniqueKey::GenerateDomain();
+    skgpu::UniqueKey key;
+    skgpu::UniqueKey::Builder builder(&key, kDomain, 1, "1-D Circular Blur");
     builder[0] = sigmaToCircleRRatioFixed;
     builder.finish();
 
@@ -850,7 +850,7 @@ static std::unique_ptr<GrFragmentProcessor> make_circle_blur(GrRecordingContext*
             // to rearrange to avoid passing large values to length() that would overflow.
             half2 vec = half2((sk_FragCoord.xy - circleData.xy) * circleData.w);
             half dist = length(vec) + (0.5 - circleData.z) * circleData.w;
-            return inColor * sample(blurProfile, half2(dist, 0.5)).a;
+            return inColor * blurProfile.eval(half2(dist, 0.5)).a;
         }
     )");
 
@@ -872,9 +872,9 @@ static std::unique_ptr<GrFragmentProcessor> make_rect_integral_fp(GrRecordingCon
 
     int width = SkGpuBlurUtils::CreateIntegralTable(sixSigma, nullptr);
 
-    static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
-    GrUniqueKey key;
-    GrUniqueKey::Builder builder(&key, kDomain, 1, "Rect Blur Mask");
+    static const skgpu::UniqueKey::Domain kDomain = skgpu::UniqueKey::GenerateDomain();
+    skgpu::UniqueKey key;
+    skgpu::UniqueKey::Builder builder(&key, kDomain, 1, "Rect Blur Mask");
     builder[0] = width;
     builder.finish();
 
@@ -994,8 +994,8 @@ static std::unique_ptr<GrFragmentProcessor> make_rect_blur(GrRecordingContext* c
                 // computations align the left edge of the integral texture with the inset rect's
                 // edge extending outward 6 * sigma from the inset rect.
                 half2 xy = max(half2(rect.LT - pos), half2(pos - rect.RB));
-                xCoverage = sample(integral, half2(xy.x, 0.5)).a;
-                yCoverage = sample(integral, half2(xy.y, 0.5)).a;
+                xCoverage = integral.eval(half2(xy.x, 0.5)).a;
+                yCoverage = integral.eval(half2(xy.y, 0.5)).a;
             } else {
                 // We just consider just the x direction here. In practice we compute x and y
                 // separately and multiply them together.
@@ -1013,10 +1013,10 @@ static std::unique_ptr<GrFragmentProcessor> make_rect_blur(GrRecordingContext* c
                 // Also, our rect uniform was pre-inset by 3 sigma from the actual rect being
                 // blurred, also factored in.
                 half4 rect = half4(half2(rect.LT - pos), half2(pos - rect.RB));
-                xCoverage = 1 - sample(integral, half2(rect.L, 0.5)).a
-                              - sample(integral, half2(rect.R, 0.5)).a;
-                yCoverage = 1 - sample(integral, half2(rect.T, 0.5)).a
-                              - sample(integral, half2(rect.B, 0.5)).a;
+                xCoverage = 1 - integral.eval(half2(rect.L, 0.5)).a
+                              - integral.eval(half2(rect.R, 0.5)).a;
+                yCoverage = 1 - integral.eval(half2(rect.T, 0.5)).a
+                              - integral.eval(half2(rect.B, 0.5)).a;
             }
             return inColor * xCoverage * yCoverage;
         }
@@ -1040,13 +1040,13 @@ static std::unique_ptr<GrFragmentProcessor> make_rect_blur(GrRecordingContext* c
 
 static constexpr auto kBlurredRRectMaskOrigin = kTopLeft_GrSurfaceOrigin;
 
-static void make_blurred_rrect_key(GrUniqueKey* key,
+static void make_blurred_rrect_key(skgpu::UniqueKey* key,
                                    const SkRRect& rrectToDraw,
                                    float xformedSigma) {
     SkASSERT(!SkGpuBlurUtils::IsEffectivelyZeroSigma(xformedSigma));
-    static const GrUniqueKey::Domain kDomain = GrUniqueKey::GenerateDomain();
+    static const skgpu::UniqueKey::Domain kDomain = skgpu::UniqueKey::GenerateDomain();
 
-    GrUniqueKey::Builder builder(key, kDomain, 9, "RoundRect Blur Mask");
+    skgpu::UniqueKey::Builder builder(key, kDomain, 9, "RoundRect Blur Mask");
     builder[0] = SkScalarCeilToInt(xformedSigma - 1 / 6.0f);
 
     int index = 1;
@@ -1262,7 +1262,7 @@ static std::unique_ptr<GrFragmentProcessor> find_or_create_rrect_blur_mask_fp(
         const SkISize& dimensions,
         float xformedSigma) {
     SkASSERT(!SkGpuBlurUtils::IsEffectivelyZeroSigma(xformedSigma));
-    GrUniqueKey key;
+    skgpu::UniqueKey key;
     make_blurred_rrect_key(&key, rrectToDraw, xformedSigma);
 
     auto threadSafeCache = rContext->priv().threadSafeCache();
@@ -1426,7 +1426,7 @@ static std::unique_ptr<GrFragmentProcessor> make_rrect_blur(GrRecordingContext* 
             half2 proxyDims = half2(2.0 * edgeSize);
             half2 texCoord = translatedFragPosHalf / proxyDims;
 
-            return inColor * sample(ninePatchFP, texCoord).a;
+            return inColor * ninePatchFP.eval(texCoord).a;
         }
     )");
 
@@ -1507,7 +1507,6 @@ bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrRecordingContext* context,
         if (!fp) {
             return false;
         }
-        paint.setCoverageFragmentProcessor(std::move(fp));
 
         SkRect srcProxyRect = srcRRect.rect();
         // Determine how much to outset the src rect to ensure we hit pixels within three sigma.
@@ -1526,6 +1525,7 @@ bool SkBlurMaskFilterImpl::directFilterMaskGPU(GrRecordingContext* context,
         }
         srcProxyRect.outset(outsetX, outsetY);
 
+        paint.setCoverageFragmentProcessor(std::move(fp));
         sdc->drawRect(clip, std::move(paint), GrAA::kNo, viewMatrix, srcProxyRect);
         return true;
     }

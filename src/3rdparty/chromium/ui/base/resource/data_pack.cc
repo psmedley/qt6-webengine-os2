@@ -15,7 +15,7 @@
 #include "base/files/file_util.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
@@ -24,6 +24,7 @@
 #include "build/build_config.h"
 #include "net/filter/gzip_header.h"
 #include "third_party/zlib/google/compression_utils.h"
+#include "ui/base/resource/scoped_file_writer.h"
 
 // For details of the file layout, see
 // http://dev.chromium.org/developers/design-documents/linuxresourcesandlocalizedstrings
@@ -93,76 +94,6 @@ void MaybePrintResourceId(uint16_t resource_id) {
   }
 }
 
-// Convenience class to write data to a file. Usage is the following:
-// 1) Create a new instance, passing a base::FilePath.
-// 2) Call Write() repeatedly to write all desired data to the file.
-// 3) Call valid() whenever you want to know if something failed.
-// 4) The file is closed automatically on destruction. Though it is possible
-//    to call the Close() method before that.
-//
-// If an I/O error happens, a PLOG(ERROR) message will be generated, and
-// a flag will be set in the writer, telling it to ignore future Write()
-// requests. This allows the caller to ignore error handling until the
-// very end, as in:
-//
-//   {
-//     base::ScopedFileWriter  writer(<some-path>);
-//     writer.Write(&foo, sizeof(foo));
-//     writer.Write(&bar, sizeof(bar));
-//     ....
-//     writer.Write(&zoo, sizeof(zoo));
-//     if (!writer.valid()) {
-//        // An error happened.
-//     }
-//   }   // closes the file.
-//
-class ScopedFileWriter {
- public:
-  // Constructor takes a |path| parameter and tries to open the file.
-  // Call valid() to check if the operation was succesful.
-  explicit ScopedFileWriter(const base::FilePath& path)
-      : valid_(true), file_(base::OpenFile(path, "wb")) {
-    if (!file_) {
-      PLOG(ERROR) << "Could not open pak file for writing";
-      valid_ = false;
-    }
-  }
-
-  // Destructor.
-  ~ScopedFileWriter() { Close(); }
-
-  // Return true if the last i/o operation was succesful.
-  bool valid() const { return valid_; }
-
-  // Try to write |data_size| bytes from |data| into the file, if a previous
-  // operation didn't already failed.
-  void Write(const void* data, size_t data_size) {
-    if (valid_ && fwrite(data, data_size, 1, file_) != 1) {
-      PLOG(ERROR) << "Could not write to pak file";
-      valid_ = false;
-    }
-  }
-
-  // Close the file explicitly. Return true if all previous operations
-  // succeeded, including the close, or false otherwise.
-  bool Close() {
-    if (file_) {
-      valid_ = (fclose(file_) == 0);
-      file_ = nullptr;
-      if (!valid_) {
-        PLOG(ERROR) << "Could not close pak file";
-      }
-    }
-    return valid_;
-  }
-
- private:
-  bool valid_ = false;
-  FILE* file_ = nullptr;  // base::ScopedFILE doesn't check errors on close.
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedFileWriter);
-};
-
 bool MmapHasGzipHeader(const base::MemoryMappedFile* mmap) {
   net::GZipHeader header;
   const char* header_end = nullptr;
@@ -213,6 +144,9 @@ class DataPack::MemoryMappedDataSource : public DataPack::DataSource {
   explicit MemoryMappedDataSource(std::unique_ptr<base::MemoryMappedFile> mmap)
       : mmap_(std::move(mmap)) {}
 
+  MemoryMappedDataSource(const MemoryMappedDataSource&) = delete;
+  MemoryMappedDataSource& operator=(const MemoryMappedDataSource&) = delete;
+
   ~MemoryMappedDataSource() override {}
 
   // DataPack::DataSource:
@@ -221,14 +155,15 @@ class DataPack::MemoryMappedDataSource : public DataPack::DataSource {
 
  private:
   std::unique_ptr<base::MemoryMappedFile> mmap_;
-
-  DISALLOW_COPY_AND_ASSIGN(MemoryMappedDataSource);
 };
 
 // Takes ownership of a string of uncompressed pack data.
 class DataPack::StringDataSource : public DataPack::DataSource {
  public:
   explicit StringDataSource(std::string&& data) : data_(std::move(data)) {}
+
+  StringDataSource(const StringDataSource&) = delete;
+  StringDataSource& operator=(const StringDataSource&) = delete;
 
   ~StringDataSource() override {}
 
@@ -240,14 +175,15 @@ class DataPack::StringDataSource : public DataPack::DataSource {
 
  private:
   const std::string data_;
-
-  DISALLOW_COPY_AND_ASSIGN(StringDataSource);
 };
 
 class DataPack::BufferDataSource : public DataPack::DataSource {
  public:
   explicit BufferDataSource(base::span<const uint8_t> buffer)
       : buffer_(buffer) {}
+
+  BufferDataSource(const BufferDataSource&) = delete;
+  BufferDataSource& operator=(const BufferDataSource&) = delete;
 
   ~BufferDataSource() override {}
 
@@ -257,8 +193,6 @@ class DataPack::BufferDataSource : public DataPack::DataSource {
 
  private:
   base::span<const uint8_t> buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(BufferDataSource);
 };
 
 DataPack::DataPack(ResourceScaleFactor resource_scale_factor)
@@ -282,8 +216,8 @@ bool DataPack::LoadFromPath(const base::FilePath& path) {
   // Open the file for reading; allowing other consumers to also open it for
   // reading and deleting. Do not allow others to write to it.
   base::File data_file(path, base::File::FLAG_OPEN | base::File::FLAG_READ |
-                                 base::File::FLAG_EXCLUSIVE_WRITE |
-                                 base::File::FLAG_SHARE_DELETE);
+                                 base::File::FLAG_WIN_EXCLUSIVE_WRITE |
+                                 base::File::FLAG_WIN_SHARE_DELETE);
   if (!data_file.IsValid()) {
     DLOG(ERROR) << "Failed to open datapack with base::File::Error "
                 << data_file.error_details();
@@ -579,8 +513,8 @@ bool DataPack::WritePack(const base::FilePath& path,
 
   // We place an extra entry after the last item that allows us to read the
   // size of the last item.
-  const uint16_t resource_id = 0;
-  file.Write(&resource_id, sizeof(resource_id));
+  const uint16_t extra_resource_id = 0;
+  file.Write(&extra_resource_id, sizeof(extra_resource_id));
   file.Write(&data_offset, sizeof(data_offset));
 
   // Write the aliases table, if any. Note: |aliases| is an std::map,

@@ -22,7 +22,7 @@ limitations under the License.
 #include "absl/strings/str_cat.h"
 #include "tensorflow/core/platform/logging.h"
 #include "tensorflow/core/platform/types.h"
-#include "tensorflow/core/profiler/utils/time_utils.h"
+#include "tensorflow/core/profiler/utils/math_utils.h"
 
 namespace tensorflow {
 namespace profiler {
@@ -79,6 +79,12 @@ class Timespan {
            std::max(begin_ps(), other.begin_ps());
   }
 
+  // Expands the timespan to include other.
+  void ExpandToInclude(const Timespan& other) {
+    *this = FromEndPoints(std::min(begin_ps(), other.begin_ps()),
+                          std::max(end_ps(), other.end_ps()));
+  }
+
   // Compares timespans by their begin time (ascending), duration (descending)
   // so nested spans are sorted from outer to innermost.
   bool operator<(const Timespan& other) const {
@@ -117,7 +123,7 @@ inline Timespan PicoSpan(uint64 start_ps, uint64 end_ps) {
 
 // Creates a Timespan from endpoints in milliseconds.
 inline Timespan MilliSpan(double start_ms, double end_ms) {
-  return PicoSpan(MillisToPicos(start_ms), MillisToPicos(end_ms));
+  return PicoSpan(MilliToPico(start_ms), MilliToPico(end_ms));
 }
 
 }  // namespace profiler

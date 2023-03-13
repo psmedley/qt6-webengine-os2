@@ -205,6 +205,10 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
   const std::string& ice_pwd() const { return ice_pwd_; }
   bool pooled() const { return pooled_; }
 
+  // TODO(bugs.webrtc.org/14605): move this to the constructor
+  void set_ice_tiebreaker(uint64_t tiebreaker) { tiebreaker_ = tiebreaker; }
+  uint64_t ice_tiebreaker() const { return tiebreaker_; }
+
   // Setting this filter should affect not only candidates gathered in the
   // future, but candidates already gathered and ports already "ready",
   // which would be returned by ReadyCandidates() and ReadyPorts().
@@ -321,6 +325,9 @@ class RTC_EXPORT PortAllocatorSession : public sigslot::has_slots<> {
 
   bool pooled_ = false;
 
+  // TODO(bugs.webrtc.org/14605): move this to the constructor
+  uint64_t tiebreaker_;
+
   // SetIceParameters is an implementation detail which only PortAllocator
   // should be able to call.
   friend class PortAllocator;
@@ -373,6 +380,9 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
                         const absl::optional<int>&
                             stun_candidate_keepalive_interval = absl::nullopt);
 
+  void SetIceTiebreaker(uint64_t tiebreaker);
+  uint64_t IceTiebreaker() const { return tiebreaker_; }
+
   const ServerAddresses& stun_servers() const {
     CheckRunOnValidThreadIfInitialized();
     return stun_servers_;
@@ -399,6 +409,16 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // ADAPTER_TYPE_ETHERNET | ADAPTER_TYPE_LOOPBACK will ignore Ethernet and
   // loopback interfaces.
   virtual void SetNetworkIgnoreMask(int network_ignore_mask) = 0;
+
+  // Set whether VPN connections should be preferred, avoided, mandated or
+  // blocked.
+  virtual void SetVpnPreference(webrtc::VpnPreference preference) {
+    vpn_preference_ = preference;
+  }
+
+  // Set list of <ipaddress, mask> that shall be categorized as VPN.
+  // Implemented by BasicPortAllocator.
+  virtual void SetVpnList(const std::vector<rtc::NetworkMask>& vpn_list) {}
 
   std::unique_ptr<PortAllocatorSession> CreateSession(
       const std::string& content_name,
@@ -571,17 +591,6 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
     return turn_port_prune_policy_;
   }
 
-  // Gets/Sets the Origin value used for WebRTC STUN requests.
-  const std::string& origin() const {
-    CheckRunOnValidThreadIfInitialized();
-    return origin_;
-  }
-
-  void set_origin(const std::string& origin) {
-    CheckRunOnValidThreadIfInitialized();
-    origin_ = origin;
-  }
-
   webrtc::TurnCustomizer* turn_customizer() {
     CheckRunOnValidThreadIfInitialized();
     return turn_customizer_;
@@ -638,6 +647,7 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   uint32_t candidate_filter_;
   std::string origin_;
   webrtc::SequenceChecker thread_checker_;
+  webrtc::VpnPreference vpn_preference_ = webrtc::VpnPreference::kDefault;
 
  private:
   ServerAddresses stun_servers_;
@@ -662,6 +672,9 @@ class RTC_EXPORT PortAllocator : public sigslot::has_slots<> {
   // if ice_credentials is nullptr.
   std::vector<std::unique_ptr<PortAllocatorSession>>::const_iterator
   FindPooledSession(const IceParameters* ice_credentials = nullptr) const;
+
+  // ICE tie breaker.
+  uint64_t tiebreaker_;
 };
 
 }  // namespace cricket

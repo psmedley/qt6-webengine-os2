@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
 #include "dbus/bus.h"
@@ -32,6 +31,10 @@ class BluetoothBatteryClientImpl : public BluetoothBatteryClient,
                                    public dbus::ObjectManager::Interface {
  public:
   BluetoothBatteryClientImpl() = default;
+
+  BluetoothBatteryClientImpl(const BluetoothBatteryClientImpl&) = delete;
+  BluetoothBatteryClientImpl& operator=(const BluetoothBatteryClientImpl&) =
+      delete;
 
   ~BluetoothBatteryClientImpl() override {
     // There is an instance of this client that is created but not initialized
@@ -118,8 +121,6 @@ class BluetoothBatteryClientImpl : public BluetoothBatteryClient,
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.
   base::WeakPtrFactory<BluetoothBatteryClientImpl> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothBatteryClientImpl);
 };
 
 BluetoothBatteryClient::BluetoothBatteryClient() = default;

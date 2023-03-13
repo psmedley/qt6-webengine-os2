@@ -16,7 +16,7 @@
 #include "src/core/SkCachedData.h"
 #include "src/core/SkMipmap.h"
 #include "src/core/SkTaskGroup.h"
-#include "src/gpu/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "src/image/SkImage_Base.h"
 #include "src/image/SkImage_GpuYUVA.h"
 
@@ -245,7 +245,7 @@ void DDLPromiseImageHelper::createCallbackContexts(GrDirectContext* direct) {
 
             GrBackendFormat backendFormat = direct->defaultBackendFormat(baseLevel.colorType(),
                                                                          GrRenderable::kNo);
-            if (!caps->isFormatTexturable(backendFormat)) {
+            if (!caps->isFormatTexturable(backendFormat, GrTextureType::k2D)) {
                 continue;
             }
 

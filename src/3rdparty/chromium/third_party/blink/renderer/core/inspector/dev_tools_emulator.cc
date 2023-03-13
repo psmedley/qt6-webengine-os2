@@ -18,13 +18,13 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
-#include "third_party/blink/renderer/platform/geometry/float_size.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
-#include "third_party/blink/renderer/platform/geometry/int_size.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/rect_conversions.h"
+#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/geometry/size_f.h"
 
 namespace {
 
@@ -111,7 +111,10 @@ DevToolsEmulator::DevToolsEmulator(WebViewImpl* web_view)
       scrollbars_hidden_(false),
       embedder_cookie_enabled_(
           web_view->GetPage()->GetSettings().GetCookieEnabled()),
-      document_cookie_disabled_(false) {}
+      document_cookie_disabled_(false),
+      embedder_force_dark_mode_enabled_(
+          web_view->GetPage()->GetSettings().GetForceDarkModeEnabled()),
+      auto_dark_overriden_(false) {}
 
 void DevToolsEmulator::Trace(Visitor* visitor) const {}
 
@@ -339,6 +342,7 @@ void DevToolsEmulator::EnableMobileEmulation() {
   is_overlay_scrollbars_enabled_ =
       ScrollbarThemeSettings::OverlayScrollbarsEnabled();
   ScrollbarThemeSettings::SetOverlayScrollbarsEnabled(true);
+  Page::UsesOverlayScrollbarsChanged();
   is_orientation_event_enabled_ =
       RuntimeEnabledFeatures::OrientationEventEnabled();
   RuntimeEnabledFeatures::SetOrientationEventEnabled(true);
@@ -373,6 +377,7 @@ void DevToolsEmulator::DisableMobileEmulation() {
     return;
   ScrollbarThemeSettings::SetOverlayScrollbarsEnabled(
       is_overlay_scrollbars_enabled_);
+  Page::UsesOverlayScrollbarsChanged();
   RuntimeEnabledFeatures::SetOrientationEventEnabled(
       is_orientation_event_enabled_);
   RuntimeEnabledFeatures::SetMobileLayoutThemeEnabled(
@@ -413,7 +418,7 @@ TransformationMatrix DevToolsEmulator::ForceViewport(
   if (!viewport_override_)
     viewport_override_ = ViewportOverride();
 
-  viewport_override_->position = FloatPoint(position);
+  viewport_override_->position = position;
   viewport_override_->scale = scale;
 
   // Move the correct (scaled) content area to show in the top left of the
@@ -443,15 +448,15 @@ void DevToolsEmulator::ApplyViewportOverride(TransformationMatrix* transform) {
 
   // Translate while taking into account current scroll offset.
   // TODO(lukasza): https://crbug.com/734201: Add OOPIF support.
-  gfx::ScrollOffset scroll_offset =
+  gfx::PointF scroll_offset =
       web_view_->MainFrame()->IsWebLocalFrame()
           ? web_view_->MainFrame()->ToWebLocalFrame()->GetScrollOffset()
-          : gfx::ScrollOffset();
+          : gfx::PointF();
   gfx::PointF visual_offset = web_view_->VisualViewportOffset();
   float scroll_x = scroll_offset.x() + visual_offset.x();
   float scroll_y = scroll_offset.y() + visual_offset.y();
-  transform->Translate(-viewport_override_->position.X() + scroll_x,
-                       -viewport_override_->position.Y() + scroll_y);
+  transform->Translate(-viewport_override_->position.x() + scroll_x,
+                       -viewport_override_->position.y() + scroll_y);
 
   // First, reverse page scale, so we don't have to take it into account for
   // calculation of the translation.
@@ -466,21 +471,6 @@ TransformationMatrix DevToolsEmulator::ComputeRootLayerTransform() {
   if (device_metrics_enabled_)
     transform.Scale(emulation_params_.scale);
   return transform;
-}
-
-void DevToolsEmulator::OverrideVisibleRect(
-    const IntSize& viewport_size,
-    IntRect* visible_rect_in_frame) const {
-  WebLocalFrameImpl* frame = web_view_->MainFrameImpl();
-  if (!viewport_override_ || !frame)
-    return;
-
-  // Don't apply viewport_override_->scale because all coordinates here are
-  // under the same scale.
-  IntRect visible_rect_in_document = EnclosingIntRect(
-      FloatRect(viewport_override_->position, FloatSize(viewport_size)));
-  *visible_rect_in_frame =
-      frame->GetFrameView()->DocumentToFrame(visible_rect_in_document);
 }
 
 float DevToolsEmulator::InputEventsScaleForEmulation() {
@@ -537,6 +527,23 @@ void DevToolsEmulator::SetDocumentCookieDisabled(bool disabled) {
   document_cookie_disabled_ = disabled;
   web_view_->GetPage()->GetSettings().SetCookieEnabled(
       document_cookie_disabled_ ? false : embedder_cookie_enabled_);
+}
+
+void DevToolsEmulator::SetAutoDarkModeOverride(bool enabled) {
+  if (!auto_dark_overriden_) {
+    auto_dark_overriden_ = true;
+    embedder_force_dark_mode_enabled_ =
+        web_view_->GetPage()->GetSettings().GetForceDarkModeEnabled();
+  }
+  web_view_->GetPage()->GetSettings().SetForceDarkModeEnabled(enabled);
+}
+
+void DevToolsEmulator::ResetAutoDarkModeOverride() {
+  if (auto_dark_overriden_) {
+    web_view_->GetPage()->GetSettings().SetForceDarkModeEnabled(
+        embedder_force_dark_mode_enabled_);
+    auto_dark_overriden_ = false;
+  }
 }
 
 }  // namespace blink

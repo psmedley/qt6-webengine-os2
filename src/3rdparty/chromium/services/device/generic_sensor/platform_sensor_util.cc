@@ -6,6 +6,8 @@
 
 #include <cmath>
 
+#include "base/notreached.h"
+#include "base/ranges/algorithm.h"
 #include "services/device/public/cpp/generic_sensor/sensor_reading.h"
 
 namespace device {
@@ -51,6 +53,10 @@ void RoundGyroscopeReading(SensorReadingXYZ* reading) {
   reading->x = RoundToMultiple(reading->x, kGyroscopeRoundingMultiple);
   reading->y = RoundToMultiple(reading->y, kGyroscopeRoundingMultiple);
   reading->z = RoundToMultiple(reading->z, kGyroscopeRoundingMultiple);
+}
+
+void RoundIlluminanceReading(SensorReadingSingle* reading) {
+  reading->value = RoundToMultiple(reading->value, kAlsRoundingMultiple);
 }
 
 void RoundOrientationQuaternionReading(SensorReadingQuat* reading) {
@@ -121,6 +127,9 @@ void RoundSensorReading(SensorReading* reading, mojom::SensorType sensor_type) {
       break;
 
     case mojom::SensorType::AMBIENT_LIGHT:
+      RoundIlluminanceReading(&reading->als);
+      break;
+
     case mojom::SensorType::MAGNETOMETER:
     case mojom::SensorType::PRESSURE:
     case mojom::SensorType::PROXIMITY:

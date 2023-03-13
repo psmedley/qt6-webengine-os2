@@ -66,11 +66,16 @@ TEST_F(LayoutTableTest, OverflowWithCollapsedBorders) {
 
   auto* table = GetTableByElementId("table");
 
-  // The table's border box rect covers all collapsed borders of the first
-  // row, and bottom collapsed borders of the last row.
   auto expected_border_box_rect = table->PhysicalContentBoxRect();
-  expected_border_box_rect.ExpandEdges(LayoutUnit(2), LayoutUnit(5),
-                                       LayoutUnit(0), LayoutUnit(1));
+  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
+    expected_border_box_rect.ExpandEdges(LayoutUnit(2), LayoutUnit(10),
+                                         LayoutUnit(0), LayoutUnit(10));
+  } else {
+    // The table's border box rect covers all collapsed borders of the first
+    // row, and bottom collapsed borders of the last row.
+    expected_border_box_rect.ExpandEdges(LayoutUnit(2), LayoutUnit(5),
+                                         LayoutUnit(0), LayoutUnit(1));
+  }
   EXPECT_EQ(expected_border_box_rect, table->PhysicalBorderBoxRect());
 
   // The table's self visual overflow rect covers all collapsed borders, but
@@ -131,15 +136,15 @@ TEST_F(LayoutTableTest, CollapsedBorders) {
 
   // Cells have wider borders.
   auto* table3 = GetTableByElementId("table3");
-  if (RuntimeEnabledFeatures::LayoutNGTableEnabled()) {
+  if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
     // Cell E's border-top won.
     EXPECT_EQ(LayoutUnit(7.5), table3->BorderBefore());
     // Cell H's border-bottom won.
     EXPECT_EQ(20, table3->BorderAfter());
-    // Cell E's border-left won.
-    EXPECT_EQ(LayoutUnit(10.5), table3->BorderStart());
-    // Cell F's border-bottom won.
-    EXPECT_EQ(LayoutUnit(12.5), table3->BorderEnd());
+    // Cell G's border-left won.
+    EXPECT_EQ(LayoutUnit(15), table3->BorderStart());
+    // Cell H's border-right won.
+    EXPECT_EQ(LayoutUnit(20), table3->BorderEnd());
   } else {
     // Cell E's border-top won.
     EXPECT_EQ(7, table3->BorderBefore());
@@ -288,7 +293,7 @@ TEST_F(LayoutTableTest, OutOfOrderHeadAndBody) {
                 GetLayoutObjectByElementId("head")),
             table->TopSectionInterface());
   // TablesNG does not implement these APIs. They are only used by Legacy.
-  if (!RuntimeEnabledFeatures::LayoutNGTableEnabled()) {
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled()) {
     EXPECT_EQ(ToInterface<LayoutNGTableSectionInterface>(
                   GetLayoutObjectByElementId("body")),
               table->TopNonEmptySectionInterface());
@@ -313,7 +318,7 @@ TEST_F(LayoutTableTest, OutOfOrderFootAndBody) {
                 GetLayoutObjectByElementId("body")),
             table->TopSectionInterface());
   // TablesNG does not implement these APIs. They are only used by Legacy.
-  if (!RuntimeEnabledFeatures::LayoutNGTableEnabled()) {
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled()) {
     EXPECT_EQ(ToInterface<LayoutNGTableSectionInterface>(
                   GetLayoutObjectByElementId("body")),
               table->TopNonEmptySectionInterface());
@@ -339,7 +344,7 @@ TEST_F(LayoutTableTest, OutOfOrderHeadFootAndBody) {
                 GetLayoutObjectByElementId("head")),
             table->TopSectionInterface());
   // TablesNG does not implement these APIs. They are only used by Legacy.
-  if (!RuntimeEnabledFeatures::LayoutNGTableEnabled()) {
+  if (!RuntimeEnabledFeatures::LayoutNGEnabled()) {
     EXPECT_EQ(ToInterface<LayoutNGTableSectionInterface>(
                   GetLayoutObjectByElementId("head")),
               table->TopNonEmptySectionInterface());
@@ -371,7 +376,7 @@ TEST_F(LayoutTableTest, VisualOverflowCleared) {
 
 TEST_F(LayoutTableTest, HasNonCollapsedBorderDecoration) {
   // TablesNG does not support DirtiedRowsAndEffectiveColumns.
-  if (RuntimeEnabledFeatures::LayoutNGTableEnabled())
+  if (RuntimeEnabledFeatures::LayoutNGEnabled())
     return;
 
   SetBodyInnerHTML("<table id='table'></table>");

@@ -32,11 +32,13 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_PLATFORM_H_
 
 #include <memory>
+#include <string>
 #include <tuple>
 #include <vector>
 
 #include "base/callback.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/threading/platform_thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
@@ -48,7 +50,6 @@
 #include "third_party/blink/public/common/security/protocol_handler_security_level.h"
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/loader/code_cache.mojom-forward.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_container.mojom-shared.h"
 #include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-forward.h"
 #include "third_party/blink/public/platform/audio/web_audio_device_source_type.h"
 #include "third_party/blink/public/platform/blame_context.h"
@@ -58,12 +59,11 @@
 #include "third_party/blink/public/platform/web_code_cache_loader.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_data.h"
-#include "third_party/blink/public/platform/web_dedicated_worker_host_factory_client.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_v8_value_converter.h"
 #include "third_party/blink/public/platform/websocket_handshake_throttle_provider.h"
 #include "third_party/webrtc/api/video/video_codec_type.h"
-#include "ui/base/resource/scale_factor.h"
+#include "ui/base/resource/resource_scale_factor.h"
 
 class SkCanvas;
 class SkBitmap;
@@ -78,7 +78,6 @@ class TaskGraphRunner;
 
 namespace gfx {
 class ColorSpace;
-class RenderingPipeline;
 }
 
 namespace gpu {
@@ -90,6 +89,7 @@ namespace media {
 struct AudioSinkParameters;
 struct AudioSourceParameters;
 class DecoderFactory;
+class MediaLog;
 class MediaPermission;
 class GpuVideoAcceleratorFactories;
 }  // namespace media
@@ -134,6 +134,7 @@ class WebAudioBus;
 class WebAudioLatencyHint;
 class WebCrypto;
 class WebDedicatedWorker;
+class WebDedicatedWorkerHostFactoryClient;
 class WebGraphicsContext3DProvider;
 class WebLocalFrame;
 class WebMediaCapabilitiesClient;
@@ -148,6 +149,10 @@ struct WebContentSecurityPolicyHeader;
 
 namespace scheduler {
 class WebThreadScheduler;
+}
+
+namespace mojom {
+class ServiceWorkerContainerHostInterfaceBase;
 }
 
 class BLINK_PLATFORM_EXPORT Platform {
@@ -203,10 +208,6 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   // Returns a theme engine. Should be non-null.
   virtual WebThemeEngine* ThemeEngine();
-
-  // AppCache  ----------------------------------------------------------
-
-  virtual bool IsURLSupportedForAppCache(const WebURL& url) { return false; }
 
   // Audio --------------------------------------------------------------
 
@@ -301,8 +302,13 @@ class BLINK_PLATFORM_EXPORT Platform {
   WrapSharedURLLoaderFactory(
       scoped_refptr<network::SharedURLLoaderFactory> factory);
 
-  // Returns the User-Agent string.
+  // Returns the default User-Agent string, it can either full User-Agent string
+  // or reduced User-Agent string based on policy setting.
   virtual WebString UserAgent() { return WebString(); }
+  // Returns the full User-Agent string.
+  virtual WebString FullUserAgent() { return WebString(); }
+  // Returns the reduced User-Agent string.
+  virtual WebString ReducedUserAgent() { return WebString(); }
 
   // Returns the User Agent metadata. This will replace `UserAgent()` if we
   // end up shipping https://github.com/WICG/ua-client-hints.
@@ -421,7 +427,7 @@ class BLINK_PLATFORM_EXPORT Platform {
     return nullptr;
   }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
   // This is called after the compositor thread is created, so the embedder
   // can initiate an IPC to change its thread priority (on Linux we can't
   // increase the nice value, so we need to ask the browser process). This
@@ -440,14 +446,15 @@ class BLINK_PLATFORM_EXPORT Platform {
   // used for resources which have compress="gzip" in *.grd.
   virtual WebData GetDataResource(
       int resource_id,
-      ui::ResourceScaleFactor scale_factor = ui::SCALE_FACTOR_NONE) {
+      ui::ResourceScaleFactor scale_factor = ui::kScaleFactorNone) {
     return WebData();
   }
 
-  // Gets a blob of data resource corresponding to |resource_id|, then
-  // uncompresses it. This should be used for resources which have
-  // compress="gzip" in *.grd.
-  virtual WebData UncompressDataResource(int resource_id) { return WebData(); }
+  // Returns string data from a data resource. compress="gzip" and "brotli" are
+  // detected automatically.
+  virtual std::string GetDataResourceString(int resource_id) {
+    return std::string();
+  }
 
   // Decodes the in-memory audio file data and returns the linear PCM audio data
   // in the |destination_bus|.
@@ -474,6 +481,10 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Returns an interface to the IO task runner.
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetIOTaskRunner() const {
     return nullptr;
+  }
+
+  virtual base::PlatformThreadId GetIOThreadId() const {
+    return base::kInvalidThreadId;
   }
 
   // Returns an interface to run nested message loop. Used for debugging.
@@ -576,7 +587,7 @@ class BLINK_PLATFORM_EXPORT Platform {
   // called by platform/graphics/ is fine.
   virtual bool IsGpuCompositingDisabled() const { return true; }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   // Returns if synchronous compositing is enabled. Only used for Android
   // webview.
   virtual bool IsSynchronousCompositingEnabledForAndroidWebView() {
@@ -596,11 +607,6 @@ class BLINK_PLATFORM_EXPORT Platform {
     return nullptr;
   }
 #endif
-
-  // Whether zoom for dsf is enabled. When true, inputs to blink would all be
-  // scaled by the device scale factor so that layout is done in device pixel
-  // space.
-  virtual bool IsUseZoomForDSFEnabled() { return true; }
 
   // Whether LCD text is enabled.
   virtual bool IsLcdTextEnabled() { return false; }
@@ -628,16 +634,13 @@ class BLINK_PLATFORM_EXPORT Platform {
   // time this routine returns.
   virtual scoped_refptr<gpu::GpuChannelHost> EstablishGpuChannelSync();
 
+  // Same as above, but asynchronous.
+  using EstablishGpuChannelCallback =
+      base::OnceCallback<void(scoped_refptr<gpu::GpuChannelHost>)>;
+  virtual void EstablishGpuChannel(EstablishGpuChannelCallback callback);
+
   // The TaskGraphRunner. This must be non-null if compositing any widgets.
   virtual cc::TaskGraphRunner* GetTaskGraphRunner() { return nullptr; }
-
-  // The RenderingPipeline for the main thread. May be null.
-  virtual gfx::RenderingPipeline* GetMainThreadPipeline() { return nullptr; }
-
-  // The RenderingPipeline for the compositor thread. May be null.
-  virtual gfx::RenderingPipeline* GetCompositorThreadPipeline() {
-    return nullptr;
-  }
 
   // Media stream ----------------------------------------------------
   virtual scoped_refptr<media::AudioCapturerSource> NewAudioCapturerSource(
@@ -663,10 +666,6 @@ class BLINK_PLATFORM_EXPORT Platform {
   virtual media::AudioLatency::LatencyType GetAudioSourceLatencyType(
       blink::WebAudioDeviceSourceType source_type) {
     return media::AudioLatency::LATENCY_PLAYBACK;
-  }
-
-  virtual absl::optional<std::string> GetWebRTCAudioProcessingConfiguration() {
-    return absl::nullopt;
   }
 
   virtual bool ShouldEnforceWebRTCRoutingPreferences() { return true; }
@@ -696,10 +695,6 @@ class BLINK_PLATFORM_EXPORT Platform {
                                             uint16_t* udp_max_port,
                                             bool* allow_mdns_obfuscation) {}
 
-  virtual absl::optional<int> GetAgcStartupMinimumVolume() {
-    return absl::nullopt;
-  }
-
   virtual bool IsWebRtcHWH264DecodingEnabled(
       webrtc::VideoCodecType video_coded_type) {
     return true;
@@ -721,9 +716,7 @@ class BLINK_PLATFORM_EXPORT Platform {
 
   virtual std::unique_ptr<WebDedicatedWorkerHostFactoryClient>
   CreateDedicatedWorkerHostFactoryClient(WebDedicatedWorker*,
-                                         const BrowserInterfaceBrokerProxy&) {
-    return nullptr;
-  }
+                                         const BrowserInterfaceBrokerProxy&);
   virtual void DidStartWorkerThread() {}
   virtual void WillStopWorkerThread() {}
   virtual void WorkerContextCreated(const v8::Local<v8::Context>& worker) {}
@@ -733,10 +726,6 @@ class BLINK_PLATFORM_EXPORT Platform {
   }
   virtual ProtocolHandlerSecurityLevel GetProtocolHandlerSecurityLevel() {
     return ProtocolHandlerSecurityLevel::kStrict;
-  }
-  virtual bool IsExcludedHeaderForServiceWorkerFetchEvent(
-      const WebString& header_name) {
-    return false;
   }
 
   // Returns true if the origin can register a service worker. Scheme must be
@@ -830,7 +819,9 @@ class BLINK_PLATFORM_EXPORT Platform {
     return nullptr;
   }
 
-  virtual media::DecoderFactory* GetMediaDecoderFactory() { return nullptr; }
+  virtual base::WeakPtr<media::DecoderFactory> GetMediaDecoderFactory() {
+    return nullptr;
+  }
 
   virtual void SetRenderingColorSpace(const gfx::ColorSpace& color_space) {}
 
@@ -839,6 +830,14 @@ class BLINK_PLATFORM_EXPORT Platform {
   // Renderer Memory Metrics ----------------------------------------------
 
   virtual void RecordMetricsForBackgroundedRendererPurge() {}
+
+  // V8 Metrics -----------------------------------------------------------
+
+  // Called when adding a histogram entry. Allows customizing the name the
+  // histogram is logged as.
+  virtual std::string GetNameForHistogram(const char* name) {
+    return std::string{name};
+  }
 
   // V8 Context Snapshot --------------------------------------------------
 

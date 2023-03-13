@@ -40,6 +40,8 @@ enum class DismissReason {
   ACTIVITY_DESTROYED = 7,
   // A message was dismissed due to the destruction of the corresponding scopes.
   SCOPE_DESTROYED = 8,
+  // A message was dismissed explicitly in feature code.
+  DISMISSED_BY_FEATURE = 9,
 
   // Insert new values before this line.
   COUNT
@@ -70,7 +72,7 @@ enum class MessageScopeType { WINDOW = 0, WEB_CONTENTS = 1, NAVIGATION = 2 };
 // A Java counterpart is generated for this enum.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.messages
 enum class MessageIdentifier {
-  TEST_MESSAGE = 0,
+  INVALID_MESSAGE = 0,
   SAVE_PASSWORD = 1,
   UPDATE_PASSWORD = 2,
   GENERATED_PASSWORD_SAVED = 3,
@@ -87,9 +89,40 @@ enum class MessageIdentifier {
   PERMISSION_UPDATE = 14,
   ADS_BLOCKED = 15,
   DOWNLOAD_PROGRESS = 16,
+  SYNC_ERROR = 17,
+  SHARED_HIGHLIGHTING = 18,
+  NEAR_OOM_REDUCTION = 19,
+  INSTALLABLE_AMBIENT_BADGE = 20,
+  AUTO_DARK_WEB_CONTENTS = 21,
+  TEST_MESSAGE = 22,
+  TAILORED_SECURITY_ENABLED = 23,
+  VR_SERVICES_UPGRADE = 24,
+  TAILORED_SECURITY_DISABLED = 25,
+  AR_CORE_UPGRADE = 26,
+  INSTANT_APPS = 27,
+  ABOUT_THIS_SITE = 28,
+  TRANSLATE = 29,
 
   // Insert new values before this line.
   COUNT
+};
+
+// The behavior the message should follow when the primary button is clicked,
+// after running the primary action callback.
+//
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.messages
+enum class PrimaryActionClickBehavior {
+  DO_NOT_DISMISS = 0,
+  DISMISS_IMMEDIATELY = 1
+};
+
+// The max size of the message secondary menu.
+//
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.messages
+enum class SecondaryMenuMaxSize {
+  SMALL = 0,   // default: 180dp -> @dimen/message_secondary_menu_max_size_small
+  MEDIUM = 1,  // 250dp -> @dimen/message_secondary_menu_max_size_medium
+  LARGE = 2,   // 300dp -> @dimen/message_secondary_menu_max_size_large
 };
 
 }  // namespace messages

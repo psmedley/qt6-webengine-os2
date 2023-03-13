@@ -9,6 +9,7 @@
 
 #include "base/callback.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,7 +26,7 @@
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/views/win/hwnd_util.h"
 #endif
 
@@ -60,12 +61,13 @@ class AXVirtualViewTest : public ViewsTestBase {
     widget_->Init(std::move(params));
     button_ = new TestButton;
     button_->SetSize(gfx::Size(20, 20));
-    widget_->GetContentsView()->AddChildView(button_);
+    button_->SetAccessibleName(u"Button");
+    widget_->GetContentsView()->AddChildView(button_.get());
     virtual_label_ = new AXVirtualView;
     virtual_label_->GetCustomData().role = ax::mojom::Role::kStaticText;
     virtual_label_->GetCustomData().SetName("Label");
     button_->GetViewAccessibility().AddVirtualChildView(
-        base::WrapUnique(virtual_label_));
+        base::WrapUnique(virtual_label_.get()));
     widget_->Show();
 
     ViewAccessibility::AccessibilityEventsCallback
@@ -95,6 +97,12 @@ class AXVirtualViewTest : public ViewsTestBase {
         &button_->GetViewAccessibility());
   }
 
+#if defined(USE_AURA)
+  void SetCache(AXVirtualView& virtual_view, AXAuraObjCache& cache) const {
+    virtual_view.set_cache(&cache);
+  }
+#endif  // defined(USE_AURA)
+
   void ExpectReceivedAccessibilityEvents(
       const std::vector<std::pair<const ui::AXPlatformNodeDelegate*,
                                   const ax::mojom::Event>>& expected_events) {
@@ -102,10 +110,10 @@ class AXVirtualViewTest : public ViewsTestBase {
     accessibility_events_.clear();
   }
 
-  Widget* widget_;
-  Button* button_;
+  raw_ptr<Widget> widget_;
+  raw_ptr<Button> button_;
   // Weak, |button_| owns this.
-  AXVirtualView* virtual_label_;
+  raw_ptr<AXVirtualView> virtual_label_;
 
  private:
   std::vector<
@@ -115,9 +123,9 @@ class AXVirtualViewTest : public ViewsTestBase {
 };
 
 TEST_F(AXVirtualViewTest, AccessibilityRoleAndName) {
-  EXPECT_EQ(ax::mojom::Role::kButton, GetButtonAccessibility()->GetData().role);
-  EXPECT_EQ(ax::mojom::Role::kStaticText, virtual_label_->GetData().role);
-  EXPECT_EQ("Label", virtual_label_->GetData().GetStringAttribute(
+  EXPECT_EQ(ax::mojom::Role::kButton, GetButtonAccessibility()->GetRole());
+  EXPECT_EQ(ax::mojom::Role::kStaticText, virtual_label_->GetRole());
+  EXPECT_EQ("Label", virtual_label_->GetStringAttribute(
                          ax::mojom::StringAttribute::kName));
 }
 
@@ -125,27 +133,26 @@ TEST_F(AXVirtualViewTest, AccessibilityRoleAndName) {
 // state of the real view ancestor, however the enabled state should.
 TEST_F(AXVirtualViewTest, FocusableAndEnabledState) {
   virtual_label_->GetCustomData().AddState(ax::mojom::State::kFocusable);
-  EXPECT_TRUE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kFocusable));
-  EXPECT_TRUE(virtual_label_->GetData().HasState(ax::mojom::State::kFocusable));
+  EXPECT_TRUE(GetButtonAccessibility()->HasState(ax::mojom::State::kFocusable));
+  EXPECT_TRUE(virtual_label_->HasState(ax::mojom::State::kFocusable));
   EXPECT_EQ(ax::mojom::Restriction::kNone,
             GetButtonAccessibility()->GetData().GetRestriction());
   EXPECT_EQ(ax::mojom::Restriction::kNone,
             virtual_label_->GetData().GetRestriction());
 
   button_->SetFocusBehavior(View::FocusBehavior::NEVER);
-  EXPECT_FALSE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kFocusable));
-  EXPECT_TRUE(virtual_label_->GetData().HasState(ax::mojom::State::kFocusable));
+  EXPECT_FALSE(
+      GetButtonAccessibility()->HasState(ax::mojom::State::kFocusable));
+  EXPECT_TRUE(virtual_label_->HasState(ax::mojom::State::kFocusable));
   EXPECT_EQ(ax::mojom::Restriction::kNone,
             GetButtonAccessibility()->GetData().GetRestriction());
   EXPECT_EQ(ax::mojom::Restriction::kNone,
             virtual_label_->GetData().GetRestriction());
 
   button_->SetEnabled(false);
-  EXPECT_FALSE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kFocusable));
-  EXPECT_TRUE(virtual_label_->GetData().HasState(ax::mojom::State::kFocusable));
+  EXPECT_FALSE(
+      GetButtonAccessibility()->HasState(ax::mojom::State::kFocusable));
+  EXPECT_TRUE(virtual_label_->HasState(ax::mojom::State::kFocusable));
   EXPECT_EQ(ax::mojom::Restriction::kDisabled,
             GetButtonAccessibility()->GetData().GetRestriction());
   EXPECT_EQ(ax::mojom::Restriction::kDisabled,
@@ -154,10 +161,8 @@ TEST_F(AXVirtualViewTest, FocusableAndEnabledState) {
   button_->SetEnabled(true);
   button_->SetFocusBehavior(View::FocusBehavior::ALWAYS);
   virtual_label_->GetCustomData().RemoveState(ax::mojom::State::kFocusable);
-  EXPECT_TRUE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kFocusable));
-  EXPECT_FALSE(
-      virtual_label_->GetData().HasState(ax::mojom::State::kFocusable));
+  EXPECT_TRUE(GetButtonAccessibility()->HasState(ax::mojom::State::kFocusable));
+  EXPECT_FALSE(virtual_label_->HasState(ax::mojom::State::kFocusable));
   EXPECT_EQ(ax::mojom::Restriction::kNone,
             GetButtonAccessibility()->GetData().GetRestriction());
   EXPECT_EQ(ax::mojom::Restriction::kNone,
@@ -190,6 +195,36 @@ TEST_F(AXVirtualViewTest, RemoveFromParentView) {
   EXPECT_EQ(nullptr, removed_child_1->GetParent());
   EXPECT_EQ(0, removed_label->GetChildCount());
 }
+
+#if defined(USE_AURA)
+TEST_F(AXVirtualViewTest, MultipleCaches) {
+  // This test ensures that AXVirtualView objects remove themselves from an
+  // existing cache (if present) when |set_cache| is called.
+  std::unique_ptr<AXAuraObjCache> cache = std::make_unique<AXAuraObjCache>();
+  std::unique_ptr<AXAuraObjCache> second_cache =
+      std::make_unique<AXAuraObjCache>();
+  // Store |virtual_label_| in |cache|.
+  SetCache(*virtual_label_, *cache);
+
+  AXVirtualViewWrapper* wrapper =
+      virtual_label_->GetOrCreateWrapper(cache.get());
+  EXPECT_NE(wrapper, nullptr);
+  EXPECT_NE(wrapper->GetUniqueId(), ui::kInvalidAXNodeID);
+  EXPECT_NE(wrapper->GetParent(), nullptr);
+  EXPECT_NE(cache->GetID(virtual_label_.get()), ui::kInvalidAXNodeID);
+
+  // Store |virtual_label_| in |second_cache|.
+  SetCache(*virtual_label_, *second_cache);
+  AXVirtualViewWrapper* second_wrapper =
+      virtual_label_->GetOrCreateWrapper(second_cache.get());
+  EXPECT_NE(second_wrapper, nullptr);
+  EXPECT_NE(second_wrapper->GetUniqueId(), ui::kInvalidAXNodeID);
+
+  // |virtual_label_| should only exist in |second_cache|.
+  EXPECT_NE(second_cache->GetID(virtual_label_.get()), ui::kInvalidAXNodeID);
+  EXPECT_EQ(cache->GetID(virtual_label_.get()), ui::kInvalidAXNodeID);
+}
+#endif  // defined(USE_AURA)
 
 TEST_F(AXVirtualViewTest, AddingAndRemovingVirtualChildren) {
   ASSERT_EQ(0, virtual_label_->GetChildCount());
@@ -342,15 +377,13 @@ TEST_F(AXVirtualViewTest, GetIndexOfVirtualChild) {
 // ax::mojom::State::kInvisible state.
 TEST_F(AXVirtualViewTest, InvisibleVirtualViews) {
   EXPECT_TRUE(widget_->IsVisible());
-  EXPECT_FALSE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kInvisible));
   EXPECT_FALSE(
-      virtual_label_->GetData().HasState(ax::mojom::State::kInvisible));
+      GetButtonAccessibility()->HasState(ax::mojom::State::kInvisible));
+  EXPECT_FALSE(virtual_label_->HasState(ax::mojom::State::kInvisible));
 
   button_->SetVisible(false);
-  EXPECT_TRUE(GetButtonAccessibility()->GetData().HasState(
-      ax::mojom::State::kInvisible));
-  EXPECT_TRUE(virtual_label_->GetData().HasState(ax::mojom::State::kInvisible));
+  EXPECT_TRUE(GetButtonAccessibility()->HasState(ax::mojom::State::kInvisible));
+  EXPECT_TRUE(virtual_label_->HasState(ax::mojom::State::kInvisible));
   button_->SetVisible(true);
 }
 
@@ -746,14 +779,14 @@ TEST_F(AXVirtualViewTest, HitTesting) {
 }
 
 // Test for GetTargetForNativeAccessibilityEvent().
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST_F(AXVirtualViewTest, GetTargetForEvents) {
   EXPECT_EQ(button_, virtual_label_->GetOwnerView());
   EXPECT_NE(nullptr, HWNDForView(virtual_label_->GetOwnerView()));
   EXPECT_EQ(HWNDForView(button_),
             virtual_label_->GetTargetForNativeAccessibilityEvent());
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 }  // namespace test
 }  // namespace views

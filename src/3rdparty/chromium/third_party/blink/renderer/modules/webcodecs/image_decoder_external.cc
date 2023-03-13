@@ -9,6 +9,7 @@
 #include "base/task/thread_pool.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
 #include "third_party/blink/public/mojom/web_feature/web_feature.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_arraybufferallowshared_arraybufferviewallowshared_readablestream.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_decode_options.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_image_decode_result.h"
@@ -26,6 +27,8 @@
 #include "third_party/blink/renderer/platform/graphics/bitmap_image_metrics.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 
 namespace blink {
 
@@ -360,7 +363,6 @@ void ImageDecoderExternal::close() {
   auto* exception = MakeGarbageCollected<DOMException>(
       DOMExceptionCode::kAbortError,
       failed_ ? "Aborted by close." : "Aborted by failure.");
-  reset(exception);
 
   // Failure cases should have already rejected the tracks ready promise.
   if (!failed_ && decoder_ && tracks_->IsEmpty())
@@ -371,7 +373,11 @@ void ImageDecoderExternal::close() {
 
   if (consumer_)
     consumer_->Cancel();
+  CloseInternal(exception);
+}
 
+void ImageDecoderExternal::CloseInternal(DOMException* exception) {
+  reset(exception);
   weak_factory_.InvalidateWeakPtrs();
   pending_metadata_requests_ = 0;
   consumer_ = nullptr;
@@ -439,9 +445,11 @@ void ImageDecoderExternal::ContextDestroyed() {
   // WeakPtrs need special consideration when used with a garbage collected
   // type; they must be invalidated ahead of finalization.
   //
-  // We also need to ensure that no further WeakPtrs are created, so close() the
+  // We also need to ensure that no further WeakPtrs are created, so close the
   // decoder at this point to prevent further operation.
-  close();
+  auto* exception = MakeGarbageCollected<DOMException>(
+      DOMExceptionCode::kAbortError, "Aborted by close.");
+  CloseInternal(exception);
 
   DCHECK(!weak_factory_.HasWeakPtrs());
   DCHECK(!decode_weak_factory_.HasWeakPtrs());

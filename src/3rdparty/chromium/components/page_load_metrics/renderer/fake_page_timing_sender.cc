@@ -24,12 +24,11 @@ void FakePageTimingSender::SendTiming(
     std::vector<mojom::ResourceDataUpdatePtr> resources,
     const mojom::FrameRenderDataUpdate& render_data,
     const mojom::CpuTimingPtr& cpu_timing,
-    mojom::DeferredResourceCountsPtr new_deferred_resource_data,
     const mojom::InputTimingPtr new_input_timing,
-    const blink::MobileFriendliness& mobile_friendliness) {
+    const absl::optional<blink::MobileFriendliness>& mobile_friendliness) {
   validator_->UpdateTiming(timing, metadata, new_features, resources,
-                           render_data, cpu_timing, new_deferred_resource_data,
-                           new_input_timing, mobile_friendliness);
+                           render_data, cpu_timing, new_input_timing,
+                           mobile_friendliness);
 }
 
 void FakePageTimingSender::SetUpSmoothnessReporting(
@@ -71,9 +70,8 @@ void FakePageTimingSender::PageTimingValidator::UpdateExpectedInputTiming(
     const base::TimeDelta input_delay) {
   expected_input_timing->num_input_events++;
   expected_input_timing->total_input_delay += input_delay;
-  expected_input_timing->total_adjusted_input_delay +=
-      base::TimeDelta::FromMilliseconds(
-          std::max(int64_t(0), input_delay.InMilliseconds() - int64_t(50)));
+  expected_input_timing->total_adjusted_input_delay += base::Milliseconds(
+      std::max(int64_t(0), input_delay.InMilliseconds() - int64_t(50)));
 }
 void FakePageTimingSender::PageTimingValidator::VerifyExpectedInputTiming()
     const {
@@ -141,9 +139,8 @@ void FakePageTimingSender::PageTimingValidator::UpdateTiming(
     const std::vector<mojom::ResourceDataUpdatePtr>& resources,
     const mojom::FrameRenderDataUpdate& render_data,
     const mojom::CpuTimingPtr& cpu_timing,
-    const mojom::DeferredResourceCountsPtr& new_deferred_resource_data,
     const mojom::InputTimingPtr& new_input_timing,
-    const blink::MobileFriendliness& mobile_friendliness) {
+    const absl::optional<blink::MobileFriendliness>& mobile_friendliness) {
   actual_timings_.push_back(timing.Clone());
   if (!cpu_timing->task_time.is_zero()) {
     actual_cpu_timings_.push_back(cpu_timing.Clone());
@@ -162,7 +159,8 @@ void FakePageTimingSender::PageTimingValidator::UpdateTiming(
   actual_input_timing->total_input_delay += new_input_timing->total_input_delay;
   actual_input_timing->total_adjusted_input_delay +=
       new_input_timing->total_adjusted_input_delay;
-  actual_mobile_friendliness = mobile_friendliness;
+  if (mobile_friendliness.has_value())
+    actual_mobile_friendliness = *mobile_friendliness;
 
   VerifyExpectedTimings();
   VerifyExpectedCpuTimings();

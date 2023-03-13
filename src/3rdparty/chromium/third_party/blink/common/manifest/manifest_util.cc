@@ -7,6 +7,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/common/permissions_policy/permissions_policy.h"
 #include "third_party/blink/public/mojom/manifest/capture_links.mojom.h"
 #include "third_party/blink/public/mojom/manifest/display_mode.mojom.h"
 #include "third_party/blink/public/mojom/manifest/manifest.mojom.h"
@@ -128,23 +129,48 @@ mojom::CaptureLinks CaptureLinksFromString(const std::string& capture_links) {
   return mojom::CaptureLinks::kUndefined;
 }
 
-absl::optional<Manifest::LaunchHandler::RouteTo> RouteToFromString(
-    const std::string& route_to) {
+mojom::HandleLinks HandleLinksFromString(const std::string& handle_links) {
+  if (base::LowerCaseEqualsASCII(handle_links, "auto"))
+    return mojom::HandleLinks::kAuto;
+  if (base::LowerCaseEqualsASCII(handle_links, "preferred"))
+    return mojom::HandleLinks::kPreferred;
+  if (base::LowerCaseEqualsASCII(handle_links, "not-preferred"))
+    return mojom::HandleLinks::kNotPreferred;
+  return mojom::HandleLinks::kUndefined;
+}
+
+bool ParsedRouteTo::operator==(const ParsedRouteTo& other) const {
+  auto AsTuple = [](const auto& item) {
+    return std::tie(item.route_to, item.legacy_existing_client_value);
+  };
+  return AsTuple(*this) == AsTuple(other);
+}
+
+bool ParsedRouteTo::operator!=(const ParsedRouteTo& other) const {
+  return !(*this == other);
+}
+
+absl::optional<ParsedRouteTo> RouteToFromString(const std::string& route_to) {
+  using RouteTo = Manifest::LaunchHandler::RouteTo;
   if (base::LowerCaseEqualsASCII(route_to, "auto"))
-    return Manifest::LaunchHandler::RouteTo::kAuto;
+    return ParsedRouteTo{/*.route_to =*/ RouteTo::kAuto};
   if (base::LowerCaseEqualsASCII(route_to, "new-client"))
-    return Manifest::LaunchHandler::RouteTo::kNewClient;
+    return ParsedRouteTo{/*.route_to =*/ RouteTo::kNewClient};
   if (base::LowerCaseEqualsASCII(route_to, "existing-client"))
-    return Manifest::LaunchHandler::RouteTo::kExistingClient;
+    return ParsedRouteTo{/*.route_to =*/ RouteTo::kAuto, /*.legacy_existing_client_value =*/ true};
+  if (base::LowerCaseEqualsASCII(route_to, "existing-client-navigate"))
+    return ParsedRouteTo{/*.route_to =*/ RouteTo::kExistingClientNavigate};
+  if (base::LowerCaseEqualsASCII(route_to, "existing-client-retain"))
+    return ParsedRouteTo{/*.route_to =*/ RouteTo::kExistingClientRetain};
   return absl::nullopt;
 }
 
-absl::optional<Manifest::LaunchHandler::NavigateExistingClient>
-NavigateExistingClientFromString(const std::string& navigate_existing_client) {
+absl::optional<NavigateExistingClient> NavigateExistingClientFromString(
+    const std::string& navigate_existing_client) {
   if (base::LowerCaseEqualsASCII(navigate_existing_client, "always"))
-    return Manifest::LaunchHandler::NavigateExistingClient::kAlways;
+    return NavigateExistingClient::kAlways;
   if (base::LowerCaseEqualsASCII(navigate_existing_client, "never"))
-    return Manifest::LaunchHandler::NavigateExistingClient::kNever;
+    return NavigateExistingClient::kNever;
   return absl::nullopt;
 }
 

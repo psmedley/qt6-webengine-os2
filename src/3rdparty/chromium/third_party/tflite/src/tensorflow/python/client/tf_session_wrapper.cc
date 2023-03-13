@@ -13,20 +13,27 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-#include "Python.h"
-#include "absl/types/optional.h"
+// Must be at top (before any system includes and Python.h).
+// clang-format off
 #include "pybind11/chrono.h"
 #include "pybind11/complex.h"
 #include "pybind11/functional.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
+// clang-format on
+
+#include "Python.h"
+#include "absl/types/optional.h"
+#include "third_party/eigen3/Eigen/Core"
 #include "tensorflow/c/c_api.h"
 #include "tensorflow/c/c_api_experimental.h"
 #include "tensorflow/c/c_api_internal.h"
 #include "tensorflow/c/python_api.h"
 #include "tensorflow/c/tf_datatype.h"
 #include "tensorflow/core/distributed_runtime/server_lib.h"
+#include "tensorflow/core/framework/full_type.pb.h"
 #include "tensorflow/core/public/version.h"
+#include "tensorflow/core/util/version_info.h"
 #include "tensorflow/python/client/tf_session_helper.h"
 #include "tensorflow/python/lib/core/numpy.h"
 #include "tensorflow/python/lib/core/pybind11_lib.h"
@@ -166,7 +173,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
           return out_handle;
         });
   m.def("_TF_SetTarget", TF_SetTarget);
-  m.def("_TF_SetConfig", [](TF_SessionOptions* options, py::str proto) {
+  m.def("_TF_SetConfig", [](TF_SessionOptions* options, py::bytes proto) {
     tensorflow::Safe_TF_StatusPtr status =
         tensorflow::make_safe(TF_NewStatus());
     tensorflow::Safe_TF_BufferPtr buf =
@@ -398,7 +405,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
   });
 
   m.def("SetHandleShapeAndType",
-        [](TF_Graph* graph, TF_Output output, py::str proto) {
+        [](TF_Graph* graph, TF_Output output, py::bytes proto) {
           tensorflow::Safe_TF_StatusPtr status =
               tensorflow::make_safe(TF_NewStatus());
           tensorflow::Safe_TF_BufferPtr buf =
@@ -614,7 +621,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
         });
 
   m.def("TF_SetAttrValueProto", [](TF_OperationDescription* desc,
-                                   const char* attr_name, py::str proto) {
+                                   const char* attr_name, py::bytes proto) {
     tensorflow::Safe_TF_StatusPtr status =
         tensorflow::make_safe(TF_NewStatus());
     tensorflow::Safe_TF_BufferPtr buf =
@@ -660,6 +667,15 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
           tensorflow::MaybeRaiseRegisteredFromTFStatus(status.get());
         });
 
+  m.def("TF_OperationGetStackTrace", [](TF_Operation* oper) -> py::object {
+    const std::shared_ptr<tensorflow::AbstractStackTrace> trace =
+        oper->node.GetStackTrace();
+    if (!trace) {
+      return py::none();
+    }
+    return py::cast(*trace, py::return_value_policy::reference);
+  });
+
   m.def("SetRequestedDevice", tensorflow::SetRequestedDevice);
 
   // TF_Buffer util methods
@@ -673,7 +689,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
   m.def("TF_DeleteBuffer", &TF_DeleteBuffer);
   m.def(
       "TF_NewBufferFromString",
-      [](py::str buffer_as_string) {
+      [](py::bytes buffer_as_string) {
         tensorflow::Safe_TF_BufferPtr buf = tensorflow::make_safe(
             ProtoStringToTFBuffer(buffer_as_string.ptr()));
         return TF_NewBufferFromString(buf.get()->data, buf.get()->length);
@@ -700,12 +716,34 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
           tensorflow::MaybeRaiseRegisteredFromTFStatusWithGIL(status.get());
         });
 
+  // Note: users should prefer using tf.cast or equivalent, and only when
+  // it's infeasible to set the type via OpDef's type constructor and inference
+  // function.
+  m.def("SetFullType", [](TF_Graph* graph, TF_Operation* op,
+                          const std::string& serialized_full_type) {
+    tensorflow::FullTypeDef proto;
+    proto.ParseFromString(serialized_full_type);
+    tensorflow::SetFullType(graph, op, proto);
+  });
+
   m.def(
       "TF_LoadLibrary",
       [](const char* library_filename) {
         tensorflow::Safe_TF_StatusPtr status =
             tensorflow::make_safe(TF_NewStatus());
         auto output = TF_LoadLibrary(library_filename, status.get());
+        tensorflow::MaybeRaiseRegisteredFromTFStatus(status.get());
+        return output;
+      },
+      py::return_value_policy::reference);
+
+  m.def(
+      "TF_LoadPluggableDeviceLibrary",
+      [](const char* library_filename) {
+        tensorflow::Safe_TF_StatusPtr status =
+            tensorflow::make_safe(TF_NewStatus());
+        auto output =
+            TF_LoadPluggableDeviceLibrary(library_filename, status.get());
         tensorflow::MaybeRaiseRegisteredFromTFStatus(status.get());
         return output;
       },
@@ -720,6 +758,11 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
 
   m.def("TF_DeleteLibraryHandle", TF_DeleteLibraryHandle,
         py::call_guard<py::gil_scoped_release>());
+
+  m.def("TF_PluggableDeviceLibraryHandle",
+        TF_DeletePluggableDeviceLibraryHandle,
+        py::call_guard<py::gil_scoped_release>());
+
   m.def("TF_AddControlInput", TF_AddControlInput);
   m.def(
       "TF_AddInputList", [](TF_OperationDescription* desc, py::handle& inputs) {
@@ -853,7 +896,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
         py::call_guard<py::gil_scoped_release>());
 
   m.def("TF_FunctionSetAttrValueProto",
-        [](TF_Function* func, const char* attr_name, py::str proto) {
+        [](TF_Function* func, const char* attr_name, py::bytes proto) {
           tensorflow::Safe_TF_StatusPtr status =
               tensorflow::make_safe(TF_NewStatus());
           tensorflow::Safe_TF_BufferPtr buf =
@@ -887,7 +930,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
 
   m.def(
       "TF_FunctionImportFunctionDef",
-      [](py::str proto) {
+      [](py::bytes proto) {
         tensorflow::Safe_TF_StatusPtr status =
             tensorflow::make_safe(TF_NewStatus());
         tensorflow::Safe_TF_BufferPtr buf =
@@ -991,7 +1034,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
 
   m.def(
       "TF_NewServer",
-      [](py::str proto) {
+      [](py::bytes proto) {
         tensorflow::Safe_TF_StatusPtr status =
             tensorflow::make_safe(TF_NewStatus());
         tensorflow::Safe_TF_BufferPtr buf =
@@ -1091,9 +1134,11 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
               tensorflow::make_safe(TF_NewStatus());
           unsigned char value;
           // Release GIL for threading.
-          py::gil_scoped_release release;
-          TF_OperationGetAttrBool(oper, attr_name, &value, status.get());
-          tensorflow::MaybeRaiseRegisteredFromTFStatusWithGIL(status.get());
+          {
+            py::gil_scoped_release release;
+            TF_OperationGetAttrBool(oper, attr_name, &value, status.get());
+            tensorflow::MaybeRaiseRegisteredFromTFStatusWithGIL(status.get());
+          }
           return tensorflow::Pyo(PyBool_FromLong(value));
         });
 
@@ -1126,7 +1171,7 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
   m.def("TF_GetCode", TF_GetCode);
 
   m.def("TF_SetXlaAutoJitMode", TF_SetXlaAutoJitMode);
-  m.def("TF_SetXlaAutoJitMode", TF_SetXlaAutoJitMode);
+  m.def("TF_GetXlaAutoJitEnabled", TF_GetXlaAutoJitEnabled);
   m.def("TF_SetXlaEnableLazyCompilation", TF_SetXlaEnableLazyCompilation);
   m.def("TF_SetTfXlaCpuGlobalJit", TF_SetTfXlaCpuGlobalJit);
   m.def("TF_SetXlaMinClusterSize", TF_SetXlaMinClusterSize);
@@ -1137,10 +1182,11 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
   // // Creating getters instead.
 
   m.def("get_version", []() { return TF_VERSION_STRING; });
-  m.def("get_git_version", []() { return tf_git_version(); });
-  m.def("get_compiler_version", []() { return tf_compiler_version(); });
-  m.def("get_cxx11_abi_flag", []() { return tf_cxx11_abi_flag(); });
-  m.def("get_monolithic_build", []() { return tf_monolithic_build(); });
+  m.def("get_git_version", []() { return TF_GIT_VERSION; });
+  m.def("get_compiler_version", []() { return TF_COMPILER_VERSION; });
+  m.def("get_cxx11_abi_flag", []() { return TF_CXX11_ABI_FLAG; });
+  m.def("get_eigen_max_align_bytes", []() { return EIGEN_MAX_ALIGN_BYTES; });
+  m.def("get_monolithic_build", []() { return TF_MONOLITHIC_BUILD; });
   m.def("get_graph_def_version", []() { return TF_GRAPH_DEF_VERSION; });
   m.def("get_graph_def_version_min_consumer",
         []() { return TF_GRAPH_DEF_VERSION_MIN_CONSUMER; });
@@ -1153,6 +1199,13 @@ PYBIND11_MODULE(_pywrap_tf_session, m) {
     // the Windows import will not load the libraries necessarily
     // in order. b/145559202
     return "TensorHandle";
+  });
+
+  m.def("TF_RegisterFilesystemPlugin", [](const char* plugin_filename) {
+    tensorflow::Safe_TF_StatusPtr status =
+        tensorflow::make_safe(TF_NewStatus());
+    TF_RegisterFilesystemPlugin(plugin_filename, status.get());
+    tensorflow::MaybeRaiseRegisteredFromTFStatus(status.get());
   });
 
   py::enum_<TF_DataType>(m, "TF_DataType")

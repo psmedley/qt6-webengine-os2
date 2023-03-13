@@ -4,7 +4,7 @@
 
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -20,8 +20,6 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/back_forward_cache.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
@@ -54,19 +52,24 @@ class ViewSourceTest : public InProcessBrowserTest {
  public:
   ViewSourceTest() {}
 
+  ViewSourceTest(const ViewSourceTest&) = delete;
+  ViewSourceTest& operator=(const ViewSourceTest&) = delete;
+
  protected:
   void SetUpOnMainThread() override {
     InProcessBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ViewSourceTest);
 };
 
 class ViewSourcePermissionsPolicyTest : public ViewSourceTest {
  public:
   ViewSourcePermissionsPolicyTest() : ViewSourceTest() {}
+
+  ViewSourcePermissionsPolicyTest(const ViewSourcePermissionsPolicyTest&) =
+      delete;
+  ViewSourcePermissionsPolicyTest& operator=(
+      const ViewSourcePermissionsPolicyTest&) = delete;
 
  protected:
   void SetUpOnMainThread() override {
@@ -78,9 +81,6 @@ class ViewSourcePermissionsPolicyTest : public ViewSourceTest {
     command_line->AppendSwitch(
         switches::kEnableExperimentalWebPlatformFeatures);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ViewSourcePermissionsPolicyTest);
 };
 
 // This test renders a page in view-source and then checks to see if the title
@@ -93,7 +93,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DoesBrowserRenderInViewSource) {
   // First we navigate to our view-source test page.
   GURL url(content::kViewSourceScheme + std::string(":") +
            embedded_test_server()->GetURL(kTestHtml).spec());
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Check that the title didn't get set.  It should not be there (because we
   // are in view-source mode).
@@ -110,12 +110,12 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DoesBrowserConsumeViewSourcePrefix) {
 
   // First we navigate to google.html.
   GURL url(embedded_test_server()->GetURL(kTestHtml));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Then we navigate to the same url but with the "view-source:" prefix.
   GURL url_viewsource(content::kViewSourceScheme + std::string(":") +
                       url.spec());
-  ui_test_utils::NavigateToURL(browser(), url_viewsource);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_viewsource));
 
   // The URL should still be prefixed with "view-source:".
   EXPECT_EQ(url_viewsource.spec(),
@@ -129,7 +129,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, ViewSourceInMenuEnabledOnANormalPage) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL(kTestHtml));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   EXPECT_TRUE(chrome::CanViewSource(browser()));
 }
@@ -140,7 +140,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, ViewSourceInMenuDisabledOnAMediaPage) {
   ASSERT_TRUE(embedded_test_server()->Start());
 
   GURL url(embedded_test_server()->GetURL(kTestMedia));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   const char* mime_type = browser()->tab_strip_model()->GetActiveWebContents()->
       GetContentsMimeType().c_str();
@@ -157,7 +157,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
 
   GURL url_viewsource(content::kViewSourceScheme + std::string(":") +
                       embedded_test_server()->GetURL(kTestHtml).spec());
-  ui_test_utils::NavigateToURL(browser(), url_viewsource);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_viewsource));
 
   EXPECT_FALSE(chrome::CanViewSource(browser()));
 }
@@ -171,19 +171,17 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, DISABLED_TestViewSourceReload) {
   GURL url_viewsource(content::kViewSourceScheme + std::string(":") +
                       embedded_test_server()->GetURL(kTestHtml).spec());
 
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
-  ui_test_utils::NavigateToURL(browser(), url_viewsource);
+  content::LoadStopObserver observer(
+      browser()->tab_strip_model()->GetActiveWebContents());
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_viewsource));
   observer.Wait();
 
   ASSERT_TRUE(
       content::ExecuteScript(browser()->tab_strip_model()->GetWebContentsAt(0),
                              "window.location.reload();"));
 
-  content::WindowedNotificationObserver observer2(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
+  content::LoadStopObserver observer2(
+      browser()->tab_strip_model()->GetWebContentsAt(0));
   observer2.Wait();
   ASSERT_TRUE(browser()->tab_strip_model()->GetWebContentsAt(0)->
                   GetController().GetActiveEntry()->IsViewSourceMode());
@@ -197,7 +195,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
 
   GURL url_viewsource(content::kViewSourceScheme + std::string(":") +
                       embedded_test_server()->GetURL(kTestHtml).spec());
-  ui_test_utils::NavigateToURL(browser(), url_viewsource);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url_viewsource));
   EXPECT_FALSE(chrome::CanViewSource(browser()));
   EXPECT_EQ(1, browser()->tab_strip_model()->count());
 
@@ -218,7 +216,8 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
   // Switch back to the first tab and navigate it cross-process.
   browser()->tab_strip_model()->ActivateTabAt(
       0, {TabStripModel::GestureType::kOther});
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIVersionURL));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(),
+                                           GURL(chrome::kChromeUIVersionURL)));
   EXPECT_TRUE(chrome::CanViewSource(browser()));
 
   // Navigate back in session history to ensure view-source mode is still
@@ -250,21 +249,22 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, CrossSiteSubframe) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL main_url(
       embedded_test_server()->GetURL("a.com", "/iframe_cross_site.html"));
-  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), main_url));
 
   // Grab the original frames.
   content::WebContents* original_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::RenderFrameHost* original_main_frame =
       original_contents->GetMainFrame();
-  ASSERT_LE(2u, original_contents->GetAllFrames().size());
   content::RenderFrameHost* original_child_frame =
-      original_contents->GetAllFrames()[1];
+      ChildFrameAt(original_main_frame, 0);
+  ASSERT_TRUE(original_child_frame);
 
   // Do a sanity check that in this particular test page the main frame and the
   // subframe are cross-site.
-  EXPECT_NE(original_main_frame->GetLastCommittedURL().GetOrigin(),
-            original_child_frame->GetLastCommittedURL().GetOrigin());
+  EXPECT_NE(
+      original_main_frame->GetLastCommittedURL().DeprecatedGetOriginAsURL(),
+      original_child_frame->GetLastCommittedURL().DeprecatedGetOriginAsURL());
   if (content::AreAllSitesIsolatedForTesting()) {
     EXPECT_NE(original_main_frame->GetSiteInstance(),
               original_child_frame->GetSiteInstance());
@@ -332,7 +332,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, HttpPostInMainframe) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL form_url(embedded_test_server()->GetURL(
       "a.com", "/form_that_posts_to_echoall.html"));
-  ui_test_utils::NavigateToURL(browser(), form_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), form_url));
   content::WebContents* original_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   content::RenderFrameHost* original_main_frame =
@@ -439,7 +439,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest,
   // Navigate to a URL, it doesn't matter which, just need the tab to have a
   // committed entry other than about:blank or the NTP.
   GURL url(embedded_test_server()->GetURL(kTestHtml));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   EXPECT_EQ(0, browser()->tab_strip_model()->active_index());
 
   // Duplicate the tab. The newly created tab should be active.
@@ -510,7 +510,7 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheTest, HttpPostInSubframe) {
   ASSERT_TRUE(embedded_test_server()->Start());
   GURL main_url(
       embedded_test_server()->GetURL("a.com", "/iframe_cross_site.html"));
-  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), main_url));
   content::WebContents* original_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
 
@@ -519,9 +519,9 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheTest, HttpPostInSubframe) {
       "b.com", "/form_that_posts_to_echoall.html"));
   EXPECT_TRUE(
       content::NavigateIframeToURL(original_contents, "frame1", form_url));
-  EXPECT_LE(2u, original_contents->GetAllFrames().size());
   content::RenderFrameHost* original_child_frame =
-      original_contents->GetAllFrames()[1];
+      ChildFrameAt(original_contents, 0);
+  ASSERT_TRUE(original_child_frame);
 
   // Submit the form and verify that we arrived at the expected location.
   content::TestNavigationObserver form_post_observer(original_contents, 1);
@@ -620,7 +620,7 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheEnabledTest,
 
   // 1. Navigate to page a.com/title1.html
   GURL main_url(embedded_test_server()->GetURL("a.com", "/title1.html"));
-  ui_test_utils::NavigateToURL(browser(), main_url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), main_url));
 
   content::WebContents* original_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -642,7 +642,7 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheEnabledTest,
 
   // 3. View-source the subframe
   content::WebContentsAddedObserver view_source_contents_observer;
-  original_contents->GetAllFrames()[1]->ViewSource();
+  ChildFrameAt(original_contents, 0)->ViewSource();
   content::WebContents* view_source_contents =
       view_source_contents_observer.GetWebContents();
   EXPECT_TRUE(WaitForLoadStop(view_source_contents));
@@ -652,11 +652,12 @@ IN_PROC_BROWSER_TEST_P(ViewSourceWithSplitCacheEnabledTest,
   // |view_source_contents| to make sure it will not be put into the back
   // forward cache.
   view_source_contents->GetController().GetBackForwardCache().DisableForTesting(
-      content::BackForwardCache::TEST_ASSUMES_NO_CACHING);
+      content::BackForwardCache::TEST_REQUIRES_NO_CACHING);
 
   // 4. Navigate the view-source page to a c.com/title1.html
-  ui_test_utils::NavigateToURL(
-      browser(), GURL(embedded_test_server()->GetURL("c.com", "/title1.html")));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(),
+      GURL(embedded_test_server()->GetURL("c.com", "/title1.html"))));
 
   base::RunLoop cache_status_waiter;
   content::URLLoaderInterceptor interceptor(
@@ -698,7 +699,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, NavigationOmitsReferrer) {
 
   GURL url(content::kViewSourceScheme + std::string(":") +
            embedded_test_server()->GetURL(kTestNavigationHtml).spec());
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Click the first link in the view-source markup.
   content::WebContentsAddedObserver nav_observer;
@@ -723,7 +724,7 @@ IN_PROC_BROWSER_TEST_F(ViewSourceTest, JavaScriptURISanitized) {
 
   GURL url(content::kViewSourceScheme + std::string(":") +
            embedded_test_server()->GetURL(kTestNavigationHtml).spec());
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
 
   // Get the href of the second link in the view-source markup.
   std::string link_href;
@@ -750,15 +751,16 @@ IN_PROC_BROWSER_TEST_F(ViewSourcePermissionsPolicyTest,
   // Sanity-check: 'vertical-scroll' is disabled in the actual page (set by the
   // mock headers).
   GURL url(embedded_test_server()->GetURL(kTestHtml));
-  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(browser(), url));
   std::string response;
   ASSERT_TRUE(ExecuteScriptAndExtractString(
       browser()->tab_strip_model()->GetActiveWebContents(), k_verify_feature,
       &response));
   EXPECT_EQ("undefined", response);
   // Ensure the policy is enabled in the view-source version.
-  ui_test_utils::NavigateToURL(browser(), GURL(content::kViewSourceScheme +
-                                               std::string(":") + url.spec()));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(),
+      GURL(content::kViewSourceScheme + std::string(":") + url.spec())));
   ASSERT_TRUE(ExecuteScriptAndExtractString(
       browser()->tab_strip_model()->GetActiveWebContents(), k_verify_feature,
       &response));
@@ -787,7 +789,7 @@ class ViewSourcePrerenderTest : public ViewSourceTest {
                           base::Unretained(this))};
 
   // The WebContents which is expected to request prerendering.
-  content::WebContents* target_ = nullptr;
+  raw_ptr<content::WebContents> target_ = nullptr;
 };
 
 // A frame in a prerendered page should be able to have its source viewed, like

@@ -30,6 +30,10 @@ HEADER = headers.header(
             url = "https://chrome-ops-rotation-proxy.appspot.com/current/oncallator:chromeos-gardeners",
         ),
         headers.oncall(
+            name = "Fuchsia",
+            url = "https://chrome-ops-rotation-proxy.appspot.com/current/grotation:chrome-fuchsia-gardener",
+        ),
+        headers.oncall(
             name = "GPU",
             url = "https://chrome-ops-rotation-proxy.appspot.com/current/oncallator:chrome-gpu-pixel-wrangler",
         ),
@@ -182,6 +186,11 @@ HEADER = headers.header(
                     alt = "Chromium GPU console",
                 ),
                 headers.link(
+                    text = "packager",
+                    url = "/p/{}/g/chromium.packager".format(settings.project),
+                    alt = "Chromium Packager console",
+                ),
+                headers.link(
                     text = "perf",
                     url = "/p/chrome/g/chrome.perf/console",
                     alt = "Chromium Perf console",
@@ -200,6 +209,11 @@ HEADER = headers.header(
                     text = "swangle",
                     url = "/p/{}/g/chromium.swangle".format(settings.project),
                     alt = "Chromium SWANGLE console",
+                ),
+                headers.link(
+                    text = "updater",
+                    url = "/p/{}/g/chromium.updater".format(settings.project),
+                    alt = "Chromium Updater console",
                 ),
                 headers.link(
                     text = "webrtc",
@@ -221,7 +235,7 @@ HEADER = headers.header(
                     text = milestone,
                     url = "/p/{}/g/main/console".format(details.project),
                 )
-                for milestone, details in sorted(ACTIVE_MILESTONES.items())
+                for milestone, details in ACTIVE_MILESTONES.items()
             ] + [
                 headers.link(
                     text = "trunk",

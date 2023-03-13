@@ -11,9 +11,28 @@ import("//tools/grit/repack.gni")
 import("//ui/base/ui_features.gni")
 
 assert(enable_extensions)
+
 assert(
     !(enable_autofill_assistant_api && is_official_build),
     "The AutofillAssistant Extension API must be disabled in official builds.")
+
+if (is_component_build) {
+  component("extensions") {
+    visibility = [
+      "//extensions/common:common_constants",
+      "//extensions/common:export",
+    ]
+    public_deps = [
+      "//extensions/common:constants_impl",
+      "//extensions/common:export_impl",
+    ]
+  }
+}
+
+# Used by targets that compile into the implementation.
+config("component_implementation") {
+  defines = [ "EXTENSIONS_COMPONENT_IMPLEMENTATION" ]
+}
 
 group("extensions_resources") {
   public_deps = [
@@ -112,8 +131,6 @@ jumbo_static_library("test_support") {
     "common/scoped_testing_manifest_handler_registry.h",
     "renderer/test_extensions_renderer_client.cc",
     "renderer/test_extensions_renderer_client.h",
-    "test/background_page_watcher.cc",
-    "test/background_page_watcher.h",
     "test/extension_background_page_waiter.cc",
     "test/extension_background_page_waiter.h",
     "test/extension_state_tester.cc",
@@ -124,16 +141,12 @@ jumbo_static_library("test_support") {
     "test/extension_test_notification_observer.h",
     "test/logging_timer.cc",
     "test/logging_timer.h",
+    "test/permissions_manager_waiter.cc",
+    "test/permissions_manager_waiter.h",
     "test/result_catcher.cc",
     "test/result_catcher.h",
-    "test/test_background_page_first_load_observer.cc",
-    "test/test_background_page_first_load_observer.h",
-    "test/test_background_page_ready_observer.cc",
-    "test/test_background_page_ready_observer.h",
     "test/test_content_script_load_waiter.cc",
     "test/test_content_script_load_waiter.h",
-    "test/test_content_utility_client.cc",
-    "test/test_content_utility_client.h",
     "test/test_extension_dir.cc",
     "test/test_extension_dir.h",
     "test/test_extensions_client.cc",
@@ -150,8 +163,8 @@ jumbo_static_library("test_support") {
     "//components/crx_file",
     "//components/guest_view/browser:test_support",
     "//components/keyed_service/content",
-    "//components/prefs:test_support",
     "//components/pref_registry",
+    "//components/prefs:test_support",
     "//components/sync_preferences:test_support",
     "//components/update_client",
     "//components/user_prefs",
@@ -173,6 +186,17 @@ jumbo_static_library("test_support") {
     "//third_party/cld_3/src/src:cld_3",
     "//third_party/zlib/google:zip",
   ]
+
+  # Generally, //extensions should not depend on //chromeos. However, a number
+  # of the APIs and the extensions shell already do. We should try to avoid
+  # expanding these dependencies.
+  if (is_chromeos_ash) {
+    deps += [ "//chromeos/login/login_state" ]
+  }
+
+  if (is_chromeos_lacros) {
+    deps += [ "//chromeos/lacros:test_support" ]
+  }
 
   public_deps = [ "//content/public/browser" ]
 }
@@ -197,6 +221,7 @@ repack("shell_and_test_pak") {
     "$root_gen_dir/third_party/blink/public/strings/blink_strings_en-US.pak",
     "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
     "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
+    "$root_gen_dir/ui/strings/ax_strings_en-US.pak",
     "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
   ]
 
@@ -253,7 +278,18 @@ test("extensions_unittests") {
     "//ui/gl:test_support",
   ]
 
-  data_deps = [ "//third_party/mesa_headers" ]
+  data_deps = [
+    "//testing/buildbot/filters:extensions_unittests_filters",
+    "//third_party/mesa_headers",
+  ]
+
+  if (is_fuchsia) {
+    use_cfv2 = false
+    additional_manifest_fragments = [
+      "//build/config/fuchsia/test/jit_capabilities.test-cmx",
+      "//build/config/fuchsia/test/network_capabilities.test-cmx",
+    ]
+  }
 }
 
 test("extensions_browsertests") {
@@ -263,12 +299,12 @@ test("extensions_browsertests") {
     "//extensions/test/data/",
     "//net/tools/testserver/",
     "//third_party/pywebsocket3/src/mod_pywebsocket/",
-    "//third_party/tlslite/",
     "$root_out_dir/extensions_shell_and_test.pak",
   ]
 
   deps = [
     "//extensions/browser:browser_tests",
+    "//extensions/renderer:browser_tests",
     "//extensions/shell:browser_tests",
   ]
 
@@ -280,7 +316,7 @@ test("extensions_browsertests") {
 # and these moved to the extensions_browsertests target. Currently, we solve
 # the problem by making this a source set and linking it into
 # //chrome/test:browser_tests.
-source_set("chrome_extensions_browsertests") {
+source_set("chrome_extensions_browsertests_sources") {
   testonly = true
   sources = [
     "browser/api/app_window/app_window_apitest.cc",
@@ -289,8 +325,6 @@ source_set("chrome_extensions_browsertests") {
     "browser/api/serial/serial_apitest.cc",
     "browser/api/usb/usb_manual_apitest.cc",
     "browser/app_window/app_window_browsertest.cc",
-    "browser/guest_view/mime_handler_view/mime_handler_view_browsertest.cc",
-    "renderer/script_context_browsertest.cc",
   ]
 
   defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
@@ -305,6 +339,7 @@ source_set("chrome_extensions_browsertests") {
     "//chrome/browser",
     "//chrome/common/extensions/api",
     "//chrome/renderer",
+    "//chrome/test:test_support",
     "//components/autofill/content/browser:risk_proto",
     "//components/autofill/content/renderer:test_support",
     "//components/captive_portal/core:test_support",
@@ -348,43 +383,4 @@ source_set("chrome_extensions_browsertests") {
   if (is_chromeos_ash) {
     deps += [ "//components/user_manager:test_support" ]
   }
-}
-
-# TODO(rockot) bug 505926: This should be deleted for the same reason as
-# chrome_extensions_browsertests.
-source_set("chrome_extensions_interactive_uitests") {
-  testonly = true
-  sources = [
-    "browser/app_window/app_window_interactive_uitest.cc",
-    "browser/guest_view/mime_handler_view/mime_handler_view_interactive_uitest.cc",
-  ]
-
-  defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
-
-  # These are the deps from interactive_uitests minus some internal Chrome
-  # ones that aren't allowed to be included here and that aren't needed.
-  deps = [
-    "//chrome/browser",
-    "//chrome/browser/devtools",
-    "//chrome/renderer",
-    "//chrome/test:test_support",
-    "//components/sync",
-    "//content/app/resources",
-    "//crypto:platform",
-    "//crypto:test_support",
-    "//google_apis:test_support",
-    "//net",
-    "//net:net_resources",
-    "//net:test_support",
-    "//skia",
-    "//testing/gmock",
-    "//testing/gtest",
-    "//third_party/hunspell",
-    "//third_party/icu",
-    "//third_party/libpng",
-    "//third_party/zlib",
-    "//ui/base:test_support",
-    "//ui/resources:ui_test_pak",
-    "//ui/web_dialogs:test_support",
-  ]
 }

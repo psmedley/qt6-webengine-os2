@@ -10,8 +10,8 @@
 
 #include "base/bind.h"
 #include "base/check.h"
-#include "base/cxx17_backports.h"
 #include "base/lazy_instance.h"
+#include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/statistics_recorder.h"
@@ -70,7 +70,7 @@ std::string StripFakepath(const std::string& path) {
   constexpr char kFakePathStr[] = "C:\\fakepath\\";
   if (base::StartsWith(path, kFakePathStr,
                        base::CompareCase::INSENSITIVE_ASCII))
-    return path.substr(base::size(kFakePathStr) - 1);
+    return path.substr(std::size(kFakePathStr) - 1);
   return path;
 }
 
@@ -114,10 +114,11 @@ void SendFeedback(content::BrowserContext* browser_context,
 
   FeedbackPrivateDelegate* delegate =
       ExtensionsAPIClient::Get()->GetFeedbackPrivateDelegate();
+  base::WeakPtr<feedback::FeedbackUploader> uploader =
+      base::AsWeakPtr(delegate->GetFeedbackUploaderForContext(browser_context));
   scoped_refptr<FeedbackData> feedback_data =
-      base::MakeRefCounted<FeedbackData>(
-          delegate->GetFeedbackUploaderForContext(browser_context),
-          ContentTracingManager::Get());
+      base::MakeRefCounted<FeedbackData>(std::move(uploader),
+                                         ContentTracingManager::Get());
 
   // Populate feedback data.
   feedback_data->set_description(feedback_info.description);
@@ -214,6 +215,7 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
     api::feedback_private::FeedbackFlow flow,
     bool from_assistant,
     bool include_bluetooth_logs,
+    bool show_questionnaire,
     bool from_chrome_labs_or_kaleidoscope) {
   auto info = std::make_unique<FeedbackInfo>();
 
@@ -226,6 +228,7 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   info->from_assistant = std::make_unique<bool>(from_assistant);
   info->include_bluetooth_logs = std::make_unique<bool>(include_bluetooth_logs);
+  info->show_questionnaire = std::make_unique<bool>(show_questionnaire);
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 
   // Any extra diagnostics information should be added to the sys info.
@@ -241,7 +244,7 @@ std::unique_ptr<FeedbackInfo> FeedbackPrivateAPI::CreateFeedbackInfo(
     info->trace_id = std::make_unique<int>(manager->RequestTrace());
   }
   info->flow = flow;
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   const bool use_system_window_frame = true;
 #else
   const bool use_system_window_frame = false;
@@ -268,12 +271,14 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
     api::feedback_private::FeedbackFlow flow,
     bool from_assistant,
     bool include_bluetooth_logs,
+    bool show_questionnaire,
     bool from_chrome_labs_or_kaleidoscope) {
   if (browser_context_ && EventRouter::Get(browser_context_)) {
     auto info = CreateFeedbackInfo(
         description_template, description_placeholder_text, category_tag,
         extra_diagnostics, page_url, flow, from_assistant,
-        include_bluetooth_logs, from_chrome_labs_or_kaleidoscope);
+        include_bluetooth_logs, show_questionnaire,
+        from_chrome_labs_or_kaleidoscope);
 
     auto args = feedback_private::OnFeedbackRequested::Create(*info);
 
@@ -295,7 +300,7 @@ void FeedbackPrivateAPI::RequestFeedbackForFlow(
 base::OnceClosure* FeedbackPrivateGetStringsFunction::test_callback_ = nullptr;
 
 ExtensionFunction::ResponseAction FeedbackPrivateGetStringsFunction::Run() {
-  auto params = feedback_private::GetStrings::Params::Create(*args_);
+  auto params = feedback_private::GetStrings::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   FeedbackPrivateDelegate* feedback_private_delegate =
@@ -363,7 +368,7 @@ void FeedbackPrivateGetSystemInformationFunction::OnCompleted(
 ExtensionFunction::ResponseAction FeedbackPrivateReadLogSourceFunction::Run() {
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   using Params = feedback_private::ReadLogSource::Params;
-  std::unique_ptr<Params> api_params = Params::Create(*args_);
+  std::unique_ptr<Params> api_params = Params::Create(args());
 
   LogSourceAccessManager* log_source_manager =
       FeedbackPrivateAPI::GetFactoryInstance()
@@ -396,15 +401,14 @@ void FeedbackPrivateReadLogSourceFunction::OnCompleted(
 
 ExtensionFunction::ResponseAction FeedbackPrivateSendFeedbackFunction::Run() {
   std::unique_ptr<feedback_private::SendFeedback::Params> params(
-      feedback_private::SendFeedback::Params::Create(*args_));
+      feedback_private::SendFeedback::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
 
   bool load_system_info =
       (params->load_system_info && *params->load_system_info);
   if (params->form_open_time) {
-    const auto form_open_time =
-        base::TimeTicks::UnixEpoch() +
-        base::TimeDelta::FromMilliseconds(*params->form_open_time);
+    const auto form_open_time = base::TimeTicks::UnixEpoch() +
+                                base::Milliseconds(*params->form_open_time);
     base::UmaHistogramLongTimes("Feedback.Duration.FormOpenToSubmit",
                                 base::TimeTicks::Now() - form_open_time);
   }

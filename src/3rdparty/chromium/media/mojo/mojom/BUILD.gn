@@ -13,10 +13,12 @@ mojom("mojom") {
   sources = [
     "audio_data_pipe.mojom",
     "audio_decoder.mojom",
+    "audio_encoder.mojom",
     "audio_input_stream.mojom",
     "audio_logging.mojom",
     "audio_output_stream.mojom",
     "audio_parameters.mojom",
+    "audio_processing.mojom",
     "audio_stream_factory.mojom",
     "capture_handle.mojom",
     "cdm_document_service.mojom",
@@ -46,6 +48,7 @@ mojom("mojom") {
     "video_encode_accelerator.mojom",
     "video_encoder_info.mojom",
     "watch_time_recorder.mojom",
+    "webrtc_video_perf.mojom",
   ]
 
   if (enable_media_drm_storage) {
@@ -70,8 +73,10 @@ mojom("mojom") {
   }
 
   public_deps = [
+    ":encryption_pattern",
     "//gpu/ipc/common:interfaces",
     "//media/learning/mojo/public/mojom",
+    "//media/mojo/mojom/stable:stable_video_decoder",
     "//mojo/public/mojom/base",
     "//sandbox/policy/mojom",
     "//services/media_session/public/mojom",
@@ -91,8 +96,21 @@ mojom("mojom") {
     public_deps += [ "//sandbox/mac/mojom" ]
   }
 
+  enabled_features = []
+
+  # Help select ServiceSandbox for media_service.mojom.
+  if (mojo_media_host == "browser") {
+    enabled_features += [ "mojo_media_in_browser" ]
+  } else if (mojo_media_host == "gpu") {
+    enabled_features += [ "mojo_media_in_gpu" ]
+  } else if (mojo_media_host == "") {
+    enabled_features += [ "mojo_media_service_unused" ]
+  } else {
+    assert(false, "Invalid mojo media host: $mojo_media_host")
+  }
+
   if (enable_cast_renderer) {
-    enabled_features = [ "enable_cast_renderer" ]
+    enabled_features += [ "enable_cast_renderer" ]
   }
 
   shared_typemaps = [
@@ -108,6 +126,20 @@ mojom("mojom") {
         "//media",
         "//media/base/ipc",
       ]
+    },
+    {
+      types = [
+        {
+          mojom = "media.mojom.AudioProcessingSettings"
+          cpp = "::media::AudioProcessingSettings"
+        },
+        {
+          mojom = "media.mojom.AudioProcessingStats"
+          cpp = "::media::AudioProcessingStats"
+        },
+      ]
+      traits_headers = [ "audio_processing_mojom_traits.h" ]
+      traits_public_deps = [ ":shared_mojom_traits" ]
     },
     {
       types = [
@@ -162,6 +194,36 @@ mojom("mojom") {
         "//base",
         "//media",
         "//media/base/ipc",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "media.mojom.AudioEncoderConfig"
+          cpp = "::media::AudioEncoder::Options"
+        },
+      ]
+      traits_headers = [ "audio_encoder_config_mojom_traits.h" ]
+      traits_sources = [ "audio_encoder_config_mojom_traits.cc" ]
+      traits_public_deps = [
+        "//base",
+        "//media",
+        "//media/base/ipc",
+      ]
+    },
+    {
+      types = [
+        {
+          mojom = "media.mojom.EncodedAudioBuffer"
+          cpp = "::media::EncodedAudioBuffer"
+          move_only = true
+        },
+      ]
+      traits_headers = [ "encoded_audio_buffer_traits.h" ]
+      traits_sources = [ "encoded_audio_buffer_traits.cc" ]
+      traits_public_deps = [
+        "//base",
+        "//media",
       ]
     },
     {
@@ -274,20 +336,6 @@ mojom("mojom") {
     {
       types = [
         {
-          mojom = "media.mojom.EncryptionPattern"
-          cpp = "::media::EncryptionPattern"
-        },
-      ]
-      traits_headers = [ "encryption_pattern_mojom_traits.h" ]
-      traits_sources = [ "encryption_pattern_mojom_traits.cc" ]
-      traits_public_deps = [
-        "//media",
-        "//media/base/ipc",
-      ]
-    },
-    {
-      types = [
-        {
           mojom = "media.mojom.PipelineStatistics"
           cpp = "::media::PipelineStatistics"
         },
@@ -313,8 +361,20 @@ mojom("mojom") {
     {
       types = [
         {
-          mojom = "media.mojom.Status"
-          cpp = "::media::Status"
+          mojom = "media.mojom.StatusData"
+          cpp = "::media::internal::StatusData"
+        },
+        {
+          mojom = "media.mojom.EncoderStatus"
+          cpp = "::media::EncoderStatus"
+        },
+        {
+          mojom = "media.mojom.DecoderStatus"
+          cpp = "::media::DecoderStatus"
+        },
+        {
+          mojom = "media.mojom.PipelineStatus"
+          cpp = "::media::PipelineStatus"
         },
       ]
       traits_headers = [ "status_mojom_traits.h" ]
@@ -415,6 +475,18 @@ mojom("mojom") {
         {
           mojom = "media.mojom.SpatialLayer"
           cpp = "::media::VideoEncodeAccelerator::Config::SpatialLayer"
+        },
+        {
+          mojom = "media.mojom.SVCScalabilityMode"
+          cpp = "::media::SVCScalabilityMode"
+        },
+        {
+          mojom = "media.mojom.VariableBitrate"
+          cpp = "::media::Bitrate"
+        },
+        {
+          mojom = "media.mojom.ConstantBitrate"
+          cpp = "::media::Bitrate"
         },
         {
           mojom = "media.mojom.Bitrate"
@@ -628,13 +700,32 @@ mojom("mojom") {
       {
         types = [
           {
-            mojom = "media.mojom.CdmPreferenceData"
-            cpp = "::std::unique_ptr<::media::CdmPreferenceData>"
+            mojom = "media.mojom.CdmEvent"
+            cpp = "::media::CdmEvent"
+          },
+        ]
+        traits_headers = [ "media_types_enum_mojom_traits.h" ]
+      },
+      {
+        types = [
+          {
+            mojom = "media.mojom.MediaFoundationCdmData"
+            cpp = "::std::unique_ptr<::media::MediaFoundationCdmData>"
             move_only = true
           },
         ]
-        traits_headers = [ "cdm_preference_data_mojom_traits.h" ]
-        traits_sources = [ "cdm_preference_data_mojom_traits.cc" ]
+        traits_headers = [ "media_foundation_cdm_data_mojom_traits.h" ]
+        traits_sources = [ "media_foundation_cdm_data_mojom_traits.cc" ]
+        traits_public_deps = [ "//media" ]
+      },
+      {
+        types = [
+          {
+            mojom = "media.mojom.RenderingMode"
+            cpp = "::media::RenderingMode"
+          },
+        ]
+        traits_headers = [ "media_foundation_rendering_mode_mojom_traits.h" ]
         traits_public_deps = [ "//media" ]
       },
     ]
@@ -648,8 +739,31 @@ mojom("mojom") {
   export_header_blink = "third_party/blink/public/platform/web_common.h"
 }
 
+mojom("encryption_pattern") {
+  generate_java = true
+  sources = [ "encryption_pattern.mojom" ]
+  cpp_typemaps = [
+    {
+      types = [
+        {
+          mojom = "media.mojom.EncryptionPattern"
+          cpp = "::media::EncryptionPattern"
+        },
+      ]
+      traits_headers = [ "encryption_pattern_mojom_traits.h" ]
+      traits_sources = [ "encryption_pattern_mojom_traits.cc" ]
+      traits_public_deps = [
+        "//media",
+        "//media/base/ipc",
+      ]
+    },
+  ]
+}
+
 source_set("shared_mojom_traits") {
   sources = [
+    "audio_processing_mojom_traits.cc",
+    "audio_processing_mojom_traits.h",
     "video_frame_metadata_mojom_traits.cc",
     "video_frame_metadata_mojom_traits.h",
   ]
@@ -688,6 +802,7 @@ source_set("unit_tests") {
 
   sources = [
     "audio_decoder_config_mojom_traits_unittest.cc",
+    "audio_processing_mojom_traits_unittest.cc",
     "cdm_key_information_mojom_traits_unittest.cc",
     "video_decoder_config_mojom_traits_unittest.cc",
     "video_encode_accelerator_mojom_traits_unittest.cc",

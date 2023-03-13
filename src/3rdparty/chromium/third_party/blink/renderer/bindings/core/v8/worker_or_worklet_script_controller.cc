@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 
 #include <memory>
+#include <tuple>
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
@@ -38,11 +39,11 @@
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
+#include "third_party/blink/renderer/platform/bindings/extensions_registry.h"
 #include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
 #include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/scheduler/public/event_loop.h"
 #include "v8/include/v8.h"
 
@@ -254,11 +255,12 @@ void WorkerOrWorkletScriptController::PrepareForEvaluation() {
   v8::HandleScope handle_scope(isolate_);
 
   V8PerContextData* per_context_data = script_state_->PerContextData();
-  ignore_result(per_context_data->ConstructorForType(
-      global_scope_->GetWrapperTypeInfo()));
+  std::ignore =
+      per_context_data->ConstructorForType(global_scope_->GetWrapperTypeInfo());
   // Inform V8 that origin trial information is now connected with the context,
   // and V8 can extend the context with origin trial features.
   isolate_->InstallConditionalFeatures(script_state_->GetContext());
+  ExtensionsRegistry::GetInstance().InstallExtensions(script_state_);
 }
 
 void WorkerOrWorkletScriptController::DisableEvalInternal(

@@ -10,7 +10,6 @@
 #include <vector>
 
 #include "base/feature_list.h"
-#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_function_test_utils.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
@@ -24,7 +23,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
-#include "components/password_manager/core/browser/mock_password_store.h"
+#include "components/password_manager/core/browser/mock_password_store_interface.h"
 #include "components/password_manager/core/browser/password_manager_test_utils.h"
 #include "components/sessions/content/session_tab_helper.h"
 #include "content/public/browser/browser_task_traits.h"
@@ -103,15 +102,17 @@ void SafeBrowsingPrivateApiUnitTest::SetUp() {
 
   PasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
       profile(),
-      base::BindRepeating(&password_manager::BuildPasswordStore<
-                          content::BrowserContext,
-                          NiceMock<password_manager::MockPasswordStore>>));
+      base::BindRepeating(
+          &password_manager::BuildPasswordStoreInterface<
+              content::BrowserContext,
+              NiceMock<password_manager::MockPasswordStoreInterface>>));
 
   AccountPasswordStoreFactory::GetInstance()->SetTestingFactoryAndUse(
       profile(),
-      base::BindRepeating(&password_manager::BuildPasswordStore<
-                          content::BrowserContext,
-                          NiceMock<password_manager::MockPasswordStore>>));
+      base::BindRepeating(
+          &password_manager::BuildPasswordStoreInterface<
+              content::BrowserContext,
+              NiceMock<password_manager::MockPasswordStoreInterface>>));
 
   // Initialize Safe Browsing service.
   safe_browsing::TestSafeBrowsingServiceFactory sb_service_factory;

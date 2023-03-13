@@ -30,11 +30,17 @@ import collections
 import logging
 import json
 import re
-import urllib
+import six.moves.urllib.request
+import six.moves.urllib.parse
+import six.moves.urllib.error
+import time
 
 from blinkpy.common.memoized import memoized
+from blinkpy.common.net.luci_auth import LuciAuth
 from blinkpy.common.net.web import Web
 from blinkpy.common.net.web_test_results import WebTestResults
+from blinkpy.common.system.filesystem import FileSystem
+from blinkpy.web_tests.builder_list import BuilderList
 from blinkpy.web_tests.layout_package import json_results_generator
 
 _log = logging.getLogger(__name__)
@@ -42,6 +48,11 @@ _log = logging.getLogger(__name__)
 TEST_RESULTS_SERVER = 'https://test-results.appspot.com'
 RESULTS_URL_BASE = '%s/data/layout_results' % TEST_RESULTS_SERVER
 RESULTS_SUMMARY_URL_BASE = 'https://storage.googleapis.com/chromium-layout-test-archives'
+
+PREDICATE_UNEXPECTED_RESULTS = {
+    "expectancy": "VARIANTS_WITH_ONLY_UNEXPECTED_RESULTS",
+    "excludeExonerated": True
+}
 
 
 class Build(collections.namedtuple('Build', ('builder_name', 'build_number',
@@ -67,6 +78,8 @@ class TestResultsFetcher(object):
 
     def __init__(self):
         self.web = Web()
+        self.builders = BuilderList.load_default_builder_list(FileSystem())
+        self._webtest_results_resultdb = None
 
     def results_url(self, builder_name, build_number=None, step_name=None):
         """Returns a URL for one set of archived web test results.
@@ -84,9 +97,39 @@ class TestResultsFetcher(object):
                     Build(builder_name, build_number))
             if step_name:
                 return '%s/%s/%s/layout-test-results' % (
-                    url_base, build_number, urllib.quote(step_name))
+                    url_base, build_number,
+                    six.moves.urllib.parse.quote(step_name))
             return '%s/%s/layout-test-results' % (url_base, build_number)
         return self.accumulated_results_url_base(builder_name)
+
+    def get_artifact_list_for_test(self, host, result_name):
+        """Fetches the list of artifacts for a test-result.
+        """
+        luci_token = LuciAuth(host).get_access_token()
+
+        url = 'https://results.api.cr.dev/prpc/luci.resultdb.v1.ResultDB/ListArtifacts'
+        header = {
+            'Authorization': 'Bearer ' + luci_token,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+
+        data = {
+            "parent": result_name,
+        }
+
+        req_body = json.dumps(data).encode("utf-8")
+        response = self.do_request_with_retries('POST', url, req_body, header)
+        if response is None:
+            _log.warning("Failed to get baseline artifacts")
+        if response.getcode() == 200:
+            response_body = response.read()
+
+        RESPONSE_PREFIX = b")]}'"
+        if response_body.startswith(RESPONSE_PREFIX):
+            response_body = response_body[len(RESPONSE_PREFIX):]
+        res = json.loads(response_body)
+        return res['artifacts']
 
     def get_full_builder_url(self, url_base, builder_name):
         """ Returns the url for a builder directory in google storage.
@@ -137,6 +180,89 @@ class TestResultsFetcher(object):
         return self.builder_results_url_base(
             builder_name) + '/results/layout-test-results'
 
+    def get_invocation(self, build):
+        """Returns the invocation for a build
+        """
+        return "invocations/build-%s" % build.build_id
+
+    def do_request_with_retries(self, method, url, data, headers):
+        for i in range(5):
+            try:
+                response = self.web.request(method, url, data=data, headers=headers)
+                return response
+            except six.moves.urllib.error.URLError:
+                _log.warning("Meet URLError...")
+                if i < 4:
+                    time.sleep(10)
+        _log.error("Http request failed for %s" % data)
+        return None
+
+    @memoized
+    def fetch_results_from_resultdb_layout_tests(self, host, build,
+                                                 unexpected_results):
+        rv = []
+        if unexpected_results:
+            predicate = PREDICATE_UNEXPECTED_RESULTS
+        else:
+            predicate = ""
+        rv = self.fetch_results_from_resultdb(host, [build], predicate)
+        self._webtest_results_resultdb = WebTestResults.results_from_resultdb(
+            rv)
+        return self._webtest_results_resultdb
+
+    def fetch_results_from_resultdb(self, host, builds, predicate):
+        """Returns a list of test results from ResultDB
+        """
+        luci_token = LuciAuth(host).get_access_token()
+
+        url = 'https://results.api.cr.dev/prpc/luci.resultdb.v1.ResultDB/QueryTestResults'
+        header = {
+            'Authorization': 'Bearer ' + luci_token,
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+        }
+        rv = []
+        page_token = None
+        request_more = True
+        invocations = [self.get_invocation(build) for build in builds]
+        data = {
+            "invocations": invocations,
+        }
+        if predicate:
+            data.update({"predicate": predicate})
+        while request_more:
+            request_more = False
+            if page_token:
+                data.update({"pageToken": page_token})
+            req_body = json.dumps(data).encode("utf-8")
+            _log.debug("Sending QueryTestResults request. Url: %s with Body: %s" %
+                       (url, req_body))
+
+            response = self.do_request_with_retries('POST', url, req_body, header)
+            if response is None:
+                continue
+
+            if response.getcode() == 200:
+                response_body = response.read()
+
+                # This string always appear at the beginning of the RPC response
+                # from ResultDB.
+                RESPONSE_PREFIX = b")]}'"
+                if response_body.startswith(RESPONSE_PREFIX):
+                    response_body = response_body[len(RESPONSE_PREFIX):]
+                res = json.loads(response_body)
+                if res:
+                    rv.extend(res['testResults'])
+                    page_token = res.get('nextPageToken')
+                    if page_token:
+                        request_more = True
+            else:
+                _log.error(
+                    "Failed to get test results from ResultDB (status=%s)" %
+                    response.status)
+                _log.debug("Full QueryTestResults response: %s" % str(response))
+        return rv
+
     @memoized
     def fetch_results(self, build, full=False, step_name=None):
         """Returns a WebTestResults object for results from a given Build.
@@ -158,15 +284,21 @@ class TestResultsFetcher(object):
             _log.debug('Builder name or build number is None')
             return None
 
+        # We were not able to retrieve step name for some builders from
+        # https://test-results.appspot.com. Read from config file instead
+        step_name = self.builders.step_name_for_builder(build.builder_name)
+        if step_name:
+            return step_name
+
         url = '%s/testfile?%s' % (
             TEST_RESULTS_SERVER,
-            urllib.urlencode({
-                'builder': build.builder_name,
-                'buildnumber': build.build_number,
-                'name': 'full_results.json',
+            six.moves.urllib.parse.urlencode([
+                ('buildnumber', build.build_number),
                 # This forces the server to gives us JSON rather than an HTML page.
-                'callback': json_results_generator.JSON_CALLBACK,
-            }))
+                ('callback', json_results_generator.JSON_CALLBACK),
+                ('builder', build.builder_name),
+                ('name', 'full_results.json')
+            ]))
         data = self.web.get_binary(url, return_none_on_404=True)
         if not data:
             _log.debug('Got 404 response from:\n%s', url)
@@ -213,15 +345,14 @@ class TestResultsFetcher(object):
             _log.debug('Builder name or build number or master is None')
             return None
 
-        url = '%s/testfile?%s' % (
-            TEST_RESULTS_SERVER,
-            urllib.urlencode({
-                'builder': build.builder_name,
-                'buildnumber': build.build_number,
-                'name': 'full_results.json',
-                'testtype': 'webdriver_tests_suite (with patch)',
-                'master': master
-            }))
+        url = '%s/testfile?%s' % (TEST_RESULTS_SERVER,
+                                  six.moves.urllib.parse.urlencode(
+                                      [('buildnumber', build.build_number),
+                                       ('master', master),
+                                       ('builder', build.builder_name),
+                                       ('testtype',
+                                        'webdriver_tests_suite (with patch)'),
+                                       ('name', 'full_results.json')]))
 
         data = self.web.get_binary(url, return_none_on_404=True)
         if not data:
@@ -245,7 +376,8 @@ def filter_latest_builds(builds):
     latest_builds = {}
     for build in builds:
         builder = build.builder_name
-        if builder not in latest_builds or build.build_number > latest_builds[
-                builder].build_number:
+        if builder not in latest_builds or (
+                build.build_number
+                and build.build_number > latest_builds[builder].build_number):
             latest_builds[builder] = build
     return sorted(latest_builds.values())

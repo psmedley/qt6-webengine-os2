@@ -89,6 +89,8 @@
          %38 = OpLoad %v4float %B
          %39 = OpFUnordEqual %v4bool %37 %38
                OpStore %eq %39
+         %ordered = OpFOrdNotEqual %v4bool %37 %38
+               OpStore %neq %ordered
          %41 = OpLoad %v4float %A
          %42 = OpLoad %v4float %B
          %43 = OpFUnordNotEqual %v4bool %41 %42

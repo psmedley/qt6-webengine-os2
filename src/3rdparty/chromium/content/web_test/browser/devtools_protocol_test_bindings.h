@@ -21,6 +21,11 @@ class DevToolsProtocolTestBindings : public WebContentsObserver,
                                      public DevToolsAgentHostClient {
  public:
   explicit DevToolsProtocolTestBindings(WebContents* devtools);
+
+  DevToolsProtocolTestBindings(const DevToolsProtocolTestBindings&) = delete;
+  DevToolsProtocolTestBindings& operator=(const DevToolsProtocolTestBindings&) =
+      delete;
+
   ~DevToolsProtocolTestBindings() override;
   static GURL MapTestURLIfNeeded(const GURL& test_url, bool* is_protocol_test);
 
@@ -38,13 +43,11 @@ class DevToolsProtocolTestBindings : public WebContentsObserver,
   void HandleMessageFromTest(base::Value);
 
   scoped_refptr<DevToolsAgentHost> agent_host_;
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // DevToolsFrontendHost does not exist on Android, but we also don't run web
   // tests natively on Android.
   std::unique_ptr<DevToolsFrontendHost> frontend_host_;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(DevToolsProtocolTestBindings);
 };
 
 }  // namespace content

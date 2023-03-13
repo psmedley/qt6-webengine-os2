@@ -13,7 +13,6 @@
 
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -48,6 +47,9 @@ class GpuChildThread : public ChildThreadImpl,
 
   GpuChildThread(const InProcessChildThreadParams& params,
                  std::unique_ptr<gpu::GpuInit> gpu_init);
+
+  GpuChildThread(const GpuChildThread&) = delete;
+  GpuChildThread& operator=(const GpuChildThread&) = delete;
 
   ~GpuChildThread() override;
 
@@ -85,7 +87,7 @@ class GpuChildThread : public ChildThreadImpl,
   static void QuitSafelyHelper(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   static std::unique_ptr<media::AndroidOverlay> CreateAndroidOverlay(
       scoped_refptr<base::SingleThreadTaskRunner> main_task_runner,
       const base::UnguessableToken& routing_token,
@@ -109,8 +111,6 @@ class GpuChildThread : public ChildThreadImpl,
   base::WeakPtrFactory<GpuChildThread> weak_factory_{this};
 
   static GpuChildThread* instance_;
-
-  DISALLOW_COPY_AND_ASSIGN(GpuChildThread);
 };
 
 }  // namespace content

@@ -4,24 +4,27 @@
 
 #include "base/allocator/partition_allocator/address_pool_manager.h"
 
-#if defined(OS_APPLE)
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <limits>
+
+#include "base/allocator/buildflags.h"
+#include "base/allocator/partition_allocator/address_space_stats.h"
+#include "base/allocator/partition_allocator/page_allocator.h"
+#include "base/allocator/partition_allocator/page_allocator_constants.h"
+#include "base/allocator/partition_allocator/partition_alloc_check.h"
+#include "base/allocator/partition_allocator/partition_alloc_constants.h"
+#include "base/allocator/partition_allocator/partition_alloc_notreached.h"
+#include "base/allocator/partition_allocator/reservation_offset_table.h"
+#include "base/lazy_instance.h"
+#include "build/build_config.h"
+
+#if BUILDFLAG(IS_APPLE)
 #include <sys/mman.h>
 #endif
 
-#include <algorithm>
-#include <limits>
-
-#include "base/allocator/partition_allocator/page_allocator.h"
-#include "base/allocator/partition_allocator/page_allocator_constants.h"
-#include "base/allocator/partition_allocator/page_allocator_internal.h"
-#include "base/allocator/partition_allocator/partition_alloc_check.h"
-#include "base/allocator/partition_allocator/partition_alloc_constants.h"
-#include "base/cxx17_backports.h"
-#include "base/lazy_instance.h"
-#include "base/notreached.h"
-
-namespace base {
-namespace internal {
+namespace partition_alloc::internal {
 
 namespace {
 
@@ -40,20 +43,11 @@ AddressPoolManager* AddressPoolManager::GetInstance() {
 namespace {
 
 // This will crash if the range cannot be decommitted.
-void DecommitPages(void* address, size_t size) {
-#if defined(OS_APPLE)
-  // MAP_FIXED replaces an existing mapping with a new one, when the address is
-  // already part of a mapping. Since newly-created mappings are guaranteed to
-  // be zero-filled, this has the desired effect. It is only required on macOS,
-  // as on other operating systems, |DecommitSystemPages()| provides the same
-  // behavior.
-  void* ptr = mmap(address, size, PROT_NONE,
-                   MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  PA_CHECK(ptr == address);
-#else
-  static_assert(DecommittedMemoryIsAlwaysZeroed(), "");
-  DecommitSystemPages(address, size, PageUpdatePermissions);
-#endif
+void DecommitPages(uintptr_t address, size_t size) {
+  // Callers rely on the pages being zero-initialized when recommitting them.
+  // |DecommitSystemPages| doesn't guarantee this on all operating systems, in
+  // particular on macOS, but |DecommitAndZeroSystemPages| does.
+  DecommitAndZeroSystemPages(address, size);
 }
 
 }  // namespace
@@ -62,19 +56,19 @@ pool_handle AddressPoolManager::Add(uintptr_t ptr, size_t length) {
   PA_DCHECK(!(ptr & kSuperPageOffsetMask));
   PA_DCHECK(!((ptr + length) & kSuperPageOffsetMask));
 
-  for (pool_handle i = 0; i < base::size(pools_); ++i) {
+  for (pool_handle i = 0; i < std::size(pools_); ++i) {
     if (!pools_[i].IsInitialized()) {
       pools_[i].Initialize(ptr, length);
       return i + 1;
     }
   }
-  NOTREACHED();
+  PA_NOTREACHED();
   return 0;
 }
 
 void AddressPoolManager::GetPoolUsedSuperPages(
     pool_handle handle,
-    std::bitset<kMaxSuperPages>& used) {
+    std::bitset<kMaxSuperPagesInPool>& used) {
   Pool* pool = GetPool(handle);
   if (!pool)
     return;
@@ -91,7 +85,7 @@ uintptr_t AddressPoolManager::GetPoolBaseAddress(pool_handle handle) {
 }
 
 void AddressPoolManager::ResetForTesting() {
-  for (pool_handle i = 0; i < base::size(pools_); ++i)
+  for (pool_handle i = 0; i < std::size(pools_); ++i)
     pools_[i].Reset();
 }
 
@@ -101,27 +95,26 @@ void AddressPoolManager::Remove(pool_handle handle) {
   pool->Reset();
 }
 
-char* AddressPoolManager::Reserve(pool_handle handle,
-                                  void* requested_address,
-                                  size_t length) {
+uintptr_t AddressPoolManager::Reserve(pool_handle handle,
+                                      uintptr_t requested_address,
+                                      size_t length) {
   Pool* pool = GetPool(handle);
   if (!requested_address)
-    return reinterpret_cast<char*>(pool->FindChunk(length));
-  const bool is_available = pool->TryReserveChunk(
-      reinterpret_cast<uintptr_t>(requested_address), length);
+    return pool->FindChunk(length);
+  const bool is_available = pool->TryReserveChunk(requested_address, length);
   if (is_available)
-    return static_cast<char*>(requested_address);
-  return reinterpret_cast<char*>(pool->FindChunk(length));
+    return requested_address;
+  return pool->FindChunk(length);
 }
 
 void AddressPoolManager::UnreserveAndDecommit(pool_handle handle,
-                                              void* ptr,
+                                              uintptr_t address,
                                               size_t length) {
   PA_DCHECK(0 < handle && handle <= kNumPools);
   Pool* pool = GetPool(handle);
   PA_DCHECK(pool->IsInitialized());
-  DecommitPages(ptr, length);
-  pool->FreeChunk(reinterpret_cast<uintptr_t>(ptr), length);
+  DecommitPages(address, length);
+  pool->FreeChunk(address, length);
 }
 
 void AddressPoolManager::Pool::Initialize(uintptr_t ptr, size_t length) {
@@ -135,9 +128,9 @@ void AddressPoolManager::Pool::Initialize(uintptr_t ptr, size_t length) {
 #endif
 
   total_bits_ = length / kSuperPageSize;
-  PA_CHECK(total_bits_ <= kMaxSuperPages);
+  PA_CHECK(total_bits_ <= kMaxSuperPagesInPool);
 
-  base::AutoLock scoped_lock(lock_);
+  ScopedGuard scoped_lock(lock_);
   alloc_bitset_.reset();
   bit_hint_ = 0;
 }
@@ -151,8 +144,8 @@ void AddressPoolManager::Pool::Reset() {
 }
 
 void AddressPoolManager::Pool::GetUsedSuperPages(
-    std::bitset<kMaxSuperPages>& used) {
-  base::AutoLock scoped_lock(lock_);
+    std::bitset<kMaxSuperPagesInPool>& used) {
+  ScopedGuard scoped_lock(lock_);
 
   PA_DCHECK(IsInitialized());
   used = alloc_bitset_;
@@ -164,7 +157,7 @@ uintptr_t AddressPoolManager::Pool::GetBaseAddress() {
 }
 
 uintptr_t AddressPoolManager::Pool::FindChunk(size_t requested_size) {
-  base::AutoLock scoped_lock(lock_);
+  ScopedGuard scoped_lock(lock_);
 
   PA_DCHECK(!(requested_size & kSuperPageOffsetMask));
   const size_t need_bits = requested_size >> kSuperPageShift;
@@ -213,13 +206,13 @@ uintptr_t AddressPoolManager::Pool::FindChunk(size_t requested_size) {
     }
   }
 
-  NOTREACHED();
+  PA_NOTREACHED();
   return 0;
 }
 
 bool AddressPoolManager::Pool::TryReserveChunk(uintptr_t address,
                                                size_t requested_size) {
-  base::AutoLock scoped_lock(lock_);
+  ScopedGuard scoped_lock(lock_);
   PA_DCHECK(!(address & kSuperPageOffsetMask));
   PA_DCHECK(!(requested_size & kSuperPageOffsetMask));
   const size_t begin_bit = (address - address_begin_) / kSuperPageSize;
@@ -241,7 +234,7 @@ bool AddressPoolManager::Pool::TryReserveChunk(uintptr_t address,
 }
 
 void AddressPoolManager::Pool::FreeChunk(uintptr_t address, size_t free_size) {
-  base::AutoLock scoped_lock(lock_);
+  ScopedGuard scoped_lock(lock_);
 
   PA_DCHECK(!(address & kSuperPageOffsetMask));
   PA_DCHECK(!(free_size & kSuperPageOffsetMask));
@@ -260,8 +253,59 @@ void AddressPoolManager::Pool::FreeChunk(uintptr_t address, size_t free_size) {
   bit_hint_ = std::min(bit_hint_, beg_bit);
 }
 
+void AddressPoolManager::Pool::GetStats(PoolStats* stats) {
+  std::bitset<kMaxSuperPagesInPool> pages;
+  size_t i;
+  {
+    ScopedGuard scoped_lock(lock_);
+    pages = alloc_bitset_;
+    i = bit_hint_;
+  }
+
+  stats->usage = pages.count();
+
+  size_t largest_run = 0;
+  size_t current_run = 0;
+  for (; i < total_bits_; ++i) {
+    if (!pages[i]) {
+      current_run += 1;
+      continue;
+    } else if (current_run > largest_run) {
+      largest_run = current_run;
+    }
+    current_run = 0;
+  }
+
+  // Fell out of the loop with last bit being zero. Check once more.
+  if (current_run > largest_run) {
+    largest_run = current_run;
+  }
+  stats->largest_available_reservation = largest_run;
+}
+
 AddressPoolManager::Pool::Pool() = default;
 AddressPoolManager::Pool::~Pool() = default;
+
+void AddressPoolManager::GetPoolStats(const pool_handle handle,
+                                      PoolStats* stats) {
+  Pool* pool = GetPool(handle);
+  if (!pool->IsInitialized()) {
+    return;
+  }
+  pool->GetStats(stats);
+}
+
+bool AddressPoolManager::GetStats(AddressSpaceStats* stats) {
+  // Get 64-bit pool stats.
+  GetPoolStats(GetRegularPool(), &stats->regular_pool_stats);
+#if BUILDFLAG(USE_BACKUP_REF_PTR)
+  GetPoolStats(GetBRPPool(), &stats->brp_pool_stats);
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
+  if (IsConfigurablePoolAvailable()) {
+    GetPoolStats(GetConfigurablePool(), &stats->configurable_pool_stats);
+  }
+  return true;
+}
 
 #else  // defined(PA_HAS_64_BITS_POINTERS)
 
@@ -305,41 +349,31 @@ void ResetBitmap(std::bitset<bitsize>& bitmap,
   }
 }
 
-char* AddressPoolManager::Reserve(pool_handle handle,
-                                  void* requested_address,
-                                  size_t length) {
+uintptr_t AddressPoolManager::Reserve(pool_handle handle,
+                                      uintptr_t requested_address,
+                                      size_t length) {
   PA_DCHECK(!(length & DirectMapAllocationGranularityOffsetMask()));
-  char* ptr = reinterpret_cast<char*>(
-      AllocPages(requested_address, length, kSuperPageSize, PageInaccessible,
-                 PageTag::kPartitionAlloc));
-  if (UNLIKELY(!ptr))
-    return nullptr;
-  return ptr;
+  uintptr_t address = AllocPages(requested_address, length, kSuperPageSize,
+                                 PageAccessibilityConfiguration::kInaccessible,
+                                 PageTag::kPartitionAlloc);
+  return address;
 }
 
 void AddressPoolManager::UnreserveAndDecommit(pool_handle handle,
-                                              void* ptr,
+                                              uintptr_t address,
                                               size_t length) {
-  uintptr_t ptr_as_uintptr = reinterpret_cast<uintptr_t>(ptr);
-  PA_DCHECK(!(ptr_as_uintptr & kSuperPageOffsetMask));
+  PA_DCHECK(!(address & kSuperPageOffsetMask));
   PA_DCHECK(!(length & DirectMapAllocationGranularityOffsetMask()));
-  FreePages(ptr, length);
+  FreePages(address, length);
 }
 
 void AddressPoolManager::MarkUsed(pool_handle handle,
-                                  const void* address,
+                                  uintptr_t address,
                                   size_t length) {
-  uintptr_t ptr_as_uintptr = reinterpret_cast<uintptr_t>(address);
-  AutoLock guard(AddressPoolManagerBitmap::GetLock());
-  if (handle == kNonBRPPoolHandle) {
-    PA_DCHECK((length %
-               AddressPoolManagerBitmap::kBytesPer1BitOfNonBRPPoolBitmap) == 0);
-    SetBitmap(
-        AddressPoolManagerBitmap::non_brp_pool_bits_,
-        ptr_as_uintptr >> AddressPoolManagerBitmap::kBitShiftOfNonBRPPoolBitmap,
-        length >> AddressPoolManagerBitmap::kBitShiftOfNonBRPPoolBitmap);
-  } else {
-    PA_DCHECK(handle == kBRPPoolHandle);
+  ScopedGuard scoped_lock(AddressPoolManagerBitmap::GetLock());
+  // When USE_BACKUP_REF_PTR is off, BRP pool isn't used.
+#if BUILDFLAG(USE_BACKUP_REF_PTR)
+  if (handle == kBRPPoolHandle) {
     PA_DCHECK(
         (length % AddressPoolManagerBitmap::kBytesPer1BitOfBRPPoolBitmap) == 0);
 
@@ -364,37 +398,36 @@ void AddressPoolManager::MarkUsed(pool_handle handle,
     // Suppose that |ptr| points to an address inside B after the loop. If
     // IsManagedByBRPPoolPool(ptr) were to return true, ~raw_ptr<T>() would
     // crash, since the memory is not allocated by PartitionAlloc.
-    SetBitmap(
-        AddressPoolManagerBitmap::brp_pool_bits_,
-        (ptr_as_uintptr >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) +
-            AddressPoolManagerBitmap::kGuardOffsetOfBRPPoolBitmap,
-        (length >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) -
-            AddressPoolManagerBitmap::kGuardBitsOfBRPPoolBitmap);
+    SetBitmap(AddressPoolManagerBitmap::brp_pool_bits_,
+              (address >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) +
+                  AddressPoolManagerBitmap::kGuardOffsetOfBRPPoolBitmap,
+              (length >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) -
+                  AddressPoolManagerBitmap::kGuardBitsOfBRPPoolBitmap);
+  } else
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
+  {
+    PA_DCHECK(handle == kRegularPoolHandle);
+    PA_DCHECK(
+        (length % AddressPoolManagerBitmap::kBytesPer1BitOfRegularPoolBitmap) ==
+        0);
+    SetBitmap(AddressPoolManagerBitmap::regular_pool_bits_,
+              address >> AddressPoolManagerBitmap::kBitShiftOfRegularPoolBitmap,
+              length >> AddressPoolManagerBitmap::kBitShiftOfRegularPoolBitmap);
   }
 }
 
 void AddressPoolManager::MarkUnused(pool_handle handle,
-                                    const void* address,
+                                    uintptr_t address,
                                     size_t length) {
-  uintptr_t ptr_as_uintptr = reinterpret_cast<uintptr_t>(address);
-  AutoLock guard(AddressPoolManagerBitmap::GetLock());
-  // Address regions allocated for normal buckets are never freed, so frequency
-  // of codepaths taken depends solely on which pool direct map allocations go
-  // to. In the USE_BACKUP_REF_PTR case, they usually go to BRP pool (except for
-  // aligned partition). Otherwise, they always go to non-BRP pool.
+  // Address regions allocated for normal buckets are never released, so this
+  // function can only be called for direct map. However, do not DCHECK on
+  // IsManagedByDirectMap(address), because many tests test this function using
+  // small allocations.
+
+  ScopedGuard scoped_lock(AddressPoolManagerBitmap::GetLock());
+  // When USE_BACKUP_REF_PTR is off, BRP pool isn't used.
 #if BUILDFLAG(USE_BACKUP_REF_PTR)
-  if (UNLIKELY(handle == kNonBRPPoolHandle)) {
-#else
-  if (LIKELY(handle == kNonBRPPoolHandle)) {
-#endif
-    PA_DCHECK((length %
-               AddressPoolManagerBitmap::kBytesPer1BitOfNonBRPPoolBitmap) == 0);
-    ResetBitmap(
-        AddressPoolManagerBitmap::non_brp_pool_bits_,
-        ptr_as_uintptr >> AddressPoolManagerBitmap::kBitShiftOfNonBRPPoolBitmap,
-        length >> AddressPoolManagerBitmap::kBitShiftOfNonBRPPoolBitmap);
-  } else {
-    PA_DCHECK(handle == kBRPPoolHandle);
+  if (handle == kBRPPoolHandle) {
     PA_DCHECK(
         (length % AddressPoolManagerBitmap::kBytesPer1BitOfBRPPoolBitmap) == 0);
 
@@ -403,23 +436,117 @@ void AddressPoolManager::MarkUnused(pool_handle handle,
     // (See MarkUsed comment)
     ResetBitmap(
         AddressPoolManagerBitmap::brp_pool_bits_,
-        (ptr_as_uintptr >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) +
+        (address >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) +
             AddressPoolManagerBitmap::kGuardOffsetOfBRPPoolBitmap,
         (length >> AddressPoolManagerBitmap::kBitShiftOfBRPPoolBitmap) -
             AddressPoolManagerBitmap::kGuardBitsOfBRPPoolBitmap);
+  } else
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
+  {
+    PA_DCHECK(handle == kRegularPoolHandle);
+    PA_DCHECK(
+        (length % AddressPoolManagerBitmap::kBytesPer1BitOfRegularPoolBitmap) ==
+        0);
+    ResetBitmap(
+        AddressPoolManagerBitmap::regular_pool_bits_,
+        address >> AddressPoolManagerBitmap::kBitShiftOfRegularPoolBitmap,
+        length >> AddressPoolManagerBitmap::kBitShiftOfRegularPoolBitmap);
   }
 }
 
 void AddressPoolManager::ResetForTesting() {
-  AutoLock guard(AddressPoolManagerBitmap::GetLock());
-  AddressPoolManagerBitmap::non_brp_pool_bits_.reset();
+  ScopedGuard guard(AddressPoolManagerBitmap::GetLock());
+  AddressPoolManagerBitmap::regular_pool_bits_.reset();
   AddressPoolManagerBitmap::brp_pool_bits_.reset();
+}
+
+namespace {
+
+// Counts super pages in use represented by `bitmap`.
+template <size_t bitsize>
+size_t CountUsedSuperPages(const std::bitset<bitsize>& bitmap,
+                           const size_t bits_per_super_page) {
+  size_t count = 0;
+  size_t bit_index = 0;
+
+  // Stride over super pages.
+  for (size_t super_page_index = 0; bit_index < bitsize; ++super_page_index) {
+    // Stride over the bits comprising the super page.
+    for (bit_index = super_page_index * bits_per_super_page;
+         bit_index < (super_page_index + 1) * bits_per_super_page &&
+         bit_index < bitsize;
+         ++bit_index) {
+      if (bitmap[bit_index]) {
+        count += 1;
+        // Move on to the next super page.
+        break;
+      }
+    }
+  }
+  return count;
+}
+
+}  // namespace
+
+bool AddressPoolManager::GetStats(AddressSpaceStats* stats) {
+  std::bitset<AddressPoolManagerBitmap::kRegularPoolBits> regular_pool_bits;
+  std::bitset<AddressPoolManagerBitmap::kBRPPoolBits> brp_pool_bits;
+  {
+    ScopedGuard scoped_lock(AddressPoolManagerBitmap::GetLock());
+    regular_pool_bits = AddressPoolManagerBitmap::regular_pool_bits_;
+    brp_pool_bits = AddressPoolManagerBitmap::brp_pool_bits_;
+  }  // scoped_lock
+
+  // Pool usage is read out from the address pool bitmaps.
+  // The output stats are sized in super pages, so we interpret
+  // the bitmaps into super page usage.
+  static_assert(
+      kSuperPageSize %
+              AddressPoolManagerBitmap::kBytesPer1BitOfRegularPoolBitmap ==
+          0,
+      "information loss when calculating metrics");
+  constexpr size_t kRegularPoolBitsPerSuperPage =
+      kSuperPageSize /
+      AddressPoolManagerBitmap::kBytesPer1BitOfRegularPoolBitmap;
+
+  // Get 32-bit pool usage.
+  stats->regular_pool_stats.usage =
+      CountUsedSuperPages(regular_pool_bits, kRegularPoolBitsPerSuperPage);
+#if BUILDFLAG(USE_BACKUP_REF_PTR)
+  static_assert(
+      kSuperPageSize % AddressPoolManagerBitmap::kBytesPer1BitOfBRPPoolBitmap ==
+          0,
+      "information loss when calculating metrics");
+  constexpr size_t kBRPPoolBitsPerSuperPage =
+      kSuperPageSize / AddressPoolManagerBitmap::kBytesPer1BitOfBRPPoolBitmap;
+  stats->brp_pool_stats.usage =
+      CountUsedSuperPages(brp_pool_bits, kBRPPoolBitsPerSuperPage);
+
+  // Get blocklist size.
+  for (const auto& blocked :
+       AddressPoolManagerBitmap::brp_forbidden_super_page_map_) {
+    if (blocked.load(std::memory_order_relaxed))
+      stats->blocklist_size += 1;
+  }
+
+  // Count failures in finding non-blocklisted addresses.
+  stats->blocklist_hit_count =
+      AddressPoolManagerBitmap::blocklist_hit_count_.load(
+          std::memory_order_relaxed);
+#endif  // BUILDFLAG(USE_BACKUP_REF_PTR)
+  return true;
 }
 
 #endif  // defined(PA_HAS_64_BITS_POINTERS)
 
+void AddressPoolManager::DumpStats(AddressSpaceStatsDumper* dumper) {
+  AddressSpaceStats stats{};
+  if (GetStats(&stats)) {
+    dumper->DumpStats(&stats);
+  }
+}
+
 AddressPoolManager::AddressPoolManager() = default;
 AddressPoolManager::~AddressPoolManager() = default;
 
-}  // namespace internal
-}  // namespace base
+}  // namespace partition_alloc::internal

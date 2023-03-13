@@ -9,12 +9,9 @@
 #include <vector>
 
 #include "base/time/time.h"
+#include "base/values.h"
 #include "components/search_engines/template_url_id.h"
 #include "url/gurl.h"
-
-namespace base {
-class ListValue;
-}
 
 // The data for the TemplateURL.  Separating this into its own class allows most
 // users to do SSA-style usage of TemplateURL: construct a TemplateURLData with
@@ -42,9 +39,10 @@ struct TemplateURLData {
                   base::StringPiece search_url_post_params,
                   base::StringPiece suggest_url_post_params,
                   base::StringPiece image_url_post_params,
+                  base::StringPiece side_search_param,
                   base::StringPiece favicon_url,
                   base::StringPiece encoding,
-                  const base::ListValue& alternate_urls_list,
+                  const base::Value& alternate_urls_list,
                   bool preconnect_to_search_url,
                   int prepopulate_id);
 
@@ -91,6 +89,10 @@ struct TemplateURLData {
   std::string search_url_post_params;
   std::string suggestions_url_post_params;
   std::string image_url_post_params;
+
+  // The parameter appended to the engine's search URL when constructing the URL
+  // for the side search side panel.
+  std::string side_search_param;
 
   // Favicon for the TemplateURL.
   GURL favicon_url;
@@ -168,6 +170,10 @@ struct TemplateURLData {
   // via the omnibox.  Inactive search engines do nothing until they have been
   // activated.  A search engine is inactive if it's unspecified or false.
   ActiveStatus is_active{ActiveStatus::kUnspecified};
+
+  // This TemplateURL is part of the built-in "starter pack" if
+  // starter_pack_id > 0.
+  int starter_pack_id{0};
 
  private:
   // Private so we can enforce using the setters and thus enforce that these

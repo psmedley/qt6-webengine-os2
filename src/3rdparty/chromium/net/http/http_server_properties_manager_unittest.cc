@@ -7,19 +7,21 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/bind.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/default_tick_clock.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/features.h"
 #include "net/base/ip_address.h"
@@ -71,6 +73,10 @@ std::unique_ptr<base::test::ScopedFeatureList> SetNetworkIsolationKeyMode(
 class MockPrefDelegate : public net::HttpServerProperties::PrefDelegate {
  public:
   MockPrefDelegate() = default;
+
+  MockPrefDelegate(const MockPrefDelegate&) = delete;
+  MockPrefDelegate& operator=(const MockPrefDelegate&) = delete;
+
   ~MockPrefDelegate() override = default;
 
   // HttpServerProperties::PrefDelegate implementation.
@@ -125,8 +131,6 @@ class MockPrefDelegate : public net::HttpServerProperties::PrefDelegate {
   int num_pref_updates_ = 0;
 
   base::OnceClosure set_properties_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockPrefDelegate);
 };
 
 // Converts |server_info_map| to a base::Value by running it through an
@@ -207,18 +211,24 @@ std::unique_ptr<HttpServerProperties::ServerInfoMap> ValueToServerInfoMap(
 
 class HttpServerPropertiesManagerTest : public testing::Test,
                                         public WithTaskEnvironment {
+ public:
+  HttpServerPropertiesManagerTest(const HttpServerPropertiesManagerTest&) =
+      delete;
+  HttpServerPropertiesManagerTest& operator=(
+      const HttpServerPropertiesManagerTest&) = delete;
+
  protected:
   HttpServerPropertiesManagerTest()
       : WithTaskEnvironment(
             base::test::TaskEnvironment::TimeSource::MOCK_TIME) {}
 
   void SetUp() override {
-    one_day_from_now_ = base::Time::Now() + base::TimeDelta::FromDays(1);
+    one_day_from_now_ = base::Time::Now() + base::Days(1);
     advertised_versions_ = DefaultSupportedQuicVersions();
     pref_delegate_ = new MockPrefDelegate;
 
     http_server_props_ = std::make_unique<HttpServerProperties>(
-        base::WrapUnique(pref_delegate_), /*net_log=*/nullptr,
+        base::WrapUnique(pref_delegate_.get()), /*net_log=*/nullptr,
         GetMockTickClock());
 
     EXPECT_FALSE(http_server_props_->IsInitialized());
@@ -274,13 +284,11 @@ class HttpServerPropertiesManagerTest : public testing::Test,
     return http_server_properties_dict;
   }
 
-  MockPrefDelegate* pref_delegate_;  // Owned by HttpServerPropertiesManager.
+  raw_ptr<MockPrefDelegate>
+      pref_delegate_;  // Owned by HttpServerPropertiesManager.
   std::unique_ptr<HttpServerProperties> http_server_props_;
   base::Time one_day_from_now_;
   quic::ParsedQuicVersionVector advertised_versions_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(HttpServerPropertiesManagerTest);
 };
 
 TEST_F(HttpServerPropertiesManagerTest, BadCachedHostPortPair) {
@@ -419,7 +427,7 @@ TEST_F(HttpServerPropertiesManagerTest,
 
   // Move forward the task runner short by 20ms.
   FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting() -
-                base::TimeDelta::FromMilliseconds(20));
+                base::Milliseconds(20));
 
   // Set another spdy server to trigger another call to
   // ScheduleUpdatePrefs. There should be no new update posted.
@@ -430,7 +438,7 @@ TEST_F(HttpServerPropertiesManagerTest,
 
   // Move forward the extra 20ms. The pref update should be executed.
   EXPECT_EQ(0, pref_delegate_->GetAndClearNumPrefUpdates());
-  FastForwardBy(base::TimeDelta::FromMilliseconds(20));
+  FastForwardBy(base::Milliseconds(20));
   EXPECT_EQ(1, pref_delegate_->GetAndClearNumPrefUpdates());
   EXPECT_EQ(0u, GetPendingMainThreadTaskCount());
 
@@ -620,7 +628,7 @@ TEST_F(HttpServerPropertiesManagerTest, LateLoadAlternativeServiceInfo) {
   // prefs.
   http_server_props_->SetHttp2AlternativeService(
       spdy_server_mail, NetworkIsolationKey(), alternative_service,
-      one_day_from_now_ + base::TimeDelta::FromDays(2));
+      one_day_from_now_ + base::Days(2));
   EXPECT_EQ(0, pref_delegate_->GetAndClearNumPrefUpdates());
   EXPECT_EQ(1u, GetPendingMainThreadTaskCount());
   FastForwardUntilNoTasksRemain();
@@ -872,7 +880,7 @@ TEST_F(HttpServerPropertiesManagerTest, ServerNetworkStats) {
       mail_server, NetworkIsolationKey());
   EXPECT_EQ(nullptr, stats);
   ServerNetworkStats stats1;
-  stats1.srtt = base::TimeDelta::FromMicroseconds(10);
+  stats1.srtt = base::Microseconds(10);
   http_server_props_->SetServerNetworkStats(mail_server, NetworkIsolationKey(),
                                             stats1);
   // Another task should not be scheduled.
@@ -964,7 +972,7 @@ TEST_F(HttpServerPropertiesManagerTest, Clear) {
   http_server_props_->SetSupportsSpdy(spdy_server, NetworkIsolationKey(), true);
   http_server_props_->SetLastLocalAddressWhenQuicWorked(actual_address);
   ServerNetworkStats stats;
-  stats.srtt = base::TimeDelta::FromMicroseconds(10);
+  stats.srtt = base::Microseconds(10);
   http_server_props_->SetServerNetworkStats(spdy_server, NetworkIsolationKey(),
                                             stats);
 
@@ -1169,8 +1177,9 @@ TEST_F(HttpServerPropertiesManagerTest, UpdatePrefsWithCache) {
   base::Value* broken_alt_svc_list =
       server_dict.FindListKey("broken_alternative_services");
   ASSERT_TRUE(broken_alt_svc_list);
-  ASSERT_EQ(2u, broken_alt_svc_list->GetList().size());
-  base::Value& broken_alt_svcs_list_entry = broken_alt_svc_list->GetList()[0];
+  ASSERT_EQ(2u, broken_alt_svc_list->GetListDeprecated().size());
+  base::Value& broken_alt_svcs_list_entry =
+      broken_alt_svc_list->GetListDeprecated()[0];
   const std::string* broken_until_str =
       broken_alt_svcs_list_entry.FindStringKey("broken_until");
   ASSERT_TRUE(broken_until_str);
@@ -1182,8 +1191,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdatePrefsWithCache) {
   int64_t expiration_int64;
   ASSERT_TRUE(base::StringToInt64(expiration_string, &expiration_int64));
   base::TimeDelta expiration_delta =
-      base::TimeDelta::FromMinutes(5) -
-      HttpServerProperties::GetUpdatePrefsDelayForTesting();
+      base::Minutes(5) - HttpServerProperties::GetUpdatePrefsDelayForTesting();
   time_t time_t_of_prefs_update = static_cast<time_t>(expiration_int64);
   EXPECT_LE((time_before_prefs_update + expiration_delta).ToTimeT(),
             time_t_of_prefs_update);
@@ -1254,8 +1262,8 @@ TEST_F(HttpServerPropertiesManagerTest, ParseAlternativeServiceInfo) {
   // Expiration defaults to one day from now, testing with tolerance.
   const base::Time now = base::Time::Now();
   const base::Time expiration = alternative_service_info_vector[0].expiration();
-  EXPECT_LE(now + base::TimeDelta::FromHours(23), expiration);
-  EXPECT_GE(now + base::TimeDelta::FromDays(1), expiration);
+  EXPECT_LE(now + base::Hours(23), expiration);
+  EXPECT_GE(now + base::Days(1), expiration);
 
   EXPECT_EQ(kProtoQUIC,
             alternative_service_info_vector[1].alternative_service().protocol);
@@ -1306,8 +1314,7 @@ TEST_F(HttpServerPropertiesManagerTest, DoNotPersistExpiredAlternativeService) {
 
   const AlternativeService broken_alternative_service(
       kProtoHTTP2, "broken.example.com", 443);
-  const base::Time time_one_day_later =
-      base::Time::Now() + base::TimeDelta::FromDays(1);
+  const base::Time time_one_day_later = base::Time::Now() + base::Days(1);
   alternative_service_info_vector.push_back(
       AlternativeServiceInfo::CreateHttp2AlternativeServiceInfo(
           broken_alternative_service, time_one_day_later));
@@ -1317,8 +1324,7 @@ TEST_F(HttpServerPropertiesManagerTest, DoNotPersistExpiredAlternativeService) {
 
   const AlternativeService expired_alternative_service(
       kProtoHTTP2, "expired.example.com", 443);
-  const base::Time time_one_day_ago =
-      base::Time::Now() - base::TimeDelta::FromDays(1);
+  const base::Time time_one_day_ago = base::Time::Now() - base::Days(1);
   alternative_service_info_vector.push_back(
       AlternativeServiceInfo::CreateHttp2AlternativeServiceInfo(
           expired_alternative_service, time_one_day_ago));
@@ -1348,7 +1354,7 @@ TEST_F(HttpServerPropertiesManagerTest, DoNotPersistExpiredAlternativeService) {
 
   const base::Value* servers_list = pref_dict->FindListKey("servers");
   ASSERT_TRUE(servers_list);
-  auto it = servers_list->GetList().begin();
+  auto it = servers_list->GetListDeprecated().begin();
   const base::Value& server_pref_dict = *it;
   ASSERT_TRUE(server_pref_dict.is_dict());
 
@@ -1360,22 +1366,22 @@ TEST_F(HttpServerPropertiesManagerTest, DoNotPersistExpiredAlternativeService) {
       server_pref_dict.FindKey("isolation");
   ASSERT_TRUE(network_isolation_key_value);
   ASSERT_EQ(base::Value::Type::LIST, network_isolation_key_value->type());
-  EXPECT_TRUE(network_isolation_key_value->GetList().empty());
+  EXPECT_TRUE(network_isolation_key_value->GetListDeprecated().empty());
 
   const base::Value* altsvc_list =
       server_pref_dict.FindListKey("alternative_service");
   ASSERT_TRUE(altsvc_list);
 
-  ASSERT_EQ(2u, altsvc_list->GetList().size());
+  ASSERT_EQ(2u, altsvc_list->GetListDeprecated().size());
 
-  const base::Value& altsvc_entry = altsvc_list->GetList()[0];
+  const base::Value& altsvc_entry = altsvc_list->GetListDeprecated()[0];
   ASSERT_TRUE(altsvc_entry.is_dict());
   const std::string* hostname = altsvc_entry.FindStringKey("host");
 
   ASSERT_TRUE(hostname);
   EXPECT_EQ("broken.example.com", *hostname);
 
-  const base::Value& altsvc_entry2 = altsvc_list->GetList()[1];
+  const base::Value& altsvc_entry2 = altsvc_list->GetListDeprecated()[1];
   ASSERT_TRUE(altsvc_entry.is_dict());
   hostname = altsvc_entry2.FindStringKey("host");
   ASSERT_TRUE(hostname);
@@ -1391,8 +1397,7 @@ TEST_F(HttpServerPropertiesManagerTest, DoNotLoadExpiredAlternativeService) {
   expired_dict.SetStringKey("protocol_str", "h2");
   expired_dict.SetStringKey("host", "expired.example.com");
   expired_dict.SetIntKey("port", 443);
-  base::Time time_one_day_ago =
-      base::Time::Now() - base::TimeDelta::FromDays(1);
+  base::Time time_one_day_ago = base::Time::Now() - base::Days(1);
   expired_dict.SetStringKey(
       "expiration", base::NumberToString(time_one_day_ago.ToInternalValue()));
   alternative_service_list.Append(std::move(expired_dict));
@@ -1515,7 +1520,7 @@ TEST_F(HttpServerPropertiesManagerTest, PersistAdvertisedVersionsToPref) {
       "\"isolation\":[],"
       "\"server\":\"https://www.google.com:80\"},"
       "{\"alternative_service\":[{"
-      "\"advertised_alpns\":[\"h3\",\"h3-29\",\"h3-Q050\"],"
+      "\"advertised_alpns\":[\"h3\",\"h3-Q050\"],"
       "\"expiration\":\"9223372036854775807\","
       "\"host\":\"foo.google.com\",\"port\":444,\"protocol_str\":\"quic\"}],"
       "\"isolation\":[],"
@@ -1564,8 +1569,8 @@ TEST_F(HttpServerPropertiesManagerTest, ReadAdvertisedVersionsFromPref) {
   // Expiration defaults to one day from now, testing with tolerance.
   const base::Time now = base::Time::Now();
   const base::Time expiration = alternative_service_info_vector[0].expiration();
-  EXPECT_LE(now + base::TimeDelta::FromHours(23), expiration);
-  EXPECT_GE(now + base::TimeDelta::FromDays(1), expiration);
+  EXPECT_LE(now + base::Hours(23), expiration);
+  EXPECT_GE(now + base::Days(1), expiration);
   EXPECT_TRUE(alternative_service_info_vector[0].advertised_versions().empty());
 
   // Verify the second alterntaive service with two advertised versions.
@@ -1628,7 +1633,7 @@ TEST_F(HttpServerPropertiesManagerTest,
       "\"server_info\":\"quic_server_info1\"}],"
       "\"servers\":["
       "{\"alternative_service\":[{"
-      "\"advertised_alpns\":[\"h3\",\"h3-29\",\"h3-Q050\"],"
+      "\"advertised_alpns\":[\"h3\",\"h3-Q050\"],"
       "\"expiration\":\"13756212000000000\",\"port\":443,"
       "\"protocol_str\":\"quic\"}],"
       "\"isolation\":[],"
@@ -1868,7 +1873,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
   // expiration time should still be 5 minutes due to being marked broken.
   // |prefs_broken_service|'s expiration time should be approximately 1 day from
   // now which comes from the prefs.
-  FastForwardBy(base::TimeDelta::FromMinutes(5) -
+  FastForwardBy(base::Minutes(5) -
                 HttpServerProperties::GetUpdatePrefsDelayForTesting());
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       cached_broken_service, NetworkIsolationKey()));
@@ -1876,7 +1881,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
       cached_broken_service2, NetworkIsolationKey()));
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       prefs_broken_service, NetworkIsolationKey()));
-  FastForwardBy(base::TimeDelta::FromDays(1));
+  FastForwardBy(base::Days(1));
   EXPECT_FALSE(http_server_props_->IsAlternativeServiceBroken(
       cached_broken_service, NetworkIsolationKey()));
   EXPECT_FALSE(http_server_props_->IsAlternativeServiceBroken(
@@ -1920,8 +1925,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
                                                    NetworkIsolationKey());
   EXPECT_EQ(0, pref_delegate_->GetAndClearNumPrefUpdates());
   EXPECT_NE(0u, GetPendingMainThreadTaskCount());
-  FastForwardBy(base::TimeDelta::FromMinutes(10) -
-                base::TimeDelta::FromInternalValue(1));
+  FastForwardBy(base::Minutes(10) - base::TimeDelta::FromInternalValue(1));
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       prefs_broken_service, NetworkIsolationKey()));
   FastForwardBy(base::TimeDelta::FromInternalValue(1));
@@ -1932,8 +1936,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
   http_server_props_->MarkAlternativeServiceBroken(
       cached_recently_broken_service, NetworkIsolationKey());
   EXPECT_NE(0u, GetPendingMainThreadTaskCount());
-  FastForwardBy(base::TimeDelta::FromMinutes(40) -
-                base::TimeDelta::FromInternalValue(1));
+  FastForwardBy(base::Minutes(40) - base::TimeDelta::FromInternalValue(1));
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       cached_recently_broken_service, NetworkIsolationKey()));
   FastForwardBy(base::TimeDelta::FromInternalValue(1));
@@ -1944,8 +1947,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
   http_server_props_->MarkAlternativeServiceBroken(cached_broken_service,
                                                    NetworkIsolationKey());
   EXPECT_NE(0u, GetPendingMainThreadTaskCount());
-  FastForwardBy(base::TimeDelta::FromMinutes(20) -
-                base::TimeDelta::FromInternalValue(1));
+  FastForwardBy(base::Minutes(20) - base::TimeDelta::FromInternalValue(1));
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       cached_broken_service, NetworkIsolationKey()));
   FastForwardBy(base::TimeDelta::FromInternalValue(1));
@@ -1956,8 +1958,7 @@ TEST_F(HttpServerPropertiesManagerTest, UpdateCacheWithPrefs) {
   http_server_props_->MarkAlternativeServiceBroken(cached_broken_service2,
                                                    NetworkIsolationKey());
   EXPECT_NE(0u, GetPendingMainThreadTaskCount());
-  FastForwardBy(base::TimeDelta::FromMinutes(10) -
-                base::TimeDelta::FromInternalValue(1));
+  FastForwardBy(base::Minutes(10) - base::TimeDelta::FromInternalValue(1));
   EXPECT_TRUE(http_server_props_->IsAlternativeServiceBroken(
       cached_broken_service2, NetworkIsolationKey()));
   FastForwardBy(base::TimeDelta::FromInternalValue(1));
@@ -2026,13 +2027,13 @@ TEST_F(HttpServerPropertiesManagerTest, ForceHTTP11) {
   // Wait until the data's been written to prefs, and then tear down the
   // HttpServerProperties.
   FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-  std::unique_ptr<base::Value> saved_value =
-      unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+  base::Value saved_value =
+      unowned_pref_delegate->GetServerProperties()->Clone();
   properties.reset();
 
   // Only information on kServer1 should have been saved to prefs.
   std::string preferences_json;
-  base::JSONWriter::Write(*saved_value, &preferences_json);
+  base::JSONWriter::Write(saved_value, &preferences_json);
   EXPECT_EQ(
       "{\"servers\":["
       "{\"isolation\":[],"
@@ -2061,7 +2062,7 @@ TEST_F(HttpServerPropertiesManagerTest, ForceHTTP11) {
   EXPECT_TRUE(properties->RequiresHTTP11(kServer3, NetworkIsolationKey()));
 
   // The data loads.
-  unowned_pref_delegate->InitializePrefs(*saved_value);
+  unowned_pref_delegate->InitializePrefs(saved_value);
 
   // The properties should contain a combination of the old and new data.
   EXPECT_TRUE(properties->GetSupportsSpdy(kServer1, NetworkIsolationKey()));
@@ -2213,8 +2214,8 @@ TEST_F(HttpServerPropertiesManagerTest, NetworkIsolationKeyIntegration) {
   // Wait until the data's been written to prefs, and then tear down the
   // HttpServerProperties.
   FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-  std::unique_ptr<base::Value> saved_value =
-      unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+  base::Value saved_value =
+      unowned_pref_delegate->GetServerProperties()->Clone();
   properties.reset();
 
   // Create a new HttpServerProperties using the value saved to prefs above.
@@ -2222,7 +2223,7 @@ TEST_F(HttpServerPropertiesManagerTest, NetworkIsolationKeyIntegration) {
   unowned_pref_delegate = pref_delegate.get();
   properties = std::make_unique<HttpServerProperties>(
       std::move(pref_delegate), /*net_log=*/nullptr, GetMockTickClock());
-  unowned_pref_delegate->InitializePrefs(*saved_value);
+  unowned_pref_delegate->InitializePrefs(saved_value);
 
   // The information set using kNetworkIsolationKey on the original
   // HttpServerProperties should also be set on the restored
@@ -2259,7 +2260,7 @@ TEST_F(HttpServerPropertiesManagerTest,
       features::kPartitionHttpServerPropertiesByNetworkIsolationKey);
 
   // Create three alt service vectors of different lengths.
-  base::Time expiration = base::Time::Now() + base::TimeDelta::FromDays(1);
+  base::Time expiration = base::Time::Now() + base::Days(1);
   AlternativeServiceInfo alt_service1 =
       AlternativeServiceInfo::CreateQuicAlternativeServiceInfo(
           AlternativeService(kProtoQUIC, "foopy.c.youtube.com", 1234),
@@ -2365,8 +2366,8 @@ TEST_F(HttpServerPropertiesManagerTest,
   // Wait until the data's been written to prefs, and then tear down the
   // HttpServerProperties.
   FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-  std::unique_ptr<base::Value> saved_value =
-      unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+  base::Value saved_value =
+      unowned_pref_delegate->GetServerProperties()->Clone();
   properties.reset();
 
   // Create a new HttpServerProperties using the value saved to prefs above.
@@ -2374,7 +2375,7 @@ TEST_F(HttpServerPropertiesManagerTest,
   unowned_pref_delegate = pref_delegate.get();
   properties = std::make_unique<HttpServerProperties>(
       std::move(pref_delegate), /*net_log=*/nullptr, GetMockTickClock());
-  unowned_pref_delegate->InitializePrefs(*saved_value);
+  unowned_pref_delegate->InitializePrefs(saved_value);
 
   // Only the first of the values learned for kNetworkIsolationKey1 should have
   // been saved, and the value for kNetworkIsolationKey2 as well. The canonical
@@ -2424,7 +2425,7 @@ TEST_F(HttpServerPropertiesManagerTest,
     SCOPED_TRACE(static_cast<int>(save_network_isolation_key_mode));
 
     // Save prefs using |save_network_isolation_key_mode|.
-    std::unique_ptr<base::Value> saved_value;
+    base::Value saved_value;
     {
       // Configure the the feature.
       std::unique_ptr<base::test::ScopedFeatureList> feature_list =
@@ -2498,8 +2499,7 @@ TEST_F(HttpServerPropertiesManagerTest,
       // Wait until the data's been written to prefs, and then create a copy of
       // the prefs data.
       FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-      saved_value =
-          unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+      saved_value = unowned_pref_delegate->GetServerProperties()->Clone();
     }
 
     // Now try and load the data in each of the feature modes.
@@ -2522,7 +2522,7 @@ TEST_F(HttpServerPropertiesManagerTest,
           std::make_unique<HttpServerProperties>(std::move(pref_delegate),
                                                  /*net_log=*/nullptr,
                                                  GetMockTickClock());
-      unowned_pref_delegate->InitializePrefs(*saved_value);
+      unowned_pref_delegate->InitializePrefs(saved_value);
 
       if (save_network_isolation_key_mode ==
           NetworkIsolationKeyMode::kDisabled) {
@@ -2683,7 +2683,7 @@ TEST_F(HttpServerPropertiesManagerTest,
     SCOPED_TRACE(static_cast<int>(save_network_isolation_key_mode));
 
     // Save prefs using |save_network_isolation_key_mode|.
-    std::unique_ptr<base::Value> saved_value;
+    base::Value saved_value;
     {
       // Configure the the feature.
       std::unique_ptr<base::test::ScopedFeatureList> feature_list =
@@ -2743,8 +2743,7 @@ TEST_F(HttpServerPropertiesManagerTest,
       // Wait until the data's been written to prefs, and then create a copy of
       // the prefs data.
       FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-      saved_value =
-          unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+      saved_value = unowned_pref_delegate->GetServerProperties()->Clone();
     }
 
     // Now try and load the data in each of the feature modes.
@@ -2767,7 +2766,7 @@ TEST_F(HttpServerPropertiesManagerTest,
           std::make_unique<HttpServerProperties>(std::move(pref_delegate),
                                                  /*net_log=*/nullptr,
                                                  GetMockTickClock());
-      unowned_pref_delegate->InitializePrefs(*saved_value);
+      unowned_pref_delegate->InitializePrefs(saved_value);
 
       if (save_network_isolation_key_mode ==
           NetworkIsolationKeyMode::kDisabled) {
@@ -2918,8 +2917,8 @@ TEST_F(HttpServerPropertiesManagerTest,
   // Wait until the data's been written to prefs, and then tear down the
   // HttpServerProperties.
   FastForwardBy(HttpServerProperties::GetUpdatePrefsDelayForTesting());
-  std::unique_ptr<base::Value> saved_value =
-      unowned_pref_delegate->GetServerProperties()->CreateDeepCopy();
+  base::Value saved_value =
+      unowned_pref_delegate->GetServerProperties()->Clone();
   properties.reset();
 
   // Create a new HttpServerProperties using the value saved to prefs above.
@@ -2927,7 +2926,7 @@ TEST_F(HttpServerPropertiesManagerTest,
   unowned_pref_delegate = pref_delegate.get();
   properties = std::make_unique<HttpServerProperties>(
       std::move(pref_delegate), /*net_log=*/nullptr, GetMockTickClock());
-  unowned_pref_delegate->InitializePrefs(*saved_value);
+  unowned_pref_delegate->InitializePrefs(saved_value);
 
   // All values should have been saved and be retrievable by suffix-matching
   // servers.
@@ -2992,6 +2991,10 @@ TEST_F(HttpServerPropertiesManagerTest,
 
 TEST_F(HttpServerPropertiesManagerTest, AdvertisedVersionsRoundTrip) {
   for (const quic::ParsedQuicVersion& version : quic::AllSupportedVersions()) {
+    if (version.AlpnDeferToRFCv1()) {
+      // These versions currently do not support Alt-Svc.
+      continue;
+    }
     // Reset test infrastructure.
     TearDown();
     SetUp();
@@ -3030,8 +3033,8 @@ TEST_F(HttpServerPropertiesManagerTest, AdvertisedVersionsRoundTrip) {
     const base::Value* servers_list = preferences_dict->FindListKey("servers");
     ASSERT_TRUE(servers_list);
     ASSERT_TRUE(servers_list->is_list());
-    ASSERT_EQ(servers_list->GetList().size(), 1u);
-    const base::Value& server_dict = servers_list->GetList()[0];
+    ASSERT_EQ(servers_list->GetListDeprecated().size(), 1u);
+    const base::Value& server_dict = servers_list->GetListDeprecated()[0];
     HttpServerProperties::ServerInfo server_info;
     EXPECT_TRUE(HttpServerPropertiesManager::ParseAlternativeServiceInfo(
         server, server_dict, &server_info));

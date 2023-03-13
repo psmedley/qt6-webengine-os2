@@ -7,7 +7,6 @@
 #include "xfa/fxfa/cxfa_ffpageview.h"
 
 #include <algorithm>
-#include <memory>
 #include <vector>
 
 #include "core/fxcrt/stl_util.h"
@@ -90,12 +89,8 @@ bool PageWidgetFilter(CXFA_FFWidget* pWidget,
   return pItem->TestStatusBits(dwFilter);
 }
 
-bool IsLayoutElement(XFA_Element eElement, bool bLayoutContainer) {
+bool IsLayoutElement(XFA_Element eElement) {
   switch (eElement) {
-    case XFA_Element::Draw:
-    case XFA_Element::Field:
-    case XFA_Element::InstanceManager:
-      return !bLayoutContainer;
     case XFA_Element::Area:
     case XFA_Element::Subform:
     case XFA_Element::ExclGroup:
@@ -208,7 +203,7 @@ void OrderContainer(CXFA_LayoutItemIterator* sIterator,
         break;
       }
       tabParams.emplace_back(hWidget);
-      if (IsLayoutElement(pSearchItem->GetFormNode()->GetElementType(), true)) {
+      if (IsLayoutElement(pSearchItem->GetFormNode()->GetElementType())) {
         OrderContainer(sIterator, pSearchItem, &tabParams.back(), bCurrentItem,
                        bContentArea, bMasterPage);
       }
@@ -415,7 +410,8 @@ bool CXFA_FFTabOrderPageWidgetIterator::SetCurrentWidget(
   if (it == m_TabOrderWidgetArray.end())
     return false;
 
-  m_iCurWidget = it - m_TabOrderWidgetArray.begin();
+  m_iCurWidget =
+      pdfium::base::checked_cast<int32_t>(it - m_TabOrderWidgetArray.begin());
   return true;
 }
 
@@ -427,7 +423,7 @@ CXFA_FFWidget* CXFA_FFTabOrderPageWidgetIterator::GetTraverseWidget(
     CXFA_Traverse* pTraverse =
         pTraversal->GetChild<CXFA_Traverse>(0, XFA_Element::Traverse, false);
     if (pTraverse) {
-      Optional<WideString> traverseWidgetName =
+      absl::optional<WideString> traverseWidgetName =
           pTraverse->JSObject()->TryAttribute(XFA_Attribute::Ref, true);
       if (traverseWidgetName.has_value())
         return FindWidgetByName(traverseWidgetName.value(), pWidget);

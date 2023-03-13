@@ -6,15 +6,13 @@
 #define NET_LOG_TEST_NET_LOG_UTIL_H_
 
 #include <stddef.h>
+#include <string>
+#include <vector>
 
 #include "base/strings/string_piece.h"
 #include "net/log/net_log_event_type.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
-
-namespace base {
-class ListValue;
-}
 
 namespace net {
 
@@ -92,11 +90,6 @@ int GetIntegerValueFromParams(const NetLogEntry& entry, base::StringPiece path);
 bool GetBooleanValueFromParams(const NetLogEntry& entry,
                                base::StringPiece path);
 int GetNetErrorCodeFromParams(const NetLogEntry& entry);
-
-// TODO(eroman): Remove use of base::ListValue.
-bool GetListValueFromParams(const NetLogEntry& entry,
-                            base::StringPiece path,
-                            const base::ListValue** value);
 
 }  // namespace net
 

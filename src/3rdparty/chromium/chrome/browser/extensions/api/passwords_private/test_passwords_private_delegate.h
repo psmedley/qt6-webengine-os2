@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_API_PASSWORDS_PRIVATE_TEST_PASSWORDS_PRIVATE_DELEGATE_H_
 #define CHROME_BROWSER_EXTENSIONS_API_PASSWORDS_PRIVATE_TEST_PASSWORDS_PRIVATE_DELEGATE_H_
 
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,12 +24,25 @@ class TestPasswordsPrivateDelegate : public PasswordsPrivateDelegate {
   // PasswordsPrivateDelegate implementation.
   void GetSavedPasswordsList(UiEntriesCallback callback) override;
   void GetPasswordExceptionsList(ExceptionEntriesCallback callback) override;
+  // Fake implementation of GetUrlCollection. This returns value if |url| is
+  // not empty.
+  absl::optional<api::passwords_private::UrlCollection> GetUrlCollection(
+      const std::string& url) override;
+  // Fake implementation. This returns value set by SetIsAccountStoreDefault.
+  bool IsAccountStoreDefault(content::WebContents* web_contents) override;
+  // Fake implementation of AddPassword. This returns true if |url| and
+  // |password| aren't empty.
+  bool AddPassword(const std::string& url,
+                   const std::u16string& username,
+                   const std::u16string& password,
+                   bool use_account_store,
+                   content::WebContents* web_contents) override;
   // Fake implementation of ChangeSavedPassword. This succeeds if the current
   // list of entries has each of the ids, vector of ids isn't empty and if the
   // new password isn't empty.
-  bool ChangeSavedPassword(const std::vector<int>& ids,
-                           const std::u16string& new_username,
-                           const std::u16string& new_password) override;
+  bool ChangeSavedPassword(
+      const std::vector<int>& ids,
+      const api::passwords_private::ChangeSavedPasswordParams& params) override;
   void RemoveSavedPasswords(const std::vector<int>& id) override;
   void RemovePasswordExceptions(const std::vector<int>& ids) override;
   // Simplified version of undo logic, only use for testing.
@@ -66,6 +80,14 @@ class TestPasswordsPrivateDelegate : public PasswordsPrivateDelegate {
   // delegate knows of a insecure credential with the same id.
   bool RemoveInsecureCredential(
       const api::passwords_private::InsecureCredential& credential) override;
+  // Fake implementation of MuteInsecureCredential. This succeeds if the
+  // delegate knows of a insecure credential with the same id.
+  bool MuteInsecureCredential(
+      const api::passwords_private::InsecureCredential& credential) override;
+  // Fake implementation of UnmuteInsecureCredential. This succeeds if the
+  // delegate knows of a insecure credential with the same id.
+  bool UnmuteInsecureCredential(
+      const api::passwords_private::InsecureCredential& credential) override;
   void StartPasswordCheck(StartPasswordCheckCallback callback) override;
   void StopPasswordCheck() override;
   api::passwords_private::PasswordCheckStatus GetPasswordCheckStatus() override;
@@ -74,6 +96,7 @@ class TestPasswordsPrivateDelegate : public PasswordsPrivateDelegate {
 
   void SetProfile(Profile* profile);
   void SetOptedInForAccountStorage(bool opted_in);
+  void SetIsAccountStoreDefault(bool is_default);
   void AddCompromisedCredential(int id);
 
   void ClearSavedPasswordsList() { current_entries_.clear(); }
@@ -101,7 +124,8 @@ class TestPasswordsPrivateDelegate : public PasswordsPrivateDelegate {
  private:
   void SendSavedPasswordsList();
   void SendPasswordExceptionsList();
-
+  bool IsCredentialPresentInInsecureCredentialsList(
+      const api::passwords_private::InsecureCredential& credential);
   // The current list of entries/exceptions. Cached here so that when new
   // observers are added, this delegate can send the current lists without
   // having to request them from |password_manager_presenter_| again.
@@ -120,9 +144,10 @@ class TestPasswordsPrivateDelegate : public PasswordsPrivateDelegate {
 
   // List of insecure credentials.
   std::vector<api::passwords_private::InsecureCredential> insecure_credentials_;
-  Profile* profile_ = nullptr;
+  raw_ptr<Profile> profile_ = nullptr;
 
   bool is_opted_in_for_account_storage_ = false;
+  bool is_account_store_default_ = false;
 
   // Flags for detecting whether import/export operations have been invoked.
   bool import_passwords_triggered_ = false;

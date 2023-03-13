@@ -120,7 +120,7 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
         initializedCallback.onResult(mBottomSheet);
 
         mBottomSheet.init(window, keyboardDelegate);
-        mBottomSheet.setAccssibilityUtil(mAccessibilityUtil);
+        mBottomSheet.setAccessibilityUtil(mAccessibilityUtil);
 
         // Initialize the queue with a comparator that checks content priority.
         mContentQueue = new PriorityQueue<>(INITIAL_QUEUE_CAPACITY,
@@ -335,7 +335,12 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
         boolean hadTokens = mSuppressionTokens.hasTokens();
         int token = mSuppressionTokens.acquireToken();
         if (!hadTokens && mBottomSheet != null) {
-            mSheetStateBeforeSuppress = getSheetState();
+            // Make sure we don't save an invalid final state (particularly "scrolling").
+            mSheetStateBeforeSuppress = getTargetSheetState();
+            if (mSheetStateBeforeSuppress == SheetState.NONE) {
+                mSheetStateBeforeSuppress = getSheetState();
+            }
+
             mContentWhenSuppressed = getCurrentSheetContent();
             mBottomSheet.setSheetState(SheetState.HIDDEN, false, reason);
         }
@@ -366,7 +371,7 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
     }
 
     @Override
-    public void setAccssibilityUtil(AccessibilityUtil enabledSupplier) {
+    public void setAccessibilityUtil(AccessibilityUtil enabledSupplier) {
         mAccessibilityUtil = enabledSupplier;
     }
 
@@ -401,8 +406,10 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
 
         if (mBottomSheet == null) mSheetInitializer.run();
 
-        // If already showing the requested content, do nothing.
-        if (content == mBottomSheet.getCurrentSheetContent()) return true;
+        // If already showing (or queued to show) the requested content, do nothing.
+        if (content == mBottomSheet.getCurrentSheetContent() || mContentQueue.contains(content)) {
+            return content == mBottomSheet.getCurrentSheetContent();
+        }
 
         boolean shouldSwapForPriorityContent = mBottomSheet.getCurrentSheetContent() != null
                 && content.getPriority() < mBottomSheet.getCurrentSheetContent().getPriority()
@@ -464,7 +471,9 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
 
     @Override
     public void expandSheet() {
-        if (mBottomSheet == null || mSuppressionTokens.hasTokens()) return;
+        if (mBottomSheet == null || mSuppressionTokens.hasTokens() || mBottomSheet.isHiding()) {
+            return;
+        }
 
         if (mBottomSheet.getCurrentSheetContent() == null) return;
         mBottomSheet.setSheetState(SheetState.HALF, true);
@@ -472,7 +481,9 @@ class BottomSheetControllerImpl implements ManagedBottomSheetController {
 
     @Override
     public boolean collapseSheet(boolean animate) {
-        if (mBottomSheet == null || mSuppressionTokens.hasTokens()) return false;
+        if (mBottomSheet == null || mSuppressionTokens.hasTokens() || mBottomSheet.isHiding()) {
+            return false;
+        }
         if (mBottomSheet.isSheetOpen() && mBottomSheet.isPeekStateEnabled()) {
             mBottomSheet.setSheetState(SheetState.PEEK, animate);
             return true;

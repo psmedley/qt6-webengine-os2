@@ -4,6 +4,8 @@
 
 #include "components/remote_cocoa/app_shim/application_bridge.h"
 
+#include <tuple>
+
 #include "base/bind.h"
 #include "base/no_destructor.h"
 #include "components/remote_cocoa/app_shim/alert.h"
@@ -91,6 +93,7 @@ class NativeWidgetBridgeOwner : public NativeWidgetNSWindowHostHelper {
     // Text input doesn't work across mojo yet.
     return nullptr;
   }
+  bool MustPostTaskToRunModalSheetAnimation() const override { return true; }
 
   mojo::AssociatedRemote<mojom::NativeWidgetNSWindowHost> host_remote_;
   mojo::AssociatedRemote<mojom::TextInputHost> text_input_host_remote_;
@@ -124,7 +127,7 @@ void ApplicationBridge::SetContentNSViewCreateCallbacks(
 void ApplicationBridge::CreateAlert(
     mojo::PendingReceiver<mojom::AlertBridge> bridge_receiver) {
   // The resulting object manages its own lifetime.
-  ignore_result(new AlertBridge(std::move(bridge_receiver)));
+  std::ignore = new AlertBridge(std::move(bridge_receiver));
 }
 
 void ApplicationBridge::ShowColorPanel(
@@ -141,9 +144,9 @@ void ApplicationBridge::CreateNativeWidgetNSWindow(
     mojo::PendingAssociatedRemote<mojom::NativeWidgetNSWindowHost> host,
     mojo::PendingAssociatedRemote<mojom::TextInputHost> text_input_host) {
   // The resulting object will be destroyed when its message pipe is closed.
-  ignore_result(
+  std::ignore =
       new NativeWidgetBridgeOwner(bridge_id, std::move(bridge_receiver),
-                                  std::move(host), std::move(text_input_host)));
+                                  std::move(host), std::move(text_input_host));
 }
 
 void ApplicationBridge::CreateRenderWidgetHostNSView(
@@ -163,6 +166,27 @@ void ApplicationBridge::CreateWebContentsNSView(
     return;
   web_conents_create_callback_.Run(view_id, host.PassHandle(),
                                    view_receiver.PassHandle());
+}
+
+void ApplicationBridge::ForwardCutCopyPaste(
+    mojom::CutCopyPasteCommand command) {
+  ForwardCutCopyPasteToNSApp(command);
+}
+
+// static
+void ApplicationBridge::ForwardCutCopyPasteToNSApp(
+    mojom::CutCopyPasteCommand command) {
+  switch (command) {
+    case mojom::CutCopyPasteCommand::kCut:
+      [NSApp sendAction:@selector(cut:) to:nil from:nil];
+      break;
+    case mojom::CutCopyPasteCommand::kCopy:
+      [NSApp sendAction:@selector(copy:) to:nil from:nil];
+      break;
+    case mojom::CutCopyPasteCommand::kPaste:
+      [NSApp sendAction:@selector(paste:) to:nil from:nil];
+      break;
+  }
 }
 
 ApplicationBridge::ApplicationBridge() = default;

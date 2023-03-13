@@ -9,9 +9,10 @@
 #include <utility>
 
 #include "base/callback_forward.h"
-#include "base/macros.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/threading/thread_checker.h"
+#include "build/build_config.h"
 #include "third_party/blink/public/common/mediastream/media_stream_request.h"
 #include "third_party/blink/public/mojom/mediastream/media_devices.mojom-blink.h"
 #include "third_party/blink/public/mojom/mediastream/media_stream.mojom-blink.h"
@@ -19,6 +20,7 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream_constraints_util_audio.h"
 #include "third_party/blink/renderer/modules/mediastream/user_media_request.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_remote.h"
 #include "third_party/blink/renderer/platform/mojo/heap_mojo_wrapper_mode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -54,6 +56,10 @@ class MODULES_EXPORT UserMediaProcessor
   UserMediaProcessor(LocalFrame* frame,
                      MediaDevicesDispatcherCallback media_devices_dispatcher_cb,
                      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+
+  UserMediaProcessor(const UserMediaProcessor&) = delete;
+  UserMediaProcessor& operator=(const UserMediaProcessor&) = delete;
+
   virtual ~UserMediaProcessor();
 
   // It can be assumed that the output of CurrentRequest() remains the same
@@ -82,6 +88,10 @@ class MODULES_EXPORT UserMediaProcessor
   void StopAllProcessing();
 
   bool HasActiveSources() const;
+
+#if !BUILDFLAG(IS_ANDROID)
+  void FocusCapturedSurface(const String& label, bool focus);
+#endif
 
   void OnDeviceStopped(const blink::MediaStreamDevice& device);
   void OnDeviceChanged(const blink::MediaStreamDevice& old_device,
@@ -137,7 +147,7 @@ class MODULES_EXPORT UserMediaProcessor
   class RequestInfo;
   using LocalStreamSources = HeapVector<Member<MediaStreamSource>>;
 
-  void OnStreamGenerated(int request_id,
+  void OnStreamGenerated(int32_t request_id,
                          blink::mojom::blink::MediaStreamRequestResult result,
                          const String& label,
                          const Vector<blink::MediaStreamDevice>& audio_devices,
@@ -153,17 +163,17 @@ class MODULES_EXPORT UserMediaProcessor
   gfx::Size GetScreenSize();
 
   void OnStreamGenerationFailed(
-      int request_id,
+      int32_t request_id,
       blink::mojom::blink::MediaStreamRequestResult result);
 
-  bool IsCurrentRequestInfo(int request_id) const;
+  bool IsCurrentRequestInfo(int32_t request_id) const;
   bool IsCurrentRequestInfo(UserMediaRequest* user_media_request) const;
   void DelayedGetUserMediaRequestSucceeded(
-      int request_id,
+      int32_t request_id,
       MediaStreamDescriptor* descriptor,
       UserMediaRequest* user_media_request);
   void DelayedGetUserMediaRequestFailed(
-      int request_id,
+      int32_t request_id,
       UserMediaRequest* user_media_request,
       blink::mojom::blink::MediaStreamRequestResult result,
       const String& constraint_name);
@@ -232,10 +242,9 @@ class MODULES_EXPORT UserMediaProcessor
       const LocalStreamSources& sources,
       const blink::MediaStreamDevice& device) const;
 
-  // Looks up a local source and returns it if found. If not found, prepares
-  // a new MediaStreamSource with a nullptr extraData pointer.
-  MediaStreamSource* FindOrInitializeSourceObject(
-      const MediaStreamDevice& device);
+  MediaStreamSource* InitializeSourceObject(
+      const MediaStreamDevice& device,
+      std::unique_ptr<WebPlatformMediaStreamSource> platform_source);
 
   // Returns true if we do find and remove the |source|.
   // Otherwise returns false.
@@ -299,8 +308,6 @@ class MODULES_EXPORT UserMediaProcessor
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(UserMediaProcessor);
 };
 
 }  // namespace blink

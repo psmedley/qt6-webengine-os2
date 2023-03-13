@@ -16,21 +16,13 @@ limitations under the License.
 #ifndef TENSORFLOW_COMPILER_XLA_SERVICE_LLVM_IR_FUSED_IR_EMITTER_H_
 #define TENSORFLOW_COMPILER_XLA_SERVICE_LLVM_IR_FUSED_IR_EMITTER_H_
 
-#include <map>
-#include <unordered_map>
+#include <utility>
 
 #include "absl/container/flat_hash_map.h"
-#include "absl/types/optional.h"
-#include "absl/types/span.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Value.h"
-#include "tensorflow/compiler/xla/service/dfs_hlo_visitor_with_default.h"
 #include "tensorflow/compiler/xla/service/elemental_ir_emitter.h"
 #include "tensorflow/compiler/xla/service/hlo_instruction.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/ir_array.h"
-#include "tensorflow/compiler/xla/service/llvm_ir/loop_emitter.h"
 #include "tensorflow/compiler/xla/statusor.h"
-#include "tensorflow/compiler/xla/xla_data.pb.h"
 
 namespace xla {
 
@@ -51,112 +43,49 @@ namespace xla {
 // created produces an LLVM struct with N elements, one for each element of the
 // arrays in the tuple.  It follows that the arrays in the tuple must have the
 // same length.
-class FusedIrEmitter : public ConstDfsHloVisitorWithDefault {
+class FusedIrEmitter {
  public:
   using IndexedGenerator = llvm_ir::ElementGenerator;
-  using NonIndexedGenerator = std::function<StatusOr<llvm::Value*>()>;
-  using GeneratorForOperandIrArrays =
-      std::function<std::vector<llvm_ir::IrArray>()>;
 
-  FusedIrEmitter(GeneratorForOperandIrArrays operand_arrays_generator,
-                 ElementalIrEmitter* elemental_emitter,
-                 llvm::Value* thread_id_x = nullptr,
-                 llvm::Value* thread_id_y = nullptr,
-                 absl::Span<llvm::Value* const> param_shmem_buffers = {})
-      : operand_arrays_(),
-        operand_arrays_generator_(std::move(operand_arrays_generator)),
-        thread_id_x_(thread_id_x),
-        thread_id_y_(thread_id_y),
-        param_shmem_buffers_(param_shmem_buffers.begin(),
-                             param_shmem_buffers.end()),
-        elemental_emitter_(elemental_emitter),
-        b_(elemental_emitter->b()),
-        module_(elemental_emitter->module()) {}
+  explicit FusedIrEmitter(ElementalIrEmitter& elemental_emitter)
+      : elemental_emitter_(elemental_emitter) {}
 
-  Status DefaultAction(const HloInstruction* hlo) override;
-
-  Status HandleConstant(const HloInstruction* constant) override;
-
-  Status HandleGetTupleElement(
-      const HloInstruction* get_tuple_element) override;
-
-  Status HandleParameter(const HloInstruction* parameter) override;
-
-  // Emits the ir value for each element in the tuple.
-  Status HandleTuple(const HloInstruction* tuple) override;
-
-  Status FinishVisit(const HloInstruction* root) override;
-
-  // Returns the generator function for the root of the fused computation.
-  IndexedGenerator GetRootGenerator() const;
+  void BindGenerator(const HloInstruction& instruction,
+                     llvm_ir::ElementGenerator generator) {
+    indexed_generators_[&instruction] = std::move(generator);
+  }
 
   // Returns the generator function for the given instruction.
-  IndexedGenerator GetGenerator(const HloInstruction* instruction) const;
+  StatusOr<IndexedGenerator> GetGenerator(const HloInstruction& instruction);
 
   // Evaluates whether fusing 'producer' into 'consumer' might cause exponential
   // behavior in FusedIrEmitter. We currently can have exponential time/memory
   // requirements for emitting certain fusion kernels, in which case we don't
   // want to fuse.
   // TODO(b/119692968): Remove this once we have fixed our fusion emitter.
-  static bool IsFusedIrEmitterInefficient(const HloInstruction* consumer,
-                                          const HloInstruction* producer);
-
- protected:
-  // Returns the IrArrays for the fusion instruction operands.
-  llvm_ir::IrArray& GetIrArrayForFusedParameter(int64 parameter_number) {
-    if (!operand_arrays_.has_value()) {
-      operand_arrays_ = operand_arrays_generator_();
-    }
-    return operand_arrays_.value()[parameter_number];
-  }
-
-  llvm::Value* GetBasePointerForFusedParameter(int64 parameter_number) {
-    return GetIrArrayForFusedParameter(parameter_number).GetBasePointer();
-  }
+  static bool IsFusedIrEmitterInefficient(const HloInstruction& consumer,
+                                          const HloInstruction& producer);
 
  private:
-  // IrArrays for the fusion instruction operands, whose base addresses are the
-  // base address of the corresponding parameters in the fused computation.
-  absl::optional<std::vector<llvm_ir::IrArray>> operand_arrays_;
-  GeneratorForOperandIrArrays operand_arrays_generator_;
+  StatusOr<IndexedGenerator> CreateGenerator(const HloInstruction& instruction);
+  StatusOr<IndexedGenerator> DefaultAction(const HloInstruction& instruction);
+  IndexedGenerator HandleConstant(const HloInstruction& constant);
+  StatusOr<IndexedGenerator> HandleTuple(const HloInstruction& tuple);
 
-  // The x coordinate within a tile.
-  llvm::Value* thread_id_x_;
-
-  // The y coordinate within a tile.
-  llvm::Value* thread_id_y_;
-
-  // Param_buffers_[i] stores the tile buffer for the ith parameter or nullptr
-  // if the parameter is not tiled.
-  std::vector<llvm::Value*> param_shmem_buffers_;
-
-  ElementalIrEmitter* elemental_emitter_;
-
-  // This member will be set by FinishVisit and used in GetRootGenerator.
-  const HloInstruction* fused_root_ = nullptr;
-
-  // Borrowed
-  llvm::IRBuilder<>* b_;
-  llvm::Module* module_;
+  ElementalIrEmitter& elemental_emitter_;
 
   // Map from instructions to functions that generate code for the output
   // elements. If an instruction is a GetTupleElement instruction, the
   // instruction produces non-tuple result.
-  std::unordered_map<const HloInstruction*, IndexedGenerator>
+  absl::flat_hash_map<const HloInstruction*, IndexedGenerator>
       indexed_generators_;
 
-  // Map from tuple-result-producing GetTupleELement instructions to functions
-  // that generate the base pointers for the output elements. This is used to
-  // support the translation of nested GetTupleElement instructions.
-  std::unordered_map<const HloInstruction*, NonIndexedGenerator>
-      non_indexed_generators_;
-
   // Cache of generated values, lest we regenerate an element of a node with
-  // multiple outgoing edges
-  absl::flat_hash_map<
-      const HloInstruction*,
-      absl::flat_hash_map<std::vector<llvm::Value*>, llvm::Value*>>
-      generated_value_cache_;
+  // multiple outgoing edges.
+  // Use instruction and index values as the key.
+  using ValueCacheKey =
+      std::pair<const HloInstruction*, std::vector<llvm::Value*>>;
+  absl::flat_hash_map<ValueCacheKey, llvm::Value*> value_cache_;
 };
 
 }  // namespace xla

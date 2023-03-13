@@ -6,7 +6,6 @@
 
 #include "core/fxge/dib/cstretchengine.h"
 
-#include <limits.h>
 #include <math.h>
 
 #include <algorithm>
@@ -16,6 +15,7 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/pauseindicator_iface.h"
+#include "core/fxge/calculate_pitch.h"
 #include "core/fxge/dib/cfx_dibbase.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/dib/fx_dib.h"
@@ -26,14 +26,6 @@
 static_assert(
     std::is_trivially_destructible<CStretchEngine::PixelWeight>::value,
     "PixelWeight storage may be re-used without invoking its destructor");
-
-namespace {
-
-int GetPitchRoundUpTo4Bytes(int bits_per_pixel) {
-  return (bits_per_pixel + 31) / 32 * 4;
-}
-
-}  // namespace
 
 // static
 size_t CStretchEngine::PixelWeight::TotalBytesForWeightCount(
@@ -173,12 +165,12 @@ CStretchEngine::CStretchEngine(ScanlineComposerIface* pDestBitmap,
                                int dest_width,
                                int dest_height,
                                const FX_RECT& clip_rect,
-                               const RetainPtr<CFX_DIBBase>& pSrcBitmap,
+                               const RetainPtr<const CFX_DIBBase>& pSrcBitmap,
                                const FXDIB_ResampleOptions& options)
     : m_DestFormat(dest_format),
       m_DestBpp(GetBppFromFormat(dest_format)),
-      m_SrcBpp(GetBppFromFormat(pSrcBitmap->GetFormat())),
-      m_bHasAlpha(GetIsAlphaFromFormat(pSrcBitmap->GetFormat())),
+      m_SrcBpp(pSrcBitmap->GetBPP()),
+      m_bHasAlpha(pSrcBitmap->IsAlphaFormat()),
       m_pSource(pSrcBitmap),
       m_pSrcPalette(pSrcBitmap->GetPaletteSpan()),
       m_SrcWidth(pSrcBitmap->GetWidth()),
@@ -187,20 +179,16 @@ CStretchEngine::CStretchEngine(ScanlineComposerIface* pDestBitmap,
       m_DestWidth(dest_width),
       m_DestHeight(dest_height),
       m_DestClip(clip_rect) {
-  uint32_t size = clip_rect.Width();
-  if (size && m_DestBpp > static_cast<int>(INT_MAX / size))
+  absl::optional<uint32_t> maybe_size =
+      fxge::CalculatePitch32(m_DestBpp, clip_rect.Width());
+  if (!maybe_size.has_value())
     return;
 
-  size *= m_DestBpp;
-  if (size > INT_MAX - 31)
-    return;
-
-  size = GetPitchRoundUpTo4Bytes(size);
-  m_DestScanline.resize(size);
+  m_DestScanline.resize(maybe_size.value());
   if (dest_format == FXDIB_Format::kRgb32)
     std::fill(m_DestScanline.begin(), m_DestScanline.end(), 255);
-  m_InterPitch = GetPitchRoundUpTo4Bytes(m_DestClip.Width() * m_DestBpp);
-  m_ExtraMaskPitch = GetPitchRoundUpTo4Bytes(m_DestClip.Width() * 8);
+  m_InterPitch = fxge::CalculatePitch32OrDie(m_DestBpp, m_DestClip.Width());
+  m_ExtraMaskPitch = fxge::CalculatePitch32OrDie(8, m_DestClip.Width());
   if (options.bNoSmoothing) {
     m_ResampleOptions.bNoSmoothing = true;
   } else {
@@ -305,13 +293,13 @@ bool CStretchEngine::ContinueStretchHorz(PauseIndicatorIface* pPause) {
       rows_to_go = kStrechPauseRows;
     }
 
-    const uint8_t* src_scan = m_pSource->GetScanline(m_CurRow);
+    const uint8_t* src_scan = m_pSource->GetScanline(m_CurRow).data();
     uint8_t* dest_scan =
         m_InterBuf.data() + (m_CurRow - m_SrcClip.top) * m_InterPitch;
     const uint8_t* src_scan_mask = nullptr;
     uint8_t* dest_scan_mask = nullptr;
     if (!m_ExtraAlphaBuf.empty()) {
-      src_scan_mask = m_pSource->GetAlphaMaskScanline(m_CurRow);
+      src_scan_mask = m_pSource->GetAlphaMaskScanline(m_CurRow).data();
       dest_scan_mask = m_ExtraAlphaBuf.data() +
                        (m_CurRow - m_SrcClip.top) * m_ExtraMaskPitch;
     }
@@ -588,7 +576,7 @@ void CStretchEngine::StretchVert() {
         break;
       }
     }
-    m_pDestBitmap->ComposeScanline(row - m_DestClip.top, m_DestScanline.data(),
-                                   m_DestMaskScanline.data());
+    m_pDestBitmap->ComposeScanline(row - m_DestClip.top, m_DestScanline,
+                                   m_DestMaskScanline);
   }
 }

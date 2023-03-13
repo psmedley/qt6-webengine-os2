@@ -16,6 +16,7 @@
 #include "core/fpdfdoc/cpdf_formcontrol.h"
 #include "core/fpdfdoc/cpdf_formfield.h"
 #include "core/fpdfdoc/cpdf_interactiveform.h"
+#include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "fpdfsdk/cpdfsdk_interactiveform.h"
 #include "fpdfsdk/cpdfsdk_pageview.h"
@@ -26,11 +27,19 @@
 #include "fxjs/cjs_icon.h"
 #include "fxjs/fxv8.h"
 #include "fxjs/js_resources.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
 #include "third_party/base/notreached.h"
-#include "third_party/base/optional.h"
+#include "v8/include/v8-container.h"
 
 namespace {
+
+constexpr wchar_t kCheckSelector = L'4';
+constexpr wchar_t kCircleSelector = L'l';
+constexpr wchar_t kCrossSelector = L'8';
+constexpr wchar_t kDiamondSelector = L'u';
+constexpr wchar_t kSquareSelector = L'n';
+constexpr wchar_t kStarSelector = L'H';
 
 bool IsCheckBoxOrRadioButton(const CPDF_FormField* pFormField) {
   return pFormField->GetFieldType() == FormFieldType::kCheckBox ||
@@ -49,11 +58,8 @@ bool IsComboBoxOrTextField(const CPDF_FormField* pFormField) {
 
 void UpdateFormField(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                      CPDF_FormField* pFormField,
-                     bool bChangeMark,
-                     bool bResetAP,
-                     bool bRefresh) {
+                     bool bResetAP) {
   CPDFSDK_InteractiveForm* pForm = pFormFillEnv->GetInteractiveForm();
-
   if (bResetAP) {
     std::vector<ObservedPtr<CPDFSDK_Annot>> widgets;
     pForm->GetWidgets(pFormField, &widgets);
@@ -61,7 +67,7 @@ void UpdateFormField(CPDFSDK_FormFillEnvironment* pFormFillEnv,
     if (IsComboBoxOrTextField(pFormField)) {
       for (auto& pObserved : widgets) {
         if (pObserved) {
-          Optional<WideString> sValue =
+          absl::optional<WideString> sValue =
               ToCPDFSDKWidget(pObserved.Get())->OnFormat();
           if (pObserved) {  // Not redundant, may be clobbered by OnFormat.
             auto* pWidget = ToCPDFSDKWidget(pObserved.Get());
@@ -73,72 +79,59 @@ void UpdateFormField(CPDFSDK_FormFillEnvironment* pFormFillEnv,
       for (auto& pObserved : widgets) {
         if (pObserved) {
           auto* pWidget = ToCPDFSDKWidget(pObserved.Get());
-          pWidget->ResetAppearance(pdfium::nullopt,
+          pWidget->ResetAppearance(absl::nullopt,
                                    CPDFSDK_Widget::kValueUnchanged);
         }
       }
     }
   }
 
-  if (bRefresh) {
-    // Refresh the widget list. The calls in |bResetAP| may have caused widgets
-    // to be removed from the list. We need to call |GetWidgets| again to be
-    // sure none of the widgets have been deleted.
-    std::vector<ObservedPtr<CPDFSDK_Annot>> widgets;
-    pForm->GetWidgets(pFormField, &widgets);
+  // Refresh the widget list. The calls in |bResetAP| may have caused widgets
+  // to be removed from the list. We need to call |GetWidgets| again to be
+  // sure none of the widgets have been deleted.
+  std::vector<ObservedPtr<CPDFSDK_Annot>> widgets;
+  pForm->GetWidgets(pFormField, &widgets);
 
-    // TODO(dsinclair): Determine if all widgets share the same
-    // CPDFSDK_InteractiveForm. If that's the case, we can move the code to
-    // |GetFormFillEnv| out of the loop.
-    for (auto& pObserved : widgets) {
-      if (pObserved) {
-        CPDFSDK_Widget* pWidget = ToCPDFSDKWidget(pObserved.Get());
-        pWidget->GetInteractiveForm()->GetFormFillEnv()->UpdateAllViews(
-            nullptr, pWidget);
-      }
+  // TODO(dsinclair): Determine if all widgets share the same
+  // CPDFSDK_InteractiveForm. If that's the case, we can move the code to
+  // |GetFormFillEnv| out of the loop.
+  for (auto& pObserved : widgets) {
+    if (pObserved) {
+      CPDFSDK_Widget* pWidget = ToCPDFSDKWidget(pObserved.Get());
+      pWidget->GetInteractiveForm()->GetFormFillEnv()->UpdateAllViews(pWidget);
     }
   }
 
-  if (bChangeMark)
-    pFormFillEnv->SetChangeMark();
+  pFormFillEnv->SetChangeMark();
 }
 
 void UpdateFormControl(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                        CPDF_FormControl* pFormControl,
-                       bool bChangeMark,
-                       bool bResetAP,
-                       bool bRefresh) {
+                       bool bResetAP) {
   DCHECK(pFormControl);
-
   CPDFSDK_InteractiveForm* pForm = pFormFillEnv->GetInteractiveForm();
   CPDFSDK_Widget* pWidget = pForm->GetWidget(pFormControl);
-
   if (pWidget) {
     ObservedPtr<CPDFSDK_Widget> observed_widget(pWidget);
     if (bResetAP) {
       FormFieldType fieldType = pWidget->GetFieldType();
       if (fieldType == FormFieldType::kComboBox ||
           fieldType == FormFieldType::kTextField) {
-        Optional<WideString> sValue = pWidget->OnFormat();
+        absl::optional<WideString> sValue = pWidget->OnFormat();
         if (!observed_widget)
           return;
         pWidget->ResetAppearance(sValue, CPDFSDK_Widget::kValueUnchanged);
       } else {
-        pWidget->ResetAppearance(pdfium::nullopt,
+        pWidget->ResetAppearance(absl::nullopt,
                                  CPDFSDK_Widget::kValueUnchanged);
       }
       if (!observed_widget)
         return;
     }
-
-    if (bRefresh) {
-      CPDFSDK_InteractiveForm* pWidgetForm = pWidget->GetInteractiveForm();
-      pWidgetForm->GetFormFillEnv()->UpdateAllViews(nullptr, pWidget);
-    }
+    CPDFSDK_InteractiveForm* pWidgetForm = pWidget->GetInteractiveForm();
+    pWidgetForm->GetFormFillEnv()->UpdateAllViews(pWidget);
   }
-
-  if (bChangeMark)
-    pFormFillEnv->SetChangeMark();
+  pFormFillEnv->SetChangeMark();
 }
 
 struct FieldNameData {
@@ -149,7 +142,7 @@ struct FieldNameData {
   int control_index;
 };
 
-Optional<FieldNameData> ParseFieldName(const WideString& field_name) {
+absl::optional<FieldNameData> ParseFieldName(const WideString& field_name) {
   auto reverse_it = field_name.rbegin();
   while (reverse_it != field_name.rend()) {
     if (*reverse_it == L'.')
@@ -157,14 +150,14 @@ Optional<FieldNameData> ParseFieldName(const WideString& field_name) {
     ++reverse_it;
   }
   if (reverse_it == field_name.rend()) {
-    return pdfium::nullopt;
+    return absl::nullopt;
   }
   WideString suffixal = field_name.Last(reverse_it - field_name.rbegin());
   int control_index = FXSYS_wtoi(suffixal.c_str());
   if (control_index == 0) {
     suffixal.TrimRight(L' ');
     if (suffixal != L"0") {
-      return pdfium::nullopt;
+      return absl::nullopt;
     }
   }
   return FieldNameData(field_name.First(field_name.rend() - reverse_it - 1),
@@ -177,8 +170,10 @@ std::vector<CPDF_FormField*> GetFormFieldsForName(
   std::vector<CPDF_FormField*> fields;
   CPDFSDK_InteractiveForm* pReaderForm = pFormFillEnv->GetInteractiveForm();
   CPDF_InteractiveForm* pForm = pReaderForm->GetInteractiveForm();
-  for (int i = 0, sz = pForm->CountFields(csFieldName); i < sz; ++i) {
-    if (CPDF_FormField* pFormField = pForm->GetField(i, csFieldName))
+  const size_t sz = pForm->CountFields(csFieldName);
+  for (size_t i = 0; i < sz; ++i) {
+    CPDF_FormField* pFormField = pForm->GetField(i, csFieldName);
+    if (pFormField)
       fields.push_back(pFormField);
   }
   return fields;
@@ -283,7 +278,7 @@ void SetBorderStyle(CPDFSDK_FormFillEnvironment* pFormFillEnv,
         }
       }
       if (bSet)
-        UpdateFormField(pFormFillEnv, pFormField, true, true, true);
+        UpdateFormField(pFormFillEnv, pFormField, true);
     } else {
       if (nControlIndex >= pFormField->CountControls())
         return;
@@ -293,7 +288,7 @@ void SetBorderStyle(CPDFSDK_FormFillEnvironment* pFormFillEnv,
         if (pWidget) {
           if (pWidget->GetBorderStyle() != nBorderStyle) {
             pWidget->SetBorderStyle(nBorderStyle);
-            UpdateFormControl(pFormFillEnv, pFormControl, true, true, true);
+            UpdateFormControl(pFormFillEnv, pFormControl, true);
           }
         }
       }
@@ -324,7 +319,7 @@ void SetCurrentValueIndices(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                                      NotificationOption::kDoNotNotify);
       }
     }
-    UpdateFormField(pFormFillEnv, pFormField, true, true, true);
+    UpdateFormField(pFormFillEnv, pFormField, true);
   }
 }
 
@@ -348,7 +343,7 @@ void SetDisplay(CPDFSDK_FormFillEnvironment* pFormFillEnv,
       }
 
       if (bAnySet)
-        UpdateFormField(pFormFillEnv, pFormField, true, false, true);
+        UpdateFormField(pFormFillEnv, pFormField, false);
     } else {
       if (nControlIndex >= pFormField->CountControls())
         return;
@@ -359,7 +354,7 @@ void SetDisplay(CPDFSDK_FormFillEnvironment* pFormFillEnv,
 
       CPDFSDK_Widget* pWidget = pForm->GetWidget(pFormControl);
       if (SetWidgetDisplayStatus(pWidget, number))
-        UpdateFormControl(pFormFillEnv, pFormControl, true, false, true);
+        UpdateFormControl(pFormFillEnv, pFormControl, false);
     }
   }
 }
@@ -394,7 +389,7 @@ void SetLineWidth(CPDFSDK_FormFillEnvironment* pFormFillEnv,
         }
       }
       if (bSet)
-        UpdateFormField(pFormFillEnv, pFormField, true, true, true);
+        UpdateFormField(pFormFillEnv, pFormField, true);
     } else {
       if (nControlIndex >= pFormField->CountControls())
         return;
@@ -403,7 +398,7 @@ void SetLineWidth(CPDFSDK_FormFillEnvironment* pFormFillEnv,
         if (CPDFSDK_Widget* pWidget = pForm->GetWidget(pFormControl)) {
           if (number != pWidget->GetBorderWidth()) {
             pWidget->SetBorderWidth(number);
-            UpdateFormControl(pFormFillEnv, pFormControl, true, true, true);
+            UpdateFormControl(pFormFillEnv, pFormControl, true);
           }
         }
       }
@@ -443,7 +438,7 @@ void SetRect(CPDFSDK_FormFillEnvironment* pFormFillEnv,
       }
 
       if (bSet)
-        UpdateFormField(pFormFillEnv, pFormField, true, true, true);
+        UpdateFormField(pFormFillEnv, pFormField, true);
 
       continue;
     }
@@ -461,7 +456,7 @@ void SetRect(CPDFSDK_FormFillEnvironment* pFormFillEnv,
           if (crRect.left != rcOld.left || crRect.right != rcOld.right ||
               crRect.top != rcOld.top || crRect.bottom != rcOld.bottom) {
             pWidget->SetRect(crRect);
-            UpdateFormControl(pFormFillEnv, pFormControl, true, true, true);
+            UpdateFormControl(pFormFillEnv, pFormControl, true);
           }
         }
       }
@@ -489,14 +484,14 @@ void SetFieldValue(CPDFSDK_FormFillEnvironment* pFormFillEnv,
       case FormFieldType::kComboBox:
         if (pFormField->GetValue() != strArray[0]) {
           pFormField->SetValue(strArray[0], NotificationOption::kNotify);
-          UpdateFormField(pFormFillEnv, pFormField, true, false, true);
+          UpdateFormField(pFormFillEnv, pFormField, false);
         }
         break;
       case FormFieldType::kCheckBox:
       case FormFieldType::kRadioButton:
         if (pFormField->GetValue() != strArray[0]) {
           pFormField->SetValue(strArray[0], NotificationOption::kNotify);
-          UpdateFormField(pFormFillEnv, pFormField, true, false, true);
+          UpdateFormField(pFormFillEnv, pFormField, false);
         }
         break;
       case FormFieldType::kListBox: {
@@ -514,13 +509,26 @@ void SetFieldValue(CPDFSDK_FormFillEnvironment* pFormFillEnv,
             if (!pFormField->IsItemSelected(index))
               pFormField->SetItemSelection(index, NotificationOption::kNotify);
           }
-          UpdateFormField(pFormFillEnv, pFormField, true, false, true);
+          UpdateFormField(pFormFillEnv, pFormField, false);
         }
         break;
       }
       default:
         break;
     }
+  }
+}
+
+wchar_t GetSelectorFromCaptionForFieldType(const WideString& caption,
+                                           CPDF_FormField::Type type) {
+  if (!caption.IsEmpty())
+    return caption[0];
+
+  switch (type) {
+    case CPDF_FormField::kRadioButton:
+      return kCircleSelector;
+    default:
+      return kCheckSelector;
   }
 }
 
@@ -653,7 +661,7 @@ bool CJS_Field::AttachField(CJS_Document* pDocument,
   swFieldNameTemp.Replace(L"..", L".");
 
   if (pForm->CountFields(swFieldNameTemp) <= 0) {
-    Optional<FieldNameData> parsed_data = ParseFieldName(swFieldNameTemp);
+    absl::optional<FieldNameData> parsed_data = ParseFieldName(swFieldNameTemp);
     if (!parsed_data.has_value())
       return false;
 
@@ -883,8 +891,8 @@ CJS_Result CJS_Field::get_button_scale_how(CJS_Runtime* pRuntime) {
   if (!pFormControl)
     return CJS_Result::Failure(JSMessage::kBadObjectError);
 
-  return CJS_Result::Success(pRuntime->NewBoolean(
-      pFormControl->GetIconFit().IsProportionalScale() ? 0 : 1));
+  return CJS_Result::Success(
+      pRuntime->NewBoolean(!pFormControl->GetIconFit().IsProportionalScale()));
 }
 
 CJS_Result CJS_Field::set_button_scale_how(CJS_Runtime* pRuntime,
@@ -946,8 +954,8 @@ CJS_Result CJS_Field::get_calc_order_index(CJS_Runtime* pRuntime) {
 
   CPDFSDK_InteractiveForm* pRDForm = m_pFormFillEnv->GetInteractiveForm();
   CPDF_InteractiveForm* pForm = pRDForm->GetInteractiveForm();
-  return CJS_Result::Success(pRuntime->NewNumber(
-      static_cast<int32_t>(pForm->FindFieldInCalculationOrder(pFormField))));
+  return CJS_Result::Success(
+      pRuntime->NewNumber(pForm->FindFieldInCalculationOrder(pFormField)));
 }
 
 CJS_Result CJS_Field::set_calc_order_index(CJS_Runtime* pRuntime,
@@ -1604,7 +1612,7 @@ CJS_Result CJS_Field::set_print(CJS_Runtime* pRuntime,
       }
 
       if (bSet)
-        UpdateFormField(m_pFormFillEnv.Get(), pFormField, true, false, true);
+        UpdateFormField(m_pFormFillEnv.Get(), pFormField, false);
 
       continue;
     }
@@ -1624,8 +1632,7 @@ CJS_Result CJS_Field::set_print(CJS_Runtime* pRuntime,
         if (dwFlags != pWidget->GetFlags()) {
           pWidget->SetFlags(dwFlags);
           UpdateFormControl(m_pFormFillEnv.Get(),
-                            pFormField->GetControl(m_nFormControlIndex), true,
-                            false, true);
+                            pFormField->GetControl(m_nFormControlIndex), false);
         }
       }
     }
@@ -1719,17 +1726,16 @@ CJS_Result CJS_Field::set_rect(CJS_Runtime* pRuntime, v8::Local<v8::Value> vp) {
   if (pRuntime->GetArrayLength(rcArray) < 4)
     return CJS_Result::Failure(JSMessage::kValueError);
 
-  float pArray[4];
-  pArray[0] = static_cast<float>(
+  float f0 = static_cast<float>(
       pRuntime->ToInt32(pRuntime->GetArrayElement(rcArray, 0)));
-  pArray[1] = static_cast<float>(
+  float f1 = static_cast<float>(
       pRuntime->ToInt32(pRuntime->GetArrayElement(rcArray, 1)));
-  pArray[2] = static_cast<float>(
+  float f2 = static_cast<float>(
       pRuntime->ToInt32(pRuntime->GetArrayElement(rcArray, 2)));
-  pArray[3] = static_cast<float>(
+  float f3 = static_cast<float>(
       pRuntime->ToInt32(pRuntime->GetArrayElement(rcArray, 3)));
 
-  CFX_FloatRect crRect(pArray);
+  CFX_FloatRect crRect(f0, f1, f2, f3);
   if (m_bDelay) {
     AddDelay_Rect(FP_RECT, crRect);
   } else {
@@ -1862,27 +1868,28 @@ CJS_Result CJS_Field::get_style(CJS_Runtime* pRuntime) {
   if (!pFormControl)
     return CJS_Result::Failure(JSMessage::kBadObjectError);
 
-  WideString csWCaption = pFormControl->GetNormalCaption();
-  wchar_t selector = !csWCaption.IsEmpty() ? csWCaption[0] : L'4';
+  wchar_t selector = GetSelectorFromCaptionForFieldType(
+      pFormControl->GetNormalCaption(), pFormControl->GetType());
 
   ByteString csBCaption;
   switch (selector) {
-    case L'l':
+    case kCircleSelector:
       csBCaption = "circle";
       break;
-    case L'8':
+    case kCrossSelector:
       csBCaption = "cross";
       break;
-    case L'u':
+    case kDiamondSelector:
       csBCaption = "diamond";
       break;
-    case L'n':
+    case kSquareSelector:
       csBCaption = "square";
       break;
-    case L'H':
+    case kStarSelector:
       csBCaption = "star";
       break;
-    default:  // L'4'
+    case kCheckSelector:
+    default:
       csBCaption = "check";
       break;
   }
@@ -1917,7 +1924,7 @@ CJS_Result CJS_Field::get_text_color(CJS_Runtime* pRuntime) {
     return CJS_Result::Failure(JSMessage::kBadObjectError);
 
   CPDF_DefaultAppearance FieldAppearance = pFormControl->GetDefaultAppearance();
-  Optional<CFX_Color::TypeAndARGB> maybe_type_argb_pair =
+  absl::optional<CFX_Color::TypeAndARGB> maybe_type_argb_pair =
       FieldAppearance.GetColorARGB();
 
   CFX_Color crRet;
@@ -1968,7 +1975,8 @@ CJS_Result CJS_Field::get_text_font(CJS_Runtime* pRuntime) {
     return CJS_Result::Failure(JSMessage::kObjectTypeError);
   }
 
-  Optional<WideString> wsFontName = pFormControl->GetDefaultControlFontName();
+  absl::optional<WideString> wsFontName =
+      pFormControl->GetDefaultControlFontName();
   if (!wsFontName.has_value())
     return CJS_Result::Failure(JSMessage::kBadObjectError);
 
@@ -2084,7 +2092,7 @@ CJS_Result CJS_Field::get_value(CJS_Runtime* pRuntime) {
           iIndex = pFormField->GetSelectedIndex(i);
           ElementValue = pRuntime->NewString(
               pFormField->GetOptionValue(iIndex).AsStringView());
-          if (wcslen(pRuntime->ToWideString(ElementValue).c_str()) == 0) {
+          if (pRuntime->ToWideString(ElementValue).IsEmpty()) {
             ElementValue = pRuntime->NewString(
                 pFormField->GetOptionLabel(iIndex).AsStringView());
           }
@@ -2196,7 +2204,7 @@ CJS_Result CJS_Field::browseForFileToSubmit(
     WideString wsFileName = m_pFormFillEnv->JS_fieldBrowse();
     if (!wsFileName.IsEmpty()) {
       pFormField->SetValue(wsFileName, NotificationOption::kDoNotNotify);
-      UpdateFormField(m_pFormFillEnv.Get(), pFormField, true, true, true);
+      UpdateFormField(m_pFormFillEnv.Get(), pFormField, true);
     }
     return CJS_Result::Success();
   }
@@ -2207,8 +2215,7 @@ CJS_Result CJS_Field::buttonGetCaption(
     CJS_Runtime* pRuntime,
     const std::vector<v8::Local<v8::Value>>& params) {
   int nface = 0;
-  int iSize = params.size();
-  if (iSize >= 1)
+  if (params.size() >= 1)
     nface = pRuntime->ToInt32(params[0]);
 
   CPDF_FormField* pFormField = GetFirstFormField();
@@ -2262,7 +2269,8 @@ CJS_Result CJS_Field::buttonGetIcon(
   if (pObj.IsEmpty())
     return CJS_Result::Failure(JSMessage::kBadObjectError);
 
-  auto* pJS_Icon = static_cast<CJS_Icon*>(CFXJS_Engine::GetObjectPrivate(pObj));
+  auto* pJS_Icon = static_cast<CJS_Icon*>(
+      CFXJS_Engine::GetObjectPrivate(pRuntime->GetIsolate(), pObj));
   return pJS_Icon ? CJS_Result::Success(pJS_Icon->ToV8Object())
                   : CJS_Result::Failure(JSMessage::kBadObjectError);
 }
@@ -2288,8 +2296,8 @@ CJS_Result CJS_Field::buttonSetIcon(
 CJS_Result CJS_Field::checkThisBox(
     CJS_Runtime* pRuntime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  int iSize = params.size();
-  if (iSize < 1)
+  const size_t nSize = params.size();
+  if (nSize == 0)
     return CJS_Result::Failure(JSMessage::kParamError);
 
   if (!m_bCanSet)
@@ -2297,7 +2305,7 @@ CJS_Result CJS_Field::checkThisBox(
 
   int nWidget = pRuntime->ToInt32(params[0]);
   bool bCheckit = true;
-  if (iSize >= 2)
+  if (nSize >= 2)
     bCheckit = pRuntime->ToBoolean(params[1]);
 
   CPDF_FormField* pFormField = GetFirstFormField();
@@ -2313,7 +2321,7 @@ CJS_Result CJS_Field::checkThisBox(
   // TODO(weili): Check whether anything special needed for radio button.
   // (When pFormField->GetFieldType() == FormFieldType::kRadioButton.)
   pFormField->CheckControl(nWidget, bCheckit, NotificationOption::kNotify);
-  UpdateFormField(m_pFormFillEnv.Get(), pFormField, true, true, true);
+  UpdateFormField(m_pFormFillEnv.Get(), pFormField, true);
   return CJS_Result::Success();
 }
 
@@ -2329,8 +2337,7 @@ CJS_Result CJS_Field::defaultIsChecked(
   if (!m_bCanSet)
     return CJS_Result::Failure(JSMessage::kReadOnlyError);
 
-  int iSize = params.size();
-  if (iSize < 1)
+  if (params.empty())
     return CJS_Result::Failure(JSMessage::kParamError);
 
   CPDF_FormField* pFormField = GetFirstFormField();
@@ -2375,8 +2382,8 @@ CJS_Result CJS_Field::getArray(
     if (pObj.IsEmpty())
       return CJS_Result::Failure(JSMessage::kBadObjectError);
 
-    auto* pJSField =
-        static_cast<CJS_Field*>(CFXJS_Engine::GetObjectPrivate(pObj));
+    auto* pJSField = static_cast<CJS_Field*>(
+        CFXJS_Engine::GetObjectPrivate(pRuntime->GetIsolate(), pObj));
     pJSField->AttachField(m_pJSDoc.Get(), *pStr);
     pRuntime->PutArrayElement(FormFieldArray, j++,
                               pJSField
@@ -2389,13 +2396,13 @@ CJS_Result CJS_Field::getArray(
 CJS_Result CJS_Field::getItemAt(
     CJS_Runtime* pRuntime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  int iSize = params.size();
+  const size_t nSize = params.size();
   int nIdx = -1;
-  if (iSize >= 1)
+  if (nSize >= 1)
     nIdx = pRuntime->ToInt32(params[0]);
 
   bool bExport = true;
-  if (iSize >= 2)
+  if (nSize >= 2)
     bExport = pRuntime->ToBoolean(params[1]);
 
   CPDF_FormField* pFormField = GetFirstFormField();
@@ -2508,7 +2515,7 @@ CJS_Result CJS_Field::setFocus(
 
   if (pWidget) {
     ObservedPtr<CPDFSDK_Annot> pObserved(pWidget);
-    m_pFormFillEnv->SetFocusAnnot(&pObserved);
+    m_pFormFillEnv->SetFocusAnnot(pObserved);
   }
 
   return CJS_Result::Success();

@@ -30,7 +30,7 @@ EPKPChallengeKey::~EPKPChallengeKey() = default;
 bool EPKPChallengeKey::IsExtensionAllowed(
     Profile* profile,
     scoped_refptr<const Extension> extension) {
-  if (!chromeos::ProfileHelper::Get()->GetUserByProfile(profile)) {
+  if (!ash::ProfileHelper::Get()->GetUserByProfile(profile)) {
     // Only allow remote attestation for apps that were force-installed on the
     // login/signin screen.
     // TODO(drcrash): Use a separate device-wide policy for the API.
@@ -61,7 +61,8 @@ void EPKPChallengeKey::Run(chromeos::attestation::AttestationKeyType type,
 
   impl_ = ash::attestation::TpmChallengeKeyFactory::Create();
   impl_->BuildResponse(type, profile, std::move(callback), challenge,
-                       register_key, key_name_for_spkac);
+                       register_key, key_name_for_spkac,
+                       /*signals=*/absl::nullopt);
 }
 
 EnterprisePlatformKeysPrivateChallengeMachineKeyFunction::
@@ -73,7 +74,7 @@ EnterprisePlatformKeysPrivateChallengeMachineKeyFunction::
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysPrivateChallengeMachineKeyFunction::Run() {
   std::unique_ptr<api_epkp::ChallengeMachineKey::Params> params(
-      api_epkp::ChallengeMachineKey::Params::Create(*args_));
+      api_epkp::ChallengeMachineKey::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
   ash::attestation::TpmChallengeKeyCallback callback =
       base::BindOnce(&EnterprisePlatformKeysPrivateChallengeMachineKeyFunction::
@@ -119,7 +120,7 @@ EnterprisePlatformKeysPrivateChallengeUserKeyFunction::
 ExtensionFunction::ResponseAction
 EnterprisePlatformKeysPrivateChallengeUserKeyFunction::Run() {
   std::unique_ptr<api_epkp::ChallengeUserKey::Params> params(
-      api_epkp::ChallengeUserKey::Params::Create(*args_));
+      api_epkp::ChallengeUserKey::Params::Create(args()));
   EXTENSION_FUNCTION_VALIDATE(params);
   ash::attestation::TpmChallengeKeyCallback callback = base::BindOnce(
       &EnterprisePlatformKeysPrivateChallengeUserKeyFunction::OnChallengedKey,

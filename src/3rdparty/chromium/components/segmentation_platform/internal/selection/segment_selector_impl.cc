@@ -4,49 +4,120 @@
 
 #include "components/segmentation_platform/internal/selection/segment_selector_impl.h"
 
+#include "base/containers/contains.h"
+#include "base/containers/flat_map.h"
+#include "base/containers/flat_set.h"
+#include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/clock.h"
+#include "base/time/time.h"
 #include "components/segmentation_platform/internal/constants.h"
 #include "components/segmentation_platform/internal/database/metadata_utils.h"
 #include "components/segmentation_platform/internal/database/segment_info_database.h"
 #include "components/segmentation_platform/internal/database/signal_storage_config.h"
+#include "components/segmentation_platform/internal/platform_options.h"
 #include "components/segmentation_platform/internal/proto/model_metadata.pb.h"
 #include "components/segmentation_platform/internal/proto/model_prediction.pb.h"
+#include "components/segmentation_platform/internal/selection/segment_result_provider.h"
 #include "components/segmentation_platform/internal/selection/segmentation_result_prefs.h"
 #include "components/segmentation_platform/internal/stats.h"
 #include "components/segmentation_platform/public/config.h"
+#include "components/segmentation_platform/public/model_provider.h"
 
 namespace segmentation_platform {
+namespace {
+
+stats::SegmentationSelectionFailureReason GetFailureReason(
+    SegmentResultProvider::ResultState result_state) {
+  switch (result_state) {
+    case SegmentResultProvider::ResultState::kUnknown:
+    case SegmentResultProvider::ResultState::kSuccessFromDatabase:
+    case SegmentResultProvider::ResultState::kDefaultModelScoreUsed:
+      NOTREACHED();
+      return stats::SegmentationSelectionFailureReason::kMaxValue;
+    case SegmentResultProvider::ResultState::kDatabaseScoreNotReady:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentNotReady;
+    case SegmentResultProvider::ResultState::kSegmentNotAvailable:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentNotAvailable;
+    case SegmentResultProvider::ResultState::kSignalsNotCollected:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentSignalsNotCollected;
+    case SegmentResultProvider::ResultState::kDefaultModelMetadataMissing:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentDefaultMissingMetadata;
+    case SegmentResultProvider::ResultState::kDefaultModelSignalNotCollected:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentDefaultSignalNotCollected;
+    case SegmentResultProvider::ResultState::kDefaultModelExecutionFailed:
+      return stats::SegmentationSelectionFailureReason::
+          kAtLeastOneSegmentDefaultExecFailed;
+  }
+}
+
+}  // namespace
+
+using optimization_guide::proto::OptimizationTarget_Name;
 
 SegmentSelectorImpl::SegmentSelectorImpl(
     SegmentInfoDatabase* segment_database,
     SignalStorageConfig* signal_storage_config,
-    SegmentationResultPrefs* result_prefs,
-    Config* config,
-    base::Clock* clock)
-    : segment_database_(segment_database),
+    PrefService* pref_service,
+    const Config* config,
+    base::Clock* clock,
+    const PlatformOptions& platform_options,
+    DefaultModelManager* default_model_manager)
+    : SegmentSelectorImpl(
+          segment_database,
+          signal_storage_config,
+          std::make_unique<SegmentationResultPrefs>(pref_service),
+          config,
+          clock,
+          platform_options,
+          default_model_manager) {}
+
+SegmentSelectorImpl::SegmentSelectorImpl(
+    SegmentInfoDatabase* segment_database,
+    SignalStorageConfig* signal_storage_config,
+    std::unique_ptr<SegmentationResultPrefs> prefs,
+    const Config* config,
+    base::Clock* clock,
+    const PlatformOptions& platform_options,
+    DefaultModelManager* default_model_manager)
+    : result_prefs_(std::move(prefs)),
+      segment_database_(segment_database),
       signal_storage_config_(signal_storage_config),
-      result_prefs_(result_prefs),
+      default_model_manager_(default_model_manager),
       config_(config),
       clock_(clock),
-      initialized_(false) {
+      platform_options_(platform_options) {
   // Read selected segment from prefs.
   const auto& selected_segment =
       result_prefs_->ReadSegmentationResultFromPref(config_->segmentation_key);
   if (selected_segment.has_value()) {
     selected_segment_last_session_.segment = selected_segment->segment_id;
     selected_segment_last_session_.is_ready = true;
+    stats::RecordSegmentSelectionFailure(
+        config_->segmentation_key,
+        stats::SegmentationSelectionFailureReason::kSelectionAvailableInPrefs);
+  } else {
+    stats::RecordSegmentSelectionFailure(
+        config_->segmentation_key, stats::SegmentationSelectionFailureReason::
+                                       kInvalidSelectionResultInPrefs);
   }
 }
 
 SegmentSelectorImpl::~SegmentSelectorImpl() = default;
 
-void SegmentSelectorImpl::Initialize(base::OnceClosure callback) {
-  // Read model results from DB.
-  segment_database_->GetSegmentInfoForSegments(
-      config_->segment_ids,
-      base::BindOnce(&SegmentSelectorImpl::ReadScoresFromLastSession,
-                     weak_ptr_factory_.GetWeakPtr(), std::move(callback)));
+void SegmentSelectorImpl::OnPlatformInitialized(
+    ExecutionService* execution_service) {
+  segment_result_provider_ = SegmentResultProvider::Create(
+      segment_database_, signal_storage_config_, default_model_manager_,
+      execution_service, clock_, platform_options_.force_refresh_results);
+  if (CanComputeSegmentSelection()) {
+    GetRankForNextSegment(std::make_unique<SegmentRanks>());
+  }
 }
 
 void SegmentSelectorImpl::GetSelectedSegment(
@@ -56,119 +127,127 @@ void SegmentSelectorImpl::GetSelectedSegment(
       base::BindOnce(std::move(callback), selected_segment_last_session_));
 }
 
-void SegmentSelectorImpl::GetSegmentScore(
-    OptimizationTarget segment_id,
-    SingleSegmentResultCallback callback) {
-  DCHECK(initialized_);
-
-  absl::optional<float> score;
-  auto iter = segment_score_last_session_.find(segment_id);
-  if (iter != segment_score_last_session_.end())
-    score = iter->second;
-
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(std::move(callback), score));
-}
-
-void SegmentSelectorImpl::OnSegmentUsed(OptimizationTarget segment_id) {
-  DCHECK(initialized_);
-  // TODO(shaktisahu): Implement this.
+SegmentSelectionResult SegmentSelectorImpl::GetCachedSegmentResult() {
+  return selected_segment_last_session_;
 }
 
 void SegmentSelectorImpl::OnModelExecutionCompleted(
     OptimizationTarget segment_id) {
-  segment_database_->GetSegmentInfoForSegments(
-      config_->segment_ids,
-      base::BindOnce(&SegmentSelectorImpl::RunSegmentSelection,
-                     weak_ptr_factory_.GetWeakPtr()));
-}
+  DCHECK(segment_result_provider_);
 
-void SegmentSelectorImpl::RunSegmentSelection(
-    std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>
-        all_segments) {
-  if (!CanComputeSegmentSelection(all_segments))
+  // If the |segment_id| is not in config, then skip any updates early.
+  if (!base::Contains(config_->segment_ids, segment_id))
     return;
 
-  OptimizationTarget selected_segment = FindBestSegment(all_segments);
-  UpdateSelectedSegment(selected_segment);
+  if (!CanComputeSegmentSelection())
+    return;
+
+  GetRankForNextSegment(std::make_unique<SegmentRanks>());
 }
 
-bool SegmentSelectorImpl::CanComputeSegmentSelection(
-    const std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>&
-        all_segments) {
-  // Don't compute results if we don't have enough signals, or don't have
-  // valid unexpired results for any of the segments.
-  for (const auto& pair : all_segments) {
-    const proto::SegmentInfo& segment_info = pair.second;
-    if (!signal_storage_config_->MeetsSignalCollectionRequirement(
-            segment_info.model_metadata())) {
-      return false;
-    }
-
-    if (metadata_utils::HasExpiredOrUnavailableResult(segment_info,
-                                                      clock_->Now())) {
-      return false;
-    }
-  }
-
+bool SegmentSelectorImpl::CanComputeSegmentSelection() {
   // Don't compute results if segment selection TTL hasn't expired.
   const auto& previous_selection =
       result_prefs_->ReadSegmentationResultFromPref(config_->segmentation_key);
-  if (previous_selection.has_value() &&
-      previous_selection->selection_time + config_->segment_selection_ttl >
-          clock_->Now()) {
-    return false;
+  if (previous_selection.has_value()) {
+    bool was_unknown_selected = previous_selection->segment_id ==
+                                OptimizationTarget::OPTIMIZATION_TARGET_UNKNOWN;
+    base::TimeDelta ttl_to_use = was_unknown_selected
+                                     ? config_->unknown_selection_ttl
+                                     : config_->segment_selection_ttl;
+    if (!platform_options_.force_refresh_results &&
+        previous_selection->selection_time + ttl_to_use > clock_->Now()) {
+      stats::RecordSegmentSelectionFailure(
+          config_->segmentation_key,
+          stats::SegmentationSelectionFailureReason::kSelectionTtlNotExpired);
+      VLOG(1) << __func__ << ": previous selection of segment="
+              << OptimizationTarget_Name(previous_selection->segment_id)
+              << " has not yet expired.";
+      return false;
+    }
   }
 
   return true;
 }
 
+void SegmentSelectorImpl::GetRankForNextSegment(
+    std::unique_ptr<SegmentRanks> ranks) {
+  for (OptimizationTarget needed_segment : config_->segment_ids) {
+    if (ranks->count(needed_segment) == 0) {
+      segment_result_provider_->GetSegmentResult(
+          needed_segment, config_->segmentation_key,
+          base::BindOnce(&SegmentSelectorImpl::OnGetResultForSegmentSelection,
+                         weak_ptr_factory_.GetWeakPtr(), std::move(ranks),
+                         needed_segment));
+      return;
+    }
+  }
+  OptimizationTarget selected_segment = FindBestSegment(*ranks);
+  UpdateSelectedSegment(selected_segment);
+}
+
+void SegmentSelectorImpl::OnGetResultForSegmentSelection(
+    std::unique_ptr<SegmentRanks> ranks,
+    OptimizationTarget current_segment_id,
+    std::unique_ptr<SegmentResultProvider::SegmentResult> result) {
+  if (!result->rank) {
+    stats::RecordSegmentSelectionFailure(config_->segmentation_key,
+                                         GetFailureReason(result->state));
+    return;
+  }
+  ranks->insert(std::make_pair(current_segment_id, *result->rank));
+
+  GetRankForNextSegment(std::move(ranks));
+}
+
 OptimizationTarget SegmentSelectorImpl::FindBestSegment(
-    const std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>&
-        all_segments) {
-  int max_score = 0;
-  OptimizationTarget max_score_id =
+    const SegmentRanks& segment_results) {
+  int max_rank = 0;
+  OptimizationTarget max_rank_id =
       OptimizationTarget::OPTIMIZATION_TARGET_UNKNOWN;
-  // Loop through all the results. Convert them to discrete scores. Select the
-  // one with highest discrete score.
-  for (const auto& pair : all_segments) {
+  // Loop through all the results. Convert them to discrete ranks. Select the
+  // one with highest discrete rank.
+  for (const auto& pair : segment_results) {
     OptimizationTarget id = pair.first;
-    const proto::SegmentInfo& info = pair.second;
-    int score = ConvertToDiscreteScore(id, config_->segmentation_key,
-                                       info.prediction_result().result(),
-                                       info.model_metadata());
-    if (score > max_score) {
-      max_score = score;
-      max_score_id = id;
-    } else if (score == max_score && score > 0) {
+    int rank = pair.second;
+    if (rank > max_rank) {
+      max_rank = rank;
+      max_rank_id = id;
+    } else if (rank == max_rank && rank > 0) {
       // TODO(shaktisahu): Use fallback priority.
     }
   }
 
-  return max_score_id;
+  return max_rank_id;
 }
 
 void SegmentSelectorImpl::UpdateSelectedSegment(
     OptimizationTarget new_selection) {
+  VLOG(1) << __func__ << ": Updating selected segment="
+          << OptimizationTarget_Name(new_selection);
   const auto& previous_selection =
       result_prefs_->ReadSegmentationResultFromPref(config_->segmentation_key);
 
   // Auto-extend the results, if
   // (1) segment selection hasn't changed.
-  // (2) or the new segment is UNKNOWN, and the previous one was a valid one.
+  // (2) or, UNKNOWN selection TTL = 0 and the new segment is UNKNOWN, and the
+  //     previous one was a valid one.
   bool skip_updating_prefs = false;
   if (previous_selection.has_value()) {
-    skip_updating_prefs =
-        new_selection == previous_selection->segment_id ||
+    skip_updating_prefs = new_selection == previous_selection->segment_id;
+    skip_updating_prefs |=
+        config_->unknown_selection_ttl == base::TimeDelta() &&
         new_selection == OptimizationTarget::OPTIMIZATION_TARGET_UNKNOWN;
     // TODO(shaktisahu): Use segment selection inertia.
   }
 
   stats::RecordSegmentSelectionComputed(
-      new_selection, previous_selection.has_value()
-                         ? absl::make_optional(previous_selection->segment_id)
-                         : absl::nullopt);
+      config_->segmentation_key, new_selection,
+      previous_selection.has_value()
+          ? absl::make_optional(previous_selection->segment_id)
+          : absl::nullopt);
 
+  VLOG(1) << __func__ << ": skip_updating_prefs=" << skip_updating_prefs;
   if (skip_updating_prefs)
     return;
 
@@ -178,55 +257,6 @@ void SegmentSelectorImpl::UpdateSelectedSegment(
 
   result_prefs_->SaveSegmentationResultToPref(config_->segmentation_key,
                                               updated_selection);
-}
-
-void SegmentSelectorImpl::ReadScoresFromLastSession(
-    base::OnceClosure callback,
-    std::vector<std::pair<OptimizationTarget, proto::SegmentInfo>>
-        all_segments) {
-  // Read results from last session to memory.
-  for (const auto& pair : all_segments) {
-    OptimizationTarget id = pair.first;
-    const proto::SegmentInfo& info = pair.second;
-    if (!info.has_prediction_result())
-      continue;
-
-    float result = info.prediction_result().result();
-    segment_score_last_session_.emplace(std::make_pair(id, result));
-  }
-
-  initialized_ = true;
-  std::move(callback).Run();
-}
-
-int SegmentSelectorImpl::ConvertToDiscreteScore(
-    OptimizationTarget segment_id,
-    const std::string& mapping_key,
-    float score,
-    const proto::SegmentationModelMetadata& metadata) {
-  auto iter = metadata.discrete_mappings().find(mapping_key);
-  if (iter == metadata.discrete_mappings().end()) {
-    iter =
-        metadata.discrete_mappings().find(metadata.default_discrete_mapping());
-    if (iter == metadata.discrete_mappings().end())
-      return 0;
-  }
-  DCHECK(iter != metadata.discrete_mappings().end());
-
-  const auto& mapping = iter->second;
-
-  // Iterate over the entries and find the last entry whose min result is equal
-  // to or less than the input.
-  int discrete_result = 0;
-  for (int i = 0; i < mapping.entries_size(); i++) {
-    const auto& entry = mapping.entries(i);
-    if (score < entry.min_result())
-      break;
-
-    discrete_result = entry.rank();
-  }
-
-  return discrete_result;
 }
 
 }  // namespace segmentation_platform

@@ -23,14 +23,15 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/bits.h"
 #include "base/compiler_specific.h"
 #include "base/containers/span.h"
-#include "base/cxx17_backports.h"
+#include "base/memory/raw_ptr.h"
+#include "base/numerics/ostream_operators.h"
 #include "base/numerics/safe_math.h"
 #include "base/strings/string_split.h"
 #include "base/system/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
@@ -294,7 +295,7 @@ gpu::ContextResult GLES2Implementation::Initialize(
 
   if (support_client_side_arrays_) {
     GetIdHandler(SharedIdNamespaces::kBuffers)
-        ->MakeIds(this, kClientSideArrayId, base::size(reserved_ids_),
+        ->MakeIds(this, kClientSideArrayId, std::size(reserved_ids_),
                   &reserved_ids_[0]);
   }
 
@@ -328,7 +329,7 @@ GLES2Implementation::~GLES2Implementation() {
   // GLES2Implementation::Initialize() could fail before allocating
   // reserved_ids_, so we need delete them carefully.
   if (support_client_side_arrays_ && reserved_ids_[0]) {
-    DeleteBuffers(base::size(reserved_ids_), &reserved_ids_[0]);
+    DeleteBuffers(std::size(reserved_ids_), &reserved_ids_[0]);
   }
 
   // Release remaining BufferRange mem; This is when a MapBufferRange() is
@@ -2429,7 +2430,7 @@ void GLES2Implementation::BufferDataHelper(GLenum target,
   if (!ValidateSize("glBufferData", size))
     return;
 
-#if defined(MEMORY_SANITIZER) && !defined(OS_NACL)
+#if defined(MEMORY_SANITIZER) && !BUILDFLAG(IS_NACL)
   // Do not upload uninitialized data. Even if it's not a bug, it can cause a
   // bogus MSan report during a readback later. This is because MSan doesn't
   // understand shared memory and would assume we were reading back the same
@@ -6230,7 +6231,7 @@ void GLES2Implementation::RequestExtensionCHROMIUM(const char* extension) {
 
   struct ExtensionCheck {
     const char* extension;
-    ExtensionStatus* status;
+    raw_ptr<ExtensionStatus> status;
   };
   const ExtensionCheck checks[] = {
       {
@@ -6514,7 +6515,7 @@ void GLES2Implementation::BeginQueryEXT(GLenum target, GLuint id) {
     case GL_TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN:
       if (capabilities_.major_version >= 3)
         break;
-      FALLTHROUGH;
+      [[fallthrough]];
     default:
       SetGLError(GL_INVALID_ENUM, "glBeginQueryEXT", "unknown query target");
       return;
@@ -7371,8 +7372,7 @@ bool GLES2Implementation::PackStringsToBucket(GLsizei count,
       if (copy_size < buffer.size()) {
         // Append NULL in the end.
         DCHECK(copy_size + 1 == buffer.size());
-        char* str = reinterpret_cast<char*>(buffer.address());
-        str[copy_size] = 0;
+        reinterpret_cast<char*>(buffer.address())[copy_size] = 0;
       }
       helper_->SetBucketData(kResultBucketId, offset, buffer.size(),
                              buffer.shm_id(), buffer.offset());

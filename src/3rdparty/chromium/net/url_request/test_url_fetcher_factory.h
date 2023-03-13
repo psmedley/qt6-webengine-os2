@@ -16,9 +16,9 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread_checker.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
@@ -37,12 +37,14 @@ namespace net {
 class ScopedURLFetcherFactory {
  public:
   explicit ScopedURLFetcherFactory(URLFetcherFactory* factory);
+
+  ScopedURLFetcherFactory(const ScopedURLFetcherFactory&) = delete;
+  ScopedURLFetcherFactory& operator=(const ScopedURLFetcherFactory&) = delete;
+
   virtual ~ScopedURLFetcherFactory();
 
  private:
   THREAD_CHECKER(thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedURLFetcherFactory);
 };
 
 // TestURLFetcher and TestURLFetcherFactory are used for testing consumers of
@@ -92,6 +94,10 @@ class TestURLFetcher : public URLFetcher {
   TestURLFetcher(int id,
                  const GURL& url,
                  URLFetcherDelegate* d);
+
+  TestURLFetcher(const TestURLFetcher&) = delete;
+  TestURLFetcher& operator=(const TestURLFetcher&) = delete;
+
   ~TestURLFetcher() override;
 
   // URLFetcher implementation
@@ -188,10 +194,8 @@ class TestURLFetcher : public URLFetcher {
   void set_response_code(int response_code) {
     fake_response_code_ = response_code;
   }
-  void set_was_fetched_via_proxy(bool flag);
   void set_was_cached(bool flag);
   void set_response_headers(scoped_refptr<HttpResponseHeaders> headers);
-  void set_backoff_delay(base::TimeDelta backoff_delay);
   void SetDelegateForTests(DelegateForTests* delegate_for_tests);
 
   // Set string data.
@@ -208,8 +212,8 @@ class TestURLFetcher : public URLFetcher {
 
   const int id_;
   const GURL original_url_;
-  URLFetcherDelegate* delegate_;
-  DelegateForTests* delegate_for_tests_;
+  raw_ptr<URLFetcherDelegate> delegate_;
+  raw_ptr<DelegateForTests> delegate_for_tests_;
   std::string upload_content_type_;
   std::string upload_data_;
   base::FilePath upload_file_path_;
@@ -234,10 +238,7 @@ class TestURLFetcher : public URLFetcher {
   scoped_refptr<HttpResponseHeaders> fake_response_headers_;
   HttpRequestHeaders fake_extra_request_headers_;
   int fake_max_retries_;
-  base::TimeDelta fake_backoff_delay_;
   std::unique_ptr<URLFetcherResponseWriter> response_writer_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestURLFetcher);
 };
 
 // The FakeURLFetcher and FakeURLFetcherFactory classes are similar to the
@@ -276,6 +277,9 @@ class FakeURLFetcher : public TestURLFetcher {
 
   const GURL& GetURL() const override;
 
+  FakeURLFetcher(const FakeURLFetcher&) = delete;
+  FakeURLFetcher& operator=(const FakeURLFetcher&) = delete;
+
   ~FakeURLFetcher() override;
 
  private:
@@ -285,8 +289,6 @@ class FakeURLFetcher : public TestURLFetcher {
 
   int64_t response_bytes_;
   base::WeakPtrFactory<FakeURLFetcher> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FakeURLFetcher);
 };
 
 // FakeURLFetcherFactory is a factory for FakeURLFetcher objects. When
@@ -370,6 +372,9 @@ class FakeURLFetcherFactory : public URLFetcherFactory,
   FakeURLFetcherFactory(URLFetcherFactory* default_factory,
                         const FakeURLFetcherCreator& creator);
 
+  FakeURLFetcherFactory(const FakeURLFetcherFactory&) = delete;
+  FakeURLFetcherFactory& operator=(const FakeURLFetcherFactory&) = delete;
+
   ~FakeURLFetcherFactory() override;
 
   // If no fake response is set for the given URL this method will delegate the
@@ -409,7 +414,7 @@ class FakeURLFetcherFactory : public URLFetcherFactory,
 
   const FakeURLFetcherCreator creator_;
   FakeResponseMap fake_responses_;
-  URLFetcherFactory* const default_factory_;
+  const raw_ptr<URLFetcherFactory> default_factory_;
 
   static std::unique_ptr<FakeURLFetcher> DefaultFakeURLFetcherCreator(
       const GURL& url,
@@ -417,7 +422,6 @@ class FakeURLFetcherFactory : public URLFetcherFactory,
       const std::string& response_data,
       HttpStatusCode response_code,
       Error error);
-  DISALLOW_COPY_AND_ASSIGN(FakeURLFetcherFactory);
 };
 
 }  // namespace net

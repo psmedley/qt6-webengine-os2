@@ -18,14 +18,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/sequenced_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
 #include "components/reporting/compression/compression_module.h"
 #include "components/reporting/encryption/encryption_module_interface.h"
-#include "components/reporting/proto/record.pb.h"
+#include "components/reporting/proto/synced/record.pb.h"
 #include "components/reporting/storage/storage_configuration.h"
 #include "components/reporting/storage/storage_uploader_interface.h"
 #include "components/reporting/util/status.h"
@@ -33,6 +33,18 @@
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace reporting {
+
+namespace test {
+
+// Storage Queue operation kind used to associate operations with failures for
+// testing purposes
+enum class StorageQueueOperationKind {
+  kReadBlock,
+  kWriteBlock,
+  kWriteMetadata
+};
+
+}  // namespace test
 
 // Storage queue represents single queue of data to be collected and stored
 // persistently. It allows to add whole data records as necessary,
@@ -42,6 +54,7 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
  public:
   // Callback type for UploadInterface provider for this queue.
   using AsyncStartUploaderCb = base::RepeatingCallback<void(
+      UploaderInterface::UploadReason,
       UploaderInterface::UploaderInterfaceResultCb)>;
 
   // Creates StorageQueue instance with the specified options, and returns it
@@ -101,8 +114,10 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
   // CollectFilesForUpload.
   void Flush();
 
-  // Test only: makes specified records fail on reading.
-  void TestInjectBlockReadErrors(std::initializer_list<int64_t> sequencing_ids);
+  // Test only: makes specified records fail on specified operation kind.
+  void TestInjectErrorsForOperation(
+      const test::StorageQueueOperationKind operation_kind,
+      std::initializer_list<int64_t> sequencing_ids);
 
   // Access queue options.
   const QueueOptions& options() const { return options_; }
@@ -136,7 +151,7 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
     Status Open(bool read_only);  // No-op if already opened.
     void Close();                 // No-op if not opened.
 
-    Status Delete();
+    void DeleteWarnIfFailed();
 
     // Attempts to read |size| bytes from position |pos| and returns
     // reference to the data that were actually read (no more than |size|).
@@ -201,7 +216,7 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
                scoped_refptr<CompressionModule> compression_module);
 
   // Initializes the object by enumerating files in the assigned directory
-  // and determines the sequencing information of the last record.
+  // and determines the sequence information of the last record.
   // Must be called once and only once after construction.
   // Returns OK or error status, if anything failed to initialize.
   // Called once, during initialization.
@@ -217,6 +232,10 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
   StatusOr<int64_t> AddDataFile(
       const base::FilePath& full_name,
       const base::FileEnumerator::FileInfo& file_info);
+
+  // Helper method for Init(): sets generation id based on data file name.
+  // For backwards compatibility, accepts file name without generation too.
+  Status SetGenerationId(const base::FilePath& full_name);
 
   // Helper method for Init(): enumerates all data files in the directory.
   // Valid file names are <prefix>.<sequencing_id>, any other names are ignored.
@@ -260,9 +279,9 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
   // Adds used metadata file to the set.
   Status RestoreMetadata(base::flat_set<base::FilePath>* used_files_set);
 
-  // Delete all files except those listed in the set.
+  // Delete all files except those listed in |used_file_set|.
   void DeleteUnusedFiles(
-      const base::flat_set<base::FilePath>& used_files_setused_files_set);
+      const base::flat_set<base::FilePath>& used_files_set) const;
 
   // Helper method for Write(): deletes meta files up to, but not including
   // |sequencing_id_to_keep|. Any errors are ignored.
@@ -298,6 +317,9 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
   // Helper method to retry upload if prior one failed or if some events below
   // |next_sequencing_id| were not uploaded.
   void CheckBackUpload(Status status, int64_t next_sequencing_id);
+
+  // Helper method called by periodic time to upload data.
+  void PeriodicUpload();
 
   // Sequential task runner for all activities in this StorageQueue
   // (must be first member in class).
@@ -363,8 +385,9 @@ class StorageQueue : public base::RefCountedDeleteOnSequence<StorageQueue> {
   // Compression module.
   scoped_refptr<CompressionModule> compression_module_;
 
-  // Test only: records specified to fail on reading.
-  base::flat_set<int64_t> test_injected_fail_sequencing_ids_;
+  // Test only: records specified to fail for a given operation kind.
+  base::flat_map<test::StorageQueueOperationKind, base::flat_set<int64_t>>
+      test_injected_failures_;
 
   // Weak pointer factory (must be last member in class).
   base::WeakPtrFactory<StorageQueue> weakptr_factory_{this};

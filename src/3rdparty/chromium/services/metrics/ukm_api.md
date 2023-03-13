@@ -104,15 +104,6 @@ Currently supported additional index fields are:
 *   `profile.form_factor`
 *   `profile.system_ram`
 
-### Aggregation by Metrics in the Same Event
-
-Aggregation can occur against other metrics of the same event by listing
-"metrics._foo_" as an index field. That other metric must also have `history`,
-`statistics`, and `**enumeration**` tags.
-
-**NOTE:** There is currently a limitation that only _one_ (1) `index` tag can
-include such a reference.
-
 ### Enumeration Proportions
 
 Proportions are calculated against the number of "page loads" (meaning per
@@ -219,7 +210,7 @@ void DidGetBackgroundSourceId(absl::optional<ukm::SourceId> source_id) {
 }
 ```
 
-For the remaining cases you may need to temporarily create your own IDs and associate the URL with them. However we currently prefer that this method is not used, and if you need to setup the URL yourself, please email us first at ukm-team@google.com.
+For the remaining cases you may need to temporarily create your own IDs and associate the URL with them. However we currently prefer that this method is not used, and if you need to setup the URL yourself, please email the OWNERS of components/ukm.
 Example:
 
 ```cpp
@@ -247,6 +238,8 @@ void OnGoatTeleported() {
 
 If the event name in the XML contains a period (`.`), it is replaced with an underscore (`_`) in the method name.
 
+To avoid having UKM report becoming unbounded in size, an upper limit is placed on the number of events recorded for each event type. Events that are recorded too frequently may be subject to downsampling (see go/ukm-sampling). As a rule of thumb, it is recommended that most entries be recorded at most once per 100 pageloads on average to limit data volume.
+
 ### Local Testing
 
 Build Chromium and run it with '--force-enable-metrics-reporting --metrics-upload-interval=N'. You may want some small N if you are interested in seeing behavior when UKM reports are emitted. Trigger your event locally and check chrome://ukm to make sure the data was recorded correctly.
@@ -254,6 +247,10 @@ Build Chromium and run it with '--force-enable-metrics-reporting --metrics-uploa
 ## Unit Testing
 
 You can pass your code a TestUkmRecorder (see [//components/ukm/test_ukm_recorder.h](https://cs.chromium.org/chromium/src/components/ukm/test_ukm_recorder.h)) and then use the methods it provides to test that your data records correctly.
+
+## Adding UKMs every report
+
+Certain information may be useful to be included on every UKM upload. This may be applicable if your information is always "available" in some sense, as opposed to triggered/computed at a particular instance, which is the default. In this case, the best way to proceed is to setup a [MetricsProvider](https://source.chromium.org/chromium/src/components/metrics/metrics_provider.h). The new Provider should implement the ProvideCurrentSessionUKMData() method. Record a UKM Event within that implementation, and it will be recorded exactly once per UKM report, immediately before the information is uploaded.
 
 ## Recording Information about Subframes URLs via Categorization
 
@@ -272,7 +269,7 @@ The full metrics will not be keyed off the subframe URL. Rather, the subframe UR
   <summary>
     Recorded when a page uses on of a list of known web frameworks. This records various performance measurements.
   </summary>
- <metric name="WebFramework" enum=WebFrameworkName>
+ <metric name="WebFramework" enum="WebFrameworkName">
     <summary>
       Web Framework used.
    </summary>

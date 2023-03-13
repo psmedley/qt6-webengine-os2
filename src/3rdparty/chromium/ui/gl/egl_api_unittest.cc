@@ -27,7 +27,7 @@ class EGLApiTest : public testing::Test {
     g_driver_egl.fn.eglGetErrorFn = &FakeGetError;
     g_driver_egl.fn.eglGetProcAddressFn = &FakeGetProcAddress;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     SetGLImplementation(kGLImplementationEGLANGLE);
 #else
     SetGLImplementation(kGLImplementationEGLGLES2);
@@ -50,7 +50,8 @@ class EGLApiTest : public testing::Test {
       SetDisabledExtensionsEGL(disabled_extensions);
     }
     g_driver_egl.InitializeClientExtensionBindings();
-    GLSurfaceEGL::InitializeDisplay(EGLDisplayPlatform(EGL_DEFAULT_DISPLAY));
+    GLSurfaceEGL::InitializeDisplay(EGLDisplayPlatform(EGL_DEFAULT_DISPLAY),
+                                    /*system_device_id=*/0);
     g_driver_egl.InitializeExtensionBindings();
   }
 

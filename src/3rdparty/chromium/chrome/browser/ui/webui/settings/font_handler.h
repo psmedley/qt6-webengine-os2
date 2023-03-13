@@ -8,15 +8,10 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 
 class Profile;
-
-namespace base {
-class ListValue;
-}  // namespace base
 
 namespace settings {
 
@@ -24,6 +19,10 @@ namespace settings {
 class FontHandler : public SettingsPageUIHandler {
  public:
   explicit FontHandler(Profile* profile);
+
+  FontHandler(const FontHandler&) = delete;
+  FontHandler& operator=(const FontHandler&) = delete;
+
   ~FontHandler() override;
 
   // SettingsPageUIHandler implementation.
@@ -33,15 +32,13 @@ class FontHandler : public SettingsPageUIHandler {
 
  private:
   // Handler for script asking for font information.
-  void HandleFetchFontsData(const base::ListValue* args);
+  void HandleFetchFontsData(const base::Value::List& args);
 
   // Callback to handle fonts loading.
   void FontListHasLoaded(std::string callback_id,
                          std::unique_ptr<base::ListValue> list);
 
   base::WeakPtrFactory<FontHandler> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FontHandler);
 };
 
 }  // namespace settings

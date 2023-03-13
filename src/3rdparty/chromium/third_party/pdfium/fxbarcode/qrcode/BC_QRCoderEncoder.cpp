@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "core/fxcrt/fx_memory_wrappers.h"
+#include "core/fxcrt/fx_string.h"
 #include "fxbarcode/common/BC_CommonByteMatrix.h"
 #include "fxbarcode/common/reedsolomon/BC_ReedSolomon.h"
 #include "fxbarcode/common/reedsolomon/BC_ReedSolomonGF256.h"
@@ -38,10 +39,10 @@
 #include "fxbarcode/qrcode/BC_QRCoderMatrixUtil.h"
 #include "fxbarcode/qrcode/BC_QRCoderMode.h"
 #include "fxbarcode/qrcode/BC_QRCoderVersion.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
 #include "third_party/base/cxx17_backports.h"
-#include "third_party/base/optional.h"
 
 using ModeStringPair = std::pair<CBC_QRCoderMode*, ByteString>;
 
@@ -116,55 +117,14 @@ bool AppendAlphaNumericBytes(const ByteString& content,
   return true;
 }
 
-bool AppendGBKBytes(const ByteString& content, CBC_QRCoderBitVector* bits) {
-  size_t length = content.GetLength();
-  uint32_t value = 0;
-  for (size_t i = 0; i < length; i += 2) {
-    value = (uint32_t)(content[i] << 8 | content[i + 1]);
-    if (value <= 0xAAFE && value >= 0xA1A1)
-      value -= 0xA1A1;
-    else if (value <= 0xFAFE && value >= 0xB0A1)
-      value -= 0xA6A1;
-    else
-      return false;
-
-    value = (uint32_t)((value >> 8) * 0x60) + (uint32_t)(value & 0xff);
-    bits->AppendBits(value, 13);
-  }
-  return true;
-}
-
-bool Append8BitBytes(const ByteString& content,
-                     CBC_QRCoderBitVector* bits,
-                     ByteString encoding) {
-  for (size_t i = 0; i < content.GetLength(); i++)
-    bits->AppendBits(content[i], 8);
-  return true;
-}
-
-bool AppendKanjiBytes(const ByteString& content, CBC_QRCoderBitVector* bits) {
-  std::vector<uint8_t, FxAllocAllocator<uint8_t>> bytes;
-  uint32_t value = 0;
-  // TODO(thestig): This is wrong, as |bytes| is empty.
-  for (size_t i = 0; i < bytes.size(); i += 2) {
-    value = (uint32_t)((content[i] << 8) | content[i + 1]);
-    if (value <= 0x9ffc && value >= 0x8140)
-      value -= 0x8140;
-    else if (value <= 0xebbf && value >= 0xe040)
-      value -= 0xc140;
-    else
-      return false;
-
-    value = (uint32_t)((value >> 8) * 0xc0) + (uint32_t)(value & 0xff);
-    bits->AppendBits(value, 13);
-  }
+bool Append8BitBytes(const ByteString& content, CBC_QRCoderBitVector* bits) {
+  for (char c : content)
+    bits->AppendBits(c, 8);
   return true;
 }
 
 void AppendModeInfo(CBC_QRCoderMode* mode, CBC_QRCoderBitVector* bits) {
   bits->AppendBits(mode->GetBits(), 4);
-  if (mode == CBC_QRCoderMode::sGBK)
-    bits->AppendBits(1, 4);
 }
 
 bool AppendLengthInfo(int32_t numLetters,
@@ -180,26 +140,19 @@ bool AppendLengthInfo(int32_t numLetters,
   if (numBits > ((1 << numBits) - 1))
     return true;
 
-  if (mode == CBC_QRCoderMode::sGBK)
-    bits->AppendBits(numLetters / 2, numBits);
   bits->AppendBits(numLetters, numBits);
   return true;
 }
 
 bool AppendBytes(const ByteString& content,
                  CBC_QRCoderMode* mode,
-                 CBC_QRCoderBitVector* bits,
-                 ByteString encoding) {
+                 CBC_QRCoderBitVector* bits) {
   if (mode == CBC_QRCoderMode::sNUMERIC)
     return AppendNumericBytes(content, bits);
   if (mode == CBC_QRCoderMode::sALPHANUMERIC)
     return AppendAlphaNumericBytes(content, bits);
   if (mode == CBC_QRCoderMode::sBYTE)
-    return Append8BitBytes(content, bits, encoding);
-  if (mode == CBC_QRCoderMode::sKANJI)
-    return AppendKanjiBytes(content, bits);
-  if (mode == CBC_QRCoderMode::sGBK)
-    return AppendGBKBytes(content, bits);
+    return Append8BitBytes(content, bits);
   return false;
 }
 
@@ -252,7 +205,7 @@ int32_t CalculateMaskPenalty(CBC_CommonByteMatrix* matrix) {
          CBC_QRCoderMaskUtil::ApplyMaskPenaltyRule4(matrix);
 }
 
-Optional<int32_t> ChooseMaskPattern(
+absl::optional<int32_t> ChooseMaskPattern(
     CBC_QRCoderBitVector* bits,
     const CBC_QRCoderErrorCorrectionLevel* ecLevel,
     int32_t version,
@@ -263,7 +216,7 @@ Optional<int32_t> ChooseMaskPattern(
        maskPattern++) {
     if (!CBC_QRCoderMatrixUtil::BuildMatrix(bits, ecLevel, version, maskPattern,
                                             matrix)) {
-      return pdfium::nullopt;
+      return absl::nullopt;
     }
     int32_t penalty = CalculateMaskPenalty(matrix);
     if (penalty < minPenalty) {
@@ -324,10 +277,7 @@ bool TerminateBits(int32_t numDataBytes, CBC_QRCoderBitVector* bits) {
   return bits->Size() == capacity;
 }
 
-CBC_QRCoderMode* ChooseMode(const ByteString& content, ByteString encoding) {
-  if (encoding == "SHIFT_JIS")
-    return CBC_QRCoderMode::sKANJI;
-
+CBC_QRCoderMode* ChooseMode(const ByteString& content) {
   bool hasNumeric = false;
   bool hasAlphaNumeric = false;
   for (size_t i = 0; i < content.GetLength(); i++) {
@@ -424,11 +374,10 @@ void CBC_QRCoderEncoder::Finalize() {
 bool CBC_QRCoderEncoder::Encode(WideStringView content,
                                 const CBC_QRCoderErrorCorrectionLevel* ecLevel,
                                 CBC_QRCoder* qrCode) {
-  ByteString encoding = "utf8";
   ByteString utf8Data = FX_UTF8Encode(content);
-  CBC_QRCoderMode* mode = ChooseMode(utf8Data, encoding);
+  CBC_QRCoderMode* mode = ChooseMode(utf8Data);
   CBC_QRCoderBitVector dataBits;
-  if (!AppendBytes(utf8Data, mode, &dataBits, encoding))
+  if (!AppendBytes(utf8Data, mode, &dataBits))
     return false;
   int32_t numInputBytes = dataBits.sizeInBytes();
   if (!InitQRCode(numInputBytes, ecLevel, qrCode))
@@ -453,7 +402,7 @@ bool CBC_QRCoderEncoder::Encode(WideStringView content,
 
   auto matrix = std::make_unique<CBC_CommonByteMatrix>(
       qrCode->GetMatrixWidth(), qrCode->GetMatrixWidth());
-  Optional<int32_t> maskPattern = ChooseMaskPattern(
+  absl::optional<int32_t> maskPattern = ChooseMaskPattern(
       &finalBits, qrCode->GetECLevel(), qrCode->GetVersion(), matrix.get());
   if (!maskPattern.has_value())
     return false;

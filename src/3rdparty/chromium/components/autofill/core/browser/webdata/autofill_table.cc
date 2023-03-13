@@ -44,6 +44,7 @@
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/model/metadata_batch.h"
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/webdata/common/web_database.h"
@@ -102,8 +103,6 @@ void BindAutofillProfileToStatement(const AutofillProfile& profile,
   s->BindInt64(index++, modification_date.ToTimeT());
   s->BindString(index++, profile.origin());
   s->BindString(index++, profile.language_code());
-  s->BindInt64(index++, profile.GetClientValidityBitfieldValue());
-  s->BindBool(index++, profile.is_client_validity_states_updated());
   s->BindString(index++, profile.profile_label());
   s->BindBool(index++, profile.disallow_settings_visible_updates());
 }
@@ -125,8 +124,6 @@ void AddAutofillProfileDetailsFromStatement(sql::Statement& s,
   profile->set_modification_date(base::Time::FromTimeT(s.ColumnInt64(index++)));
   profile->set_origin(s.ColumnString(index++));
   profile->set_language_code(s.ColumnString(index++));
-  profile->SetClientValidityFromBitfieldValue(s.ColumnInt64(index++));
-  profile->set_is_client_validity_states_updated(s.ColumnBool(index++));
   profile->set_profile_label(s.ColumnString(index++));
   profile->set_disallow_settings_visible_updates(s.ColumnBool(index++));
 }
@@ -259,8 +256,6 @@ bool AddAutofillProfileAddresses(const AutofillProfile& profile,
   // structured addresses is enabled or the creation of address enhancement
   // votes.
   if (base::FeatureList::IsEnabled(
-          features::kAutofillAddressEnhancementVotes) ||
-      base::FeatureList::IsEnabled(
           features::kAutofillEnableSupportForMoreStructureInAddresses)) {
     sql::Statement s(db->GetUniqueStatement(
         "INSERT INTO autofill_profile_addresses "
@@ -386,8 +381,6 @@ bool AddAutofillProfileNamesToProfile(sql::Database* db,
 bool AddAutofillProfileAddressesToProfile(sql::Database* db,
                                           AutofillProfile* profile) {
   if (base::FeatureList::IsEnabled(
-          features::kAutofillAddressEnhancementVotes) ||
-      base::FeatureList::IsEnabled(
           features::kAutofillEnableSupportForMoreStructureInAddresses)) {
     sql::Statement s(db->GetUniqueStatement(
         "SELECT "
@@ -526,6 +519,31 @@ bool AddAutofillProfilePhonesToProfile(sql::Database* db,
   }
   return s.Succeeded();
 }
+
+bool AddAutofillProfileBirthdateToProfile(sql::Database* db,
+                                          AutofillProfile* profile) {
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillEnableCompatibilitySupportForBirthdates)) {
+    return true;
+  }
+
+  sql::Statement s(db->GetUniqueStatement(
+      "SELECT guid, day, month, year FROM autofill_profile_birthdates WHERE "
+      "guid=? LIMIT 1"));
+  s.BindString(0, profile->guid());
+
+  if (!s.is_valid())
+    return false;
+
+  if (s.Step()) {
+    DCHECK_EQ(profile->guid(), s.ColumnString(0));
+    profile->SetRawInfoAsInt(BIRTHDATE_DAY, s.ColumnInt(1));
+    profile->SetRawInfoAsInt(BIRTHDATE_MONTH, s.ColumnInt(2));
+    profile->SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, s.ColumnInt(3));
+  }
+  return s.Succeeded();
+}
+
 bool AddAutofillProfileEmails(const AutofillProfile& profile,
                               sql::Database* db) {
   // Add the new email.
@@ -548,6 +566,25 @@ bool AddAutofillProfilePhones(const AutofillProfile& profile,
   return s.Run();
 }
 
+bool AddAutofillProfileBirthdate(const AutofillProfile& profile,
+                                 sql::Database* db) {
+  if (!base::FeatureList::IsEnabled(
+          features::kAutofillEnableCompatibilitySupportForBirthdates)) {
+    return true;
+  }
+
+  // Add the new birthdate.
+  sql::Statement s(
+      db->GetUniqueStatement("INSERT INTO autofill_profile_birthdates (guid, "
+                             "day, month, year) VALUES (?,?,?,?)"));
+  s.BindString(0, profile.guid());
+  s.BindInt(1, profile.GetRawInfoAsInt(BIRTHDATE_DAY));
+  s.BindInt(2, profile.GetRawInfoAsInt(BIRTHDATE_MONTH));
+  s.BindInt(3, profile.GetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS));
+
+  return s.Run();
+}
+
 bool AddAutofillProfilePieces(const AutofillProfile& profile,
                               sql::Database* db) {
   if (!AddAutofillProfileNames(profile, db))
@@ -560,6 +597,9 @@ bool AddAutofillProfilePieces(const AutofillProfile& profile,
     return false;
 
   if (!AddAutofillProfileAddresses(profile, db))
+    return false;
+
+  if (!AddAutofillProfileBirthdate(profile, db))
     return false;
 
   return true;
@@ -591,7 +631,14 @@ bool RemoveAutofillProfilePieces(const std::string& guid, sql::Database* db) {
       "DELETE FROM autofill_profile_addresses WHERE guid = ?"));
   s4.BindString(0, guid);
 
-  return s4.Run();
+  if (!s4.Run())
+    return false;
+
+  sql::Statement s5(db->GetUniqueStatement(
+      "DELETE FROM autofill_profile_birthdates WHERE guid = ?"));
+  s5.BindString(0, guid);
+
+  return s5.Run();
 }
 
 WebDatabaseTable::TypeKey GetKey() {
@@ -606,27 +653,6 @@ time_t GetEndTime(const base::Time& end) {
     return std::numeric_limits<time_t>::max();
 
   return end.ToTimeT();
-}
-
-std::string ServerStatusEnumToString(CreditCard::ServerStatus status) {
-  switch (status) {
-    case CreditCard::EXPIRED:
-      return "EXPIRED";
-
-    case CreditCard::OK:
-      return "OK";
-  }
-
-  NOTREACHED();
-  return "OK";
-}
-
-CreditCard::ServerStatus ServerStatusStringToEnum(const std::string& status) {
-  if (status == "EXPIRED")
-    return CreditCard::EXPIRED;
-
-  DCHECK_EQ("OK", status);
-  return CreditCard::OK;
 }
 
 // Returns |s| with |escaper| in front of each of occurrence of a character
@@ -676,14 +702,13 @@ bool AutofillTable::CreateTablesIfNecessary() {
   return (InitMainTable() && InitCreditCardsTable() && InitProfilesTable() &&
           InitProfileAddressesTable() && InitProfileNamesTable() &&
           InitProfileEmailsTable() && InitProfilePhonesTable() &&
-          InitProfileTrashTable() && InitMaskedCreditCardsTable() &&
+          InitProfileBirthdatesTable() && InitMaskedCreditCardsTable() &&
           InitUnmaskedCreditCardsTable() && InitServerCardMetadataTable() &&
           InitServerAddressesTable() && InitServerAddressMetadataTable() &&
           InitAutofillSyncMetadataTable() && InitModelTypeStateTable() &&
           InitPaymentsCustomerDataTable() && InitPaymentsUPIVPATable() &&
           InitServerCreditCardCloudTokenDataTable() && InitOfferDataTable() &&
-          InitOfferEligibleInstrumentTable() &&
-          InitOfferMerchantDomainTable() && InitCreditCardArtImagesTable());
+          InitOfferEligibleInstrumentTable() && InitOfferMerchantDomainTable());
 }
 
 bool AutofillTable::IsSyncable() {
@@ -797,7 +822,28 @@ bool AutofillTable::MigrateToVersion(int version,
       *update_compatible_version = false;
       return MigrateToVersion95AddVirtualCardMetadata();
     case 96:
+      *update_compatible_version = false;
       return MigrateToVersion96AddAutofillProfileDisallowConfirmableMergesColumn();
+    case 98:
+      *update_compatible_version = true;
+      return MigrateToVersion98RemoveStatusColumnMaskedCreditCards();
+    case 99:
+      *update_compatible_version = true;
+      return MigrateToVersion99RemoveAutofillProfilesTrashTable();
+    case 100:
+      *update_compatible_version = true;
+      return MigrateToVersion100RemoveProfileValidityBitfieldColumn();
+    case 101:
+      // update_compatible_version is set to false because this table is not
+      // used since M99.
+      *update_compatible_version = false;
+      return MigrateToVersion101RemoveCreditCardArtImageTable();
+    case 102:
+      *update_compatible_version = false;
+      return MigrateToVersion102AddAutofillBirthdatesTable();
+    case 104:
+      *update_compatible_version = false;
+      return MigrateToVersion104AddProductDescriptionColumn();
   }
   return true;
 }
@@ -972,8 +1018,7 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
       updates.push_back(updated_entry);
     }
 
-    tentative_changes.push_back(
-        AutofillChange(change_type, AutofillKey(name, value)));
+    tentative_changes.emplace_back(change_type, AutofillKey(name, value));
   }
   if (!s.Succeeded())
     return false;
@@ -988,15 +1033,15 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
     return false;
   if (!s_delete.Run())
     return false;
-  for (size_t i = 0; i < updates.size(); ++i) {
+  for (const auto& update : updates) {
     sql::Statement s_update(db_->GetUniqueStatement(
         "UPDATE autofill SET date_created = ?, date_last_used = ?, count = ?"
         "WHERE name = ? AND value = ?"));
-    s_update.BindInt64(0, updates[i].date_created);
-    s_update.BindInt64(1, updates[i].date_last_used);
-    s_update.BindInt(2, updates[i].count);
-    s_update.BindString16(3, updates[i].name);
-    s_update.BindString16(4, updates[i].value);
+    s_update.BindInt64(0, update.date_created);
+    s_update.BindInt64(1, update.date_last_used);
+    s_update.BindInt(2, update.count);
+    s_update.BindString16(3, update.name);
+    s_update.BindString16(4, update.value);
     if (!s_update.Run())
       return false;
   }
@@ -1009,11 +1054,10 @@ bool AutofillTable::RemoveFormElementsAddedBetween(
 
 bool AutofillTable::RemoveExpiredFormElements(
     std::vector<AutofillChange>* changes) {
-  const int64_t period = kAutocompleteRetentionPolicyPeriodInDays;
   const auto change_type = AutofillChange::EXPIRE;
 
   base::Time expiration_time =
-      AutofillClock::Now() - base::TimeDelta::FromDays(period);
+      AutofillClock::Now() - kAutocompleteRetentionPolicyPeriod;
 
   // Query for the name and value of all form elements that were last used
   // before the |expiration_time|.
@@ -1024,8 +1068,7 @@ bool AutofillTable::RemoveExpiredFormElements(
   while (select_for_delete.Step()) {
     std::u16string name = select_for_delete.ColumnString16(0);
     std::u16string value = select_for_delete.ColumnString16(1);
-    tentative_changes.push_back(
-        AutofillChange(change_type, AutofillKey(name, value)));
+    tentative_changes.emplace_back(change_type, AutofillKey(name, value));
   }
 
   if (!select_for_delete.Succeeded())
@@ -1113,18 +1156,18 @@ bool AutofillTable::UpdateAutofillEntries(
     return true;
 
   // Remove all existing entries.
-  for (size_t i = 0; i < entries.size(); ++i) {
+  for (const auto& entry : entries) {
     sql::Statement s(db_->GetUniqueStatement(
         "DELETE FROM autofill WHERE name = ? AND value = ?"));
-    s.BindString16(0, entries[i].key().name());
-    s.BindString16(1, entries[i].key().value());
+    s.BindString16(0, entry.key().name());
+    s.BindString16(1, entry.key().value());
     if (!s.Run())
       return false;
   }
 
   // Insert all the supplied autofill entries.
-  for (size_t i = 0; i < entries.size(); ++i) {
-    if (!InsertAutofillEntry(entries[i]))
+  for (const auto& entry : entries) {
+    if (!InsertAutofillEntry(entry))
       return false;
   }
 
@@ -1132,17 +1175,13 @@ bool AutofillTable::UpdateAutofillEntries(
 }
 
 bool AutofillTable::AddAutofillProfile(const AutofillProfile& profile) {
-  if (IsAutofillGUIDInTrash(profile.guid()))
-    return true;
-
   sql::Statement s(db_->GetUniqueStatement(
       "INSERT INTO autofill_profiles"
       "(guid, company_name, street_address, dependent_locality, city, state,"
       " zipcode, sorting_code, country_code, use_count, use_date, "
-      " date_modified, origin, language_code, validity_bitfield, "
-      " is_client_validity_states_updated, label, "
-      " disallow_settings_visible_updates) "
-      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
+      " date_modified, origin, language_code, "
+      " label, disallow_settings_visible_updates) "
+      "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"));
   BindAutofillProfileToStatement(profile, AutofillClock::Now(), &s);
 
   if (!s.Run())
@@ -1153,11 +1192,6 @@ bool AutofillTable::AddAutofillProfile(const AutofillProfile& profile) {
 
 bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
   DCHECK(base::IsValidGUID(profile.guid()));
-
-  // Don't update anything until the trash has been emptied.  There may be
-  // pending modifications to process.
-  if (!IsAutofillProfilesTrashEmpty())
-    return true;
 
   std::unique_ptr<AutofillProfile> old_profile =
       GetAutofillProfile(profile.guid());
@@ -1171,16 +1205,14 @@ bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
       "SET guid=?, company_name=?, street_address=?, dependent_locality=?, "
       "    city=?, state=?, zipcode=?, sorting_code=?, country_code=?, "
       "    use_count=?, use_date=?, date_modified=?, origin=?, "
-      "    language_code=?, validity_bitfield=?, "
-      "    is_client_validity_states_updated=?, "
-      "    label=?, disallow_settings_visible_updates=? "
+      "    language_code=?, label=?, disallow_settings_visible_updates=? "
       "WHERE guid=?"));
   BindAutofillProfileToStatement(profile,
                                  update_modification_date
                                      ? AutofillClock::Now()
                                      : old_profile->modification_date(),
                                  &s);
-  s.BindString(18, profile.guid());
+  s.BindString(16, profile.guid());
 
   bool result = s.Run();
   DCHECK_GT(db_->GetLastChangeCount(), 0);
@@ -1196,17 +1228,6 @@ bool AutofillTable::UpdateAutofillProfile(const AutofillProfile& profile) {
 
 bool AutofillTable::RemoveAutofillProfile(const std::string& guid) {
   DCHECK(base::IsValidGUID(guid));
-
-  if (IsAutofillGUIDInTrash(guid)) {
-    sql::Statement s_trash(db_->GetUniqueStatement(
-        "DELETE FROM autofill_profiles_trash WHERE guid = ?"));
-    s_trash.BindString(0, guid);
-
-    bool success = s_trash.Run();
-    DCHECK_GT(db_->GetLastChangeCount(), 0) << "Expected item in trash";
-    return success;
-  }
-
   sql::Statement s(
       db_->GetUniqueStatement("DELETE FROM autofill_profiles WHERE guid = ?"));
   s.BindString(0, guid);
@@ -1223,8 +1244,7 @@ std::unique_ptr<AutofillProfile> AutofillTable::GetAutofillProfile(
   sql::Statement s(db_->GetUniqueStatement(
       "SELECT guid, company_name, street_address, dependent_locality, city,"
       " state, zipcode, sorting_code, country_code, use_count, use_date,"
-      " date_modified, origin, language_code, validity_bitfield,"
-      " is_client_validity_states_updated, label,"
+      " date_modified, origin, language_code, label,"
       " disallow_settings_visible_updates "
       "FROM autofill_profiles "
       "WHERE guid=?"));
@@ -1246,18 +1266,17 @@ std::unique_ptr<AutofillProfile> AutofillTable::GetAutofillProfile(
   // Get associated phone info using guid.
   AddAutofillProfilePhonesToProfile(db_, profile.get());
 
+  // Get associated birthdate info using guid.
+  AddAutofillProfileBirthdateToProfile(db_, profile.get());
+
   // The details should be added after the other info to make sure they don't
   // change when we change the names/emails/phones.
   AddAutofillProfileDetailsFromStatement(s, profile.get());
-  bool validation_status = profile->is_client_validity_states_updated();
 
   // The structured address information should be added after the street_address
   // from the query above was  written because this information is used to
   // detect changes by a legacy client.
   AddAutofillProfileAddressesToProfile(db_, profile.get());
-  // Set the validation status again to prevent a change due to the repeated
-  // writing.
-  profile->set_is_client_validity_states_updated(validation_status);
 
   // For more-structured profiles, the profile must be finalized to fully
   // populate the name fields.
@@ -1544,17 +1563,17 @@ bool AutofillTable::GetServerCreditCards(
       "metadata.use_count,"              // 3
       "metadata.use_date,"               // 4
       "network,"                         // 5
-      "status,"                          // 6
-      "name_on_card,"                    // 7
-      "exp_month,"                       // 8
-      "exp_year,"                        // 9
-      "metadata.billing_address_id,"     // 10
-      "bank_name,"                       // 11
-      "nickname,"                        // 12
-      "card_issuer,"                     // 13
-      "instrument_id, "                  // 14
-      "virtual_card_enrollment_state, "  // 15
-      "card_art_url "                    // 16
+      "name_on_card,"                    // 6
+      "exp_month,"                       // 7
+      "exp_year,"                        // 8
+      "metadata.billing_address_id,"     // 9
+      "bank_name,"                       // 10
+      "nickname,"                        // 11
+      "card_issuer,"                     // 12
+      "instrument_id, "                  // 13
+      "virtual_card_enrollment_state, "  // 14
+      "card_art_url, "                   // 15
+      "product_description "             // 16
       "FROM masked_credit_cards masked "
       "LEFT OUTER JOIN unmasked_credit_cards USING (id) "
       "LEFT OUTER JOIN server_card_metadata metadata USING (id)"));
@@ -1591,7 +1610,6 @@ bool AutofillTable::GetServerCreditCards(
       DCHECK_EQ(CreditCard::GetCardNetwork(full_card_number), card_network);
     }
 
-    card->SetServerStatus(ServerStatusStringToEnum(s.ColumnString(index++)));
     card->SetRawInfo(CREDIT_CARD_NAME_FULL, s.ColumnString16(index++));
     card->SetRawInfo(CREDIT_CARD_EXP_MONTH, s.ColumnString16(index++));
     card->SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, s.ColumnString16(index++));
@@ -1605,6 +1623,7 @@ bool AutofillTable::GetServerCreditCards(
         static_cast<CreditCard::VirtualCardEnrollmentState>(
             s.ColumnInt(index++)));
     card->set_card_art_url(GURL(s.ColumnString(index++)));
+    card->set_product_description(s.ColumnString16(index++));
     credit_cards->push_back(std::move(card));
   }
   return s.Succeeded();
@@ -1857,17 +1876,17 @@ void AutofillTable::SetServerCardsData(
       db_->GetUniqueStatement("INSERT INTO masked_credit_cards("
                               "id,"                             // 0
                               "network,"                        // 1
-                              "status,"                         // 2
-                              "name_on_card,"                   // 3
-                              "last_four,"                      // 4
-                              "exp_month,"                      // 5
-                              "exp_year,"                       // 6
-                              "bank_name,"                      // 7
-                              "nickname,"                       // 8
-                              "card_issuer,"                    // 9
-                              "instrument_id,"                  // 10
-                              "virtual_card_enrollment_state,"  // 11
-                              "card_art_url) "                  // 12
+                              "name_on_card,"                   // 2
+                              "last_four,"                      // 3
+                              "exp_month,"                      // 4
+                              "exp_year,"                       // 5
+                              "bank_name,"                      // 6
+                              "nickname,"                       // 7
+                              "card_issuer,"                    // 8
+                              "instrument_id,"                  // 9
+                              "virtual_card_enrollment_state,"  // 10
+                              "card_art_url,"                   // 11
+                              "product_description) "           // 12
                               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"));
   int index;
   for (const CreditCard& card : credit_cards) {
@@ -1875,8 +1894,6 @@ void AutofillTable::SetServerCardsData(
     index = 0;
     masked_insert.BindString(index++, card.server_id());
     masked_insert.BindString(index++, card.network());
-    masked_insert.BindString(index++,
-                             ServerStatusEnumToString(card.GetServerStatus()));
     masked_insert.BindString16(index++, card.GetRawInfo(CREDIT_CARD_NAME_FULL));
     masked_insert.BindString16(index++, card.LastFourDigits());
     masked_insert.BindString16(index++, card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
@@ -1889,6 +1906,7 @@ void AutofillTable::SetServerCardsData(
     masked_insert.BindInt(
         index++, static_cast<int>(card.virtual_card_enrollment_state()));
     masked_insert.BindString(index++, card.card_art_url().spec());
+    masked_insert.BindString16(index++, card.product_description());
     masked_insert.Run();
     masked_insert.Reset(true);
   }
@@ -2151,7 +2169,7 @@ bool AutofillTable::GetAutofillOffers(
     data->offer_id = s.ColumnInt64(index++);
     data->offer_reward_amount = s.ColumnString(index++);
     data->expiry = base::Time::FromDeltaSinceWindowsEpoch(
-        base::TimeDelta::FromMilliseconds(s.ColumnInt64(index++)));
+        base::Milliseconds(s.ColumnInt64(index++)));
     data->offer_details_url = GURL(s.ColumnString(index++));
     data->promo_code = s.ColumnString(index++);
     data->display_strings.value_prop_text = s.ColumnString(index++);
@@ -2272,11 +2290,6 @@ bool AutofillTable::ClearAllServerData() {
   sql::Statement autofill_offer_merchant_domain(
       db_->GetUniqueStatement("DELETE FROM offer_merchant_domain"));
   autofill_offer_merchant_domain.Run();
-  changed |= db_->GetLastChangeCount() > 0;
-
-  sql::Statement credit_card_art_images(
-      db_->GetUniqueStatement("DELETE FROM credit_card_art_images"));
-  credit_card_art_images.Run();
   changed |= db_->GetLastChangeCount() > 0;
 
   transaction.Commit();
@@ -2474,7 +2487,13 @@ bool AutofillTable::ClearAutofillProfiles() {
   sql::Statement s5(
       db_->GetUniqueStatement("DELETE FROM autofill_profile_phones"));
 
-  return s5.Run();
+  if (!s5.Run())
+    return false;
+
+  sql::Statement s6(
+      db_->GetUniqueStatement("DELETE FROM autofill_profile_birthdates"));
+
+  return s6.Run();
 }
 
 bool AutofillTable::ClearCreditCards() {
@@ -2565,7 +2584,8 @@ bool AutofillTable::RemoveOrphanAutofillTableRows() {
       "SELECT guid FROM (SELECT guid FROM autofill_profile_names UNION SELECT "
       "guid FROM autofill_profile_emails UNION SELECT guid FROM "
       "autofill_profile_phones UNION SELECT guid FROM "
-      "autofill_profile_addresses) "
+      "autofill_profile_addresses UNION SELECT guid FROM "
+      "autofill_profile_birthdates) "
       "WHERE guid NOT IN (SELECT guid FROM "
       "autofill_profiles)"));
 
@@ -3500,9 +3520,6 @@ bool AutofillTable::MigrateToVersion95AddVirtualCardMetadata() {
   if (!db_->DoesTableExist("masked_credit_cards"))
     InitMaskedCreditCardsTable();
 
-  if (!db_->DoesTableExist("credit_card_art_images"))
-    InitCreditCardArtImagesTable();
-
   // Add virtual_card_enrollment_state to masked_credit_cards.
   if (!db_->DoesColumnExist("masked_credit_cards",
                             "virtual_card_enrollment_state") &&
@@ -3515,6 +3532,120 @@ bool AutofillTable::MigrateToVersion95AddVirtualCardMetadata() {
   if (!db_->DoesColumnExist("masked_credit_cards", "card_art_url") &&
       !db_->Execute("ALTER TABLE masked_credit_cards ADD COLUMN "
                     "card_art_url VARCHAR")) {
+    return false;
+  }
+
+  return transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion98RemoveStatusColumnMaskedCreditCards() {
+  // Sqlite does not support "alter table drop column" syntax, so it has be done
+  // manually.
+  sql::Transaction transaction(db_);
+  return transaction.Begin() &&
+         db_->Execute(
+             "CREATE TABLE masked_credit_cards_temp ("
+             "id VARCHAR,"
+             "name_on_card VARCHAR,"
+             "network VARCHAR,"
+             "last_four VARCHAR,"
+             "exp_month INTEGER DEFAULT 0,"
+             "exp_year INTEGER DEFAULT 0, "
+             "bank_name VARCHAR, "
+             "nickname VARCHAR, "
+             "card_issuer INTEGER DEFAULT 0, "
+             "instrument_id INTEGER DEFAULT 0, "
+             "virtual_card_enrollment_state INTEGER DEFAULT 0, "
+             "card_art_url VARCHAR)") &&
+         db_->Execute(
+             "INSERT INTO masked_credit_cards_temp "
+             "SELECT id, name_on_card, network, last_four, exp_month, "
+             "exp_year, bank_name, nickname, card_issuer, instrument_id, "
+             "virtual_card_enrollment_state, card_art_url "
+             "FROM masked_credit_cards") &&
+         db_->Execute("DROP TABLE masked_credit_cards") &&
+         db_->Execute(
+             "ALTER TABLE masked_credit_cards_temp "
+             "RENAME TO masked_credit_cards") &&
+         transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion99RemoveAutofillProfilesTrashTable() {
+  sql::Transaction transaction(db_);
+  return transaction.Begin() &&
+         db_->Execute("DROP TABLE autofill_profiles_trash") &&
+         transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion100RemoveProfileValidityBitfieldColumn() {
+  // Sqlite does not support "alter table drop column" syntax, so it has be done
+  // manually.
+  sql::Transaction transaction(db_);
+
+  return transaction.Begin() &&
+         db_->Execute(
+             "CREATE TABLE autofill_profiles_tmp ( "
+             "guid VARCHAR PRIMARY KEY, "
+             "company_name VARCHAR, "
+             "street_address VARCHAR, "
+             "dependent_locality VARCHAR, "
+             "city VARCHAR, "
+             "state VARCHAR, "
+             "zipcode VARCHAR, "
+             "sorting_code VARCHAR, "
+             "country_code VARCHAR, "
+             "date_modified INTEGER NOT NULL DEFAULT 0, "
+             "origin VARCHAR DEFAULT '', "
+             "language_code VARCHAR, "
+             "use_count INTEGER NOT NULL DEFAULT 0, "
+             "use_date INTEGER NOT NULL DEFAULT 0, "
+             "label VARCHAR, "
+             "disallow_settings_visible_updates INTEGER NOT NULL DEFAULT 0)") &&
+         db_->Execute(
+             "INSERT INTO autofill_profiles_tmp "
+             "SELECT guid, company_name, street_address, dependent_locality, "
+             "city, state, zipcode, sorting_code, country_code, date_modified, "
+             "origin, language_code, use_count, use_date, label, "
+             "disallow_settings_visible_updates "
+             " FROM autofill_profiles") &&
+         db_->Execute("DROP TABLE autofill_profiles") &&
+         db_->Execute(
+             "ALTER TABLE autofill_profiles_tmp "
+             "RENAME TO autofill_profiles") &&
+         transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion101RemoveCreditCardArtImageTable() {
+  sql::Transaction transaction(db_);
+  return transaction.Begin() &&
+         db_->Execute("DROP TABLE IF EXISTS credit_card_art_images") &&
+         transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion102AddAutofillBirthdatesTable() {
+  sql::Transaction transaction(db_);
+  return transaction.Begin() &&
+         db_->Execute(
+             "CREATE TABLE autofill_profile_birthdates ( "
+             "guid VARCHAR, "
+             "day INTEGER DEFAULT 0, "
+             "month INTEGER DEFAULT 0, "
+             "year INTEGER DEFAULT 0)") &&
+         transaction.Commit();
+}
+
+bool AutofillTable::MigrateToVersion104AddProductDescriptionColumn() {
+  sql::Transaction transaction(db_);
+  if (!transaction.Begin())
+    return false;
+
+  if (!db_->DoesTableExist("masked_credit_cards"))
+    InitMaskedCreditCardsTable();
+
+  // Add product_description to masked_credit_cards.
+  if (!db_->DoesColumnExist("masked_credit_cards", "product_description") &&
+      !db_->Execute("ALTER TABLE masked_credit_cards ADD COLUMN "
+                    "product_description VARCHAR")) {
     return false;
   }
 
@@ -3661,21 +3792,6 @@ bool AutofillTable::InsertAutofillEntry(const AutofillEntry& entry) {
   return s.Run();
 }
 
-bool AutofillTable::IsAutofillProfilesTrashEmpty() {
-  sql::Statement s(
-      db_->GetUniqueStatement("SELECT guid FROM autofill_profiles_trash"));
-
-  return !s.Step();
-}
-
-bool AutofillTable::IsAutofillGUIDInTrash(const std::string& guid) {
-  sql::Statement s(db_->GetUniqueStatement(
-      "SELECT guid FROM autofill_profiles_trash WHERE guid = ?"));
-  s.BindString(0, guid);
-
-  return s.Step();
-}
-
 void AutofillTable::AddMaskedCreditCards(
     const std::vector<CreditCard>& credit_cards) {
   DCHECK_GT(db_->transaction_nesting(), 0);
@@ -3683,17 +3799,17 @@ void AutofillTable::AddMaskedCreditCards(
       db_->GetUniqueStatement("INSERT INTO masked_credit_cards("
                               "id,"                              // 0
                               "network,"                         // 1
-                              "status,"                          // 2
-                              "name_on_card,"                    // 3
-                              "last_four,"                       // 4
-                              "exp_month,"                       // 5
-                              "exp_year,"                        // 6
-                              "bank_name,"                       // 7
-                              "nickname,"                        // 8
-                              "card_issuer,"                     // 9
-                              "instrument_id,"                   // 10
-                              "virtual_card_enrollment_state, "  // 11
-                              "card_art_url) "                   // 12
+                              "name_on_card,"                    // 2
+                              "last_four,"                       // 3
+                              "exp_month,"                       // 4
+                              "exp_year,"                        // 5
+                              "bank_name,"                       // 6
+                              "nickname,"                        // 7
+                              "card_issuer,"                     // 8
+                              "instrument_id,"                   // 9
+                              "virtual_card_enrollment_state, "  // 10
+                              "card_art_url, "                   // 11
+                              "product_description )"            // 12
                               "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"));
   int index;
   for (const CreditCard& card : credit_cards) {
@@ -3701,8 +3817,6 @@ void AutofillTable::AddMaskedCreditCards(
     index = 0;
     masked_insert.BindString(index++, card.server_id());
     masked_insert.BindString(index++, card.network());
-    masked_insert.BindString(index++,
-                             ServerStatusEnumToString(card.GetServerStatus()));
     masked_insert.BindString16(index++, card.GetRawInfo(CREDIT_CARD_NAME_FULL));
     masked_insert.BindString16(index++, card.LastFourDigits());
     masked_insert.BindString16(index++, card.GetRawInfo(CREDIT_CARD_EXP_MONTH));
@@ -3714,6 +3828,7 @@ void AutofillTable::AddMaskedCreditCards(
     masked_insert.BindInt64(index++, card.instrument_id());
     masked_insert.BindInt(index++, card.virtual_card_enrollment_state());
     masked_insert.BindString(index++, card.card_art_url().spec());
+    masked_insert.BindString16(index++, card.product_description());
     masked_insert.Run();
     masked_insert.Reset(true);
 
@@ -3816,9 +3931,6 @@ bool AutofillTable::InitProfilesTable() {
             "language_code VARCHAR, "
             "use_count INTEGER NOT NULL DEFAULT 0, "
             "use_date INTEGER NOT NULL DEFAULT 0, "
-            "validity_bitfield UNSIGNED NOT NULL DEFAULT 0, "
-            "is_client_validity_states_updated BOOL NOT NULL DEFAULT "
-            "FALSE, "
             "label VARCHAR, "
             "disallow_settings_visible_updates INTEGER NOT NULL DEFAULT 0)")) {
       NOTREACHED();
@@ -3925,10 +4037,13 @@ bool AutofillTable::InitProfilePhonesTable() {
   return true;
 }
 
-bool AutofillTable::InitProfileTrashTable() {
-  if (!db_->DoesTableExist("autofill_profiles_trash")) {
-    if (!db_->Execute("CREATE TABLE autofill_profiles_trash ( "
-                      "guid VARCHAR)")) {
+bool AutofillTable::InitProfileBirthdatesTable() {
+  if (!db_->DoesTableExist("autofill_profile_birthdates")) {
+    if (!db_->Execute("CREATE TABLE autofill_profile_birthdates ( "
+                      "guid VARCHAR, "
+                      "day INTEGER DEFAULT 0, "
+                      "month INTEGER DEFAULT 0, "
+                      "year INTEGER DEFAULT 0)")) {
       NOTREACHED();
       return false;
     }
@@ -3940,7 +4055,6 @@ bool AutofillTable::InitMaskedCreditCardsTable() {
   if (!db_->DoesTableExist("masked_credit_cards")) {
     if (!db_->Execute("CREATE TABLE masked_credit_cards ("
                       "id VARCHAR,"
-                      "status VARCHAR,"
                       "name_on_card VARCHAR,"
                       "network VARCHAR,"
                       "last_four VARCHAR,"
@@ -3951,7 +4065,8 @@ bool AutofillTable::InitMaskedCreditCardsTable() {
                       "card_issuer INTEGER DEFAULT 0, "
                       "instrument_id INTEGER DEFAULT 0, "
                       "virtual_card_enrollment_state INTEGER DEFAULT 0, "
-                      "card_art_url VARCHAR)")) {
+                      "card_art_url VARCHAR, "
+                      "product_description VARCHAR)")) {
       NOTREACHED();
       return false;
     }
@@ -4124,19 +4239,6 @@ bool AutofillTable::InitOfferMerchantDomainTable() {
     if (!db_->Execute("CREATE TABLE offer_merchant_domain ( "
                       "offer_id UNSIGNED LONG,"
                       "merchant_domain VARCHAR)")) {
-      NOTREACHED();
-      return false;
-    }
-  }
-  return true;
-}
-
-bool AutofillTable::InitCreditCardArtImagesTable() {
-  if (!db_->DoesTableExist("credit_card_art_images")) {
-    if (!db_->Execute("CREATE TABLE credit_card_art_images ( "
-                      "id VARCHAR NOT NULL DEFAULT 0, "
-                      "instrument_id INTEGER DEFAULT 0, "
-                      "card_art_image BLOB)")) {
       NOTREACHED();
       return false;
     }

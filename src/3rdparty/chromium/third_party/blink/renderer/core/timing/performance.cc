@@ -38,6 +38,7 @@
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/blink/public/mojom/permissions_policy/document_policy_feature.mojom-blink.h"
 #include "third_party/blink/public/mojom/timing/worker_timing_container.mojom-blink-forward.h"
 #include "third_party/blink/public/platform/platform.h"
@@ -53,6 +54,7 @@
 #include "third_party/blink/renderer/core/dom/document_timing.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -76,7 +78,7 @@
 #include "third_party/blink/renderer/core/timing/profiler.h"
 #include "third_party/blink/renderer/core/timing/profiler_group.h"
 #include "third_party/blink/renderer/core/timing/time_clamper.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_timing.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
@@ -117,6 +119,7 @@ void RecordLongTaskUkm(ExecutionContext* execution_context,
                        base::TimeDelta duration) {
   v8::metrics::LongTaskStats stats =
       v8::metrics::LongTaskStats::Get(execution_context->GetIsolate());
+  // TODO(cbruni, 1275056): Filter out stats without v8_execute_us.
   ukm::builders::PerformanceAPI_LongTask(execution_context->UkmSourceID())
       .SetStartTime(start_time.InMilliseconds())
       .SetDuration(duration.InMicroseconds())
@@ -128,8 +131,14 @@ void RecordLongTaskUkm(ExecutionContext* execution_context,
       .SetDuration_V8_GC_Full_Incremental(
           stats.gc_full_incremental_wall_clock_duration_us)
       .SetDuration_V8_GC_Young(stats.gc_young_wall_clock_duration_us)
+      .SetDuration_V8_Execute(stats.v8_execute_us)
       .Record(execution_context->UkmRecorder());
 }
+
+PerformanceEntry::EntryType kDroppableEntryTypes[] = {
+    PerformanceEntry::kResource,    PerformanceEntry::kLongTask,
+    PerformanceEntry::kElement,     PerformanceEntry::kEvent,
+    PerformanceEntry::kLayoutShift, PerformanceEntry::kLargestContentfulPaint};
 
 }  // namespace
 
@@ -169,6 +178,11 @@ Performance::Performance(
   if (context) {
     background_tracing_helper_ =
         MakeGarbageCollected<BackgroundTracingHelper>(context);
+  }
+  // Initialize the map of dropped entry types only with those which could be
+  // dropped (saves some unnecessary 0s).
+  for (const auto type : kDroppableEntryTypes) {
+    dropped_entries_count_map_.insert(type, 0);
   }
 }
 
@@ -551,16 +565,6 @@ mojom::blink::ResourceTimingInfoPtr Performance::GenerateResourceTiming(
       result->allow_redirect_details = false;
       result->last_redirect_end_time = base::TimeTicks();
     }
-    if (!result->allow_redirect_details) {
-      // TODO(https://crbug.com/817691): There was previously a DCHECK that
-      // |final_timing| is non-null. However, it clearly can be null: removing
-      // this check caused https://crbug.com/803811. Figure out how this can
-      // happen so test coverage can be added.
-      if (ResourceLoadTiming* final_timing =
-              final_response.GetResourceLoadTiming()) {
-        result->start_time = final_timing->RequestTime();
-      }
-    }
   } else {
     result->allow_redirect_details = false;
     result->last_redirect_end_time = base::TimeTicks();
@@ -604,6 +608,12 @@ void Performance::AddResourceTiming(
     resource_timing_buffer_.push_back(entry);
     return;
   }
+  // The Resource Timing entries have a special processing model in which there
+  // is a secondary buffer but getting those entries requires handling the
+  // buffer full event, and the PerformanceObserver with buffered flag only
+  // receives the entries from the primary buffer, so it's ok to increase
+  // the dropped entries count here.
+  ++(dropped_entries_count_map_.find(PerformanceEntry::kResource)->value);
   if (!resource_timing_buffer_full_event_pending_) {
     resource_timing_buffer_full_event_pending_ = true;
     resource_timing_buffer_full_timer_.StartOneShot(base::TimeDelta(),
@@ -676,19 +686,26 @@ void Performance::FireResourceTimingBufferFull(TimerBase*) {
 void Performance::AddElementTimingBuffer(PerformanceElementTiming& entry) {
   if (!IsElementTimingBufferFull()) {
     element_timing_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kElement)->value);
   }
 }
 
 void Performance::AddEventTimingBuffer(PerformanceEventTiming& entry) {
   if (!IsEventTimingBufferFull()) {
     event_timing_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kEvent)->value);
   }
 }
 
 void Performance::AddLayoutShiftBuffer(LayoutShift& entry) {
   probe::PerformanceEntryAdded(GetExecutionContext(), &entry);
-  if (layout_shift_buffer_.size() < kDefaultLayoutShiftBufferSize)
+  if (layout_shift_buffer_.size() < kDefaultLayoutShiftBufferSize) {
     layout_shift_buffer_.push_back(&entry);
+  } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kLayoutShift)->value);
+  }
 }
 
 void Performance::AddLargestContentfulPaint(LargestContentfulPaint* entry) {
@@ -696,6 +713,10 @@ void Performance::AddLargestContentfulPaint(LargestContentfulPaint* entry) {
   if (largest_contentful_paint_buffer_.size() <
       kDefaultLargestContenfulPaintSize) {
     largest_contentful_paint_buffer_.push_back(entry);
+  } else {
+    ++(dropped_entries_count_map_
+           .find(PerformanceEntry::kLargestContentfulPaint)
+           ->value);
   }
 }
 
@@ -745,13 +766,13 @@ void Performance::AddLongTaskTiming(base::TimeTicks start_time,
   if (longtask_buffer_.size() < kDefaultLongTaskBufferSize) {
     longtask_buffer_.push_back(entry);
   } else {
+    ++(dropped_entries_count_map_.find(PerformanceEntry::kLongTask)->value);
     UseCounter::Count(execution_context, WebFeature::kLongTaskBufferFull);
   }
   if ((++long_task_counter_ % kLongTaskUkmSampleInterval) == 0) {
-    RecordLongTaskUkm(
-        execution_context,
-        base::TimeDelta::FromMillisecondsD(dom_high_res_start_time),
-        end_time - start_time);
+    RecordLongTaskUkm(execution_context,
+                      base::Milliseconds(dom_high_res_start_time),
+                      end_time - start_time);
   }
   NotifyObserversOfEntry(*entry);
 }
@@ -788,8 +809,8 @@ PerformanceMark* Performance::mark(ScriptState* script_state,
             ->Loader()
             .GetDocumentLoader()
             ->GetTiming()
-            .SetUserTimingMarkFullyLoaded(base::TimeDelta::FromMillisecondsD(
-                performance_mark->startTime()));
+            .SetUserTimingMarkFullyLoaded(
+                base::Milliseconds(performance_mark->startTime()));
       }
     } else if (mark_name == mark_fully_visible) {
       if (LocalDOMWindow* window = LocalDOMWindow::From(script_state)) {
@@ -797,8 +818,8 @@ PerformanceMark* Performance::mark(ScriptState* script_state,
             ->Loader()
             .GetDocumentLoader()
             ->GetTiming()
-            .SetUserTimingMarkFullyVisible(base::TimeDelta::FromMillisecondsD(
-                performance_mark->startTime()));
+            .SetUserTimingMarkFullyVisible(
+                base::Milliseconds(performance_mark->startTime()));
       }
     } else if (mark_name == mark_interactive) {
       if (LocalDOMWindow* window = LocalDOMWindow::From(script_state)) {
@@ -806,8 +827,8 @@ PerformanceMark* Performance::mark(ScriptState* script_state,
             ->Loader()
             .GetDocumentLoader()
             ->GetTiming()
-            .SetUserTimingMarkInteractive(base::TimeDelta::FromMillisecondsD(
-                performance_mark->startTime()));
+            .SetUserTimingMarkInteractive(
+                base::Milliseconds(performance_mark->startTime()));
       }
     }
     NotifyObserversOfEntry(*performance_mark);
@@ -1005,8 +1026,21 @@ void Performance::SuspendObserver(PerformanceObserver& observer) {
 void Performance::DeliverObservationsTimerFired(TimerBase*) {
   decltype(active_observers_) observers;
   active_observers_.Swap(observers);
-  for (const auto& observer : observers)
-    observer->Deliver();
+  for (const auto& observer : observers) {
+    observer->Deliver(observer->RequiresDroppedEntries()
+                          ? absl::optional<int>(GetDroppedEntriesForTypes(
+                                observer->FilterOptions()))
+                          : absl::nullopt);
+  }
+}
+
+int Performance::GetDroppedEntriesForTypes(PerformanceEntryTypeMask types) {
+  int dropped_count = 0;
+  for (const auto type : kDroppableEntryTypes) {
+    if (types & type)
+      dropped_count += dropped_entries_count_map_.at(type);
+  }
+  return dropped_count;
 }
 
 // static
@@ -1044,7 +1078,7 @@ base::TimeDelta Performance::MonotonicTimeToTimeDelta(
     base::TimeTicks monotonic_time,
     bool allow_negative_value,
     bool cross_origin_isolated_capability) {
-  return base::TimeDelta::FromMillisecondsD(MonotonicTimeToDOMHighResTimeStamp(
+  return base::Milliseconds(MonotonicTimeToDOMHighResTimeStamp(
       time_origin, monotonic_time, allow_negative_value,
       cross_origin_isolated_capability));
 }

@@ -24,6 +24,9 @@ const char kU2FHasLegacyCredentials[] = "HasLegacyCredentials";
 const char kU2FCancelWebAuthnFlow[] = "CancelWebAuthnFlow";
 const char kU2FIsUvpaa[] = "IsUvpaa";
 const char kU2FIsU2fEnabled[] = "IsU2fEnabled";
+const char kU2FCountCredentialsInTimeRange[] = "CountCredentialsInTimeRange";
+const char kU2FDeleteCredentialsInTimeRange[] = "DeleteCredentialsInTimeRange";
+const char kU2FGetAlgorithms[] = "GetAlgorithms";
 
 }  // namespace u2f
 

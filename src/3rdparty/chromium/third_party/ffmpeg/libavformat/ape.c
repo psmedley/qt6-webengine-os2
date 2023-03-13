@@ -331,7 +331,7 @@ static int ape_read_header(AVFormatContext * s)
     st->codecpar->codec_type      = AVMEDIA_TYPE_AUDIO;
     st->codecpar->codec_id        = AV_CODEC_ID_APE;
     st->codecpar->codec_tag       = MKTAG('A', 'P', 'E', ' ');
-    st->codecpar->channels        = ape->channels;
+    st->codecpar->ch_layout.nb_channels = ape->channels;
     st->codecpar->sample_rate     = ape->samplerate;
     st->codecpar->bits_per_coded_sample = ape->bps;
 
@@ -434,7 +434,7 @@ static int ape_read_seek(AVFormatContext *s, int stream_index, int64_t timestamp
     if (index < 0)
         return -1;
 
-    if ((ret = avio_seek(s->pb, st->internal->index_entries[index].pos, SEEK_SET)) < 0)
+    if ((ret = avio_seek(s->pb, ffstream(st)->index_entries[index].pos, SEEK_SET)) < 0)
         return ret;
     ape->currentframe = index;
     return 0;

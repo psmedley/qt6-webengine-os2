@@ -48,28 +48,30 @@ interface EditableProperty {
 }
 
 export class PropertySelectedEvent extends Event {
+  static readonly eventName = 'propertyselected';
   data: {name: string, value: string};
 
   constructor(name: string, value: string) {
-    super('propertyselected', {});
+    super(PropertySelectedEvent.eventName, {});
     this.data = {name, value};
   }
 }
 
 export class PropertyDeselectedEvent extends Event {
+  static readonly eventName = 'propertydeselected';
   data: {name: string, value: string};
 
   constructor(name: string, value: string) {
-    super('propertydeselected', {});
+    super(PropertyDeselectedEvent.eventName, {});
     this.data = {name, value};
   }
 }
 
 // eslint-disable-next-line rulesdir/check_component_naming
 export class StylePropertyEditor extends HTMLElement {
-  private readonly shadow = this.attachShadow({mode: 'open'});
-  private authoredProperties: Map<string, string> = new Map();
-  private computedProperties: Map<string, string> = new Map();
+  readonly #shadow = this.attachShadow({mode: 'open'});
+  #authoredProperties: Map<string, string> = new Map();
+  #computedProperties: Map<string, string> = new Map();
   protected readonly editableProperties: EditableProperty[] = [];
 
   constructor() {
@@ -77,7 +79,7 @@ export class StylePropertyEditor extends HTMLElement {
   }
 
   connectedCallback(): void {
-    this.shadow.adoptedStyleSheets = [stylePropertyEditorStyles];
+    this.#shadow.adoptedStyleSheets = [stylePropertyEditorStyles];
   }
 
   getEditableProperties(): EditableProperty[] {
@@ -85,28 +87,28 @@ export class StylePropertyEditor extends HTMLElement {
   }
 
   set data(data: FlexEditorData) {
-    this.authoredProperties = data.authoredProperties;
-    this.computedProperties = data.computedProperties;
-    this.render();
+    this.#authoredProperties = data.authoredProperties;
+    this.#computedProperties = data.computedProperties;
+    this.#render();
   }
 
-  private render(): void {
+  #render(): void {
     // Disabled until https://crbug.com/1079231 is fixed.
     // clang-format off
     render(html`
       <div class="container">
-        ${this.editableProperties.map(prop => this.renderProperty(prop))}
+        ${this.editableProperties.map(prop => this.#renderProperty(prop))}
       </div>
-    `, this.shadow, {
+    `, this.#shadow, {
       host: this,
     });
     // clang-format on
   }
 
-  private renderProperty(prop: EditableProperty): LitHtml.TemplateResult {
-    const authoredValue = this.authoredProperties.get(prop.propertyName);
+  #renderProperty(prop: EditableProperty): LitHtml.TemplateResult {
+    const authoredValue = this.#authoredProperties.get(prop.propertyName);
     const notAuthored = !authoredValue;
-    const shownValue = authoredValue || this.computedProperties.get(prop.propertyName);
+    const shownValue = authoredValue || this.#computedProperties.get(prop.propertyName);
     const classes = Directives.classMap({
       'property-value': true,
       'not-authored': notAuthored,
@@ -116,14 +118,14 @@ export class StylePropertyEditor extends HTMLElement {
         <span class="property-name">${prop.propertyName}</span>: <span class=${classes}>${shownValue}</span>
       </div>
       <div class="buttons">
-        ${prop.propertyValues.map(value => this.renderButton(value, prop.propertyName, value === authoredValue))}
+        ${prop.propertyValues.map(value => this.#renderButton(value, prop.propertyName, value === authoredValue))}
       </div>
     </div>`;
   }
 
-  private renderButton(propertyValue: string, propertyName: string, selected: boolean = false): LitHtml.TemplateResult {
+  #renderButton(propertyValue: string, propertyName: string, selected: boolean = false): LitHtml.TemplateResult {
     const query = `${propertyName}: ${propertyValue}`;
-    const iconInfo = this.findIcon(query, this.computedProperties);
+    const iconInfo = this.findIcon(query, this.#computedProperties);
     if (!iconInfo) {
       throw new Error(`Icon for ${query} is not found`);
     }
@@ -135,14 +137,14 @@ export class StylePropertyEditor extends HTMLElement {
     const values = {propertyName, propertyValue};
     const title = selected ? i18nString(UIStrings.deselectButton, values) : i18nString(UIStrings.selectButton, values);
     return html`<button title=${title} class=${classes} @click=${
-        (): void => this.onButtonClick(propertyName, propertyValue, selected)}>
+        (): void => this.#onButtonClick(propertyName, propertyValue, selected)}>
        <${IconButton.Icon.Icon.litTagName} style=${transform} .data=${
         {iconName: iconInfo.iconName, color: 'var(--icon-color)', width: '18px', height: '18px'} as
         IconButton.Icon.IconWithName}></${IconButton.Icon.Icon.litTagName}>
     </button>`;
   }
 
-  private onButtonClick(propertyName: string, propertyValue: string, selected: boolean): void {
+  #onButtonClick(propertyName: string, propertyValue: string, selected: boolean): void {
     if (selected) {
       this.dispatchEvent(new PropertyDeselectedEvent(propertyName, propertyValue));
     } else {
@@ -195,6 +197,8 @@ export const FlexboxEditableProperties = [
     propertyValues: [
       'row',
       'column',
+      'row-reverse',
+      'column-reverse',
     ],
   },
   {

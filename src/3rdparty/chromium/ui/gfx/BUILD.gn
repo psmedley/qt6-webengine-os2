@@ -38,33 +38,18 @@ jumbo_component("color_utils") {
   ]
 }
 
-jumbo_component("geometry_skia") {
+jumbo_component("gfx_skia") {
   sources = [
-    "geometry_skia_export.h",
-    "mask_filter_info.cc",
-    "mask_filter_info.h",
-    "rrect_f.cc",
-    "rrect_f.h",
-    "rrect_f_builder.cc",
-    "rrect_f_builder.h",
+    "gfx_skia_export.h",
     "skia_util.cc",
     "skia_util.h",
-    "transform.cc",
-    "transform.h",
-    "transform_operation.cc",
-    "transform_operation.h",
-    "transform_operations.cc",
-    "transform_operations.h",
-    "transform_util.cc",
-    "transform_util.h",
   ]
   configs += [ "//build/config/compiler:wexit_time_destructors" ]
   public_deps = [
     "//base",
     "//skia",
-    "//ui/gfx/geometry",
   ]
-  defines = [ "GEOMETRY_SKIA_IMPLEMENTATION" ]
+  defines = [ "GFX_SKIA_IMPLEMENTATION" ]
 }
 
 jumbo_component("gfx") {
@@ -72,8 +57,6 @@ jumbo_component("gfx") {
     "break_list.h",
     "color_analysis.cc",
     "color_analysis.h",
-    "color_transform.cc",
-    "color_transform.h",
     "decorated_text.cc",
     "decorated_text.h",
     "delegated_ink_metadata.cc",
@@ -109,6 +92,7 @@ jumbo_component("gfx") {
     "image/image.h",
     "image/image_family.cc",
     "image/image_family.h",
+    "image/image_internal.h",
     "image/image_platform.h",
     "image/image_png_rep.cc",
     "image/image_png_rep.h",
@@ -123,13 +107,11 @@ jumbo_component("gfx") {
     "interpolated_transform.h",
     "nine_image_painter.cc",
     "nine_image_painter.h",
+    "overlay_plane_data.cc",
+    "overlay_plane_data.h",
     "overlay_transform_utils.cc",
     "overlay_transform_utils.h",
     "platform_font.h",
-    "rendering_pipeline.cc",
-    "rendering_pipeline.h",
-    "rendering_stage_scheduler.cc",
-    "rendering_stage_scheduler.h",
     "scrollbar_size.cc",
     "scrollbar_size.h",
     "selection_model.cc",
@@ -160,6 +142,8 @@ jumbo_component("gfx") {
   ]
   if (is_android) {
     sources += [
+      "android/achoreographer_compat.cc",
+      "android/achoreographer_compat.h",
       "android/android_surface_control_compat.cc",
       "android/android_surface_control_compat.h",
       "android/java_bitmap.cc",
@@ -179,8 +163,7 @@ jumbo_component("gfx") {
   }
   if (is_mac) {
     sources += [
-      "canvas_paint_mac.h",
-      "canvas_paint_mac.mm",
+      "ca_layer_result.h",
       "decorated_text_mac.h",
       "decorated_text_mac.mm",
       "font_fallback_mac.mm",
@@ -195,8 +178,6 @@ jumbo_component("gfx") {
       "mac/nswindow_frame_controls.mm",
       "mac/scoped_cocoa_disable_screen_updates.h",
       "mac/scoped_cocoa_disable_screen_updates.mm",
-      "path_mac.h",
-      "path_mac.mm",
       "platform_font_mac.h",
       "platform_font_mac.mm",
       "scoped_cg_context_save_gstate_mac.h",
@@ -263,7 +244,6 @@ jumbo_component("gfx") {
       "canvas.cc",
       "canvas.h",
       "canvas_skia.cc",
-      "canvas_skia_paint.h",
       "image/canvas_image_source.cc",
       "image/canvas_image_source.h",
       "image/image_generic.cc",
@@ -284,7 +264,6 @@ jumbo_component("gfx") {
 
   configs += [
     "//build/config:precompiled_headers",
-    "//build/config/compiler:noshadowing",
     "//build/config/compiler:wexit_time_destructors",
   ]
 
@@ -294,7 +273,7 @@ jumbo_component("gfx") {
   public_deps = [
     ":color_space",
     ":color_utils",
-    ":geometry_skia",
+    ":gfx_skia",
     ":gfx_switches",
     ":memory_buffer_sources",
     ":native_widget_types",
@@ -307,6 +286,7 @@ jumbo_component("gfx") {
     "//ui/gfx/animation",
     "//ui/gfx/codec",
     "//ui/gfx/geometry",
+    "//ui/gfx/geometry:geometry_skia",
     "//ui/gfx/range",
   ]
   deps = [
@@ -426,17 +406,17 @@ jumbo_component("gfx") {
   if (use_ozone) {
     deps += [ "//ui/ozone:buildflags" ]
   }
-
-  if (ozone_platform_x11 || use_x11) {
-    deps += [ "//ui/gfx/x" ]
-  }
 }
 
 jumbo_component("color_space") {
   sources = [
+    "color_conversion_sk_filter_cache.cc",
+    "color_conversion_sk_filter_cache.h",
     "color_space.cc",
     "color_space.h",
     "color_space_export.h",
+    "color_transform.cc",
+    "color_transform.h",
     "display_color_spaces.cc",
     "display_color_spaces.h",
     "hdr_static_metadata.cc",
@@ -456,6 +436,7 @@ jumbo_component("color_space") {
     "//build:chromeos_buildflags",
     "//skia:skcms",
     "//ui/gfx:buffer_types",
+    "//ui/gfx/geometry:geometry_skia",
   ]
   public_deps = [
     "//base",
@@ -470,9 +451,6 @@ jumbo_component("color_space") {
       "CoreFoundation.framework",
       "CoreGraphics.framework",
     ]
-  }
-  if (use_x11) {
-    deps += [ "//ui/gfx/x" ]
   }
   defines = [ "COLOR_SPACE_IMPLEMENTATION" ]
 }
@@ -568,6 +546,7 @@ jumbo_source_set("memory_buffer_sources") {
     "hdr_metadata.cc",
     "hdr_metadata.h",
     "native_pixmap.h",
+    "overlay_priority_hint.h",
     "overlay_transform.h",
     "surface_origin.h",
   ]
@@ -653,19 +632,17 @@ jumbo_static_library("test_support") {
     "animation/keyframe/test/animation_utils.cc",
     "animation/keyframe/test/animation_utils.h",
     "animation/test_animation_delegate.h",
-    "geometry/test/rect_test_util.cc",
-    "geometry/test/rect_test_util.h",
-    "geometry/test/size_test_util.h",
-    "geometry/test/transform_test_util.cc",
-    "geometry/test/transform_test_util.h",
+    "geometry/test/geometry_util.cc",
+    "geometry/test/geometry_util.h",
     "image/image_unittest_util.cc",
     "image/image_unittest_util.h",
     "test/font_fallback_test_data.cc",
     "test/font_fallback_test_data.h",
-    "test/gfx_util.cc",
-    "test/gfx_util.h",
     "test/icc_profiles.cc",
     "test/icc_profiles.h",
+    "test/scoped_default_font_description.h",
+    "test/sk_color_eq.cc",
+    "test/sk_color_eq.h",
   ]
   if (is_ios) {
     sources += [ "image/image_unittest_util_ios.mm" ]
@@ -721,17 +698,18 @@ test("gfx_unittests") {
     "font_names_testing.cc",
     "font_names_testing.h",
     "font_unittest.cc",
+    "geometry/linear_gradient_unittest.cc",
+    "geometry/rrect_f_unittest.cc",
+    "geometry/transform_operations_unittest.cc",
+    "geometry/transform_unittest.cc",
     "image/buffer_w_stream_unittest.cc",
     "image/image_family_unittest.cc",
     "image/image_skia_unittest.cc",
     "image/image_unittest.cc",
     "interpolated_transform_unittest.cc",
-    "rrect_f_unittest.cc",
     "test/run_all_unittests.cc",
     "text_elider_unittest.cc",
     "text_utils_unittest.cc",
-    "transform_operations_unittest.cc",
-    "transform_unittest.cc",
   ]
   if (is_linux || is_chromeos) {
     sources += [
@@ -745,7 +723,6 @@ test("gfx_unittests") {
       "image/image_mac_unittest.mm",
       "mac/coordinate_conversion_unittest.mm",
       "mac/io_surface_unittest.cc",
-      "path_mac_unittest.mm",
       "platform_font_mac_unittest.mm",
       "range/range_mac_unittest.mm",
     ]
@@ -792,19 +769,27 @@ test("gfx_unittests") {
       "geometry/axis_transform2d_unittest.cc",
       "geometry/box_unittest.cc",
       "geometry/cubic_bezier_unittest.cc",
+      "geometry/insets_f_unittest.cc",
       "geometry/insets_unittest.cc",
       "geometry/matrix3_unittest.cc",
-      "geometry/point3_unittest.cc",
+      "geometry/point3_f_unittest.cc",
+      "geometry/point_f_unittest.cc",
       "geometry/point_unittest.cc",
-      "geometry/quad_unittest.cc",
+      "geometry/quad_f_unittest.cc",
       "geometry/quaternion_unittest.cc",
+      "geometry/rect_conversions_unittest.cc",
+      "geometry/rect_f_unittest.cc",
       "geometry/rect_unittest.cc",
       "geometry/resize_utils_unittest.cc",
       "geometry/rounded_corners_f_unittest.cc",
-      "geometry/scroll_offset_unittest.cc",
+      "geometry/size_f_unittest.cc",
       "geometry/size_unittest.cc",
+      "geometry/skia_conversions_unittest.cc",
+      "geometry/transform_util_unittest.cc",
+      "geometry/triangle_unittest.cc",
+      "geometry/vector2d_f_unittest.cc",
       "geometry/vector2d_unittest.cc",
-      "geometry/vector3d_unittest.cc",
+      "geometry/vector3d_f_unittest.cc",
       "half_float_unittest.cc",
       "icc_profile_unittest.cc",
       "image/image_skia_operations_unittest.cc",
@@ -820,8 +805,6 @@ test("gfx_unittests") {
       "shadow_value_unittest.cc",
       "skbitmap_operations_unittest.cc",
       "skia_util_unittest.cc",
-      "skrect_conversion_unittest.cc",
-      "transform_util_unittest.cc",
       "utf16_indexing_unittest.cc",
     ]
   }
@@ -930,6 +913,10 @@ test("gfx_unittests") {
   }
 
   if (is_fuchsia || is_os2) {
+    # TODO(https://crbug.com/1287051): fuchsia.sys.Launcher is used to launch
+    # fuchsia-pkg://fuchsia.com/fonts#meta/fonts.cmx with specific test
+    # args.
+    use_cfv2 = false
     deps += [ "//skia:test_fonts" ]
   }
 }
@@ -937,7 +924,6 @@ test("gfx_unittests") {
 if (is_android) {
   generate_jni("gfx_jni_headers") {
     sources = [
-      "../android/java/src/org/chromium/ui/gfx/AdpfRenderingStageScheduler.java",
       "../android/java/src/org/chromium/ui/gfx/Animation.java",
       "../android/java/src/org/chromium/ui/gfx/BitmapHelper.java",
       "../android/java/src/org/chromium/ui/gfx/ViewConfigurationHelper.java",

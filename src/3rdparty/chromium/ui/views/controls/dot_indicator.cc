@@ -7,12 +7,14 @@
 #include <algorithm>
 #include <utility>
 
+#include "base/memory/ptr_util.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/layer.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/views/cascading_property.h"
 
 namespace views {
 
@@ -58,15 +60,20 @@ void DotIndicator::OnPaint(gfx::Canvas* canvas) {
 
   // Fill the center.
   cc::PaintFlags flags;
-  flags.setColor(dot_color_);
+  flags.setColor(dot_color_.value_or(GetCascadingAccentColor(this)));
   flags.setAntiAlias(true);
   canvas->DrawCircle(center, scale * radius - kStrokeWidthPx, flags);
 
   // Draw the border.
-  flags.setColor(border_color_);
+  flags.setColor(border_color_.value_or(GetCascadingBackgroundColor(this)));
   flags.setStyle(cc::PaintFlags::kStroke_Style);
   flags.setStrokeWidth(kStrokeWidthPx * scale);
   canvas->DrawCircle(center, scale * radius - kStrokeWidthPx / 2.0f, flags);
+}
+
+void DotIndicator::OnThemeChanged() {
+  View::OnThemeChanged();
+  SchedulePaint();
 }
 
 BEGIN_METADATA(DotIndicator, View)

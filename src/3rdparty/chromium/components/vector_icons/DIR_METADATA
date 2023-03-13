@@ -1,3 +1,1 @@
-monorail {
-  component: "UI>Assets>Images"
-}
+mixins: "//components/vector_icons/COMMON_METADATA"

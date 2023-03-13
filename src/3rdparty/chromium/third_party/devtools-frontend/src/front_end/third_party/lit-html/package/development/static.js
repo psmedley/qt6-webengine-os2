@@ -3,6 +3,8 @@
  * Copyright 2020 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
+// Any new exports need to be added to the export statement in
+// `packages/lit/src/index.all.ts`.
 import { html as coreHtml, svg as coreSvg } from './lit-html.js';
 /**
  * Wraps a string so that it behaves like part of the static template
@@ -19,11 +21,11 @@ import { html as coreHtml, svg as coreSvg } from './lit-html.js';
  * since they effectively create a new template.
  */
 export const unsafeStatic = (value) => ({
-    _$litStatic$: value,
+    ['_$litStatic$']: value,
 });
 const textFromStatic = (value) => {
-    if (value._$litStatic$ !== undefined) {
-        return value._$litStatic$;
+    if (value['_$litStatic$'] !== undefined) {
+        return value['_$litStatic$'];
     }
     else {
         throw new Error(`Value passed to 'literal' function must be a 'literal' result: ${value}. Use 'unsafeStatic' to pass non-literal values, but
@@ -45,7 +47,7 @@ const textFromStatic = (value) => {
  * they effectively create a new template.
  */
 export const literal = (strings, ...values) => ({
-    _$litStatic$: values.reduce((acc, v, idx) => acc + textFromStatic(v) + strings[idx + 1], strings[0]),
+    ['_$litStatic$']: values.reduce((acc, v, idx) => acc + textFromStatic(v) + strings[idx + 1], strings[0]),
 });
 const stringsCache = new Map();
 /**
@@ -68,7 +70,8 @@ export const withStatic = (coreTag) => (strings, ...values) => {
         // a single template string.
         while (i < l &&
             ((dynamicValue = values[i]),
-                (staticValue = (_a = dynamicValue) === null || _a === void 0 ? void 0 : _a._$litStatic$)) !== undefined) {
+                (staticValue = (_a = dynamicValue) === null || _a === void 0 ? void 0 : _a['_$litStatic$'])) !==
+                undefined) {
             s += staticValue + strings[++i];
             hasStatics = true;
         }
@@ -85,6 +88,11 @@ export const withStatic = (coreTag) => (strings, ...values) => {
         const key = staticStrings.join('$$lit$$');
         strings = stringsCache.get(key);
         if (strings === undefined) {
+            // Beware: in general this pattern is unsafe, and doing so may bypass
+            // lit's security checks and allow an attacker to execute arbitrary
+            // code and inject arbitrary content.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            staticStrings.raw = staticStrings;
             stringsCache.set(key, (strings = staticStrings));
         }
         values = dynamicValues;

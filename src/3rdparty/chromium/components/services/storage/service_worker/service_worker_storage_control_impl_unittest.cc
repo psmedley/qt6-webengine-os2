@@ -88,6 +88,11 @@ struct GetUserDataForAllRegistrationsResult {
   std::vector<mojom::ServiceWorkerUserDataPtr> values;
 };
 
+struct GetUsageForStorageKeyResult {
+  DatabaseStatus status;
+  int64_t usage;
+};
+
 ReadResponseHeadResult ReadResponseHead(
     mojom::ServiceWorkerResourceReader* reader) {
   ReadResponseHeadResult result;
@@ -570,6 +575,21 @@ class ServiceWorkerStorageControlImplTest : public testing::Test {
     return return_value;
   }
 
+  GetUsageForStorageKeyResult GetUsageForStorageKey(
+      const blink::StorageKey& key) {
+    GetUsageForStorageKeyResult result;
+    base::RunLoop loop;
+    storage()->GetUsageForStorageKey(
+        key,
+        base::BindLambdaForTesting([&](DatabaseStatus status, int64_t usage) {
+          result.status = status;
+          result.usage = usage;
+          loop.Quit();
+        }));
+    loop.Run();
+    return result;
+  }
+
   // Creates a registration with the given resource records.
   RegistrationData CreateRegistrationData(
       int64_t registration_id,
@@ -964,7 +984,8 @@ TEST_F(ServiceWorkerStorageControlImplTest, GetRegistrationsForStorageKey) {
     EXPECT_EQ(result.registrations.size(), 2UL);
 
     for (auto& registration : result.registrations) {
-      EXPECT_EQ(registration->registration->scope.GetOrigin(), origin.GetURL());
+      EXPECT_EQ(registration->registration->scope.DeprecatedGetOriginAsURL(),
+                origin.GetURL());
       EXPECT_EQ(registration->registration->resources_total_size_bytes,
                 kScriptSize);
       EXPECT_TRUE(registration->version_reference);
@@ -1020,10 +1041,10 @@ TEST_F(ServiceWorkerStorageControlImplTest, WriteAndReadResource) {
   // Write content.
   {
     mojo_base::BigBuffer data(base::as_bytes(base::make_span(kData)));
-    int data_size = data.size();
+    int bytes_size = data.size();
 
     int result = WriteResponseData(writer.get(), std::move(data));
-    ASSERT_EQ(data_size, result);
+    ASSERT_EQ(bytes_size, result);
   }
 
   mojo::Remote<mojom::ServiceWorkerResourceReader> reader =
@@ -1422,6 +1443,92 @@ TEST_F(ServiceWorkerStorageControlImplTest,
   EXPECT_EQ(result.values.size(), 0UL);
 }
 
+// Tests that getting usage for a storage key works at different stages of
+// registration resource update.
+TEST_F(ServiceWorkerStorageControlImplTest, GetUsageForStorageKey) {
+  const GURL kScope("https://www.example.com/");
+  const blink::StorageKey kKey(url::Origin::Create(kScope));
+  const GURL kScriptUrl("https://www.example.com/sw.js");
+  const GURL kImportedScriptUrl("https://www.example.com/imported.js");
+
+  LazyInitializeForTest();
+
+  // No data has written yet for a given storage key.
+  {
+    GetUsageForStorageKeyResult result = GetUsageForStorageKey(kKey);
+    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+    ASSERT_EQ(result.usage, 0);
+  }
+
+  // Preparation: Create a registration with two resources. These aren't written
+  // to storage yet.
+  std::vector<ResourceRecord> resources;
+  const int64_t resource_id1 = GetNewResourceId();
+  const std::string resource_data1 = "main script data";
+  resources.push_back(mojom::ServiceWorkerResourceRecord::New(
+      resource_id1, kScriptUrl, resource_data1.size()));
+
+  const int64_t resource_id2 = GetNewResourceId();
+  const std::string resource_data2 = "imported script data";
+  resources.push_back(mojom::ServiceWorkerResourceRecord::New(
+      resource_id2, kImportedScriptUrl, resource_data2.size()));
+
+  const int64_t registration_id = GetNewRegistrationId();
+  const int64_t version_id = GetNewVersionId().version_id;
+  RegistrationData registration_data = CreateRegistrationData(
+      registration_id, version_id, kScope, kKey, kScriptUrl, resources);
+
+  // Put these resources ids on the uncommitted list in storage.
+  DatabaseStatus status;
+  status = StoreUncommittedResourceId(resource_id1);
+  ASSERT_EQ(status, DatabaseStatus::kOk);
+  status = StoreUncommittedResourceId(resource_id2);
+  ASSERT_EQ(status, DatabaseStatus::kOk);
+
+  {
+    GetUsageForStorageKeyResult result = GetUsageForStorageKey(kKey);
+    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+    ASSERT_EQ(result.usage, 0)
+        << "Resources that aren't stored with the registration "
+        << "don't use quota.";
+  }
+
+  // Write responses and the registration data.
+  {
+    int result = WriteResource(resource_id1, resource_data1);
+    ASSERT_GT(result, 0);
+  }
+  {
+    int result = WriteResource(resource_id2, resource_data2);
+    ASSERT_GT(result, 0);
+  }
+  status =
+      StoreRegistration(std::move(registration_data), std::move(resources));
+  ASSERT_EQ(status, DatabaseStatus::kOk);
+
+  // Expect the storage usage for resources stored.
+  {
+    GetUsageForStorageKeyResult result = GetUsageForStorageKey(kKey);
+    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+    const int64_t expected_usage =
+        resource_data1.size() + resource_data2.size();
+    ASSERT_EQ(result.usage, expected_usage);
+  }
+
+  // Delete the registration.
+  {
+    DeleteRegistrationResult result = DeleteRegistration(registration_id, kKey);
+    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+  }
+
+  // Expect no storage usage.
+  {
+    GetUsageForStorageKeyResult result = GetUsageForStorageKey(kKey);
+    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+    ASSERT_EQ(result.usage, 0);
+  }
+}
+
 // Tests that apply policy updates work.
 TEST_F(ServiceWorkerStorageControlImplTest, ApplyPolicyUpdates) {
   const GURL kScope1("https://foo.example.com/");
@@ -1454,7 +1561,8 @@ TEST_F(ServiceWorkerStorageControlImplTest, ApplyPolicyUpdates) {
   // Update policies to purge the registration for |kScope2| on shutdown.
   std::vector<mojom::StoragePolicyUpdatePtr> updates;
   updates.emplace_back(mojom::StoragePolicyUpdate::New(
-      url::Origin::Create(kScope2.GetOrigin()), /*purge_on_shutdown=*/true));
+      url::Origin::Create(kScope2.DeprecatedGetOriginAsURL()),
+      /*purge_on_shutdown=*/true));
   base::RunLoop loop;
   storage()->ApplyPolicyUpdates(
       std::move(updates),
@@ -1522,28 +1630,30 @@ TEST_F(ServiceWorkerStorageControlImplTest, TrackRunningVersion) {
 
   mojo::Remote<mojom::ServiceWorkerLiveVersionRef> reference2;
   {
-    FindRegistrationResult result =
+    FindRegistrationResult find_result =
         FindRegistrationForId(registration_id, kKey);
-    ASSERT_EQ(result.status, DatabaseStatus::kOk);
-    ASSERT_TRUE(result.entry->version_reference);
-    reference2.Bind(std::move(result.entry->version_reference));
+    ASSERT_EQ(find_result.status, DatabaseStatus::kOk);
+    ASSERT_TRUE(find_result.entry->version_reference);
+    reference2.Bind(std::move(find_result.entry->version_reference));
   }
 
   mojo::Remote<mojom::ServiceWorkerLiveVersionRef> reference3;
   {
-    GetRegistrationsForOriginResult result =
+    GetRegistrationsForOriginResult get_registrations_result =
         GetRegistrationsForStorageKey(kKey);
-    ASSERT_EQ(result.status, DatabaseStatus::kOk);
-    ASSERT_EQ(result.registrations.size(), 1UL);
-    ASSERT_TRUE(result.registrations[0]->version_reference);
-    reference3.Bind(std::move(result.registrations[0]->version_reference));
+    ASSERT_EQ(get_registrations_result.status, DatabaseStatus::kOk);
+    ASSERT_EQ(get_registrations_result.registrations.size(), 1UL);
+    ASSERT_TRUE(get_registrations_result.registrations[0]->version_reference);
+    reference3.Bind(std::move(
+        get_registrations_result.registrations[0]->version_reference));
   }
 
   // Drop the first reference and delete the registration.
   reference1.reset();
   {
-    DeleteRegistrationResult result = DeleteRegistration(registration_id, kKey);
-    ASSERT_EQ(result.status, DatabaseStatus::kOk);
+    DeleteRegistrationResult delete_result =
+        DeleteRegistration(registration_id, kKey);
+    ASSERT_EQ(delete_result.status, DatabaseStatus::kOk);
   }
 
   // Make sure all tasks are ran.

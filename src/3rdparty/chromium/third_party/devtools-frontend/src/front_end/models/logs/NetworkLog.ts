@@ -46,7 +46,7 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 let networkLogInstance: NetworkLog;
 
-export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
+export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper<EventTypes> implements
     SDK.TargetManager.SDKModelObserver<SDK.NetworkManager.NetworkManager> {
   private requestsInternal: SDK.NetworkRequest.NetworkRequest[];
   private sentNetworkRequests: Protocol.Network.Request[];
@@ -142,15 +142,15 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
     }
   }
 
-  requestForURL(url: string): SDK.NetworkRequest.NetworkRequest|null {
+  requestForURL(url: Platform.DevToolsPath.UrlString): SDK.NetworkRequest.NetworkRequest|null {
     return this.requestsInternal.find(request => request.url() === url) || null;
   }
 
-  originalRequestForURL(url: string): Protocol.Network.Request|null {
+  originalRequestForURL(url: Platform.DevToolsPath.UrlString): Protocol.Network.Request|null {
     return this.sentNetworkRequests.find(request => request.url === url) || null;
   }
 
-  originalResponseForURL(url: string): Protocol.Network.Response|null {
+  originalResponseForURL(url: Platform.DevToolsPath.UrlString): Protocol.Network.Response|null {
     return this.receivedNetworkResponses.find(response => response.url === url) || null;
   }
 
@@ -171,8 +171,9 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
     return null;
   }
 
-  private requestByManagerAndURL(networkManager: SDK.NetworkManager.NetworkManager, url: string):
-      SDK.NetworkRequest.NetworkRequest|null {
+  private requestByManagerAndURL(
+      networkManager: SDK.NetworkManager.NetworkManager,
+      url: Platform.DevToolsPath.UrlString): SDK.NetworkRequest.NetworkRequest|null {
     for (const request of this.requestsInternal) {
       if (url === request.url() && networkManager === SDK.NetworkManager.NetworkManager.forRequest(request)) {
         return request;
@@ -202,10 +203,10 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
     }
 
     let type = SDK.NetworkRequest.InitiatorType.Other;
-    let url = '';
+    let url = Platform.DevToolsPath.EmptyUrlString;
     let lineNumber: number = -Infinity;
     let columnNumber: number = -Infinity;
-    let scriptId: string|null = null;
+    let scriptId: Protocol.Runtime.ScriptId|null = null;
     let initiatorStack: Protocol.Runtime.StackTrace|null = null;
     let initiatorRequest: (SDK.NetworkRequest.NetworkRequest|null)|null = null;
     const initiator = request.initiator();
@@ -217,7 +218,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
     } else if (initiator) {
       if (initiator.type === Protocol.Network.InitiatorType.Parser) {
         type = SDK.NetworkRequest.InitiatorType.Parser;
-        url = initiator.url ? initiator.url : url;
+        url = initiator.url ? initiator.url as Platform.DevToolsPath.UrlString : url;
         lineNumber = typeof initiator.lineNumber === 'number' ? initiator.lineNumber : lineNumber;
         columnNumber = typeof initiator.columnNumber === 'number' ? initiator.columnNumber : columnNumber;
       } else if (initiator.type === Protocol.Network.InitiatorType.Script) {
@@ -228,7 +229,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
             continue;
           }
           type = SDK.NetworkRequest.InitiatorType.Script;
-          url = topFrame.url || i18nString(UIStrings.anonymous);
+          url = (topFrame.url || i18nString(UIStrings.anonymous) as string) as Platform.DevToolsPath.UrlString;
           lineNumber = topFrame.lineNumber;
           columnNumber = topFrame.columnNumber;
           scriptId = topFrame.scriptId;
@@ -236,7 +237,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
         }
         if (!initiator.stack && initiator.url) {
           type = SDK.NetworkRequest.InitiatorType.Script;
-          url = initiator.url;
+          url = initiator.url as Platform.DevToolsPath.UrlString;
           lineNumber = initiator.lineNumber || 0;
         }
         if (initiator.stack && initiator.stack.callFrames && initiator.stack.callFrames.length) {
@@ -249,7 +250,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
         initiatorRequest = request.preflightInitiatorRequest();
       } else if (initiator.type === Protocol.Network.InitiatorType.SignedExchange) {
         type = SDK.NetworkRequest.InitiatorType.SignedExchange;
-        url = initiator.url || '';
+        url = initiator.url as Platform.DevToolsPath.UrlString || Platform.DevToolsPath.EmptyUrlString;
       }
     }
 
@@ -547,7 +548,7 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
     if (initiator) {
       consoleMessage.stackTrace = initiator.stack || undefined;
       if (initiator.url) {
-        consoleMessage.url = initiator.url;
+        consoleMessage.url = initiator.url as Platform.DevToolsPath.UrlString;
         consoleMessage.line = initiator.lineNumber || 0;
       }
     }
@@ -565,10 +566,22 @@ export class NetworkLog extends Common.ObjectWrapper.ObjectWrapper implements
 
 const consoleMessageToRequest = new WeakMap<SDK.ConsoleModel.ConsoleMessage, SDK.NetworkRequest.NetworkRequest>();
 
-export const Events = {
-  Reset: Symbol('Reset'),
-  RequestAdded: Symbol('RequestAdded'),
-  RequestUpdated: Symbol('RequestUpdated'),
+// TODO(crbug.com/1167717): Make this a const enum again
+// eslint-disable-next-line rulesdir/const_enum
+export enum Events {
+  Reset = 'Reset',
+  RequestAdded = 'RequestAdded',
+  RequestUpdated = 'RequestUpdated',
+}
+
+export interface ResetEvent {
+  clearIfPreserved: boolean;
+}
+
+export type EventTypes = {
+  [Events.Reset]: ResetEvent,
+  [Events.RequestAdded]: SDK.NetworkRequest.NetworkRequest,
+  [Events.RequestUpdated]: SDK.NetworkRequest.NetworkRequest,
 };
 
 interface InitiatorData {
@@ -584,10 +597,11 @@ export interface InitiatorGraph {
 
 interface InitiatorInfo {
   type: SDK.NetworkRequest.InitiatorType;
-  url: string;
+  // generally this is a url but can also contain "<anonymous>"
+  url: Platform.DevToolsPath.UrlString;
   lineNumber: number;
   columnNumber: number;
-  scriptId: string|null;
+  scriptId: Protocol.Runtime.ScriptId|null;
   stack: Protocol.Runtime.StackTrace|null;
   initiatorRequest: SDK.NetworkRequest.NetworkRequest|null;
 }

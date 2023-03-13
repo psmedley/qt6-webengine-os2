@@ -25,7 +25,9 @@
 #import "base/RTCVideoDecoderFactory.h"
 #import "base/RTCVideoEncoderFactory.h"
 #import "helpers/NSString+StdString.h"
+#include "rtc_base/checks.h"
 #include "sdk/objc/native/api/network_monitor_factory.h"
+#include "sdk/objc/native/api/ssl_certificate_verifier.h"
 #include "system_wrappers/include/field_trial.h"
 
 #ifndef HAVE_NO_MEDIA
@@ -118,17 +120,17 @@
     _networkThread = rtc::Thread::CreateWithSocketServer();
     _networkThread->SetName("network_thread", _networkThread.get());
     BOOL result = _networkThread->Start();
-    NSAssert(result, @"Failed to start network thread.");
+    RTC_DCHECK(result) << "Failed to start network thread.";
 
     _workerThread = rtc::Thread::Create();
     _workerThread->SetName("worker_thread", _workerThread.get());
     result = _workerThread->Start();
-    NSAssert(result, @"Failed to start worker thread.");
+    RTC_DCHECK(result) << "Failed to start worker thread.";
 
     _signalingThread = rtc::Thread::Create();
     _signalingThread->SetName("signaling_thread", _signalingThread.get());
     result = _signalingThread->Start();
-    NSAssert(result, @"Failed to start signaling thread.");
+    RTC_DCHECK(result) << "Failed to start signaling thread.";
   }
   return self;
 }
@@ -247,6 +249,13 @@
                                                    workerThread:_workerThread.get()];
 }
 
+- (RTC_OBJC_TYPE(RTCVideoSource) *)videoSourceForScreenCast:(BOOL)forScreenCast {
+  return [[RTC_OBJC_TYPE(RTCVideoSource) alloc] initWithFactory:self
+                                                signalingThread:_signalingThread.get()
+                                                   workerThread:_workerThread.get()
+                                                   isScreenCast:forScreenCast];
+}
+
 - (RTC_OBJC_TYPE(RTCVideoTrack) *)videoTrackWithSource:(RTC_OBJC_TYPE(RTCVideoSource) *)source
                                                trackId:(NSString *)trackId {
   return [[RTC_OBJC_TYPE(RTCVideoTrack) alloc] initWithFactory:self source:source trackId:trackId];
@@ -264,6 +273,21 @@
   return [[RTC_OBJC_TYPE(RTCPeerConnection) alloc] initWithFactory:self
                                                      configuration:configuration
                                                        constraints:constraints
+                                               certificateVerifier:nil
+                                                          delegate:delegate];
+}
+
+- (nullable RTC_OBJC_TYPE(RTCPeerConnection) *)
+    peerConnectionWithConfiguration:(RTC_OBJC_TYPE(RTCConfiguration) *)configuration
+                        constraints:(RTC_OBJC_TYPE(RTCMediaConstraints) *)constraints
+                certificateVerifier:
+                    (id<RTC_OBJC_TYPE(RTCSSLCertificateVerifier)>)certificateVerifier
+                           delegate:
+                               (nullable id<RTC_OBJC_TYPE(RTCPeerConnectionDelegate)>)delegate {
+  return [[RTC_OBJC_TYPE(RTCPeerConnection) alloc] initWithFactory:self
+                                                     configuration:configuration
+                                                       constraints:constraints
+                                               certificateVerifier:certificateVerifier
                                                           delegate:delegate];
 }
 

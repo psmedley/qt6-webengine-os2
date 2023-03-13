@@ -32,6 +32,7 @@
 
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/time/time.h"
 #include "third_party/blink/renderer/core/css/css_font_face_rule.h"
 #include "third_party/blink/renderer/core/css/css_font_face_src_value.h"
 #include "third_party/blink/renderer/core/css/css_image_value.h"
@@ -65,7 +66,7 @@
 #include "third_party/blink/renderer/core/style/style_fetched_image.h"
 #include "third_party/blink/renderer/core/style/style_image.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_set.h"
 #include "third_party/blink/renderer/platform/instrumentation/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/mhtml/serialized_resource.h"
@@ -494,7 +495,8 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
     // Rules inheriting CSSGroupingRule
     case CSSRule::kMediaRule:
     case CSSRule::kSupportsRule:
-    case CSSRule::kContainerRule: {
+    case CSSRule::kContainerRule:
+    case CSSRule::kLayerBlockRule: {
       CSSRuleList* rule_list = rule->cssRules();
       for (unsigned i = 0; i < rule_list->length(); ++i)
         SerializeCSSRule(rule_list->item(i));
@@ -513,6 +515,7 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
 
     // Rules in which no external resources can be referenced
     case CSSRule::kCharsetRule:
+    case CSSRule::kFontPaletteValuesRule:
     case CSSRule::kPageRule:
     case CSSRule::kPropertyRule:
     case CSSRule::kKeyframesRule:
@@ -520,6 +523,7 @@ void FrameSerializer::SerializeCSSRule(CSSRule* rule) {
     case CSSRule::kScrollTimelineRule:
     case CSSRule::kNamespaceRule:
     case CSSRule::kViewportRule:
+    case CSSRule::kLayerStatementRule:
       break;
   }
 }

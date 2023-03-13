@@ -7,6 +7,8 @@
 #include <string>
 
 #include "base/bind.h"
+#include "build/build_config.h"
+#include "build/buildflag.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
@@ -14,7 +16,7 @@
 #include "third_party/blink/public/web/web_heap.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
-#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_void_function.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_answer_options.h"
@@ -29,9 +31,10 @@
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
+#include "third_party/blink/renderer/modules/mediastream/media_stream_track_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_rtc_peer_connection_handler_platform.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_rtp_receiver_platform.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_rtp_sender_platform.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_session_description_platform.h"
@@ -419,8 +422,8 @@ class RTCPeerConnectionTest : public testing::Test {
     auto* source = MakeGarbageCollected<MediaStreamSource>("sourceId", type,
                                                            "sourceName", false);
     auto* component = MakeGarbageCollected<MediaStreamComponent>(id, source);
-    return MakeGarbageCollected<MediaStreamTrack>(scope.GetExecutionContext(),
-                                                  component);
+    return MakeGarbageCollected<MediaStreamTrackImpl>(
+        scope.GetExecutionContext(), component);
   }
 
   std::string GetExceptionMessage(V8TestingScope& scope) {
@@ -461,9 +464,9 @@ TEST_F(RTCPeerConnectionTest, GetAudioTrack) {
       MediaStream::Create(scope.GetExecutionContext(), tracks);
   ASSERT_TRUE(stream);
 
-  EXPECT_FALSE(pc->GetTrack(track->Component()));
+  EXPECT_FALSE(pc->GetTrackForTesting(track->Component()));
   AddStream(scope, pc, stream);
-  EXPECT_TRUE(pc->GetTrack(track->Component()));
+  EXPECT_TRUE(pc->GetTrackForTesting(track->Component()));
 }
 
 TEST_F(RTCPeerConnectionTest, GetVideoTrack) {
@@ -480,9 +483,9 @@ TEST_F(RTCPeerConnectionTest, GetVideoTrack) {
       MediaStream::Create(scope.GetExecutionContext(), tracks);
   ASSERT_TRUE(stream);
 
-  EXPECT_FALSE(pc->GetTrack(track->Component()));
+  EXPECT_FALSE(pc->GetTrackForTesting(track->Component()));
   AddStream(scope, pc, stream);
-  EXPECT_TRUE(pc->GetTrack(track->Component()));
+  EXPECT_TRUE(pc->GetTrackForTesting(track->Component()));
 }
 
 TEST_F(RTCPeerConnectionTest, GetAudioAndVideoTrack) {
@@ -503,11 +506,11 @@ TEST_F(RTCPeerConnectionTest, GetAudioAndVideoTrack) {
       MediaStream::Create(scope.GetExecutionContext(), tracks);
   ASSERT_TRUE(stream);
 
-  EXPECT_FALSE(pc->GetTrack(audio_track->Component()));
-  EXPECT_FALSE(pc->GetTrack(video_track->Component()));
+  EXPECT_FALSE(pc->GetTrackForTesting(audio_track->Component()));
+  EXPECT_FALSE(pc->GetTrackForTesting(video_track->Component()));
   AddStream(scope, pc, stream);
-  EXPECT_TRUE(pc->GetTrack(audio_track->Component()));
-  EXPECT_TRUE(pc->GetTrack(video_track->Component()));
+  EXPECT_TRUE(pc->GetTrackForTesting(audio_track->Component()));
+  EXPECT_TRUE(pc->GetTrackForTesting(video_track->Component()));
 }
 
 TEST_F(RTCPeerConnectionTest, GetTrackRemoveStreamAndGCAll) {
@@ -527,9 +530,9 @@ TEST_F(RTCPeerConnectionTest, GetTrackRemoveStreamAndGCAll) {
         MediaStream::Create(scope.GetExecutionContext(), tracks);
     ASSERT_TRUE(stream);
 
-    EXPECT_FALSE(pc->GetTrack(track_component));
+    EXPECT_FALSE(pc->GetTrackForTesting(track_component));
     AddStream(scope, pc, stream);
-    EXPECT_TRUE(pc->GetTrack(track_component));
+    EXPECT_TRUE(pc->GetTrackForTesting(track_component));
 
     RemoveStream(scope, pc, stream);
     // In Unified Plan, transceivers will still reference the stream even after
@@ -543,7 +546,7 @@ TEST_F(RTCPeerConnectionTest, GetTrackRemoveStreamAndGCAll) {
   // |MediaStreamComponent|, which will remove its mapping from the peer
   // connection.
   WebHeap::CollectAllGarbageForTesting();
-  EXPECT_FALSE(pc->GetTrack(track_component));
+  EXPECT_FALSE(pc->GetTrackForTesting(track_component));
 }
 
 TEST_F(RTCPeerConnectionTest,
@@ -564,9 +567,9 @@ TEST_F(RTCPeerConnectionTest,
         MediaStream::Create(scope.GetExecutionContext(), tracks);
     ASSERT_TRUE(stream);
 
-    EXPECT_FALSE(pc->GetTrack(track_component.Get()));
+    EXPECT_FALSE(pc->GetTrackForTesting(track_component.Get()));
     AddStream(scope, pc, stream);
-    EXPECT_TRUE(pc->GetTrack(track_component.Get()));
+    EXPECT_TRUE(pc->GetTrackForTesting(track_component.Get()));
 
     RemoveStream(scope, pc, stream);
     // In Unified Plan, transceivers will still reference the stream even after
@@ -580,10 +583,13 @@ TEST_F(RTCPeerConnectionTest,
   // |MediaStreamComponent|), which will remove its mapping from the peer
   // connection.
   WebHeap::CollectAllGarbageForTesting();
-  EXPECT_FALSE(pc->GetTrack(track_component.Get()));
+  EXPECT_FALSE(pc->GetTrackForTesting(track_component.Get()));
 }
 
-TEST_F(RTCPeerConnectionTest, CheckForComplexSdpWithSdpSemanticsPlanB) {
+#if BUILDFLAG(IS_FUCHSIA)
+
+TEST_F(RTCPeerConnectionTest,
+       CheckForComplexSdpWithSdpSemanticsPlanBOnFuchsia) {
   V8TestingScope scope;
   Persistent<RTCPeerConnection> pc = CreatePC(scope, "plan-b");
   RTCSessionDescriptionInit* sdp = RTCSessionDescriptionInit::Create();
@@ -611,6 +617,8 @@ TEST_F(RTCPeerConnectionTest, CheckForComplexSdpWithSdpSemanticsPlanB) {
   ASSERT_FALSE(
       pc->CheckForComplexSdp(ParsedSessionDescription::Parse(sdp)).has_value());
 }
+
+#endif  // BUILDFLAG(IS_FUCHSIA)
 
 TEST_F(RTCPeerConnectionTest, CheckForComplexSdpWithSdpSemanticsUnifiedPlan) {
   V8TestingScope scope;
@@ -820,9 +828,9 @@ class RTCPeerConnectionCallSetupStateTest : public RTCPeerConnectionTest {
   }
 
   ScriptValue ToScriptValue(V8TestingScope& scope, RTCOfferOptions* value) {
-    v8::Isolate* isolate = scope.GetIsolate();
-    return ScriptValue(isolate,
-                       ToV8(value, scope.GetContext()->Global(), isolate));
+    return ScriptValue(scope.GetIsolate(), ToV8Traits<RTCOfferOptions>::ToV8(
+                                               scope.GetScriptState(), value)
+                                               .ToLocalChecked());
   }
 
  private:
@@ -1204,6 +1212,7 @@ TEST_F(RTCPeerConnectionTest, SdpSemanticsUseCounters) {
     EXPECT_TRUE(scope.GetDocument().IsUseCounted(
         WebFeature::kRTCPeerConnectionUsingComplexUnifiedPlan));
   }
+#if BUILDFLAG(IS_FUCHSIA)
   // Constructor with {sdpSemantics:"plan-b"}.
   {
     V8TestingScope scope;
@@ -1232,6 +1241,7 @@ TEST_F(RTCPeerConnectionTest, SdpSemanticsUseCounters) {
     EXPECT_FALSE(scope.GetDocument().IsUseCounted(
         WebFeature::kRTCPeerConnectionUsingComplexUnifiedPlan));
   }
+#endif  // BUILDFLAG(IS_FUCHSIA)
   // Constructor with {sdpSemantics:"unified-plan"}.
   {
     V8TestingScope scope;

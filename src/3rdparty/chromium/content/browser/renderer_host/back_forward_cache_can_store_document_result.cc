@@ -4,11 +4,14 @@
 
 #include "content/browser/renderer_host/back_forward_cache_can_store_document_result.h"
 
-#include "base/containers/contains.h"
+#include <inttypes.h>
+#include <cstdint>
+
 #include "base/debug/dump_without_crashing.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "content/common/debug_utils.h"
+#include "content/public/browser/disallow_activation_reason.h"
 #include "third_party/blink/public/common/scheduler/web_scheduler_tracked_feature.h"
 
 namespace content {
@@ -44,8 +47,6 @@ const char* BrowsingInstanceSwapResultToString(
       return "BI not swapped - source URL scheme is not HTTP(S)";
     case ShouldSwapBrowsingInstance::kNo_SameSiteNavigation:
       return "BI not swapped - same site navigation";
-    case ShouldSwapBrowsingInstance::kNo_ReloadingErrorPage:
-      return "BI not swapped - reloading error page";
     case ShouldSwapBrowsingInstance::kNo_AlreadyHasMatchingBrowsingInstance:
       return "BI not swapped - already has matching BrowsingInstance";
     case ShouldSwapBrowsingInstance::kNo_RendererDebugURL:
@@ -72,10 +73,136 @@ const char* BrowsingInstanceSwapResultToString(
         kNo_UnloadHandlerExistsOnSameSiteNavigation:
       return "BI not swapped - unload handler exists and the navigation is "
              "same-site";
+    case ShouldSwapBrowsingInstance::kNo_NotPrimaryMainFrame:
+      return "BI not swapped - not a primary main frame";
   }
 }
 
+using ProtoEnum =
+    perfetto::protos::pbzero::BackForwardCacheCanStoreDocumentResult;
+ProtoEnum::BackForwardCacheNotRestoredReason NotRestoredReasonToTraceEnum(
+    BackForwardCacheMetrics::NotRestoredReason reason) {
+  using Reason = BackForwardCacheMetrics::NotRestoredReason;
+  switch (reason) {
+    case Reason::kNotPrimaryMainFrame:
+      return ProtoEnum::NOT_MAIN_FRAME;
+    case Reason::kBackForwardCacheDisabled:
+      return ProtoEnum::BACK_FORWARD_CACHE_DISABLED;
+    case Reason::kRelatedActiveContentsExist:
+      return ProtoEnum::RELATED_ACTIVE_CONTENTS_EXIST;
+    case Reason::kHTTPStatusNotOK:
+      return ProtoEnum::HTTP_STATUS_NOT_OK;
+    case Reason::kSchemeNotHTTPOrHTTPS:
+      return ProtoEnum::SCHEME_NOT_HTTP_OR_HTTPS;
+    case Reason::kLoading:
+      return ProtoEnum::LOADING;
+    case Reason::kWasGrantedMediaAccess:
+      return ProtoEnum::WAS_GRANTED_MEDIA_ACCESS;
+    case Reason::kDisableForRenderFrameHostCalled:
+      return ProtoEnum::DISABLE_FOR_RENDER_FRAME_HOST_CALLED;
+    case Reason::kDomainNotAllowed:
+      return ProtoEnum::DOMAIN_NOT_ALLOWED;
+    case Reason::kHTTPMethodNotGET:
+      return ProtoEnum::HTTP_METHOD_NOT_GET;
+    case Reason::kSubframeIsNavigating:
+      return ProtoEnum::SUBFRAME_IS_NAVIGATING;
+    case Reason::kTimeout:
+      return ProtoEnum::TIMEOUT;
+    case Reason::kCacheLimit:
+      return ProtoEnum::CACHE_LIMIT;
+    case Reason::kJavaScriptExecution:
+      return ProtoEnum::JAVASCRIPT_EXECUTION;
+    case Reason::kRendererProcessKilled:
+      return ProtoEnum::RENDERER_PROCESS_KILLED;
+    case Reason::kRendererProcessCrashed:
+      return ProtoEnum::RENDERER_PROCESS_CRASHED;
+    case Reason::kGrantedMediaStreamAccess:
+      return ProtoEnum::GRANTED_MEDIA_STREAM_ACCESS;
+    case Reason::kSchedulerTrackedFeatureUsed:
+      return ProtoEnum::SCHEDULER_TRACKED_FEATURE_USED;
+    case Reason::kConflictingBrowsingInstance:
+      return ProtoEnum::CONFLICTING_BROWSING_INSTANCE;
+    case Reason::kCacheFlushed:
+      return ProtoEnum::CACHE_FLUSHED;
+    case Reason::kServiceWorkerVersionActivation:
+      return ProtoEnum::SERVICE_WORKER_VERSION_ACTIVATION;
+    case Reason::kSessionRestored:
+      return ProtoEnum::SESSION_RESTORED;
+    case Reason::kServiceWorkerPostMessage:
+      return ProtoEnum::SERVICE_WORKER_POST_MESSAGE;
+    case Reason::kEnteredBackForwardCacheBeforeServiceWorkerHostAdded:
+      return ProtoEnum::
+          ENTERED_BACK_FORWARD_CACHE_BEFORE_SERVICE_WORKER_HOST_ADDED;
+    case Reason::kNotMostRecentNavigationEntry:
+      return ProtoEnum::NOT_MOST_RECENT_NAVIGATION_ENTRY;
+    case Reason::kServiceWorkerClaim:
+      return ProtoEnum::SERVICE_WORKER_CLAIM;
+    case Reason::kIgnoreEventAndEvict:
+      return ProtoEnum::IGNORE_EVENT_AND_EVICT;
+    case Reason::kHaveInnerContents:
+      return ProtoEnum::HAVE_INNER_CONTENTS;
+    case Reason::kTimeoutPuttingInCache:
+      return ProtoEnum::TIMEOUT_PUTTING_IN_CACHE;
+    case Reason::kBackForwardCacheDisabledByLowMemory:
+      return ProtoEnum::BACK_FORWARD_CACHE_DISABLED_BY_LOW_MEMORY;
+    case Reason::kBackForwardCacheDisabledByCommandLine:
+      return ProtoEnum::BACK_FORWARD_CACHE_DISABLED_BY_COMMAND_LINE;
+    case Reason::kNetworkRequestDatapipeDrainedAsBytesConsumer:
+      return ProtoEnum::NETWORK_REQUEST_DATAPIPE_DRAINED_AS_BYTES_CONSUMER;
+    case Reason::kNetworkRequestRedirected:
+      return ProtoEnum::NETWORK_REQUEST_REDIRECTED;
+    case Reason::kNetworkRequestTimeout:
+      return ProtoEnum::NETWORK_REQUEST_TIMEOUT;
+    case Reason::kNetworkExceedsBufferLimit:
+      return ProtoEnum::NETWORK_EXCEEDS_BUFFER_LIMIT;
+    case Reason::kNavigationCancelledWhileRestoring:
+      return ProtoEnum::NAVIGATION_CANCELLED_WHILE_RESTORING;
+    case Reason::kUserAgentOverrideDiffers:
+      return ProtoEnum::USER_AGENT_OVERRIDE_DIFFERS;
+    case Reason::kForegroundCacheLimit:
+      return ProtoEnum::FOREGROUND_CACHE_LIMIT;
+    case Reason::kBrowsingInstanceNotSwapped:
+      return ProtoEnum::BROWSING_INSTANCE_NOT_SWAPPED;
+    case Reason::kBackForwardCacheDisabledForDelegate:
+      return ProtoEnum::BACK_FORWARD_CACHE_DISABLED_FOR_DELEGATE;
+    case Reason::kUnloadHandlerExistsInMainFrame:
+      return ProtoEnum::UNLOAD_HANDLER_EXISTS_IN_MAIN_FRAME;
+    case Reason::kUnloadHandlerExistsInSubFrame:
+      return ProtoEnum::UNLOAD_HANDLER_EXISTS_IN_SUBFRAME;
+    case Reason::kServiceWorkerUnregistration:
+      return ProtoEnum::SERVICE_WORKER_UNREGISTRATION;
+    case Reason::kCacheControlNoStore:
+      return ProtoEnum::CACHE_CONTROL_NO_STORE;
+    case Reason::kCacheControlNoStoreCookieModified:
+      return ProtoEnum::CACHE_CONTROL_NO_STORE_COOKIE_MODIFIED;
+    case Reason::kCacheControlNoStoreHTTPOnlyCookieModified:
+      return ProtoEnum::CACHE_CONTROL_NO_STORE_HTTP_ONLY_COOKIE_MODIFIED;
+    case Reason::kNoResponseHead:
+      return ProtoEnum::NO_RESPONSE_HEAD;
+    case Reason::kErrorDocument:
+      return ProtoEnum::ERROR_DOCUMENT;
+    case Reason::kFencedFramesEmbedder:
+      return ProtoEnum::FENCED_FRAMES_EMBEDDER;
+    case Reason::kBlocklistedFeatures:
+      return ProtoEnum::BLOCKLISTED_FEATURES;
+    case Reason::kUnknown:
+      return ProtoEnum::UNKNOWN;
+  }
+  NOTREACHED();
+  return ProtoEnum::UNKNOWN;
+}
+
 }  // namespace
+
+void BackForwardCacheCanStoreDocumentResult::WriteIntoTrace(
+    perfetto::TracedProto<
+        perfetto::protos::pbzero::BackForwardCacheCanStoreDocumentResult>
+        result) const {
+  for (auto reason : not_stored_reasons()) {
+    result->set_back_forward_cache_not_restored_reason(
+        NotRestoredReasonToTraceEnum(reason));
+  }
+}
 
 bool BackForwardCacheCanStoreDocumentResult::HasNotStoredReason(
     BackForwardCacheMetrics::NotRestoredReason reason) const {
@@ -85,6 +212,7 @@ bool BackForwardCacheCanStoreDocumentResult::HasNotStoredReason(
 void BackForwardCacheCanStoreDocumentResult::AddNotStoredReason(
     BackForwardCacheMetrics::NotRestoredReason reason) {
   not_stored_reasons_.Put(reason);
+
   if (reason == BackForwardCacheMetrics::NotRestoredReason::kNoResponseHead ||
       reason ==
           BackForwardCacheMetrics::NotRestoredReason::kSchemeNotHTTPOrHTTPS) {
@@ -110,8 +238,18 @@ std::string DisabledReasonsToString(
     const std::set<BackForwardCache::DisabledReason>& reasons) {
   std::vector<std::string> descriptions;
   for (const auto& reason : reasons) {
-    descriptions.push_back(base::StringPrintf(
-        "%d:%d:%s", reason.source, reason.id, reason.description.c_str()));
+    descriptions.push_back(
+        base::StringPrintf("%d:%d:%s:%s", reason.source, reason.id,
+                           reason.description.c_str(), reason.context.c_str()));
+  }
+  return base::JoinString(descriptions, ", ");
+}
+
+std::string DisallowActivationReasonsToString(
+    const std::set<uint64_t>& reasons) {
+  std::vector<std::string> descriptions;
+  for (const uint64_t reason : reasons) {
+    descriptions.push_back(base::StringPrintf("%" PRIu64, reason));
   }
   return base::JoinString(descriptions, ", ");
 }
@@ -136,7 +274,7 @@ std::string BackForwardCacheCanStoreDocumentResult::NotRestoredReasonToString(
   using Reason = BackForwardCacheMetrics::NotRestoredReason;
 
   switch (reason) {
-    case Reason::kNotMainFrame:
+    case Reason::kNotPrimaryMainFrame:
       return "not a main frame";
     case Reason::kBackForwardCacheDisabled:
       return "BackForwardCache disabled";
@@ -199,7 +337,8 @@ std::string BackForwardCacheCanStoreDocumentResult::NotRestoredReasonToString(
       return "service worker claim is called";
     case Reason::kIgnoreEventAndEvict:
       return "IsInactiveAndDisallowReactivation() was called for the frame in "
-             "bfcache";
+             "bfcache " +
+             DisallowActivationReasonsToString(disallow_activation_reasons_);
     case Reason::kHaveInnerContents:
       return "RenderFrameHost has inner WebContents attached";
     case Reason::kTimeoutPuttingInCache:
@@ -218,8 +357,6 @@ std::string BackForwardCacheCanStoreDocumentResult::NotRestoredReasonToString(
       return "Network request is open for too long and exceeds time limit";
     case Reason::kNetworkExceedsBufferLimit:
       return "Network request reads too much data and exceeds buffer limit";
-    case Reason::kBackForwardCacheDisabledForPrerender:
-      return "BackForwardCache is disabled for Prerender";
     case Reason::kUserAgentOverrideDiffers:
       return "User-agent override differs";
     case Reason::kNetworkRequestDatapipeDrainedAsBytesConsumer:
@@ -228,9 +365,9 @@ std::string BackForwardCacheCanStoreDocumentResult::NotRestoredReasonToString(
       return "Browsing instance is not swapped";
     case Reason::kBackForwardCacheDisabledForDelegate:
       return "BackForwardCache is not supported by delegate";
-    case Reason::kOptInUnloadHeaderNotPresent:
-      return "BFCache-Opt-In header not present, or does not include `unload` "
-             "token, and an experimental config which requires it is active.";
+    case Reason::kUnloadHandlerExistsInMainFrame:
+      return "Unload handler exists in the main frame, and the current "
+             "experimental config doesn't permit it to be BFCached.";
     case Reason::kUnloadHandlerExistsInSubFrame:
       return "Unload handler exists in a sub frame, and the current "
              "experimental config doesn't permit it to be BFCached.";
@@ -251,22 +388,22 @@ std::string BackForwardCacheCanStoreDocumentResult::NotRestoredReasonToString(
     case Reason::kNoResponseHead:
       return "main RenderFrameHost doesn't have response headers set, probably "
              "due not having successfully committed a navigation.";
-    case Reason::kActivationNavigationsDisallowedForBug1234857:
-      return "Activation navigations are disallowed to avoid bypassing "
-             "PasswordProtectionService as a workaround for "
-             "https://crbug.com/1234857.";
+    case Reason::kErrorDocument:
+      return "Error documents cannot be stored in bfcache";
+    case Reason::kFencedFramesEmbedder:
+      return "Pages using FencedFrames cannot be stored in bfcache.";
   }
 }
 
 void BackForwardCacheCanStoreDocumentResult::No(
     BackForwardCacheMetrics::NotRestoredReason reason) {
-  if (reason ==
-          BackForwardCacheMetrics::NotRestoredReason::kBlocklistedFeatures ||
-      reason == BackForwardCacheMetrics::NotRestoredReason::
-                    kDisableForRenderFrameHostCalled) {
-    CaptureTraceForNavigationDebugScenario(
-        DebugScenario::kDebugBackForwardCacheMetricsMismatch);
-  }
+  // Either |NoDueToFeatures()| or |NoDueToDisableForRenderFrameHostCalled|
+  // should be called instead.
+  DCHECK_NE(reason,
+            BackForwardCacheMetrics::NotRestoredReason::kBlocklistedFeatures);
+  DCHECK_NE(reason, BackForwardCacheMetrics::NotRestoredReason::
+                        kDisableForRenderFrameHostCalled);
+
   AddNotStoredReason(reason);
 }
 
@@ -280,10 +417,15 @@ void BackForwardCacheCanStoreDocumentResult::NoDueToFeatures(
 void BackForwardCacheCanStoreDocumentResult::
     NoDueToDisableForRenderFrameHostCalled(
         const std::set<BackForwardCache::DisabledReason>& reasons) {
-  AddNotStoredReason(BackForwardCacheMetrics::NotRestoredReason::
-                         kDisableForRenderFrameHostCalled);
-  for (const BackForwardCache::DisabledReason& reason : reasons)
+  // This should only be called with non-empty reasons.
+  DCHECK(reasons.size());
+  for (const BackForwardCache::DisabledReason& reason : reasons) {
     disabled_reasons_.insert(reason);
+    // This will be a no-op after the first time but it's written like this to
+    // guarantee that we do not set it without a reason.
+    AddNotStoredReason(BackForwardCacheMetrics::NotRestoredReason::
+                           kDisableForRenderFrameHostCalled);
+  }
 }
 
 void BackForwardCacheCanStoreDocumentResult::NoDueToRelatedActiveContents(
@@ -291,6 +433,23 @@ void BackForwardCacheCanStoreDocumentResult::NoDueToRelatedActiveContents(
   AddNotStoredReason(
       BackForwardCacheMetrics::NotRestoredReason::kRelatedActiveContentsExist);
   browsing_instance_swap_result_ = browsing_instance_swap_result;
+}
+
+void BackForwardCacheCanStoreDocumentResult::NoDueToDisallowActivation(
+    uint64_t reason) {
+  AddNotStoredReason(
+      BackForwardCacheMetrics::NotRestoredReason::kIgnoreEventAndEvict);
+  disallow_activation_reasons_.insert(reason);
+}
+
+void BackForwardCacheCanStoreDocumentResult::NoDueToAXEvents(
+    const std::vector<ui::AXEvent>& events) {
+  for (auto& event : events) {
+    ax_events_.insert(event.event_type);
+  }
+  AddNotStoredReason(
+      BackForwardCacheMetrics::NotRestoredReason::kIgnoreEventAndEvict);
+  disallow_activation_reasons_.insert(DisallowActivationReasonId::kAXEvent);
 }
 
 void BackForwardCacheCanStoreDocumentResult::AddReasonsFrom(
@@ -303,14 +462,19 @@ void BackForwardCacheCanStoreDocumentResult::AddReasonsFrom(
   }
   if (other.browsing_instance_swap_result_)
     browsing_instance_swap_result_ = other.browsing_instance_swap_result_;
+  for (const auto reason : other.disallow_activation_reasons()) {
+    disallow_activation_reasons_.insert(reason);
+  }
+  for (const auto event : other.ax_events()) {
+    ax_events_.insert(event);
+  }
 }
 
 BackForwardCacheCanStoreDocumentResult::
     BackForwardCacheCanStoreDocumentResult() = default;
 BackForwardCacheCanStoreDocumentResult::BackForwardCacheCanStoreDocumentResult(
-    BackForwardCacheCanStoreDocumentResult&&) = default;
-BackForwardCacheCanStoreDocumentResult&
-BackForwardCacheCanStoreDocumentResult::operator=(
+    BackForwardCacheCanStoreDocumentResult&) = default;
+BackForwardCacheCanStoreDocumentResult::BackForwardCacheCanStoreDocumentResult(
     BackForwardCacheCanStoreDocumentResult&&) = default;
 BackForwardCacheCanStoreDocumentResult::
     ~BackForwardCacheCanStoreDocumentResult() = default;

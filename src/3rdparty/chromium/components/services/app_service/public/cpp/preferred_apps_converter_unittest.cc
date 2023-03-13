@@ -33,20 +33,21 @@ TEST_F(PreferredAppsConverterTest, ConvertSimpleEntry) {
   auto* converted_preferred_apps =
       converted_value.FindKey(apps::kPreferredAppsKey);
   // Check that each entry is correct.
-  ASSERT_EQ(1u, converted_preferred_apps->GetList().size());
-  auto& entry = converted_preferred_apps->GetList()[0];
+  ASSERT_EQ(1u, converted_preferred_apps->GetListDeprecated().size());
+  auto& entry = converted_preferred_apps->GetListDeprecated()[0];
   EXPECT_EQ(kAppId1, *entry.FindStringKey(apps::kAppIdKey));
 
   auto* converted_intent_filter = entry.FindKey(apps::kIntentFilterKey);
   ASSERT_EQ(intent_filter->conditions.size(),
-            converted_intent_filter->GetList().size());
+            converted_intent_filter->GetListDeprecated().size());
 
   for (size_t i = 0; i < intent_filter->conditions.size(); i++) {
     auto& condition = intent_filter->conditions[i];
-    auto& converted_condition = converted_intent_filter->GetList()[i];
+    auto& converted_condition = converted_intent_filter->GetListDeprecated()[i];
     auto& condition_values = condition->condition_values;
     auto converted_condition_values =
-        converted_condition.FindKey(apps::kConditionValuesKey)->GetList();
+        converted_condition.FindKey(apps::kConditionValuesKey)
+            ->GetListDeprecated();
 
     EXPECT_EQ(static_cast<int>(condition->condition_type),
               converted_condition.FindIntKey(apps::kConditionTypeKey));
@@ -67,8 +68,8 @@ TEST_F(PreferredAppsConverterTest, ConvertSimpleEntry) {
             preferred_apps.FindPreferredAppForUrl(url_wrong_host));
 }
 
-// Test one simple entry with json string.
-TEST_F(PreferredAppsConverterTest, ConvertSimpleEntryJson) {
+// Test one upgraded simple entry with json string.
+TEST_F(PreferredAppsConverterTest, ConvertUpgradedSimpleEntryJson) {
   GURL filter_url = GURL("https://www.google.com/abc");
   auto intent_filter = apps_util::CreateIntentFilterForUrlScope(filter_url);
 
@@ -77,47 +78,6 @@ TEST_F(PreferredAppsConverterTest, ConvertSimpleEntryJson) {
   preferred_apps.AddPreferredApp(kAppId1, intent_filter);
   auto converted_value =
       apps::ConvertPreferredAppsToValue(preferred_apps.GetReference());
-
-  const char expected_output_string[] =
-      "{\"preferred_apps\": [ {\"app_id\": \"abcdefg\","
-      "   \"intent_filter\": [ {"
-      "      \"condition_type\": 0,"
-      "      \"condition_values\": [ {"
-      "         \"match_type\": 0,"
-      "         \"value\": \"https\""
-      "      } ]"
-      "   }, {"
-      "      \"condition_type\": 1,"
-      "      \"condition_values\": [ {"
-      "         \"match_type\": 0,"
-      "         \"value\": \"www.google.com\""
-      "      } ]"
-      "   }, {"
-      "      \"condition_type\": 2,"
-      "      \"condition_values\": [ {"
-      "         \"match_type\": 2,"
-      "         \"value\": \"/abc\""
-      "      } ]"
-      "   } ]"
-      "} ],"
-      "\"version\": 0}";
-  absl::optional<base::Value> expected_output =
-      base::JSONReader::Read(expected_output_string);
-  ASSERT_TRUE(expected_output);
-  EXPECT_EQ(expected_output.value(), converted_value);
-}
-
-// Test one upgraded simple entry with json string.
-TEST_F(PreferredAppsConverterTest, ConvertUpgradedSimpleEntryJson) {
-  GURL filter_url = GURL("https://www.google.com/abc");
-  auto intent_filter = apps_util::CreateIntentFilterForUrlScope(
-      filter_url, /*with_action_view=*/true);
-
-  apps::PreferredAppsList preferred_apps;
-  preferred_apps.Init();
-  preferred_apps.AddPreferredApp(kAppId1, intent_filter);
-  auto converted_value = apps::ConvertPreferredAppsToValue(
-      preferred_apps.GetReference(), /*upgraded_for_sharing=*/true);
 
   const char expected_output_string[] =
       "{\"preferred_apps\": [ {\"app_id\": \"abcdefg\","
@@ -185,7 +145,7 @@ TEST_F(PreferredAppsConverterTest, ParseSimpleEntryJson) {
 
   GURL filter_url = GURL("https://www.google.com/abc");
   auto intent_filter = apps_util::CreateIntentFilterForUrlScope(filter_url);
-
+  intent_filter->conditions.erase(intent_filter->conditions.begin());
   apps::PreferredAppsList preferred_apps;
   preferred_apps.Init();
   preferred_apps.AddPreferredApp(kAppId1, intent_filter);
@@ -231,8 +191,7 @@ TEST_F(PreferredAppsConverterTest, ParseUpgradedSimpleEntryJson) {
   EXPECT_TRUE(apps::IsUpgradedForSharing(test_value.value()));
 
   GURL filter_url = GURL("https://www.google.com/abc");
-  auto intent_filter = apps_util::CreateIntentFilterForUrlScope(
-      filter_url, /*with_action_view=*/true);
+  auto intent_filter = apps_util::CreateIntentFilterForUrlScope(filter_url);
 
   apps::PreferredAppsList preferred_apps;
   preferred_apps.Init();
@@ -578,8 +537,7 @@ TEST_F(PreferredAppsConverterTest, UpgradePreferredApp) {
   old_preferred_apps.Init();
   old_preferred_apps.AddPreferredApp(kAppId1, old_intent_filter);
 
-  auto new_intent_filter = apps_util::CreateIntentFilterForUrlScope(
-      filter_url, /*with_action_view=*/true);
+  auto new_intent_filter = apps_util::CreateIntentFilterForUrlScope(filter_url);
 
   apps::PreferredAppsList new_preferred_apps;
   new_preferred_apps.Init();

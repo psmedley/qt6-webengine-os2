@@ -10,6 +10,7 @@
  */
 
 #include <arm_neon.h>
+#include <assert.h>
 
 #include "config/aom_config.h"
 #include "config/aom_dsp_rtcd.h"
@@ -571,7 +572,7 @@ static INLINE void highbd_dc_predictor(uint16_t *dst, ptrdiff_t stride, int bw,
   }
 }
 
-#define intra_pred_highbd_sized_neon(type, width)               \
+#define INTRA_PRED_HIGHBD_SIZED_NEON(type, width)               \
   void aom_highbd_##type##_predictor_##width##x##width##_neon(  \
       uint16_t *dst, ptrdiff_t stride, const uint16_t *above,   \
       const uint16_t *left, int bd) {                           \
@@ -579,15 +580,16 @@ static INLINE void highbd_dc_predictor(uint16_t *dst, ptrdiff_t stride, int bw,
     highbd_##type##_predictor(dst, stride, width, above, left); \
   }
 
-#define intra_pred_square(type)           \
-  intra_pred_highbd_sized_neon(type, 4);  \
-  intra_pred_highbd_sized_neon(type, 8);  \
-  intra_pred_highbd_sized_neon(type, 16); \
-  intra_pred_highbd_sized_neon(type, 32); \
-  intra_pred_highbd_sized_neon(type, 64);
+#define INTRA_PRED_SQUARE(type)          \
+  INTRA_PRED_HIGHBD_SIZED_NEON(type, 4)  \
+  INTRA_PRED_HIGHBD_SIZED_NEON(type, 8)  \
+  INTRA_PRED_HIGHBD_SIZED_NEON(type, 16) \
+  INTRA_PRED_HIGHBD_SIZED_NEON(type, 32) \
+  INTRA_PRED_HIGHBD_SIZED_NEON(type, 64)
 
-intra_pred_square(dc);
-#undef intra_pred_square
+INTRA_PRED_SQUARE(dc)
+
+#undef INTRA_PRED_SQUARE
 
 /* ---------------------P R E D I C T I O N   Z 1--------------------------- */
 
@@ -1141,7 +1143,7 @@ static void dr_prediction_z2_Nx4_neon(int N, uint8_t *dst, ptrdiff_t stride,
     uint16x4_t ydx;
     uint8x8_t resx, resy;
     uint16x4x2_t v_shift;
-
+    v_shift.val[1] = vdup_n_u16(0);
     int y = r + 1;
     int base_x = (-y * dx) >> frac_bits_x;
     int base_shift = 0;
@@ -1296,6 +1298,7 @@ static void dr_prediction_z2_Nx8_neon(int N, uint8_t *dst, ptrdiff_t stride,
     uint8x8_t resx, resy, resxy;
     uint16x8_t r6, ydx;
     uint16x8x2_t res, shift;
+    shift.val[1] = vdupq_n_u16(0);
 
     int y = r + 1;
     int base_x = (-y * dx) >> frac_bits_x;
@@ -1513,12 +1516,12 @@ static void dr_prediction_z2_HxW_neon(int H, int W, uint8_t *dst,
                                 vreinterpretq_s16_u16(c1234.val[0]));
         c256.val[1] = vaddq_s16(vreinterpretq_s16_u16(j256),
                                 vreinterpretq_s16_u16(c1234.val[1]));
-        mul16.val[0] = vminq_s16(vmulq_s16(c256.val[0], dy256),
-                                 vreinterpretq_s16_u16(vshrq_n_u16(
-                                     vreinterpretq_u16_s16(min_base_y256), 1)));
-        mul16.val[1] = vminq_s16(vmulq_s16(c256.val[1], dy256),
-                                 vreinterpretq_s16_u16(vshrq_n_u16(
-                                     vreinterpretq_u16_s16(min_base_y256), 1)));
+        mul16.val[0] = vreinterpretq_s16_u16(
+            vminq_u16(vreinterpretq_u16_s16(vmulq_s16(c256.val[0], dy256)),
+                      vshrq_n_u16(vreinterpretq_u16_s16(min_base_y256), 1)));
+        mul16.val[1] = vreinterpretq_s16_u16(
+            vminq_u16(vreinterpretq_u16_s16(vmulq_s16(c256.val[1], dy256)),
+                      vshrq_n_u16(vreinterpretq_u16_s16(min_base_y256), 1)));
         y_c256.val[0] = vsubq_s16(v_r6, mul16.val[0]);
         y_c256.val[1] = vsubq_s16(v_r6, mul16.val[1]);
 
@@ -1541,6 +1544,7 @@ static void dr_prediction_z2_HxW_neon(int H, int W, uint8_t *dst,
         int16_t offset_diff = max_y - min_y;
 
         if (offset_diff < 16) {
+          assert(offset_diff >= 0);
           int16x8_t min_y256 =
               vdupq_lane_s16(vget_high_s16(base_y_c256.val[1]), 3);
 

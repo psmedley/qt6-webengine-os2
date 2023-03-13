@@ -63,7 +63,7 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/modules/websockets/inspector_websocket_events.h"
 #include "third_party/blink/renderer/modules/websockets/websocket_channel_client.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/unique_identifier.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
@@ -319,7 +319,7 @@ bool WebSocketChannelImpl::Connect(const KURL& url, const String& protocol) {
   // the browser process. Fail asynchronously, to match the behaviour when we
   // are throttled by the network service.
   if (connection_count_tracker_handle_.IncrementAndCheckStatus() ==
-      ConnectionCountTrackerHandle::CountStatus::SHOULD_NOT_CONNECT) {
+      ConnectionCountTrackerHandle::CountStatus::kShouldNotConnect) {
     StringBuilder message;
     message.Append("WebSocket connection to '");
     message.Append(url.GetString());
@@ -386,7 +386,7 @@ WebSocketChannel::SendResult WebSocketChannelImpl::Send(
     did_attempt_to_send = true;
     if (MaybeSendSynchronously(
             network::mojom::blink::WebSocketMessageType::TEXT, &data)) {
-      return SendResult::SENT_SYNCHRONOUSLY;
+      return SendResult::kSentSynchronously;
     }
   }
 
@@ -403,7 +403,7 @@ WebSocketChannel::SendResult WebSocketChannelImpl::Send(
   // that the callback was fired re-entrantly, which would be bad.
   DCHECK(!messages_.empty());
 
-  return SendResult::CALLBACK_WILL_BE_CALLED;
+  return SendResult::kCallbackWillBeCalled;
 }
 
 void WebSocketChannelImpl::Send(
@@ -440,7 +440,7 @@ WebSocketChannel::SendResult WebSocketChannelImpl::Send(
     did_attempt_to_send = true;
     if (MaybeSendSynchronously(
             network::mojom::blink::WebSocketMessageType::BINARY, &message)) {
-      return SendResult::SENT_SYNCHRONOUSLY;
+      return SendResult::kSentSynchronously;
     }
   }
 
@@ -455,7 +455,7 @@ WebSocketChannel::SendResult WebSocketChannelImpl::Send(
   // that the callback was fired re-entrantly, which would be bad.
   DCHECK(!messages_.empty());
 
-  return SendResult::CALLBACK_WILL_BE_CALLED;
+  return SendResult::kCallbackWillBeCalled;
 }
 
 void WebSocketChannelImpl::Close(int code, const String& reason) {
@@ -772,8 +772,8 @@ WebSocketChannelImpl::ConnectionCountTrackerHandle::IncrementAndCheckStatus() {
   const size_t old_count =
       g_connection_count.fetch_add(1, std::memory_order_relaxed);
   return old_count >= kMaxWebSocketsPerRenderProcess
-             ? CountStatus::SHOULD_NOT_CONNECT
-             : CountStatus::OKAY_TO_CONNECT;
+             ? CountStatus::kShouldNotConnect
+             : CountStatus::kOkayToConnect;
 }
 
 void WebSocketChannelImpl::ConnectionCountTrackerHandle::Decrement() {
@@ -806,7 +806,7 @@ void WebSocketChannelImpl::ProcessSendQueue() {
     switch (message.Type()) {
       case kMessageTypeText:
         message_type = network::mojom::blink::WebSocketMessageType::TEXT;
-        FALLTHROUGH;
+        [[fallthrough]];
       case kMessageTypeArrayBuffer: {
         base::span<const char>& data_frame = message.MutablePendingPayload();
         if (!message.GetDidCallSendMessage()) {

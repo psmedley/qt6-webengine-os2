@@ -275,7 +275,8 @@ tr.exportTo('tr.metrics.sh', function() {
         sample = {value: evData.cumulative_score};
       }
     });
-    return sample ? [sample] : [];
+    // When there is no layout shift event on found on the page, CLS is 0.
+    return sample ? [sample] : [{value: 0}];
   }
 
   function findAllLayoutShiftSamples(chromeHelper) {
@@ -299,7 +300,9 @@ tr.exportTo('tr.metrics.sh', function() {
         }
       });
     }
-    return foundMainFrame ? [{value: total}] : [];
+
+    // If no CLS is found, report value as 0 instead of null.
+    return foundMainFrame ? [{value: total}] : [{value: 0}];
   }
 
   function addFirstMeaningfulPaintSample(samples, rendererHelper,
@@ -594,40 +597,6 @@ tr.exportTo('tr.metrics.sh', function() {
   function addSamplesToHistogram(samples, histogram, histograms) {
     for (const sample of samples) {
       histogram.addSample(sample.value, sample.diagnostics);
-
-      // Only add breakdown histograms for FCP.
-      // http://crbug.com/771610
-      if (histogram.name !== 'timeToFirstContentfulPaint') continue;
-
-      if (!sample.breakdownTree) continue;
-      for (const [category, breakdown] of Object.entries(
-          sample.breakdownTree)) {
-        const relatedName = `${histogram.name}:${category}`;
-        let relatedHist = histograms.getHistogramsNamed(relatedName)[0];
-        if (!relatedHist) {
-          relatedHist = histograms.createHistogram(
-              relatedName, histogram.unit, [], {
-                binBoundaries: LOADING_METRIC_BOUNDARIES,
-                summaryOptions: {
-                  count: false,
-                  max: false,
-                  min: false,
-                  sum: false,
-                },
-              });
-
-          let relatedNames = histogram.diagnostics.get('breakdown');
-          if (!relatedNames) {
-            relatedNames = new tr.v.d.RelatedNameMap();
-            histogram.diagnostics.set('breakdown', relatedNames);
-          }
-          relatedNames.set(category, relatedName);
-        }
-        relatedHist.addSample(breakdown.total, {
-          breakdown: tr.v.d.Breakdown.fromEntries(
-              Object.entries(breakdown.events)),
-        });
-      }
     }
   }
 

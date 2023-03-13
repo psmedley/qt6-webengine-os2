@@ -20,9 +20,9 @@ namespace media_router {
 
 enum class SinkIconType;
 
-// NOTE: Do not renumber enums as that would confuse interpretation of
-// previously logged data. When making changes, also update the enum list
-// in tools/metrics/histograms/enums.xml to keep it in sync.
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused. When making changes, also update the
+// enum list in tools/metrics/histograms/enums.xml to keep it in sync.
 
 // NOTE: For metrics specific to the Media Router component extension, see
 // mojo/media_router_mojo_metrics.h.
@@ -34,25 +34,25 @@ enum class DialogActivationLocationAndCastMode {
   kPinnedIconAndPresentation,
   kPinnedIconAndTabMirror,
   kPinnedIconAndDesktopMirror,
-  kPinnedIconAndLocalFile,
+  kPinnedIconAndLocalFile,  // Obsolete.
   // One can start casting from an ephemeral icon by stopping a session, then
   // starting another from the same dialog.
   kEphemeralIconAndPresentation,
   kEphemeralIconAndTabMirror,
   kEphemeralIconAndDesktopMirror,
-  kEphemeralIconAndLocalFile,
+  kEphemeralIconAndLocalFile,  // Obsolete.
   kContextMenuAndPresentation,
   kContextMenuAndTabMirror,
   kContextMenuAndDesktopMirror,
-  kContextMenuAndLocalFile,
+  kContextMenuAndLocalFile,  // Obsolete.
   kPageAndPresentation,
   kPageAndTabMirror,
   kPageAndDesktopMirror,
-  kPageAndLocalFile,
+  kPageAndLocalFile,  // Obsolete.
   kAppMenuAndPresentation,
   kAppMenuAndTabMirror,
   kAppMenuAndDesktopMirror,
-  kAppMenuAndLocalFile,
+  kAppMenuAndLocalFile,  // Obsolete.
 
   // NOTE: Do not reorder existing entries, and add entries only immediately
   // above this line.
@@ -113,6 +113,23 @@ enum class PresentationUrlType {
   kPresentationUrlTypeCount
 };
 
+enum class UiType {
+  kCastDialog,
+  kGlobalMediaControls,
+};
+
+enum class MediaRouterAndroidDialogType {
+  kRouteController = 0,
+  kRouteChooser = 1,
+  kMaxValue = kRouteChooser,
+};
+
+enum class MediaRouterAndroidDialogAction {
+  kTerminateRoute = 0,
+  kStartRoute = 1,
+  kMaxValue = kStartRoute,
+};
+
 class MediaRouterMetrics {
  public:
   MediaRouterMetrics();
@@ -120,8 +137,6 @@ class MediaRouterMetrics {
 
   // UMA histogram names.
   static const char kHistogramCloseLatency[];
-  static const char kHistogramCloudPrefAtDialogOpen[];
-  static const char kHistogramCloudPrefAtInit[];
   static const char kHistogramIconClickLocation[];
   static const char kHistogramMediaRouterFileFormat[];
   static const char kHistogramMediaRouterFileSize[];
@@ -139,6 +154,8 @@ class MediaRouterMetrics {
   static const char kHistogramUiDialogPaint[];
   static const char kHistogramUiFirstAction[];
   static const char kHistogramUiIconStateAtInit[];
+  static const char kHistogramUiAndroidDialogType[];
+  static const char kHistogramUiAndroidDialogAction[];
 
   // When recording the number of devices shown in UI we record after a delay
   // because discovering devices can take some time after the UI is shown.
@@ -180,13 +197,20 @@ class MediaRouterMetrics {
 
   // Records the type of the sink that media is being Cast to.
   static void RecordMediaSinkType(SinkIconType sink_icon_type);
+  static void RecordMediaSinkTypeForGlobalMediaControls(
+      SinkIconType sink_icon_type);
+  static void RecordMediaSinkTypeForCastDialog(SinkIconType sink_icon_type);
+  static void RecordMediaSinkTypeWhenCastAndDialPresent(
+      SinkIconType sink_icon_type,
+      UiType ui);
 
   // Records the number of devices shown in the Cast dialog. The device count
   // may be 0.
   static void RecordDeviceCount(int device_count);
 
   // Records the number of sinks in |is_available| state, provided by |provider|
-  // that was opened via |origin|.
+  // that was opened via |origin|. Recorded for the global media controls and
+  // the Cast dialog, respectively.
   static void RecordGmcDeviceCount(MediaRouterDialogOpenOrigin origin,
                                    mojom::MediaRouteProviderId provider,
                                    bool is_available,
@@ -220,14 +244,6 @@ class MediaRouterMetrics {
   // Recorded whenever the browser is initialized.
   static void RecordIconStateAtInit(bool is_pinned);
 
-  // Records the pref value to enable the cloud services. Recorded whenever the
-  // Cast dialog is opened.
-  static void RecordCloudPrefAtDialogOpen(bool enabled);
-
-  // Records the pref value to enable the cloud services. Recorded whenever the
-  // browser is initialized.
-  static void RecordCloudPrefAtInit(bool enabled);
-
   // Records the outcome of a create route request to a Media Route Provider.
   // This and the following methods that record ResultCode use per-provider
   // histograms.
@@ -245,6 +261,14 @@ class MediaRouterMetrics {
   static void RecordMediaRouteProviderTerminateRoute(
       RouteRequestResult::ResultCode result_code,
       absl::optional<mojom::MediaRouteProviderId> provider_id = absl::nullopt);
+
+  // Records the type of the MediaRouter dialog opened. Android only.
+  static void RecordMediaRouterAndroidDialogType(
+      MediaRouterAndroidDialogType type);
+
+  // Records the action taken on the MediaRouter dialog. Android only.
+  static void RecordMediaRouterAndroidDialogAction(
+      MediaRouterAndroidDialogAction action);
 };
 
 }  // namespace media_router

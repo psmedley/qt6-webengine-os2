@@ -74,7 +74,7 @@ TIntermTyped *CreateZeroNode(const TType &type)
                     // CreateZeroNode is called by ParseContext that keeps parsing even when an
                     // error occurs, so it is possible for CreateZeroNode to be called with
                     // non-basic types. This happens only on error condition but CreateZeroNode
-                    // needs to return a value with the correct type to continue the typecheck.
+                    // needs to return a value with the correct type to continue the type check.
                     // That's why we handle non-basic type by setting whatever value, we just need
                     // the type to be right.
                     u[i].setIConst(42);
@@ -113,12 +113,26 @@ TIntermTyped *CreateZeroNode(const TType &type)
     return TIntermAggregate::CreateConstructor(constType, &arguments);
 }
 
-TIntermConstantUnion *CreateFloatNode(float value)
+TIntermConstantUnion *CreateFloatNode(float value, TPrecision precision)
 {
     TConstantUnion *u = new TConstantUnion[1];
     u[0].setFConst(value);
 
-    TType type(EbtFloat, EbpUndefined, EvqConst, 1);
+    TType type(EbtFloat, precision, EvqConst, 1);
+    return new TIntermConstantUnion(u, type);
+}
+
+TIntermConstantUnion *CreateVecNode(const float values[],
+                                    unsigned int vecSize,
+                                    TPrecision precision)
+{
+    TConstantUnion *u = new TConstantUnion[vecSize];
+    for (unsigned int channel = 0; channel < vecSize; ++channel)
+    {
+        u[channel].setFConst(values[channel]);
+    }
+
+    TType type(EbtFloat, precision, EvqConst, static_cast<uint8_t>(vecSize));
     return new TIntermConstantUnion(u, type);
 }
 
@@ -127,7 +141,7 @@ TIntermConstantUnion *CreateIndexNode(int index)
     TConstantUnion *u = new TConstantUnion[1];
     u[0].setIConst(index);
 
-    TType type(EbtInt, EbpUndefined, EvqConst, 1);
+    TType type(EbtInt, EbpHigh, EvqConst, 1);
     return new TIntermConstantUnion(u, type);
 }
 
@@ -136,7 +150,7 @@ TIntermConstantUnion *CreateUIntNode(unsigned int value)
     TConstantUnion *u = new TConstantUnion[1];
     u[0].setUConst(value);
 
-    TType type(EbtUInt, EbpUndefined, EvqConst, 1);
+    TType type(EbtUInt, EbpHigh, EvqConst, 1);
     return new TIntermConstantUnion(u, type);
 }
 
@@ -323,9 +337,9 @@ TIntermBlock *EnsureBlock(TIntermNode *node)
 
 TIntermSymbol *ReferenceGlobalVariable(const ImmutableString &name, const TSymbolTable &symbolTable)
 {
-    const TVariable *var = static_cast<const TVariable *>(symbolTable.findGlobal(name));
-    ASSERT(var);
-    return new TIntermSymbol(var);
+    const TSymbol *symbol = symbolTable.findGlobal(name);
+    ASSERT(symbol && symbol->isVariable());
+    return new TIntermSymbol(static_cast<const TVariable *>(symbol));
 }
 
 TIntermSymbol *ReferenceBuiltInVariable(const ImmutableString &name,
@@ -360,6 +374,36 @@ TIntermTyped *CreateBuiltInUnaryFunctionCallNode(const char *name,
 {
     TIntermSequence seq = {argument};
     return CreateBuiltInFunctionCallNode(name, &seq, symbolTable, shaderVersion);
+}
+
+// Returns true if a block ends in a branch (break, continue, return, etc).  This is only correct
+// after PruneNoOps, because it expects empty blocks after a branch to have been already pruned,
+// i.e. a block can only end in a branch if its last statement is a branch or is a block ending in
+// branch.
+bool EndsInBranch(TIntermBlock *block)
+{
+    while (block != nullptr)
+    {
+        // Get the last statement of the block.
+        TIntermSequence &statements = *block->getSequence();
+        if (statements.empty())
+        {
+            return false;
+        }
+
+        TIntermNode *lastStatement = statements.back();
+
+        // If it's a branch itself, we have the answer.
+        if (lastStatement->getAsBranchNode())
+        {
+            return true;
+        }
+
+        // Otherwise, see if it's a block that ends in a branch
+        block = lastStatement->getAsBlock();
+    }
+
+    return false;
 }
 
 }  // namespace sh

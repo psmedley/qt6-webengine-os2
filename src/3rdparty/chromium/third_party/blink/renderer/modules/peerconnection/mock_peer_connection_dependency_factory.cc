@@ -6,7 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_peer_connection_impl.h"
 #include "third_party/blink/renderer/modules/peerconnection/mock_rtc_peer_connection_handler_platform.h"
 #include "third_party/webrtc/api/media_stream_interface.h"
@@ -53,13 +53,13 @@ bool MockWebRtcAudioSource::remote() const {
 MockMediaStream::MockMediaStream(const std::string& id) : id_(id) {}
 
 bool MockMediaStream::AddTrack(AudioTrackInterface* track) {
-  audio_track_vector_.push_back(track);
+  audio_track_vector_.emplace_back(track);
   NotifyObservers();
   return true;
 }
 
 bool MockMediaStream::AddTrack(VideoTrackInterface* track) {
-  video_track_vector_.push_back(track);
+  video_track_vector_.emplace_back(track);
   NotifyObservers();
   return true;
 }
@@ -354,8 +354,9 @@ MockPeerConnectionDependencyFactory::CreatePeerConnection(
 scoped_refptr<webrtc::VideoTrackSourceInterface>
 MockPeerConnectionDependencyFactory::CreateVideoTrackSourceProxy(
     webrtc::VideoTrackSourceInterface* source) {
-  return nullptr;
+  return source;
 }
+
 scoped_refptr<webrtc::MediaStreamInterface>
 MockPeerConnectionDependencyFactory::CreateLocalMediaStream(
     const String& label) {

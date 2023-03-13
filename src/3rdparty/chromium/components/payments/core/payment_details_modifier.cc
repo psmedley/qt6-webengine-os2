@@ -4,6 +4,7 @@
 
 #include "components/payments/core/payment_details_modifier.h"
 
+#include "base/memory/values_equivalent.h"
 #include "base/values.h"
 
 namespace payments {
@@ -44,8 +45,7 @@ PaymentDetailsModifier& PaymentDetailsModifier::operator=(
 bool PaymentDetailsModifier::operator==(
     const PaymentDetailsModifier& other) const {
   return method_data == other.method_data &&
-         ((!total && !other.total) ||
-          (total && other.total && *total == *other.total)) &&
+         base::ValuesEquivalent(total, other.total) &&
          additional_display_items == other.additional_display_items;
 }
 
@@ -54,15 +54,13 @@ bool PaymentDetailsModifier::operator!=(
   return !(*this == other);
 }
 
-std::unique_ptr<base::DictionaryValue>
-PaymentDetailsModifier::ToDictionaryValue() const {
-  auto result = std::make_unique<base::DictionaryValue>();
-  result->SetString(kPaymentDetailsModifierSupportedMethods,
-                    method_data.supported_method);
-  result->SetString(kPaymentDetailsModifierData, method_data.data);
+base::Value PaymentDetailsModifier::ToValue() const {
+  base::Value result(base::Value::Type::DICTIONARY);
+  result.SetStringKey(kPaymentDetailsModifierSupportedMethods,
+                      method_data.supported_method);
+  result.SetStringKey(kPaymentDetailsModifierData, method_data.data);
   if (total) {
-    result->SetDictionary(kPaymentDetailsModifierTotal,
-                          total->ToDictionaryValue());
+    result.SetKey(kPaymentDetailsModifierTotal, total->ToValue());
   }
 
   return result;

@@ -13,16 +13,13 @@
 
 namespace media {
 
-H264Metadata::H264Metadata() = default;
-H264Metadata::~H264Metadata() = default;
-H264Metadata::H264Metadata(const H264Metadata&) = default;
-
-Vp8Metadata::Vp8Metadata()
-    : non_reference(false), temporal_idx(0), layer_sync(false) {}
-
 Vp9Metadata::Vp9Metadata() = default;
 Vp9Metadata::~Vp9Metadata() = default;
 Vp9Metadata::Vp9Metadata(const Vp9Metadata&) = default;
+
+Av1Metadata::Av1Metadata() = default;
+Av1Metadata::~Av1Metadata() = default;
+Av1Metadata::Av1Metadata(const Av1Metadata&) = default;
 
 BitstreamBufferMetadata::BitstreamBufferMetadata()
     : payload_size_bytes(0), key_frame(false) {}
@@ -91,7 +88,7 @@ std::string VideoEncodeAccelerator::Config::AsHumanReadableString() const {
   if (gop_length)
     str += base::StringPrintf(", gop_length: %u", gop_length.value());
 
-  if (VideoCodecProfileToVideoCodec(output_profile) == kCodecH264) {
+  if (VideoCodecProfileToVideoCodec(output_profile) == VideoCodec::kH264) {
     if (h264_output_level) {
       str += base::StringPrintf(", h264_output_level: %u",
                                 h264_output_level.value());
@@ -148,21 +145,29 @@ void VideoEncodeAccelerator::Client::NotifyEncoderInfoChange(
 VideoEncodeAccelerator::~VideoEncodeAccelerator() = default;
 
 VideoEncodeAccelerator::SupportedProfile::SupportedProfile()
-    : profile(media::VIDEO_CODEC_PROFILE_UNKNOWN),
-      max_framerate_numerator(0),
-      max_framerate_denominator(0) {}
+    : profile(media::VIDEO_CODEC_PROFILE_UNKNOWN) {}
 
 VideoEncodeAccelerator::SupportedProfile::SupportedProfile(
     VideoCodecProfile profile,
     const gfx::Size& max_resolution,
     uint32_t max_framerate_numerator,
-    uint32_t max_framerate_denominator)
+    uint32_t max_framerate_denominator,
+    const std::vector<SVCScalabilityMode>& scalability_modes)
     : profile(profile),
       max_resolution(max_resolution),
       max_framerate_numerator(max_framerate_numerator),
-      max_framerate_denominator(max_framerate_denominator) {}
+      max_framerate_denominator(max_framerate_denominator),
+      scalability_modes(scalability_modes) {}
+
+VideoEncodeAccelerator::SupportedProfile::SupportedProfile(
+    const SupportedProfile& other) = default;
 
 VideoEncodeAccelerator::SupportedProfile::~SupportedProfile() = default;
+
+VideoEncodeAccelerator::SupportedProfiles
+VideoEncodeAccelerator::GetSupportedProfilesLight() {
+  return GetSupportedProfiles();
+}
 
 void VideoEncodeAccelerator::Flush(FlushCallback flush_callback) {
   // TODO(owenlin): implements this https://crbug.com/755889.
@@ -191,6 +196,15 @@ void VideoEncodeAccelerator::RequestEncodingParametersChange(
       Bitrate::ConstantBitrate(bitrate_allocation.GetSumBps()), framerate);
 }
 
+bool operator==(const VideoEncodeAccelerator::SupportedProfile& l,
+                const VideoEncodeAccelerator::SupportedProfile& r) {
+  return l.profile == r.profile && l.min_resolution == r.min_resolution &&
+         l.max_resolution == r.max_resolution &&
+         l.max_framerate_numerator == r.max_framerate_numerator &&
+         l.max_framerate_denominator == r.max_framerate_denominator &&
+         l.scalability_modes == r.scalability_modes;
+}
+
 bool operator==(const H264Metadata& l, const H264Metadata& r) {
   return l.temporal_idx == r.temporal_idx && l.layer_sync == r.layer_sync;
 }
@@ -210,6 +224,15 @@ bool operator==(const Vp9Metadata& l, const Vp9Metadata& r) {
          l.temporal_idx == r.temporal_idx && l.spatial_idx == r.spatial_idx &&
          l.spatial_layer_resolutions == r.spatial_layer_resolutions &&
          l.p_diffs == r.p_diffs;
+}
+
+bool operator==(const Av1Metadata& l, const Av1Metadata& r) {
+  return l.inter_pic_predicted == r.inter_pic_predicted &&
+         l.switch_frame == r.switch_frame &&
+         l.end_of_picture == r.end_of_picture &&
+         l.temporal_idx == r.temporal_idx && l.spatial_idx == r.spatial_idx &&
+         l.spatial_layer_resolutions == r.spatial_layer_resolutions &&
+         l.f_diffs == r.f_diffs;
 }
 
 bool operator==(const BitstreamBufferMetadata& l,

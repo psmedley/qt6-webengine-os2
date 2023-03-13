@@ -4,6 +4,8 @@
 
 #include "content/browser/devtools/service_worker_devtools_manager.h"
 
+#include "base/no_destructor.h"
+#include "base/observer_list.h"
 #include "content/browser/devtools/devtools_instrumentation.h"
 #include "content/browser/devtools/protocol/network_handler.h"
 #include "content/browser/devtools/protocol/page_handler.h"
@@ -12,6 +14,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "ipc/ipc_listener.h"
+#include "services/network/public/cpp/devtools_observer_util.h"
 #include "services/network/public/mojom/devtools_observer.mojom.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
@@ -85,10 +88,10 @@ void ServiceWorkerDevToolsManager::WorkerMainScriptFetchingStarting(
   DCHECK(!agent_host);
 
   scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
-      new ServiceWorkerDevToolsAgentHost(
+      base::MakeRefCounted<ServiceWorkerDevToolsAgentHost>(
           -1, -1, std::move(context_wrapper), version_id, url, scope,
           /*is_installed_version=*/false,
-          /*cross_origin_embedder_policy=*/absl::nullopt,
+          /*client_security_state=*/nullptr,
           /*coep_reporter=*/mojo::NullRemote(),
           base::UnguessableToken::Create());
 
@@ -107,7 +110,7 @@ void ServiceWorkerDevToolsManager::WorkerMainScriptFetchingStarting(
   // opportunity to attach to it before we do the actual fetch. We pass it a
   // callback that will be called once we have all the handlers ready.
   if (host_ptr->should_pause_on_start()) {
-    devtools_instrumentation::ThrottleMainScriptFetch(
+    devtools_instrumentation::ThrottleServiceWorkerMainScriptFetch(
         context_wrapper_ptr, version_id, requesting_frame_id, throttle_handle);
   }
 }
@@ -140,8 +143,7 @@ void ServiceWorkerDevToolsManager::WorkerStarting(
     const GURL& url,
     const GURL& scope,
     bool is_installed_version,
-    absl::optional<network::CrossOriginEmbedderPolicy>
-        cross_origin_embedder_policy,
+    network::mojom::ClientSecurityStatePtr client_security_state,
     mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
         coep_reporter,
     base::UnguessableToken* devtools_worker_token,
@@ -167,21 +169,20 @@ void ServiceWorkerDevToolsManager::WorkerStarting(
     *pause_on_start = agent_host->should_pause_on_start();
     *devtools_worker_token = agent_host->devtools_worker_token();
 
-    if (cross_origin_embedder_policy) {
-      UpdateCrossOriginEmbedderPolicy(worker_process_id, worker_route_id,
-                                      cross_origin_embedder_policy.value(),
-                                      std::move(coep_reporter));
+    if (client_security_state) {
+      agent_host->UpdateClientSecurityState(std::move(client_security_state),
+                                            std::move(coep_reporter));
     }
+
     return;
   }
 
   *devtools_worker_token = base::UnguessableToken::Create();
-  scoped_refptr<ServiceWorkerDevToolsAgentHost> host =
-      new ServiceWorkerDevToolsAgentHost(
-          worker_process_id, worker_route_id, std::move(context_wrapper),
-          version_id, url, scope, is_installed_version,
-          cross_origin_embedder_policy, std::move(coep_reporter),
-          *devtools_worker_token);
+  auto host = base::MakeRefCounted<ServiceWorkerDevToolsAgentHost>(
+      worker_process_id, worker_route_id, std::move(context_wrapper),
+      version_id, url, scope, is_installed_version,
+      std::move(client_security_state), std::move(coep_reporter),
+      *devtools_worker_token);
   live_hosts_[worker_id] = host;
   *pause_on_start = debug_service_worker_on_start_;
   for (auto& observer : observer_list_) {
@@ -208,21 +209,6 @@ void ServiceWorkerDevToolsManager::WorkerReadyForInspection(
   // Bring up UI for the ones not picked by other clients.
   if (debug_service_worker_on_start_ && !host->IsAttached())
     host->Inspect();
-}
-
-void ServiceWorkerDevToolsManager::UpdateCrossOriginEmbedderPolicy(
-    int worker_process_id,
-    int worker_route_id,
-    network::CrossOriginEmbedderPolicy cross_origin_embedder_policy,
-    mojo::PendingRemote<network::mojom::CrossOriginEmbedderPolicyReporter>
-        coep_reporter) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  const WorkerId worker_id(worker_process_id, worker_route_id);
-  auto it = live_hosts_.find(worker_id);
-  if (it == live_hosts_.end())
-    return;
-  it->second->UpdateCrossOriginEmbedderPolicy(
-      std::move(cross_origin_embedder_policy), std::move(coep_reporter));
 }
 
 void ServiceWorkerDevToolsManager::WorkerVersionInstalled(int worker_process_id,
@@ -315,15 +301,12 @@ void ServiceWorkerDevToolsManager::NavigationPreloadRequestSent(
   if (it == live_hosts_.end())
     return;
   auto timestamp = base::TimeTicks::Now();
-  network::mojom::URLRequestDevToolsInfo request_info(
-      request.method, request.url, request.priority, request.referrer_policy,
-      request.trust_token_params ? request.trust_token_params->Clone()
-                                 : nullptr,
-      request.has_user_gesture);
+  network::mojom::URLRequestDevToolsInfoPtr request_info =
+      network::ExtractDevToolsInfo(request);
   for (auto* network :
        protocol::NetworkHandler::ForAgentHost(it->second.get())) {
     network->RequestSent(request_id, std::string(), request.headers,
-                         request_info,
+                         *request_info,
                          protocol::Network::Initiator::TypeEnum::Preload,
                          /*initiator_url=*/absl::nullopt,
                          /*initiator_devtools_request_id=*/"", timestamp);
@@ -340,10 +323,13 @@ void ServiceWorkerDevToolsManager::NavigationPreloadResponseReceived(
   auto it = live_hosts_.find(worker_id);
   if (it == live_hosts_.end())
     return;
+
+  network::mojom::URLResponseHeadDevToolsInfoPtr head_info =
+      network::ExtractDevToolsInfo(head);
   for (auto* network : protocol::NetworkHandler::ForAgentHost(it->second.get()))
     network->ResponseReceived(request_id, std::string(), url,
-                              protocol::Network::ResourceTypeEnum::Other, head,
-                              protocol::Maybe<std::string>());
+                              protocol::Network::ResourceTypeEnum::Other,
+                              *head_info, protocol::Maybe<std::string>());
 }
 
 void ServiceWorkerDevToolsManager::NavigationPreloadCompleted(

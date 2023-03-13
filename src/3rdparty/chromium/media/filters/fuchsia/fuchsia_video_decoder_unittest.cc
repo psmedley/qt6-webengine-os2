@@ -57,6 +57,9 @@ class TestBufferCollection {
     ZX_CHECK(status == ZX_OK, status) << "BufferCollection::SetConstraints()";
   }
 
+  TestBufferCollection(const TestBufferCollection&) = delete;
+  TestBufferCollection& operator=(const TestBufferCollection&) = delete;
+
   ~TestBufferCollection() { buffers_collection_->Close(); }
 
   size_t GetNumBuffers() {
@@ -80,8 +83,6 @@ class TestBufferCollection {
 
   absl::optional<fuchsia::sysmem::BufferCollectionInfo_2>
       buffer_collection_info_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestBufferCollection);
 };
 
 class TestSharedImageInterface : public gpu::SharedImageInterface {
@@ -295,15 +296,20 @@ class FuchsiaVideoDecoderTest : public testing::Test {
         decoder_(
             FuchsiaVideoDecoder::CreateForTests(raster_context_provider_.get(),
                                                 /*enable_sw_decoding=*/true)) {}
+
+  FuchsiaVideoDecoderTest(const FuchsiaVideoDecoderTest&) = delete;
+  FuchsiaVideoDecoderTest& operator=(const FuchsiaVideoDecoderTest&) = delete;
+
   ~FuchsiaVideoDecoderTest() override = default;
 
-  bool InitializeDecoder(VideoDecoderConfig config) WARN_UNUSED_RESULT {
+  [[nodiscard]] bool InitializeDecoder(VideoDecoderConfig config) {
     base::RunLoop run_loop;
     bool init_cb_result = false;
     decoder_->Initialize(
         config, true, /*cdm_context=*/nullptr,
         base::BindRepeating(
-            [](bool* init_cb_result, base::RunLoop* run_loop, Status status) {
+            [](bool* init_cb_result, base::RunLoop* run_loop,
+               DecoderStatus status) {
               *init_cb_result = status.is_ok();
               run_loop->Quit();
             },
@@ -346,7 +352,7 @@ class FuchsiaVideoDecoderTest : public testing::Test {
     DecodeBuffer(ReadTestDataFile(name));
   }
 
-  void OnFrameDecoded(size_t frame_pos, Status status) {
+  void OnFrameDecoded(size_t frame_pos, DecoderStatus status) {
     EXPECT_EQ(frame_pos, num_decoded_buffers_);
     num_decoded_buffers_ += 1;
     last_decode_status_ = std::move(status);
@@ -383,15 +389,13 @@ class FuchsiaVideoDecoderTest : public testing::Test {
   std::list<scoped_refptr<VideoFrame>> output_frames_;
   size_t num_output_frames_ = 0;
 
-  Status last_decode_status_;
+  DecoderStatus last_decode_status_;
   base::RunLoop* run_loop_ = nullptr;
 
   // Number of frames that OnVideoFrame() should keep in |output_frames_|.
   size_t frames_to_keep_ = 2;
 
   base::WeakPtrFactory<FuchsiaVideoDecoderTest> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(FuchsiaVideoDecoderTest);
 };
 
 scoped_refptr<DecoderBuffer> GetH264Frame(size_t frame_num) {
@@ -400,7 +404,7 @@ scoped_refptr<DecoderBuffer> GetH264Frame(size_t frame_num) {
       ReadTestDataFile("h264-320x180-frame-1"),
       ReadTestDataFile("h264-320x180-frame-2"),
       ReadTestDataFile("h264-320x180-frame-3")};
-  CHECK_LT(frame_num, base::size(frames));
+  CHECK_LT(frame_num, std::size(frames));
   return frames[frame_num];
 }
 
@@ -411,7 +415,7 @@ TEST_F(FuchsiaVideoDecoderTest, CreateInitDestroy) {
 }
 
 TEST_F(FuchsiaVideoDecoderTest, DISABLED_VP9) {
-  ASSERT_TRUE(InitializeDecoder(TestVideoConfig::Normal(kCodecVP9)));
+  ASSERT_TRUE(InitializeDecoder(TestVideoConfig::Normal(VideoCodec::kVP9)));
 
   DecodeBuffer(ReadTestDataFile("vp9-I-frame-320x240"));
   DecodeBuffer(DecoderBuffer::CreateEOSBuffer());

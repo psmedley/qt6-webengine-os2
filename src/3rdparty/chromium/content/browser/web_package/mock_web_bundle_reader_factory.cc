@@ -10,9 +10,9 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
+#include "base/test/test_future.h"
 #include "components/web_package/mojom/web_bundle_parser.mojom.h"
 #include "content/browser/web_package/web_bundle_reader.h"
 #include "content/browser/web_package/web_bundle_source.h"
@@ -34,6 +34,10 @@ class MockParser final : public web_package::mojom::WebBundleParser {
   explicit MockParser(
       mojo::PendingReceiver<web_package::mojom::WebBundleParser> receiver)
       : receiver_(this, std::move(receiver)) {}
+
+  MockParser(const MockParser&) = delete;
+  MockParser& operator=(const MockParser&) = delete;
+
   ~MockParser() override = default;
 
   void RunMetadataCallback(web_package::mojom::BundleMetadataPtr metadata) {
@@ -86,14 +90,16 @@ class MockParser final : public web_package::mojom::WebBundleParser {
   base::OnceClosure wait_parse_metadata_callback_;
   base::OnceCallback<void(web_package::mojom::BundleResponseLocationPtr)>
       wait_parse_response_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockParser);
 };
 
 class MockParserFactory final
     : public web_package::mojom::WebBundleParserFactory {
  public:
   MockParserFactory() {}
+
+  MockParserFactory(const MockParserFactory&) = delete;
+  MockParserFactory& operator=(const MockParserFactory&) = delete;
+
   ~MockParserFactory() override = default;
 
   void AddReceiver(
@@ -122,15 +128,12 @@ class MockParserFactory final
       web_package::mojom::BundleResponseLocationPtr expected_parse_args,
       web_package::mojom::BundleResponsePtr response) {
     ASSERT_TRUE(parser_);
-    base::RunLoop run_loop;
-    parser_->WaitUntilParseResponseCalled(base::BindLambdaForTesting(
-        [&run_loop, &expected_parse_args](
-            web_package::mojom::BundleResponseLocationPtr parse_args) {
-          EXPECT_EQ(expected_parse_args->offset, parse_args->offset);
-          EXPECT_EQ(expected_parse_args->length, parse_args->length);
-          run_loop.Quit();
-        }));
-    run_loop.Run();
+    base::test::TestFuture<web_package::mojom::BundleResponseLocationPtr>
+        future;
+    parser_->WaitUntilParseResponseCalled(future.GetCallback());
+    auto parse_args = future.Take();
+    EXPECT_EQ(expected_parse_args->offset, parse_args->offset);
+    EXPECT_EQ(expected_parse_args->length, parse_args->length);
     parser_->RunResponseCallback(std::move(response));
   }
 
@@ -155,13 +158,17 @@ class MockParserFactory final
   std::unique_ptr<MockParser> parser_;
   mojo::ReceiverSet<web_package::mojom::WebBundleParserFactory> receivers_;
   base::OnceClosure wait_parse_metadata_callback_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockParserFactory);
 };
 
 class MockWebBundleReaderFactoryImpl final : public MockWebBundleReaderFactory {
  public:
   MockWebBundleReaderFactoryImpl() : MockWebBundleReaderFactory() {}
+
+  MockWebBundleReaderFactoryImpl(const MockWebBundleReaderFactoryImpl&) =
+      delete;
+  MockWebBundleReaderFactoryImpl& operator=(
+      const MockWebBundleReaderFactoryImpl&) = delete;
+
   ~MockWebBundleReaderFactoryImpl() override {
     EXPECT_TRUE(!temp_dir_.IsValid() || temp_dir_.Delete())
         << temp_dir_.GetPath();
@@ -196,18 +203,11 @@ class MockWebBundleReaderFactoryImpl final : public MockWebBundleReaderFactory {
     ASSERT_TRUE(factory_);
     DCHECK(reader);
 
-    base::RunLoop run_loop;
-    reader->ReadMetadata(base::BindOnce(
-        [](base::OnceClosure quit_closure,
-           WebBundleReader::MetadataCallback callback,
-           web_package::mojom::BundleMetadataParseErrorPtr error) {
-          std::move(callback).Run(std::move(error));
-          std::move(quit_closure).Run();
-        },
-        run_loop.QuitClosure(), std::move(callback)));
-
+    base::test::TestFuture<web_package::mojom::BundleMetadataParseErrorPtr>
+        future;
+    reader->ReadMetadata(future.GetCallback());
     factory_->RunMetadataCallback(std::move(metadata));
-    run_loop.Run();
+    std::move(callback).Run(future.Take());
   }
 
   void ReadAndFullfillResponse(
@@ -219,22 +219,14 @@ class MockWebBundleReaderFactoryImpl final : public MockWebBundleReaderFactory {
     ASSERT_TRUE(factory_);
     DCHECK(reader);
 
-    base::RunLoop run_loop;
-    reader->ReadResponse(
-        resource_request, "" /* accept_langs */,
-        base::BindOnce(
-            [](base::OnceClosure quit_closure,
-               WebBundleReader::ResponseCallback callback,
-               web_package::mojom::BundleResponsePtr response,
-               web_package::mojom::BundleResponseParseErrorPtr error) {
-              std::move(callback).Run(std::move(response), std::move(error));
-              std::move(quit_closure).Run();
-            },
-            run_loop.QuitClosure(), std::move(callback)));
-
+    base::test::TestFuture<web_package::mojom::BundleResponsePtr,
+                           web_package::mojom::BundleResponseParseErrorPtr>
+        future;
+    reader->ReadResponse(resource_request, future.GetCallback());
     factory_->RunResponseCallback(std::move(expected_parse_args),
                                   std::move(response));
-    run_loop.Run();
+    auto [bundle_response, error] = future.Take();
+    std::move(callback).Run(std::move(bundle_response), std::move(error));
   }
 
   void FullfillResponse(
@@ -252,8 +244,6 @@ class MockWebBundleReaderFactoryImpl final : public MockWebBundleReaderFactory {
   base::ScopedTempDir temp_dir_;
   base::FilePath temp_file_path_;
   std::unique_ptr<MockParserFactory> factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(MockWebBundleReaderFactoryImpl);
 };
 
 }  // namespace

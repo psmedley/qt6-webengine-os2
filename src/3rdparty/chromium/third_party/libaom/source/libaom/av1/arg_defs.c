@@ -50,6 +50,12 @@ static const struct arg_enum_list tuning_enum[] = {
   { NULL, 0 }
 };
 
+static const struct arg_enum_list dist_metric_enum[] = {
+  { "psnr", AOM_DIST_METRIC_PSNR },
+  { "qm-psnr", AOM_DIST_METRIC_QM_PSNR },
+  { NULL, 0 }
+};
+
 #if CONFIG_AV1_ENCODER
 static const struct arg_enum_list timing_info_enum[] = {
   { "unspecified", AOM_TIMING_UNSPECIFIED },
@@ -140,6 +146,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .debugmode =
       ARG_DEF("D", "debug", 0, "Debug mode (makes output deterministic)"),
   .outputfile = ARG_DEF("o", "output", 1, "Output filename"),
+  .use_nv12 = ARG_DEF(NULL, "nv12", 0, "Input file is NV12"),
   .use_yv12 = ARG_DEF(NULL, "yv12", 0, "Input file is YV12"),
   .use_i420 = ARG_DEF(NULL, "i420", 0, "Input file is I420 (default)"),
   .use_i422 = ARG_DEF(NULL, "i422", 0, "Input file is I422"),
@@ -284,17 +291,25 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "arnr-strength", 1, "AltRef filter strength (0..6)"),
   .tune_metric = ARG_DEF_ENUM(NULL, "tune", 1, "Distortion metric tuned with",
                               tuning_enum),
+  .dist_metric = ARG_DEF_ENUM(
+      NULL, "dist-metric", 1,
+      "Distortion metric to use for in-block optimization", dist_metric_enum),
   .cq_level =
       ARG_DEF(NULL, "cq-level", 1, "Constant/Constrained Quality level"),
   .max_intra_rate_pct =
       ARG_DEF(NULL, "max-intra-rate", 1, "Max I-frame bitrate (pct)"),
 #if CONFIG_AV1_ENCODER
-  .cpu_used_av1 =
-      ARG_DEF(NULL, "cpu-used", 1,
-              "Speed setting (0..6 in good mode, 6..9 in realtime mode)"),
+  .cpu_used_av1 = ARG_DEF(NULL, "cpu-used", 1,
+                          "Speed setting (0..6 in good mode, 5..10 in realtime "
+                          "mode, 0..9 in all intra mode)"),
   .rowmtarg =
       ARG_DEF(NULL, "row-mt", 1,
               "Enable row based multi-threading (0: off, 1: on (default))"),
+#if CONFIG_FRAME_PARALLEL_ENCODE
+  .fpmtarg = ARG_DEF(
+      NULL, "fp-mt", 1,
+      "Enable frame parallel multi-threading (0: off (default), 1: on)"),
+#endif
   .tile_cols =
       ARG_DEF(NULL, "tile-columns", 1, "Number of tile columns to use, log2"),
   .tile_rows =
@@ -317,7 +332,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .enable_cdef = ARG_DEF(
       NULL, "enable-cdef", 1,
       "Enable the constrained directional enhancement filter (0: false, "
-      "1: true (default))"),
+      "1: true (default), 2: disable for non-reference frames)"),
   .enable_restoration = ARG_DEF(NULL, "enable-restoration", 1,
                                 "Enable the loop restoration filter (0: false "
                                 "(default in Realtime mode), "
@@ -517,8 +532,12 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
   .deltaq_mode =
       ARG_DEF(NULL, "deltaq-mode", 1,
               "Delta qindex mode (0: off, 1: deltaq objective (default), "
-              "2: deltaq placeholder, 3: key frame visual quality). "
+              "2: deltaq placeholder, 3: key frame visual quality, 4: user "
+              "rating based visual quality optimization). "
               "Currently this requires enable-tpl-model as a prerequisite."),
+  .deltaq_strength = ARG_DEF(NULL, "deltaq-strength", 1,
+                             "Deltaq strength for"
+                             " --deltaq-mode=4 (%)"),
   .deltalf_mode = ARG_DEF(NULL, "delta-lf-mode", 1,
                           "Enable delta-lf-mode (0: off (default), 1: on)"),
   .frame_periodic_boost =
@@ -604,9 +623,7 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
               "pyramid. Selected automatically from --cq-level if "
               "--fixed-qp-offsets is not provided. If this option is not "
               "specified (default), offsets are adaptively chosen by the "
-              "encoder. Further, if this option is specified, at least two "
-              "comma-separated values corresponding to kf and arf offsets "
-              "must be provided, while the rest are chosen by the encoder"),
+              "encoder."),
 
   .fixed_qp_offsets = ARG_DEF(
       NULL, "fixed-qp-offsets", 1,
@@ -632,6 +649,18 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       "If false, transforms always have the largest possible size "
       "(0: false, 1: true (default))"),
 
+  .loopfilter_control = ARG_DEF(
+      NULL, "loopfilter-control", 1,
+      "Control loop filtering "
+      "(0: Loopfilter disabled for all frames, 1: Enable "
+      "loopfilter for all frames (default), 2: Disable loopfilter for "
+      "non-reference frames, 3: Disable loopfilter for frames with low motion"),
+
+  .auto_intra_tools_off = ARG_DEF(
+      NULL, "auto-intra-tools-off", 1,
+      "Automatically turn off several intra coding tools for allintra mode. "
+      "Only in effect if --deltaq-mode=3."),
+
   .two_pass_input =
       ARG_DEF(NULL, "two-pass-input", 1,
               "The input file for the second pass for three-pass encoding."),
@@ -642,5 +671,11 @@ const av1_codec_arg_definitions_t g_av1_codec_arg_defs = {
       ARG_DEF(NULL, "two-pass-width", 1, "The width of two-pass-input."),
   .two_pass_height =
       ARG_DEF(NULL, "two-pass-height", 1, "The height of two-pass-input."),
+  .second_pass_log =
+      ARG_DEF("spf", "second-pass-log", 1, "Log file from second pass."),
+  .strict_level_conformance =
+      ARG_DEF(NULL, "strict-level-conformance", 1,
+              "When set to 1, exit the encoder when it fails to encode "
+              "to a given target level"),
 #endif  // CONFIG_AV1_ENCODER
 };

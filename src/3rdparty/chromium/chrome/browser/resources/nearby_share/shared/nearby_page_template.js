@@ -2,12 +2,19 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import '//resources/cr_elements/shared_style_css.m.js';
+
+import {html, Polymer} from '//resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+
+import {CloseReason} from './types.js';
+
 /**
  * @fileoverview The 'nearby-page-template is used as a template for pages. It
  * provide a consistent setup for all pages with title, sub-title, body slot
  * and button options.
  */
 Polymer({
+  _template: html`{__html_template__}`,
   is: 'nearby-page-template',
 
   properties: {
@@ -116,7 +123,7 @@ Polymer({
 
   /** @private */
   onCloseClick_() {
-    this.fire('close');
+    this.fire('close', {reason: CloseReason.UNKNOWN});
   },
 
   /**

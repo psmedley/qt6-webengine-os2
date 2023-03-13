@@ -21,6 +21,7 @@
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "third_party/base/span.h"
 
 class CFieldTree;
 class CFDF_Document;
@@ -52,12 +53,11 @@ class CPDF_InteractiveForm {
   static bool IsUpdateAPEnabled();
   static void SetUpdateAP(bool bUpdateAP);
   static RetainPtr<CPDF_Font> AddNativeInteractiveFormFont(
-      CPDF_Dictionary*& pFormDict,
       CPDF_Document* pDocument,
       ByteString* csNameTag);
 
   size_t CountFields(const WideString& csFieldName) const;
-  CPDF_FormField* GetField(uint32_t index, const WideString& csFieldName) const;
+  CPDF_FormField* GetField(size_t index, const WideString& csFieldName) const;
   CPDF_FormField* GetFieldByDict(CPDF_Dictionary* pFieldDict) const;
 
   const CPDF_FormControl* GetControlAtPoint(const CPDF_Page* pPage,
@@ -84,10 +84,7 @@ class CPDF_InteractiveForm {
       bool bIncludeOrExclude) const;
 
   void ResetForm();
-
-  // TODO(tsepez): Use a span.
-  void ResetForm(const std::vector<CPDF_FormField*>& fields,
-                 bool bIncludeOrExclude);
+  void ResetForm(pdfium::span<CPDF_FormField*> fields, bool bIncludeOrExclude);
 
   void SetNotifierIface(NotifierIface* pNotify);
   void FixPageFields(CPDF_Page* pPage);

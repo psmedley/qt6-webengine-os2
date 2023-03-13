@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/form_parsing/parsing_test_utils.h"
@@ -91,6 +90,21 @@ TEST_F(AddressFieldTest, ParseStreetNameAndHouseNumberAndApartmentNumber) {
   AddTextFormFieldData("house-number", "House number",
                        ADDRESS_HOME_HOUSE_NUMBER);
   AddTextFormFieldData("apartment", "apartment", ADDRESS_HOME_APT_NUM);
+  ClassifyAndVerify();
+}
+
+// Tests that an address field after a |ADDRESS_HOME_STREET_NAME|,
+// |ADDRESS_HOME_HOUSE_NUMBER| combination is classified as
+// |ADDRESS_HOME_LINE2| instead of |ADDRESS_HOME_LINE1|.
+TEST_F(AddressFieldTest, ParseAsAddressLine2AfterStreetName) {
+  // TODO(crbug.com/1125978): Remove once launched.
+  base::test::ScopedFeatureList structured_addresses;
+  structured_addresses.InitAndEnableFeature(
+      features::kAutofillEnableSupportForMoreStructureInAddresses);
+
+  AddTextFormFieldData("street", "Street", ADDRESS_HOME_STREET_NAME);
+  AddTextFormFieldData("house-number", "House no.", ADDRESS_HOME_HOUSE_NUMBER);
+  AddTextFormFieldData("address", "Address", ADDRESS_HOME_LINE2);
   ClassifyAndVerify();
 }
 

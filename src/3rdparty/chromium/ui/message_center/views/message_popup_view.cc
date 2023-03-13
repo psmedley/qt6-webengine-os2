@@ -15,10 +15,11 @@
 #include "ui/message_center/public/cpp/message_center_constants.h"
 #include "ui/message_center/views/message_popup_collection.h"
 #include "ui/message_center/views/message_view.h"
+#include "ui/views/accessibility/accessibility_paint_checks.h"
 #include "ui/views/layout/fill_layout.h"
 #include "ui/views/widget/widget.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/views/widget/desktop_aura/desktop_native_widget_aura.h"
 #endif
 
@@ -35,11 +36,13 @@ MessagePopupView::MessagePopupView(MessageView* message_view,
     : message_view_(message_view),
       popup_collection_(popup_collection),
       a11y_feedback_on_init_(a11y_feedback_on_init) {
+  set_suppress_default_focus_handling();
   SetLayoutManager(std::make_unique<views::FillLayout>());
 
   if (!message_view_->IsManuallyExpandedOrCollapsed())
     message_view_->SetExpanded(message_view_->IsAutoExpandingAllowed());
-  AddChildView(message_view_);
+  AddChildView(message_view_.get());
+
   SetNotifyEnterExitOnChild(true);
 }
 
@@ -47,6 +50,11 @@ MessagePopupView::MessagePopupView(MessagePopupCollection* popup_collection)
     : message_view_(nullptr),
       popup_collection_(popup_collection),
       a11y_feedback_on_init_(false) {
+  // TODO(crbug.com/1218186): Remove this, this is in place temporarily to be
+  // able to submit accessibility checks. This crashes if fetching a11y node
+  // data during paint because message_view_ is null.
+  SetProperty(views::kSkipAccessibilityPaintChecks, true);
+  set_suppress_default_focus_handling();
   SetLayoutManager(std::make_unique<views::FillLayout>());
 }
 
@@ -82,7 +90,7 @@ void MessagePopupView::UpdateContents(const Notification& notification) {
   }
 }
 
-#if !defined(OS_APPLE)
+#if !BUILDFLAG(IS_APPLE)
 float MessagePopupView::GetOpacity() const {
   if (!IsWidgetValid())
     return 0.f;
@@ -115,7 +123,7 @@ void MessagePopupView::Show() {
   params.z_order = ui::ZOrderLevel::kFloatingWindow;
 // TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
 // of lacros-chrome is complete.
-#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
   // Make the widget explicitly activatable as TYPE_POPUP is not activatable by
   // default but we need focus for the inline reply textarea.
   params.activatable = views::Widget::InitParams::Activatable::kYes;
@@ -128,7 +136,7 @@ void MessagePopupView::Show() {
   popup_collection_->ConfigureWidgetInitParamsForContainer(widget, &params);
   widget->set_focus_on_creation(false);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // We want to ensure that this toast always goes to the native desktop,
   // not the Ash desktop (since there is already another toast contents view
   // there.
@@ -184,7 +192,10 @@ void MessagePopupView::ChildPreferredSizeChanged(views::View* child) {
 }
 
 void MessagePopupView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
-  message_view_->GetAccessibleNodeData(node_data);
+  // TODO(pbos): Consider removing the test-only constructor that has
+  // `message_view_` as nullptr.
+  if (message_view_)
+    message_view_->GetAccessibleNodeData(node_data);
   node_data->role = ax::mojom::Role::kAlertDialog;
 }
 

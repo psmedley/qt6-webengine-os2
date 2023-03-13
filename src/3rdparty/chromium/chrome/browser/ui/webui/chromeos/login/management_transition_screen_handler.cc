@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/management_transition_screen_handler.h"
 
+#include "ash/components/arc/arc_prefs.h"
 #include "ash/public/cpp/login_screen.h"
 #include "base/bind.h"
 #include "base/logging.h"
@@ -18,22 +19,26 @@
 #include "chrome/browser/ui/ash/system_tray_client_impl.h"
 #include "chrome/browser/ui/managed_ui.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/arc/arc_prefs.h"
 #include "components/login/localized_values_builder.h"
 
 namespace {
 
-constexpr base::TimeDelta kWaitingTimeout = base::TimeDelta::FromMinutes(2);
+constexpr base::TimeDelta kWaitingTimeout = base::Minutes(2);
 
 }  // namespace
 
 namespace chromeos {
+namespace {
+
+// Management transition screen step names.
+const char kManagementTransitionStepError[] = "error";
+
+}  // namespace
 
 constexpr StaticOobeScreenId ManagementTransitionScreenView::kScreenId;
 
-ManagementTransitionScreenHandler::ManagementTransitionScreenHandler(
-    JSCallsContainer* js_calls_container)
-    : BaseScreenHandler(kScreenId, js_calls_container) {}
+ManagementTransitionScreenHandler::ManagementTransitionScreenHandler()
+    : BaseScreenHandler(kScreenId) {}
 
 ManagementTransitionScreenHandler::~ManagementTransitionScreenHandler() {
   if (screen_)
@@ -67,20 +72,20 @@ void ManagementTransitionScreenHandler::RegisterMessages() {
 
 void ManagementTransitionScreenHandler::Bind(
     ManagementTransitionScreen* screen) {
-  BaseScreenHandler::SetBaseScreen(screen);
+  BaseScreenHandler::SetBaseScreenDeprecated(screen);
   screen_ = screen;
-  if (page_is_ready())
-    Initialize();
+  if (IsJavascriptAllowed())
+    InitializeDeprecated();
 }
 
 void ManagementTransitionScreenHandler::Unbind() {
   screen_ = nullptr;
-  BaseScreenHandler::SetBaseScreen(nullptr);
+  BaseScreenHandler::SetBaseScreenDeprecated(nullptr);
   timer_.Stop();
 }
 
 void ManagementTransitionScreenHandler::Show() {
-  if (!page_is_ready() || !screen_) {
+  if (!IsJavascriptAllowed() || !screen_) {
     show_on_init_ = true;
     return;
   }
@@ -110,13 +115,12 @@ void ManagementTransitionScreenHandler::Show() {
   ash::LoginScreen::Get()->SetAllowLoginAsGuest(false);
   ash::LoginScreen::Get()->SetIsFirstSigninStep(false);
 
-  base::DictionaryValue data;
-  data.SetInteger("arcTransition",
-                  static_cast<int>(arc::GetManagementTransition(profile)));
-  data.SetString(
-      "managementEntity",
-      chrome::GetAccountManagerIdentity(profile).value_or(std::string()));
-  ShowScreenWithData(kScreenId, &data);
+  base::Value::Dict data;
+  data.Set("arcTransition",
+           static_cast<int>(arc::GetManagementTransition(profile)));
+  data.Set("managementEntity",
+           chrome::GetAccountManagerIdentity(profile).value_or(std::string()));
+  ShowInWebUI(std::move(data));
 }
 
 void ManagementTransitionScreenHandler::Hide() {}
@@ -125,12 +129,16 @@ base::OneShotTimer* ManagementTransitionScreenHandler::GetTimerForTesting() {
   return &timer_;
 }
 
-void ManagementTransitionScreenHandler::Initialize() {
+void ManagementTransitionScreenHandler::InitializeDeprecated() {
   if (!screen_ || !show_on_init_)
     return;
 
   Show();
   show_on_init_ = false;
+}
+
+void ManagementTransitionScreenHandler::ShowStep(const char* step) {
+  CallJS("login.ManagementTransitionScreen.showStep", std::string(step));
 }
 
 void ManagementTransitionScreenHandler::OnManagementTransitionFailed() {
@@ -141,10 +149,7 @@ void ManagementTransitionScreenHandler::OnManagementTransitionFailed() {
   timed_out_ = true;
   arc::ArcSessionManager::Get()->RequestArcDataRemoval();
   arc::ArcSessionManager::Get()->StopAndEnableArc();
-  if (screen_) {
-    AllowJavascript();
-    FireWebUIListener("management-transition-failed");
-  }
+  ShowStep(kManagementTransitionStepError);
 }
 
 void ManagementTransitionScreenHandler::OnManagementTransitionFinished() {

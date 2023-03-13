@@ -10,7 +10,7 @@
 #include "build/build_config.h"
 #include "chrome/common/profiler/process_type.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include "chrome/android/modules/stack_unwinder/public/module.h"
 #endif
 
@@ -75,14 +75,14 @@ DefaultPlatformConfiguration::GetEnableRates(
 
 double DefaultPlatformConfiguration::GetChildProcessEnableFraction(
     metrics::CallStackProfileParams::Process process) const {
-  DCHECK_NE(metrics::CallStackProfileParams::BROWSER_PROCESS, process);
+  DCHECK_NE(metrics::CallStackProfileParams::Process::kBrowser, process);
 
   switch (process) {
-    case metrics::CallStackProfileParams::GPU_PROCESS:
-    case metrics::CallStackProfileParams::NETWORK_SERVICE_PROCESS:
+    case metrics::CallStackProfileParams::Process::kGpu:
+    case metrics::CallStackProfileParams::Process::kNetworkService:
       return 1.0;
 
-    case metrics::CallStackProfileParams::RENDERER_PROCESS:
+    case metrics::CallStackProfileParams::Process::kRenderer:
       // Run the profiler in all renderer processes if the browser test mode is
       // enabled, otherwise run in 20% of the processes to collect roughly as
       // many profiles for renderer processes as browser processes.
@@ -112,7 +112,7 @@ bool DefaultPlatformConfiguration::IsSupportedForChannel(
          *release_channel == version_info::Channel::DEV;
 }
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 // The configuration to use for the Android platform. Applies to ARM32 which is
 // the only Android architecture currently supported by StackSamplingProfiler.
 // Defined in terms of DefaultPlatformConfiguration where Android does not
@@ -191,7 +191,7 @@ AndroidPlatformConfiguration::GetEnableRates(
 
 void AndroidPlatformConfiguration::RequestRuntimeModuleInstall() const {
   // The install can only be done in the browser process.
-  CHECK_EQ(metrics::CallStackProfileParams::BROWSER_PROCESS,
+  CHECK_EQ(metrics::CallStackProfileParams::Process::kBrowser,
            GetProfileParamsProcess(*base::CommandLine::ForCurrentProcess()));
 
   // The install occurs asynchronously, with the module available at the first
@@ -206,7 +206,7 @@ double AndroidPlatformConfiguration::GetChildProcessEnableFraction(
   if (browser_test_mode_enabled())
     return DefaultPlatformConfiguration::GetChildProcessEnableFraction(process);
 
-  if (process == metrics::CallStackProfileParams::RENDERER_PROCESS)
+  if (process == metrics::CallStackProfileParams::Process::kRenderer)
     return 0.4;
 
   // TODO(https://crbug.com/1004855): Enable for all the default processes.
@@ -217,8 +217,8 @@ bool AndroidPlatformConfiguration::IsEnabledForThread(
     metrics::CallStackProfileParams::Process process,
     metrics::CallStackProfileParams::Thread thread) const {
   // Enable on renderer process main thread in production, for now.
-  if (process == metrics::CallStackProfileParams::RENDERER_PROCESS &&
-      thread == metrics::CallStackProfileParams::MAIN_THREAD) {
+  if (process == metrics::CallStackProfileParams::Process::kRenderer &&
+      thread == metrics::CallStackProfileParams::Thread::kMain) {
     return true;
   }
 
@@ -236,14 +236,14 @@ bool AndroidPlatformConfiguration::IsSupportedForChannel(
   // TODO(https://crbug.com/1004855): Enable across all browser tests.
   return browser_test_mode_enabled();
 }
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
 }  // namespace
 
 // static
 std::unique_ptr<ThreadProfilerPlatformConfiguration>
 ThreadProfilerPlatformConfiguration::Create(bool browser_test_mode_enabled) {
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   using PlatformConfiguration = AndroidPlatformConfiguration;
 #else
   using PlatformConfiguration = DefaultPlatformConfiguration;

@@ -12,8 +12,8 @@
 
 #include <vector>
 
-#include "base/cxx17_backports.h"
 #include "base/memory/ref_counted.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_variant.h"
 #include "build/build_config.h"
@@ -75,6 +75,7 @@ class MockTextInputClient : public TextInputClient {
   MOCK_METHOD2(GetActiveTextInputControlLayoutBounds,
                void(absl::optional<gfx::Rect>* control_bounds,
                     absl::optional<gfx::Rect>* selection_bounds));
+  MOCK_METHOD0(GetTextEditingContext, ui::TextInputClient::EditingContext());
 };
 
 class MockInputMethodDelegate : public internal::InputMethodDelegate {
@@ -177,6 +178,10 @@ class TSFTextStoreTestCallback {
       : text_store_(text_store) {
     CHECK(text_store_);
   }
+
+  TSFTextStoreTestCallback(const TSFTextStoreTestCallback&) = delete;
+  TSFTextStoreTestCallback& operator=(const TSFTextStoreTestCallback&) = delete;
+
   virtual ~TSFTextStoreTestCallback() {}
 
   bool HasCompositionText() { return has_composition_text_; }
@@ -413,9 +418,6 @@ class TSFTextStoreTestCallback {
   gfx::Range composition_range_;
   std::u16string text_buffer_;
   scoped_refptr<TSFTextStore> text_store_;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TSFTextStoreTestCallback);
 };
 
 namespace {
@@ -469,12 +471,23 @@ TEST_F(TSFTextStoreTest, QueryInsertTest) {
             text_store_->QueryInsert(3, 5, 0, &result_start, &result_end));
   EXPECT_EQ(3, result_start);
   EXPECT_EQ(4, result_end);
+
+  *string_buffer() = u"";
+  *composition_start() = 2;
+  EXPECT_EQ(S_OK,
+            text_store_->QueryInsert(0, 2, 5, &result_start, &result_end));
+  EXPECT_EQ(0, result_start);
+  EXPECT_EQ(5, result_end);
 }
 
 class SyncRequestLockTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit SyncRequestLockTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  SyncRequestLockTestCallback(const SyncRequestLockTestCallback&) = delete;
+  SyncRequestLockTestCallback& operator=(const SyncRequestLockTestCallback&) =
+      delete;
 
   HRESULT LockGranted1(DWORD flags) {
     EXPECT_TRUE(HasReadLock());
@@ -525,9 +538,6 @@ class SyncRequestLockTestCallback : public TSFTextStoreTestCallback {
     EXPECT_EQ(TS_E_SYNCHRONOUS, result);
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SyncRequestLockTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, SynchronousRequestLockTest) {
@@ -568,6 +578,10 @@ class AsyncRequestLockTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit AsyncRequestLockTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store), state_(0) {}
+
+  AsyncRequestLockTestCallback(const AsyncRequestLockTestCallback&) = delete;
+  AsyncRequestLockTestCallback& operator=(const AsyncRequestLockTestCallback&) =
+      delete;
 
   HRESULT LockGranted1(DWORD flags) {
     EXPECT_EQ(0, state_);
@@ -628,8 +642,6 @@ class AsyncRequestLockTestCallback : public TSFTextStoreTestCallback {
 
  private:
   int state_;
-
-  DISALLOW_COPY_AND_ASSIGN(AsyncRequestLockTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, AsynchronousRequestLockTest) {
@@ -650,6 +662,11 @@ class RequestLockTextChangeTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit RequestLockTextChangeTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store), state_(0) {}
+
+  RequestLockTextChangeTestCallback(const RequestLockTextChangeTestCallback&) =
+      delete;
+  RequestLockTextChangeTestCallback& operator=(
+      const RequestLockTextChangeTestCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     EXPECT_EQ(0, state_);
@@ -712,8 +729,6 @@ class RequestLockTextChangeTestCallback : public TSFTextStoreTestCallback {
 
  private:
   int state_;
-
-  DISALLOW_COPY_AND_ASSIGN(RequestLockTextChangeTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, RequestLockOnTextChangeTest) {
@@ -847,6 +862,9 @@ class SetGetTextTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit SetGetTextTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  SetGetTextTestCallback(const SetGetTextTestCallback&) = delete;
+  SetGetTextTestCallback& operator=(const SetGetTextTestCallback&) = delete;
 
   HRESULT ReadLockGranted(DWORD flags) {
     SetTextTest(0, 0, L"", TF_E_NOLOCK);
@@ -1019,9 +1037,6 @@ class SetGetTextTestCallback : public TSFTextStoreTestCallback {
 
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SetGetTextTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, SetGetTextTest) {
@@ -1051,6 +1066,11 @@ class InsertTextAtSelectionTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit InsertTextAtSelectionTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  InsertTextAtSelectionTestCallback(const InsertTextAtSelectionTestCallback&) =
+      delete;
+  InsertTextAtSelectionTestCallback& operator=(
+      const InsertTextAtSelectionTestCallback&) = delete;
 
   HRESULT ReadLockGranted(DWORD flags) {
     const wchar_t kBuffer[] = L"0123456789";
@@ -1108,9 +1128,6 @@ class InsertTextAtSelectionTestCallback : public TSFTextStoreTestCallback {
 
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(InsertTextAtSelectionTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, InsertTextAtSelectionTest) {
@@ -1133,6 +1150,9 @@ class ScenarioTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit ScenarioTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  ScenarioTestCallback(const ScenarioTestCallback&) = delete;
+  ScenarioTestCallback& operator=(const ScenarioTestCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"abc", S_OK);
@@ -1296,7 +1316,6 @@ class ScenarioTestCallback : public TSFTextStoreTestCallback {
 
  private:
   bool has_composition_text_;
-  DISALLOW_COPY_AND_ASSIGN(ScenarioTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, ScenarioTest) {
@@ -1344,6 +1363,9 @@ class GetTextExtTestCallback : public TSFTextStoreTestCallback {
   explicit GetTextExtTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store),
         layout_prepared_character_num_(0) {}
+
+  GetTextExtTestCallback(const GetTextExtTestCallback&) = delete;
+  GetTextExtTestCallback& operator=(const GetTextExtTestCallback&) = delete;
 
   HRESULT LockGranted(DWORD flags) {
     SetInternalState(u"0123456789012", 0, 0, 0);
@@ -1411,8 +1433,6 @@ class GetTextExtTestCallback : public TSFTextStoreTestCallback {
  private:
   uint32_t layout_prepared_character_num_;
   bool has_composition_text_;
-
-  DISALLOW_COPY_AND_ASSIGN(GetTextExtTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, GetTextExtTest) {
@@ -1438,22 +1458,42 @@ TEST_F(TSFTextStoreTest, GetTextExtTest) {
 }
 
 TEST_F(TSFTextStoreTest, RequestSupportedAttrs) {
+  ui::TextInputClient::EditingContext expected_editing_context;
+  expected_editing_context.page_url = GURL("http://example.com");
   EXPECT_CALL(text_input_client_, GetTextInputType())
       .WillRepeatedly(Return(TEXT_INPUT_TYPE_TEXT));
   EXPECT_CALL(text_input_client_, GetTextInputMode())
       .WillRepeatedly(Return(TEXT_INPUT_MODE_DEFAULT));
+  EXPECT_CALL(text_input_client_, GetTextEditingContext())
+      .WillOnce(Return(ui::TextInputClient::EditingContext()))
+      .WillOnce(Return(expected_editing_context));
 
   EXPECT_HRESULT_FAILED(text_store_->RequestSupportedAttrs(0, 1, nullptr));
 
   const TS_ATTRID kUnknownAttributes[] = {GUID_NULL};
-  EXPECT_HRESULT_FAILED(text_store_->RequestSupportedAttrs(
-      0, base::size(kUnknownAttributes), kUnknownAttributes))
-      << "Must fail for unknown attributes";
+  EXPECT_HRESULT_SUCCEEDED(text_store_->RequestSupportedAttrs(
+      0, std::size(kUnknownAttributes), kUnknownAttributes))
+      << "Mustn't fail for unknown attributes";
 
   const TS_ATTRID kAttributes[] = {GUID_NULL, GUID_PROP_INPUTSCOPE, GUID_NULL};
-  EXPECT_EQ(S_OK, text_store_->RequestSupportedAttrs(0, base::size(kAttributes),
+  EXPECT_EQ(S_OK, text_store_->RequestSupportedAttrs(0, std::size(kAttributes),
                                                      kAttributes))
       << "InputScope must be supported";
+  const TS_ATTRID urlAttributes[] = {GUID_PROP_URL};
+  ui::TextInputClient::EditingContext actual_editing_context =
+      text_input_client_.GetTextEditingContext();
+  EXPECT_TRUE(actual_editing_context.page_url.is_empty());
+  EXPECT_EQ(S_OK, text_store_->RequestSupportedAttrs(
+                      0, std::size(urlAttributes), urlAttributes))
+      << "Should return S_OK even if URL not supported";
+
+  actual_editing_context = text_input_client_.GetTextEditingContext();
+  EXPECT_TRUE(!actual_editing_context.page_url.is_empty());
+  EXPECT_TRUE(actual_editing_context.page_url.spec().compare(
+                  expected_editing_context.page_url.spec()) == 0);
+  EXPECT_EQ(S_OK, text_store_->RequestSupportedAttrs(
+                      0, std::size(urlAttributes), urlAttributes))
+      << "Expect URL to be supported";
 
   {
     SCOPED_TRACE("Check if RequestSupportedAttrs fails while focus is lost");
@@ -1461,25 +1501,32 @@ TEST_F(TSFTextStoreTest, RequestSupportedAttrs) {
     text_store_->SetFocusedTextInputClient(nullptr, nullptr);
     EXPECT_HRESULT_FAILED(text_store_->RequestSupportedAttrs(0, 0, nullptr));
     EXPECT_HRESULT_FAILED(text_store_->RequestSupportedAttrs(
-        0, base::size(kAttributes), kAttributes));
+        0, std::size(kAttributes), kAttributes));
   }
 }
 
 TEST_F(TSFTextStoreTest, RetrieveRequestedAttrs) {
+  ui::TextInputClient::EditingContext expected_editing_context;
+  expected_editing_context.page_url = GURL("http://example.com");
   EXPECT_CALL(text_input_client_, GetTextInputType())
       .WillRepeatedly(Return(TEXT_INPUT_TYPE_TEXT));
   EXPECT_CALL(text_input_client_, GetTextInputMode())
       .WillRepeatedly(Return(TEXT_INPUT_MODE_DEFAULT));
+  EXPECT_CALL(text_input_client_, GetTextEditingContext())
+      .WillRepeatedly(Return(expected_editing_context));
 
   ULONG num_copied = 0xfffffff;
   EXPECT_HRESULT_FAILED(
       text_store_->RetrieveRequestedAttrs(1, nullptr, &num_copied));
 
   {
-    SCOPED_TRACE("Make sure if InputScope is supported");
+    SCOPED_TRACE("Make sure that InputScope is supported");
     TS_ATTRVAL buffer[2] = {};
     num_copied = 0xfffffff;
-    ASSERT_EQ(S_OK, text_store_->RetrieveRequestedAttrs(base::size(buffer),
+    const TS_ATTRID kAttributes[] = {GUID_PROP_INPUTSCOPE};
+    ASSERT_EQ(S_OK, text_store_->RequestSupportedAttrs(
+                        0, std::size(kAttributes), kAttributes));
+    ASSERT_EQ(S_OK, text_store_->RetrieveRequestedAttrs(std::size(buffer),
                                                         buffer, &num_copied));
     bool input_scope_found = false;
     for (size_t i = 0; i < num_copied; ++i) {
@@ -1498,13 +1545,72 @@ TEST_F(TSFTextStoreTest, RetrieveRequestedAttrs) {
     EXPECT_TRUE(input_scope_found);
   }
   {
+    SCOPED_TRACE("Verify URL support");
+    TS_ATTRVAL buffer[2] = {};
+    num_copied = 0xfffffff;
+    base::win::ScopedVariant variant;
+    const TS_ATTRID urlAttributes[] = {GUID_PROP_URL};
+
+    // This call should have a valid URL so the URL property should be returned
+    // and is expected to match the test_url value set above.
+    ASSERT_EQ(S_OK, text_store_->RequestSupportedAttrs(
+                        0, std::size(urlAttributes), urlAttributes));
+    ASSERT_EQ(S_OK, text_store_->RetrieveRequestedAttrs(std::size(buffer),
+                                                        buffer, &num_copied));
+    EXPECT_EQ(num_copied, 1U) << "Expect only URL property to be supported";
+    EXPECT_TRUE(IsEqualGUID(buffer[0].idAttr, GUID_PROP_URL));
+    std::swap(*variant.Receive(), buffer[0].varValue);
+    EXPECT_EQ(VT_BSTR, variant.type());
+    std::string url_string = base::WideToUTF8(std::wstring(
+        variant.ptr()->bstrVal, SysStringLen(variant.ptr()->bstrVal)));
+    EXPECT_EQ(expected_editing_context.page_url.spec(), url_string)
+        << "Expected url strings to match";
+  }
+  {
+    SCOPED_TRACE("Verify URL and InputScope support");
+    TS_ATTRVAL buffer[2] = {};
+    num_copied = 0xfffffff;
+    base::win::ScopedVariant variant;
+    const TS_ATTRID inputScopeAndUrlAttributes[] = {GUID_PROP_INPUTSCOPE,
+                                                    GUID_PROP_URL};
+
+    // This call should have a valid URL so the URL property should be returned
+    // and is expected to match the test_url value set above.
+    ASSERT_EQ(S_OK, text_store_->RequestSupportedAttrs(
+                        0, std::size(inputScopeAndUrlAttributes),
+                        inputScopeAndUrlAttributes));
+    ASSERT_EQ(S_OK, text_store_->RetrieveRequestedAttrs(std::size(buffer),
+                                                        buffer, &num_copied));
+    EXPECT_EQ(num_copied, 2U)
+        << "Expect both URL & InputScope properties to be supported";
+    for (size_t i = 0; i < num_copied; ++i) {
+      base::win::ScopedVariant variant;
+      // Move ownership from |buffer[i].varValue| to |variant|.
+      std::swap(*variant.Receive(), buffer[i].varValue);
+      if (IsEqualGUID(buffer[i].idAttr, GUID_PROP_INPUTSCOPE)) {
+        EXPECT_EQ(VT_UNKNOWN, variant.type());
+        Microsoft::WRL::ComPtr<ITfInputScope> input_scope;
+        EXPECT_HRESULT_SUCCEEDED(variant.AsInput()->punkVal->QueryInterface(
+            IID_PPV_ARGS(&input_scope)));
+      }
+      if (IsEqualGUID(buffer[i].idAttr, GUID_PROP_URL)) {
+        EXPECT_EQ(VT_BSTR, variant.type());
+        std::string url_string = base::WideToUTF8(std::wstring(
+            variant.ptr()->bstrVal, SysStringLen(variant.ptr()->bstrVal)));
+        EXPECT_EQ(expected_editing_context.page_url.spec(), url_string)
+            << "Expected url strings to match";
+      }
+      // we do not break here to clean up all the retrieved VARIANTs.
+    }
+  }
+  {
     SCOPED_TRACE("Check if RetrieveRequestedAttrs fails while focus is lost");
     // Emulate focus lost
     text_store_->SetFocusedTextInputClient(nullptr, nullptr);
     num_copied = 0xfffffff;
     TS_ATTRVAL buffer[2] = {};
     EXPECT_HRESULT_FAILED(text_store_->RetrieveRequestedAttrs(
-        base::size(buffer), buffer, &num_copied));
+        std::size(buffer), buffer, &num_copied));
   }
 }
 
@@ -1512,6 +1618,9 @@ class KeyEventTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit KeyEventTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  KeyEventTestCallback(const KeyEventTestCallback&) = delete;
+  KeyEventTestCallback& operator=(const KeyEventTestCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
@@ -1644,9 +1753,6 @@ class KeyEventTestCallback : public TSFTextStoreTestCallback {
     text_store_->OnKeyTraceUp(66u, 3145729u);
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(KeyEventTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, KeyEventTest) {
@@ -1699,6 +1805,11 @@ class AccessibilityEventTestCallback : public TSFTextStoreTestCallback {
   explicit AccessibilityEventTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
 
+  AccessibilityEventTestCallback(const AccessibilityEventTestCallback&) =
+      delete;
+  AccessibilityEventTestCallback& operator=(
+      const AccessibilityEventTestCallback&) = delete;
+
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
 
@@ -1746,9 +1857,6 @@ class AccessibilityEventTestCallback : public TSFTextStoreTestCallback {
     EXPECT_EQ(0u, range.start());
     EXPECT_EQ(1u, range.end());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(AccessibilityEventTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, AccessibilityEventTest) {
@@ -1793,6 +1901,10 @@ class DiffingAlgorithmTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit DiffingAlgorithmTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  DiffingAlgorithmTestCallback(const DiffingAlgorithmTestCallback&) = delete;
+  DiffingAlgorithmTestCallback& operator=(const DiffingAlgorithmTestCallback&) =
+      delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"", S_OK);
@@ -2287,9 +2399,6 @@ class DiffingAlgorithmTestCallback : public TSFTextStoreTestCallback {
     GetSelectionTest(4, 4);
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(DiffingAlgorithmTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, DiffingAlgorithmTest) {
@@ -2471,6 +2580,9 @@ class RegressionTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTestCallback(const RegressionTestCallback&) = delete;
+  RegressionTestCallback& operator=(const RegressionTestCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
@@ -2698,9 +2810,6 @@ class RegressionTestCallback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"e", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest) {
@@ -2770,6 +2879,9 @@ class RegressionTest2Callback : public TSFTextStoreTestCallback {
   explicit RegressionTest2Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
 
+  RegressionTest2Callback(const RegressionTest2Callback&) = delete;
+  RegressionTest2Callback& operator=(const RegressionTest2Callback&) = delete;
+
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"abc", S_OK);
     SetSelectionTest(3, 3, S_OK);
@@ -2836,9 +2948,6 @@ class RegressionTest2Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"DE", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest2Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest2) {
@@ -2876,6 +2985,9 @@ class RegressionTest3Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest3Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest3Callback(const RegressionTest3Callback&) = delete;
+  RegressionTest3Callback& operator=(const RegressionTest3Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     GetTextTest(0, -1, L"", 0);
@@ -2938,9 +3050,6 @@ class RegressionTest3Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(0u, composition.selection.end());
     ASSERT_EQ(0u, composition.ime_text_spans.size());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest3Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest3) {
@@ -2976,6 +3085,9 @@ class RegressionTest4Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest4Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest4Callback(const RegressionTest4Callback&) = delete;
+  RegressionTest4Callback& operator=(const RegressionTest4Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     GetTextTest(0, -1, L"", 0);
@@ -3036,9 +3148,6 @@ class RegressionTest4Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"a", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest4Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest4) {
@@ -3074,6 +3183,9 @@ class RegressionTest5Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest5Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest5Callback(const RegressionTest5Callback&) = delete;
+  RegressionTest5Callback& operator=(const RegressionTest5Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"aa", S_OK);
@@ -3180,9 +3292,6 @@ class RegressionTest5Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"aa", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest5Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest5) {
@@ -3224,6 +3333,9 @@ class RegressionTest6Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest6Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest6Callback(const RegressionTest6Callback&) = delete;
+  RegressionTest6Callback& operator=(const RegressionTest6Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     EXPECT_EQ(false, *new_text_inserted());
@@ -3279,9 +3391,6 @@ class RegressionTest6Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"a", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest6Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest6) {
@@ -3313,6 +3422,10 @@ class UnderlineStyleTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit UnderlineStyleTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  UnderlineStyleTestCallback(const UnderlineStyleTestCallback&) = delete;
+  UnderlineStyleTestCallback& operator=(const UnderlineStyleTestCallback&) =
+      delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
@@ -3355,9 +3468,6 @@ class UnderlineStyleTestCallback : public TSFTextStoreTestCallback {
               composition.ime_text_spans[0].underline_style);
     SetHasCompositionText(true);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(UnderlineStyleTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, UnderlineStyleTest) {
@@ -3384,6 +3494,9 @@ class RegressionTest7Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest7Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest7Callback(const RegressionTest7Callback&) = delete;
+  RegressionTest7Callback& operator=(const RegressionTest7Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"aaaa", S_OK);
@@ -3446,9 +3559,6 @@ class RegressionTest7Callback : public TSFTextStoreTestCallback {
     EXPECT_EQ(u"a", text);
     SetHasCompositionText(false);
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest7Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest7) {
@@ -3487,6 +3597,9 @@ class RegressionTest8Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest8Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest8Callback(const RegressionTest8Callback&) = delete;
+  RegressionTest8Callback& operator=(const RegressionTest8Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"bbbb", S_OK);
@@ -3537,9 +3650,6 @@ class RegressionTest8Callback : public TSFTextStoreTestCallback {
   }
 
   void ClearCompositionText2() { EXPECT_EQ(false, *has_composition_range()); }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest8Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest8) {
@@ -3574,6 +3684,9 @@ class RegressionTest9Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest9Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest9Callback(const RegressionTest9Callback&) = delete;
+  RegressionTest9Callback& operator=(const RegressionTest9Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
@@ -3673,9 +3786,6 @@ class RegressionTest9Callback : public TSFTextStoreTestCallback {
     GetTextTest(0, -1, L"abbcc", 5);
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest9Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest9) {
@@ -3722,6 +3832,9 @@ class RegressionTest10Callback : public TSFTextStoreTestCallback {
  public:
   explicit RegressionTest10Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest10Callback(const RegressionTest10Callback&) = delete;
+  RegressionTest10Callback& operator=(const RegressionTest10Callback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"abcd", S_OK);
@@ -3811,9 +3924,6 @@ class RegressionTest10Callback : public TSFTextStoreTestCallback {
     GetSelectionTest(4, 4);
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest10Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest10) {
@@ -3873,6 +3983,9 @@ class RegressionTest11Callback : public TSFTextStoreTestCallback {
   explicit RegressionTest11Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
 
+  RegressionTest11Callback(const RegressionTest11Callback&) = delete;
+  RegressionTest11Callback& operator=(const RegressionTest11Callback&) = delete;
+
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"abcd", S_OK);
     SetSelectionTest(0, 4, S_OK);
@@ -3915,9 +4028,6 @@ class RegressionTest11Callback : public TSFTextStoreTestCallback {
     ResetCompositionStateTest();
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest11Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest11) {
@@ -3974,6 +4084,9 @@ class RegressionTest12Callback : public TSFTextStoreTestCallback {
   explicit RegressionTest12Callback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
 
+  RegressionTest12Callback(const RegressionTest12Callback&) = delete;
+  RegressionTest12Callback& operator=(const RegressionTest12Callback&) = delete;
+
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
     SetSelectionTest(1, 1, S_OK);
@@ -3995,9 +4108,6 @@ class RegressionTest12Callback : public TSFTextStoreTestCallback {
 
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(RegressionTest12Callback);
 };
 
 TEST_F(TSFTextStoreTest, RegressionTest12) {
@@ -4121,11 +4231,121 @@ TEST_F(TSFTextStoreTest, RegressionTest13) {
   EXPECT_EQ(S_OK, result);
 }
 
+// regression tests for crbug.com/1295578.
+// Some IMEs (e.g. voice typing panel) may select text before active
+// composition. We should select text after composition end.
+class RegressionTest14Callback : public TSFTextStoreTestCallback {
+ public:
+  explicit RegressionTest14Callback(TSFTextStore* text_store)
+      : TSFTextStoreTestCallback(text_store) {}
+
+  RegressionTest14Callback(const RegressionTest14Callback&) = delete;
+  RegressionTest14Callback& operator=(const RegressionTest14Callback&) = delete;
+
+  HRESULT LockGranted1(DWORD flags) {
+    SetTextTest(0, 0, L"text ", S_OK);
+    SetTextTest(4, 5, L"", S_OK);
+    SetTextTest(4, 4, L" select that ", S_OK);
+    SetSelectionTest(17, 17, S_OK);
+
+    text_spans()->clear();
+    ImeTextSpan text_span;
+    text_span.start_offset = 4;
+    text_span.end_offset = 17;
+    text_span.underline_color = SK_ColorBLACK;
+    text_span.thickness = ImeTextSpan::Thickness::kThin;
+    text_span.background_color = SK_ColorTRANSPARENT;
+    text_spans()->push_back(text_span);
+    *edit_flag() = true;
+    *composition_start() = 4;
+    composition_range()->set_start(4);
+    composition_range()->set_end(17);
+    *has_composition_range() = true;
+
+    return S_OK;
+  }
+
+  void SetCompositionText1(const ui::CompositionText& composition) {
+    EXPECT_EQ(u" select that ", composition.text);
+    EXPECT_EQ(13u, composition.selection.start());
+    EXPECT_EQ(13u, composition.selection.end());
+    ASSERT_EQ(1u, composition.ime_text_spans.size());
+    EXPECT_EQ(0u, composition.ime_text_spans[0].start_offset);
+    EXPECT_EQ(13u, composition.ime_text_spans[0].end_offset);
+    SetHasCompositionText(true);
+    SetTextRange(0, 17);
+    SetTextBuffer(u"text select that ");
+    SetSelectionRange(17, 17);
+  }
+
+  HRESULT LockGranted2(DWORD flags) {
+    GetTextTest(0, -1, L"text select that ", 17);
+    SetTextTest(4, 17, L"", S_OK);
+    GetTextTest(0, -1, L"text", 4);
+    SetSelectionTest(0, 4, S_OK);
+
+    text_spans()->clear();
+    *edit_flag() = true;
+    *composition_start() = 0;
+    composition_range()->set_start(0);
+    composition_range()->set_end(0);
+    *has_composition_range() = false;
+
+    return S_OK;
+  }
+
+  bool SetEditableSelectionRange2(const gfx::Range& range) {
+    EXPECT_EQ(range.GetMin(), 0u);
+    EXPECT_EQ(range.length(), 4u);
+    return true;
+  }
+
+  HRESULT LockGranted3(DWORD flags) {
+    GetTextTest(0, -1, L"text", 4);
+    GetSelectionTest(0, 4);
+
+    return S_OK;
+  }
+};
+
+TEST_F(TSFTextStoreTest, RegressionTest14) {
+  RegressionTest14Callback callback(text_store_.get());
+  EXPECT_CALL(text_input_client_, InsertText(_, _)).Times(0);
+  EXPECT_CALL(text_input_client_, SetCompositionText(_))
+      .WillOnce(
+          Invoke(&callback, &RegressionTest14Callback::SetCompositionText1));
+  EXPECT_CALL(text_input_client_, SetEditableSelectionRange(_))
+      .WillOnce(Invoke(&callback,
+                       &RegressionTest14Callback::SetEditableSelectionRange2));
+
+  EXPECT_CALL(*sink_, OnLockGranted(_))
+      .WillOnce(Invoke(&callback, &RegressionTest14Callback::LockGranted1))
+      .WillOnce(Invoke(&callback, &RegressionTest14Callback::LockGranted2))
+      .WillOnce(Invoke(&callback, &RegressionTest14Callback::LockGranted3));
+
+  ON_CALL(text_input_client_, HasCompositionText())
+      .WillByDefault(
+          Invoke(&callback, &TSFTextStoreTestCallback::HasCompositionText));
+
+  HRESULT result = kInvalidResult;
+  EXPECT_EQ(S_OK, text_store_->RequestLock(TS_LF_READWRITE, &result));
+  EXPECT_EQ(S_OK, result);
+  result = kInvalidResult;
+  EXPECT_EQ(S_OK, text_store_->RequestLock(TS_LF_READWRITE, &result));
+  EXPECT_EQ(S_OK, result);
+  result = kInvalidResult;
+  EXPECT_EQ(S_OK, text_store_->RequestLock(TS_LF_READWRITE, &result));
+  EXPECT_EQ(S_OK, result);
+}
+
 // Test multiple |SetText| call in one edit session.
 class MultipleSetTextCallback : public TSFTextStoreTestCallback {
  public:
   explicit MultipleSetTextCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  MultipleSetTextCallback(const MultipleSetTextCallback&) = delete;
+  MultipleSetTextCallback& operator=(const MultipleSetTextCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextRange(0, 6);
@@ -4169,9 +4389,6 @@ class MultipleSetTextCallback : public TSFTextStoreTestCallback {
     *composition_start() = 5;
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MultipleSetTextCallback);
 };
 
 TEST_F(TSFTextStoreTest, MultipleSetText) {
@@ -4213,6 +4430,11 @@ class TextInputClientReentrancyTestCallback : public TSFTextStoreTestCallback {
  public:
   explicit TextInputClientReentrancyTestCallback(TSFTextStore* text_store)
       : TSFTextStoreTestCallback(text_store) {}
+
+  TextInputClientReentrancyTestCallback(
+      const TextInputClientReentrancyTestCallback&) = delete;
+  TextInputClientReentrancyTestCallback& operator=(
+      const TextInputClientReentrancyTestCallback&) = delete;
 
   HRESULT LockGranted1(DWORD flags) {
     SetTextTest(0, 0, L"a", S_OK);
@@ -4285,9 +4507,6 @@ class TextInputClientReentrancyTestCallback : public TSFTextStoreTestCallback {
     *edit_flag() = false;
     return S_OK;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(TextInputClientReentrancyTestCallback);
 };
 
 TEST_F(TSFTextStoreTest, TextInputClientReentrancTest) {

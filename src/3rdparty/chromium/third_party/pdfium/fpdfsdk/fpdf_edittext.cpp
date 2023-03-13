@@ -8,8 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/fpdfapi/font/cpdf_cidfont.h"
 #include "core/fpdfapi/font/cpdf_font.h"
-#include "core/fpdfapi/font/cpdf_type1font.h"
 #include "core/fpdfapi/page/cpdf_docpagedata.h"
 #include "core/fpdfapi/page/cpdf_textobject.h"
 #include "core/fpdfapi/page/cpdf_textstate.h"
@@ -21,15 +21,20 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fpdfapi/render/charposlist.h"
 #include "core/fpdftext/cpdf_textpage.h"
 #include "core/fxcrt/fx_extension.h"
+#include "core/fxcrt/fx_string_wrappers.h"
+#include "core/fxcrt/stl_util.h"
 #include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/fx_font.h"
+#include "core/fxge/text_char_pos.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "public/fpdf_edit.h"
 #include "third_party/base/check.h"
 #include "third_party/base/check_op.h"
 #include "third_party/base/containers/contains.h"
+#include "third_party/base/numerics/safe_conversions.h"
 
 // These checks are here because core/ and public/ cannot depend on each other.
 static_assert(static_cast<int>(TextRenderingMode::MODE_UNKNOWN) ==
@@ -142,7 +147,7 @@ const char ToUnicodeEnd[] =
     "end\n"
     "end\n";
 
-void AddCharcode(std::ostringstream* pBuffer, uint32_t number) {
+void AddCharcode(fxcrt::ostringstream* pBuffer, uint32_t number) {
   DCHECK(number <= 0xFFFF);
   *pBuffer << "<";
   char ans[4];
@@ -154,7 +159,7 @@ void AddCharcode(std::ostringstream* pBuffer, uint32_t number) {
 
 // PDF spec 1.7 Section 5.9.2: "Unicode character sequences as expressed in
 // UTF-16BE encoding." See https://en.wikipedia.org/wiki/UTF-16#Description
-void AddUnicode(std::ostringstream* pBuffer, uint32_t unicode) {
+void AddUnicode(fxcrt::ostringstream* pBuffer, uint32_t unicode) {
   if (unicode >= 0xD800 && unicode <= 0xDFFF)
     unicode = 0;
 
@@ -231,7 +236,7 @@ CPDF_Stream* LoadUnicode(CPDF_Document* pDoc,
     }
     map_range[std::make_pair(firstCharcode, curCharcode)] = firstUnicode;
   }
-  std::ostringstream buffer;
+  fxcrt::ostringstream buffer;
   buffer << ToUnicodeStart;
   // Add maps to buffer
   buffer << static_cast<uint32_t>(char_to_uni.size()) << " beginbfchar\n";
@@ -288,8 +293,8 @@ RetainPtr<CPDF_Font> LoadSimpleFont(CPDF_Document* pDoc,
   pFontDict->SetNewFor<CPDF_Name>("BaseFont", name);
 
   uint32_t dwGlyphIndex;
-  uint32_t dwCurrentChar =
-      FT_Get_First_Char(pFont->GetFaceRec(), &dwGlyphIndex);
+  uint32_t dwCurrentChar = static_cast<uint32_t>(
+      FT_Get_First_Char(pFont->GetFaceRec(), &dwGlyphIndex));
   static constexpr uint32_t kMaxSimpleFontChar = 0xFF;
   if (dwCurrentChar > kMaxSimpleFontChar || dwGlyphIndex == 0)
     return nullptr;
@@ -298,8 +303,8 @@ RetainPtr<CPDF_Font> LoadSimpleFont(CPDF_Document* pDoc,
   CPDF_Array* widthsArray = pDoc->NewIndirect<CPDF_Array>();
   while (true) {
     widthsArray->AppendNew<CPDF_Number>(pFont->GetGlyphWidth(dwGlyphIndex));
-    uint32_t nextChar =
-        FT_Get_Next_Char(pFont->GetFaceRec(), dwCurrentChar, &dwGlyphIndex);
+    uint32_t nextChar = static_cast<uint32_t>(
+        FT_Get_Next_Char(pFont->GetFaceRec(), dwCurrentChar, &dwGlyphIndex));
     // Simple fonts have 1-byte charcodes only.
     if (nextChar > kMaxSimpleFontChar || dwGlyphIndex == 0)
       break;
@@ -355,8 +360,8 @@ RetainPtr<CPDF_Font> LoadCompositeFont(CPDF_Document* pDoc,
                                       pFontDesc->GetObjNum());
 
   uint32_t dwGlyphIndex;
-  uint32_t dwCurrentChar =
-      FT_Get_First_Char(pFont->GetFaceRec(), &dwGlyphIndex);
+  uint32_t dwCurrentChar = static_cast<uint32_t>(
+      FT_Get_First_Char(pFont->GetFaceRec(), &dwGlyphIndex));
   static constexpr uint32_t kMaxUnicode = 0x10FFFF;
   // If it doesn't have a single char, just fail
   if (dwGlyphIndex == 0 || dwCurrentChar > kMaxUnicode)
@@ -371,8 +376,8 @@ RetainPtr<CPDF_Font> LoadCompositeFont(CPDF_Document* pDoc,
     if (!pdfium::Contains(widths, dwGlyphIndex))
       widths[dwGlyphIndex] = pFont->GetGlyphWidth(dwGlyphIndex);
     to_unicode.emplace(dwGlyphIndex, dwCurrentChar);
-    dwCurrentChar =
-        FT_Get_Next_Char(pFont->GetFaceRec(), dwCurrentChar, &dwGlyphIndex);
+    dwCurrentChar = static_cast<uint32_t>(
+        FT_Get_Next_Char(pFont->GetFaceRec(), dwCurrentChar, &dwGlyphIndex));
     if (dwGlyphIndex == 0)
       break;
   }
@@ -440,6 +445,13 @@ RetainPtr<CPDF_Font> LoadCompositeFont(CPDF_Document* pDoc,
 CPDF_TextObject* CPDFTextObjectFromFPDFPageObject(FPDF_PAGEOBJECT page_object) {
   auto* obj = CPDFPageObjectFromFPDFPageObject(page_object);
   return obj ? obj->AsText() : nullptr;
+}
+
+FPDF_GLYPHPATH FPDFGlyphPathFromCFXPath(const CFX_Path* path) {
+  return reinterpret_cast<FPDF_GLYPHPATH>(path);
+}
+const CFX_Path* CFXPathFromFPDFGlyphPath(FPDF_GLYPHPATH path) {
+  return reinterpret_cast<const CFX_Path*>(path);
 }
 
 }  // namespace
@@ -520,7 +532,7 @@ FPDF_EXPORT FPDF_FONT FPDF_CALLCONV FPDFText_LoadFont(FPDF_DOCUMENT document,
   // TODO(npm): Maybe use FT_Get_X11_Font_Format to check format? Otherwise, we
   // are allowing giving any font that can be loaded on freetype and setting it
   // as any font type.
-  if (!pFont->LoadEmbedded(span, false))
+  if (!pFont->LoadEmbedded(span, /*force_vertical=*/false, /*object_tag=*/0))
     return nullptr;
 
   // Caller takes ownership.
@@ -551,24 +563,6 @@ FPDFTextObj_GetFontSize(FPDF_PAGEOBJECT text, float* size) {
 
   *size = pTextObj->GetFontSize();
   return true;
-}
-
-FPDF_EXPORT unsigned long FPDF_CALLCONV
-FPDFTextObj_GetFontName(FPDF_PAGEOBJECT text,
-                        char* buffer,
-                        unsigned long length) {
-  CPDF_TextObject* pTextObj = CPDFTextObjectFromFPDFPageObject(text);
-  if (!pTextObj)
-    return 0;
-
-  RetainPtr<CPDF_Font> pPdfFont = pTextObj->GetFont();
-  CFX_Font* pFont = pPdfFont->GetFont();
-  ByteString name = pFont->GetFamilyName();
-  unsigned long dwStringLen = name.GetLength() + 1;
-  if (buffer && length >= dwStringLen)
-    memcpy(buffer, name.c_str(), dwStringLen);
-
-  return dwStringLen;
 }
 
 FPDF_EXPORT unsigned long FPDF_CALLCONV
@@ -632,4 +626,147 @@ FPDFTextObj_SetTextRenderMode(FPDF_PAGEOBJECT text,
 
   pTextObj->SetTextRenderMode(static_cast<TextRenderingMode>(render_mode));
   return true;
+}
+
+FPDF_EXPORT FPDF_FONT FPDF_CALLCONV FPDFTextObj_GetFont(FPDF_PAGEOBJECT text) {
+  CPDF_TextObject* pTextObj = CPDFTextObjectFromFPDFPageObject(text);
+  if (!pTextObj)
+    return nullptr;
+
+  return FPDFFontFromCPDFFont(pTextObj->GetFont().Get());
+}
+
+FPDF_EXPORT unsigned long FPDF_CALLCONV
+FPDFFont_GetFontName(FPDF_FONT font, char* buffer, unsigned long length) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont)
+    return 0;
+
+  CFX_Font* pCfxFont = pFont->GetFont();
+  ByteString name = pCfxFont->GetFamilyName();
+  const unsigned long dwStringLen =
+      pdfium::base::checked_cast<unsigned long>(name.GetLength() + 1);
+  if (buffer && length >= dwStringLen)
+    memcpy(buffer, name.c_str(), dwStringLen);
+
+  return dwStringLen;
+}
+
+FPDF_EXPORT int FPDF_CALLCONV FPDFFont_GetFlags(FPDF_FONT font) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont)
+    return -1;
+
+  // Return only flags from ISO 32000-1:2008, table 123.
+  return pFont->GetFontFlags() & 0x7ffff;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFFont_GetWeight(FPDF_FONT font) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  return pFont ? pFont->GetFontWeight() : -1;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFFont_GetItalicAngle(FPDF_FONT font,
+                                                            int* angle) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont || !angle)
+    return false;
+
+  *angle = pFont->GetItalicAngle();
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFFont_GetAscent(FPDF_FONT font,
+                                                       float font_size,
+                                                       float* ascent) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont || !ascent)
+    return false;
+
+  *ascent = pFont->GetTypeAscent() * font_size / 1000.f;
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFFont_GetDescent(FPDF_FONT font,
+                                                        float font_size,
+                                                        float* descent) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont || !descent)
+    return false;
+
+  *descent = pFont->GetTypeDescent() * font_size / 1000.f;
+  return true;
+}
+
+FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFFont_GetGlyphWidth(FPDF_FONT font,
+                                                           uint32_t glyph,
+                                                           float font_size,
+                                                           float* width) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont || !width)
+    return false;
+
+  uint32_t charcode = pFont->CharCodeFromUnicode(static_cast<wchar_t>(glyph));
+
+  CPDF_CIDFont* pCIDFont = pFont->AsCIDFont();
+  if (pCIDFont && pCIDFont->IsVertWriting()) {
+    uint16_t cid = pCIDFont->CIDFromCharCode(charcode);
+    *width = pCIDFont->GetVertWidth(cid) * font_size / 1000.f;
+  } else {
+    *width = pFont->GetCharWidthF(charcode) * font_size / 1000.f;
+  }
+
+  return true;
+}
+
+FPDF_EXPORT FPDF_GLYPHPATH FPDF_CALLCONV
+FPDFFont_GetGlyphPath(FPDF_FONT font, uint32_t glyph, float font_size) {
+  auto* pFont = CPDFFontFromFPDFFont(font);
+  if (!pFont)
+    return nullptr;
+
+  if (!pdfium::base::IsValueInRangeForNumericType<wchar_t>(glyph))
+    return nullptr;
+
+  uint32_t charcode = pFont->CharCodeFromUnicode(static_cast<wchar_t>(glyph));
+  std::vector<TextCharPos> pos =
+      GetCharPosList(pdfium::make_span(&charcode, 1),
+                     pdfium::span<const float>(), pFont, font_size);
+
+  CFX_Font* pCfxFont;
+  if (pos[0].m_FallbackFontPosition == -1) {
+    pCfxFont = pFont->GetFont();
+    DCHECK(pCfxFont);  // Never null.
+  } else {
+    pCfxFont = pFont->GetFontFallback(pos[0].m_FallbackFontPosition);
+    if (!pCfxFont)
+      return nullptr;
+  }
+
+  const CFX_Path* pPath =
+      pCfxFont->LoadGlyphPath(pos[0].m_GlyphIndex, pos[0].m_FontCharWidth);
+
+  return FPDFGlyphPathFromCFXPath(pPath);
+}
+
+FPDF_EXPORT int FPDF_CALLCONV
+FPDFGlyphPath_CountGlyphSegments(FPDF_GLYPHPATH glyphpath) {
+  auto* pPath = CFXPathFromFPDFGlyphPath(glyphpath);
+  if (!pPath)
+    return -1;
+
+  return fxcrt::CollectionSize<int>(pPath->GetPoints());
+}
+
+FPDF_EXPORT FPDF_PATHSEGMENT FPDF_CALLCONV
+FPDFGlyphPath_GetGlyphPathSegment(FPDF_GLYPHPATH glyphpath, int index) {
+  auto* pPath = CFXPathFromFPDFGlyphPath(glyphpath);
+  if (!pPath)
+    return nullptr;
+
+  pdfium::span<const CFX_Path::Point> points = pPath->GetPoints();
+  if (!fxcrt::IndexInBounds(points, index))
+    return nullptr;
+
+  return FPDFPathSegmentFromFXPathPoint(&points[index]);
 }

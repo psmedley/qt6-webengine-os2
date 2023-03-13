@@ -1,4 +1,1 @@
-monorail {
-  component: "Blink>Storage>IndexedDB"
-}
-team_email: "storage-dev@chromium.org"
+mixins: "//content/browser/indexed_db/COMMON_METADATA"

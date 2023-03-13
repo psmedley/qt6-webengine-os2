@@ -9,7 +9,7 @@
 
 #include "base/android/jni_weak_ref.h"
 #include "base/callback.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "content/public/browser/android/compositor_client.h"
 #include "ui/gfx/native_widget_types.h"
@@ -30,6 +30,9 @@ class ContentViewRenderView : public content::CompositorClient {
   ContentViewRenderView(JNIEnv* env,
                         jobject obj,
                         gfx::NativeWindow root_window);
+
+  ContentViewRenderView(const ContentViewRenderView&) = delete;
+  ContentViewRenderView& operator=(const ContentViewRenderView&) = delete;
 
   content::Compositor* compositor() { return compositor_.get(); }
 
@@ -59,12 +62,13 @@ class ContentViewRenderView : public content::CompositorClient {
                       jint width,
                       jint height,
                       jboolean transparent_background,
-                      const base::android::JavaParamRef<jobject>& surface);
+                      const base::android::JavaParamRef<jobject>& new_surface);
   void SetNeedsRedraw(JNIEnv* env);
   void EvictCachedSurface(JNIEnv* env);
   base::android::ScopedJavaLocalRef<jobject> GetResourceManager(JNIEnv* env);
   void UpdateBackgroundColor(JNIEnv* env);
   void SetRequiresAlphaChannel(JNIEnv* env, jboolean requires_alpha_channel);
+  void SetDidSwapBuffersCallbackEnabled(JNIEnv* env, jboolean enable);
 
   // CompositorClient implementation
   void UpdateLayerTreeHost() override;
@@ -80,7 +84,7 @@ class ContentViewRenderView : public content::CompositorClient {
   base::android::ScopedJavaGlobalRef<jobject> java_obj_;
   bool use_transparent_background_ = false;
   bool requires_alpha_channel_ = false;
-  content::WebContents* web_contents_ = nullptr;
+  raw_ptr<content::WebContents> web_contents_ = nullptr;
 
   std::unique_ptr<content::Compositor> compositor_;
 
@@ -92,8 +96,6 @@ class ContentViewRenderView : public content::CompositorClient {
 
   base::RepeatingClosure height_changed_listener_;
   int height_ = 0;
-
-  DISALLOW_COPY_AND_ASSIGN(ContentViewRenderView);
 };
 
 }  // namespace weblayer

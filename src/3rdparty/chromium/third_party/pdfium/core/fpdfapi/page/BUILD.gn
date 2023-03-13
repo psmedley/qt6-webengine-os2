@@ -11,6 +11,8 @@ source_set("page") {
     "cpdf_allstates.h",
     "cpdf_annotcontext.cpp",
     "cpdf_annotcontext.h",
+    "cpdf_basedcs.cpp",
+    "cpdf_basedcs.h",
     "cpdf_clippath.cpp",
     "cpdf_clippath.h",
     "cpdf_color.cpp",
@@ -49,6 +51,8 @@ source_set("page") {
     "cpdf_image.h",
     "cpdf_imageobject.cpp",
     "cpdf_imageobject.h",
+    "cpdf_indexedcs.cpp",
+    "cpdf_indexedcs.h",
     "cpdf_meshstream.cpp",
     "cpdf_meshstream.h",
     "cpdf_occontext.cpp",
@@ -115,8 +119,22 @@ source_set("page") {
   visibility = [ "../../../*" ]
 }
 
+source_set("unit_test_support") {
+  testonly = true
+  sources = [
+    "test_with_page_module.cpp",
+    "test_with_page_module.h",
+  ]
+  configs += [ "../../../:pdfium_strict_config" ]
+  deps = [
+    "../page",
+    "//testing/gtest",
+  ]
+}
+
 pdfium_unittest_source_set("unittests") {
   sources = [
+    "cpdf_colorspace_unittest.cpp",
     "cpdf_devicecs_unittest.cpp",
     "cpdf_function_unittest.cpp",
     "cpdf_pageobjectholder_unittest.cpp",

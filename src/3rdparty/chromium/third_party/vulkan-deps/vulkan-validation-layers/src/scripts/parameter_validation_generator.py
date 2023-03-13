@@ -1,9 +1,9 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2021 The Khronos Group Inc.
-# Copyright (c) 2015-2021 Valve Corporation
-# Copyright (c) 2015-2021 LunarG, Inc.
-# Copyright (c) 2015-2021 Google Inc.
+# Copyright (c) 2015-2022 The Khronos Group Inc.
+# Copyright (c) 2015-2022 Valve Corporation
+# Copyright (c) 2015-2022 LunarG, Inc.
+# Copyright (c) 2015-2022 Google Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -27,16 +27,28 @@ from generator import *
 from collections import namedtuple
 from common_codegen import *
 
-# This is a workaround to use a Python 2.7 and 3.x compatible syntax.
-from io import open
+# Helper for iterating over a list where each element is possibly a single element or another 1-dimensional list
+# Generates (setter, deleter, element) for each element where:
+#  - element = the next element in the list
+#  - setter(x) = a function that will set the entry in `lines` corresponding to `element` to `x`
+#  - deleter() = a function that will delete the entry corresponding to `element` in `lines`
+def multi_string_iter(lines):
+    for i, ul in enumerate(lines):
+        if not isinstance(ul, list):
+            def setter(x): lines[i] = x
+            def deleter(): del(lines[i])
+            yield (setter, deleter, ul)
+        else:
+            for j, l in enumerate(lines[i]):
+                def setter(x): lines[i][j] = x
+                def deleter(): del(lines[i][j])
+                yield (setter, deleter, l)
 
 # ParameterValidationGeneratorOptions - subclass of GeneratorOptions.
 #
 # Adds options used by ParameterValidationOutputGenerator object during Parameter validation layer generation.
 #
 # Additional members
-#   prefixText - list of strings to prefix generated header with
-#     (usually a copyright statement + calling convention macros).
 #   protectFile - True if multiple inclusion protection should be
 #     generated (based on the filename) around the entire header.
 #   protectFeature - True if #ifndef..#endif protection should be
@@ -68,24 +80,23 @@ class ParameterValidationGeneratorOptions(GeneratorOptions):
                  filename = None,
                  directory = '.',
                  genpath = None,
-                 apiname = None,
+                 apiname = 'vulkan',
                  profile = None,
                  versions = '.*',
                  emitversions = '.*',
-                 defaultExtensions = None,
+                 defaultExtensions = 'vulkan',
                  addExtensions = None,
                  removeExtensions = None,
                  emitExtensions = None,
                  emitSpirv = None,
                  sortProcedure = regSortFeatures,
-                 prefixText = "",
-                 apicall = '',
-                 apientry = '',
-                 apientryp = '',
+                 apicall = 'VKAPI_ATTR ',
+                 apientry = 'VKAPI_CALL ',
+                 apientryp = 'VKAPI_PTR *',
                  indentFuncProto = True,
                  indentFuncPointer = False,
-                 alignFuncParam = 0,
-                 expandEnumerants = True,
+                 alignFuncParam = 48,
+                 expandEnumerants = False,
                  valid_usage_path = ''):
         GeneratorOptions.__init__(self,
                 conventions = conventions,
@@ -102,7 +113,6 @@ class ParameterValidationGeneratorOptions(GeneratorOptions):
                 emitExtensions = emitExtensions,
                 emitSpirv = emitSpirv,
                 sortProcedure = sortProcedure)
-        self.prefixText      = prefixText
         self.apicall         = apicall
         self.apientry        = apientry
         self.apientryp       = apientryp
@@ -235,16 +245,19 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCmdBuildAccelerationStructureIndirectKHR',
             'vkGetDeviceAccelerationStructureCompatibilityKHR',
             'vkCmdSetViewportWithCountEXT',
+            'vkCmdSetViewportWithCount',
             'vkCmdSetScissorWithCountEXT',
+            'vkCmdSetScissorWithCount',
             'vkCmdBindVertexBuffers2EXT',
+            'vkCmdBindVertexBuffers2',
             'vkCmdCopyBuffer2KHR',
+            'vkCmdCopyBuffer2',
             'vkCmdBuildAccelerationStructuresKHR',
             'vkCmdBuildAccelerationStructuresIndirectKHR',
             'vkBuildAccelerationStructuresKHR',
             'vkGetAccelerationStructureBuildSizesKHR',
             'vkCmdWriteAccelerationStructuresPropertiesNV',
             'vkCreateDisplayModeKHR',
-            'vkCreatePrivateDataSlotEXT',
             'vkCmdSetVertexInputEXT',
             'vkCmdPushConstants',
             'vkMergePipelineCaches',
@@ -254,6 +267,16 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             'vkCmdBeginRenderPass2KHR',
             'vkCmdBeginRenderPass2',
             'vkCmdSetDiscardRectangleEXT',
+            'vkGetQueryPoolResults',
+            'vkCmdBeginConditionalRenderingEXT',
+            'vkGetDeviceImageMemoryRequirementsKHR',
+            'vkGetDeviceImageSparseMemoryRequirementsKHR',
+            'vkCreateWin32SurfaceKHR',
+            'vkGetPhysicalDeviceSurfaceFormatsKHR',
+            'vkGetPhysicalDeviceSurfacePresentModesKHR',
+            'vkGetPhysicalDeviceSurfaceCapabilities2KHR',
+            'vkGetPhysicalDeviceSurfaceFormats2KHR',
+            'vkGetPhysicalDeviceSurfacePresentModes2EXT',
             ]
 
         # Commands to ignore
@@ -316,9 +339,9 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         copyright  = '/* *** THIS FILE IS GENERATED - DO NOT EDIT! ***\n'
         copyright += ' * See parameter_validation_generator.py for modifications\n'
         copyright += ' *\n'
-        copyright += ' * Copyright (c) 2015-2021 The Khronos Group Inc.\n'
-        copyright += ' * Copyright (c) 2015-2021 LunarG, Inc.\n'
-        copyright += ' * Copyright (C) 2015-2021 Google Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 The Khronos Group Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 LunarG, Inc.\n'
+        copyright += ' * Copyright (C) 2015-2022 Google Inc.\n'
         copyright += ' *\n'
         copyright += ' * Licensed under the Apache License, Version 2.0 (the "License");\n'
         copyright += ' * you may not use this file except in compliance with the License.\n'
@@ -457,7 +480,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             api_func += '    bool skip = false;\n'
             api_func += '    if (api_version < promoted_version) {\n'
             api_func += '        skip = LogError(instance,\n'
-            api_func += '                        kVUID_PVError_ApiVersionViolation, "Attemped to call %s() with an effective API version of %s"\n'
+            api_func += '                        kVUID_PVError_ApiVersionViolation, "Attempted to call %s() with an effective API version of %s"\n'
             api_func += '                        "but this API was not promoted until version %s.", api_name, StringAPIVersion(api_version).c_str(),\n'
             api_func += '                        StringAPIVersion(promoted_version).c_str());\n'
             api_func += '    }\n'
@@ -470,10 +493,10 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             api_func += '        auto effective_api_version = std::min(target_pdev->second->apiVersion, api_version);\n'
             api_func += '        if (effective_api_version < promoted_version) {\n'
             api_func += '            skip = LogError(instance,\n'
-            api_func += '                            kVUID_PVError_ApiVersionViolation, "Attemped to call %s() with an effective API version of %s, "\n'
+            api_func += '                            kVUID_PVError_ApiVersionViolation, "Attempted to call %s() with an effective API version of %s, "\n'
             api_func += '                            "which is the minimum of version requested in pApplicationInfo (%s) and supported by this physical device (%s), "\n'
-            api_func += '                            "but this API was not promoted until version %s.", api_name, StringAPIVersion(api_version).c_str(),\n'
-            api_func += '                            StringAPIVersion(target_pdev->second->apiVersion).c_str(), StringAPIVersion(effective_api_version).c_str(),\n'
+            api_func += '                            "but this API was not promoted until version %s.", api_name, StringAPIVersion(effective_api_version).c_str(),\n'
+            api_func += '                            StringAPIVersion(api_version).c_str(), StringAPIVersion(target_pdev->second->apiVersion).c_str(),\n'
             api_func += '                            StringAPIVersion(promoted_version).c_str());\n'
             api_func += '        }\n'
             api_func += '    }\n'
@@ -482,7 +505,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
             write(api_func, file=self.outFile)
 
             pnext_handler  = 'bool StatelessValidation::ValidatePnextStructContents(const char *api_name, const ParameterName &parameter_name,\n'
-            pnext_handler += '                                                      const VkBaseOutStructure* header, const char *pnext_vuid) const {\n'
+            pnext_handler += '                                                      const VkBaseOutStructure* header, const char *pnext_vuid, bool is_physdev_api, bool is_const_param) const {\n'
             pnext_handler += '    bool skip = false;\n'
             pnext_handler += '    switch(header->sType) {\n'
 
@@ -513,8 +536,10 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                         ver_info = self.stype_version_dict[struct_type[:-4]]
                     else:
                         ver_info = None
+                api_check = False
                 if ver_info is not None:
                     if 'VK_API_VERSION_' in ver_info:
+                        api_check = True
                         api_version = ver_info;
                         pnext_check += '            if (api_version < %s) {\n' % ver_info
                         pnext_check += '                skip |= LogError(\n'
@@ -534,21 +559,25 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                             table_type = 'device'
                         else:
                             print("Error in parameter_validation_generator.py CodeGen.")
+                        pnext_check += '            if (is_const_param) {\n'
                         if table_type == 'device':
-                            pnext_check += '            if ((!SupportedByPdev(physical_device, %s)) && !%s_extensions.%s) {\n' % (ext_name_define, table_type, ext_name.lower())
+                            pnext_check += f'                if ((is_physdev_api && !SupportedByPdev(physical_device, {ext_name_define})) || (!is_physdev_api && !IsExtEnabled({table_type}_extensions.{ext_name.lower()}))) {{\n'
                         else:
-                            pnext_check += '            if (!%s_extensions.%s) {\n' % (table_type, ext_name.lower())
-                        pnext_check += '                skip |= LogError(\n'
-                        pnext_check += '                           instance, pnext_vuid,\n'
-                        pnext_check += '                           "%%s: Includes a pNext pointer (%%s) to a VkStructureType (%s), but its parent extension "\n' % struct_type
-                        pnext_check += '                           "%s has not been enabled.",\n' % ext_name
-                        pnext_check += '                           api_name, parameter_name.get_name().c_str());\n'
+                            pnext_check += '                if (!%s_extensions.%s) {\n' % (table_type, ext_name.lower())
+                        pnext_check += '                        skip |= LogError(\n'
+                        pnext_check += '                               instance, pnext_vuid,\n'
+                        pnext_check += '                               "%%s: Includes a pNext pointer (%%s) to a VkStructureType (%s), but its parent extension "\n' % struct_type
+                        pnext_check += '                               "%s has not been enabled.",\n' % ext_name
+                        pnext_check += '                               api_name, parameter_name.get_name().c_str());\n'
+                        pnext_check += '                }\n'
                         pnext_check += '            }\n'
                         pnext_check += '\n'
-                expr = self.expandStructCode(item, item, 'structure->', '', '            ', [], postProcSpec)
+                expr = self.expandStructCode(item, item, 'structure->', '', '                ', [], postProcSpec)
                 struct_validation_source = self.ScrubStructCode(expr)
                 if struct_validation_source != '':
-                    pnext_case += '            %s *structure = (%s *) header;\n' % (item, item)
+                    pnext_check += '            if (is_const_param) {\n'
+                    struct_validation_source = '                %s *structure = (%s *) header;\n' % (item, item) + struct_validation_source
+                    struct_validation_source += '            }\n'
                 pnext_case += '%s%s' % (pnext_check, struct_validation_source)
                 pnext_case += '        } break;\n'
                 if protect:
@@ -568,7 +597,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
 
             ext_template  = 'bool StatelessValidation::OutputExtensionError(const std::string &api_name, const std::string &extension_name) const {\n'
             ext_template += '    return LogError(instance,\n'
-            ext_template += '                    kVUID_PVError_ExtensionNotEnabled, "Attemped to call %s() but its required extension %s has not been enabled\\n",\n'
+            ext_template += '                    kVUID_PVError_ExtensionNotEnabled, "Attempted to call %s() but its required extension %s has not been enabled\\n",\n'
             ext_template += '                    api_name.c_str(), extension_name.c_str());\n'
             ext_template += '}\n'
             write(ext_template, file=self.outFile)
@@ -598,7 +627,10 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         # Get base list of extension dependencies for all items in this extension
         base_required_extensions = []
         if "VK_VERSION_1" not in self.featureName:
-            nameElem = interface[0][1]
+            index = 0
+            while interface[0][index].tag == 'comment':
+                index += 1
+            nameElem = interface[0][index + 1]
             name = nameElem.get('name')
             # Save Name Define to get correct enable name later
             self.extension_names[self.featureName] = name
@@ -624,14 +656,17 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         # And note if this is an Instance or Device extension
         self.extension_type = interface.get('type')
         if interface.tag == 'extension':
-            name_elem = interface[0][1]
+            index = 0
+            while interface[0][index].tag == 'comment':
+                index += 1
+            name_elem = interface[0][index + 1]
             name_definition = name_elem.get('name')
             if 'EXTENSION_NAME' not in name_definition:
                 print("Error in vk.xml file -- extension name is not available")
             if interface.get('type') == 'instance':
-                self.instance_extension_list += '%s, ' % name_definition
+                self.instance_extension_list += '%s, ' % GetNameDefine(interface)
             else:
-                self.device_extension_list += '%s, ' % name_definition
+                self.device_extension_list += '%s, ' % GetNameDefine(interface)
 
     #
     # Called at the end of each extension (feature)
@@ -663,7 +698,7 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                     for bit in bits[1:]:
                         decl += '|' + bit
                     decl += ';'
-                    self.flag_values_definitions[flag] = decl
+                    self.flag_values_definitions[flag] = Guarded(self.featureExtraProtect, decl)
             endif = '\n'
             if (self.featureExtraProtect is not None):
                 endif = '#endif // %s\n' % self.featureExtraProtect
@@ -1325,10 +1360,14 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         return expr
     #
     # Generate the parameter checking code
-    def genFuncBody(self, funcName, values, valuePrefix, displayNamePrefix, structTypeName):
+    def genFuncBody(self, funcName, values, valuePrefix, displayNamePrefix, structTypeName, is_phys_device = False):
         lines = []    # Generated lines of code
         unused = []   # Unused variable names
         duplicateCountVuid = [] # prevent duplicate VUs being generated
+
+        # TODO Using a regex in this context is not ideal. Would be nicer if usedLines were a list of objects with "settings" (such as "is_phys_device")
+        validate_pnext_rx = re.compile(r'(.*validate_struct_pnext\(.*)(\).*\n*)', re.M)
+
         for value in values:
             usedLines = []
             lenParam = None
@@ -1369,6 +1408,15 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                             else:
                                 if lenParam.isoptional:
                                     cpReq = 'false'
+                                # In case of count as field in another struct, look up field to see if count is optional.
+                                len_deref = value.len.split('->')
+                                if len(len_deref) == 2:
+                                    struct_fields = next((struct.members for struct in self.structMembers if struct.name == lenParam.type), None)
+                                    if struct_fields:
+                                        len_field_name = len_deref[1]
+                                        struct_field = next((field for field in struct_fields if field.name == len_field_name), None)
+                                        if struct_field and struct_field.isoptional:
+                                            cvReq = 'false'
                         else:
                             if lenParam.isoptional:
                                 cvReq = 'false'
@@ -1422,6 +1470,15 @@ class ParameterValidationOutputGenerator(OutputGenerator):
                             usedLines.append(self.expandStructPointerCode(valuePrefix, value, lenParam, funcName, valueDisplayName, postProcSpec))
                         elif value.type in self.returnedonly_structs:
                             usedLines.append(self.expandStructPointerCode(valuePrefix, value, lenParam, funcName, valueDisplayName, postProcSpec))
+
+                    is_const_str = 'true' if value.isconst else 'false'
+                    is_phys_device_str = 'true' if is_phys_device else 'false'
+                    for setter, _, elem in multi_string_iter(usedLines):
+                        elem = re.sub(r', (true|false)', '', elem)
+                        m = validate_pnext_rx.match(elem)
+                        if m is not None:
+                            setter(f'{m.group(1)}, {is_phys_device_str}, {is_const_str}{m.group(2)}')
+
             # Non-pointer types
             else:
                 # The parameter will not be processes when tagged as 'noautovalidity'
@@ -1502,21 +1559,20 @@ class ParameterValidationOutputGenerator(OutputGenerator):
         for command in self.commands:
             # Skip first parameter if it is a dispatch handle (everything except vkCreateInstance)
             startIndex = 0 if command.name == 'vkCreateInstance' else 1
-            lines, unused = self.genFuncBody(command.name, command.params[startIndex:], '', '', None)
+            lines, unused = self.genFuncBody(command.name, command.params[startIndex:], '', '', None, is_phys_device = command.params[0].type == 'VkPhysicalDevice')
             # Cannot validate extension dependencies for device extension APIs having a physical device as their dispatchable object
             if (command.name in self.required_extensions) and (self.extension_type != 'device' or command.params[0].type != 'VkPhysicalDevice'):
-                ext_test = ''
-                if command.params[0].type in ["VkInstance", "VkPhysicalDevice"] or command.name == 'vkCreateInstance':
-                    ext_table_type = 'instance'
-                else:
-                    ext_table_type = 'device'
                 for ext in self.required_extensions[command.name]:
                     ext_name_define = ''
                     for extension in self.registry.extensions:
                         if extension.attrib['name'] == ext:
-                            ext_name_define = extension[0][1].get('name')
+                            ext_name_define = GetNameDefine(extension)
                             break
-                    ext_test = 'if (!%s_extensions.%s) skip |= OutputExtensionError("%s", %s);\n' % (ext_table_type, ext.lower(), command.name, ext_name_define)
+                    ext_test = ''
+                    if command.params[0].type in ["VkInstance", "VkPhysicalDevice"] or command.name == 'vkCreateInstance':
+                        ext_test = 'if (!instance_extensions.%s) skip |= OutputExtensionError("%s", %s);\n' % (ext.lower(), command.name, ext_name_define)
+                    else:
+                        ext_test = 'if (!IsExtEnabled(device_extensions.%s)) skip |= OutputExtensionError("%s", %s);\n' % (ext.lower(), command.name, ext_name_define)
                     lines.insert(0, ext_test)
             if lines:
                 func_sig = self.getCmdDef(command) + ' const {\n'

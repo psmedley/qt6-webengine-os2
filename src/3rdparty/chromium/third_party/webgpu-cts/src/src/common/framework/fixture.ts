@@ -101,7 +101,8 @@ export class Fixture {
   /**
    * Tracks an object to be cleaned up after the test finishes.
    *
-   * TODO: Use this in more places. (Will be easier once .destroy() is allowed on invalid objects.)
+   * MAINTENANCE_TODO: Use this in more places. (Will be easier once .destroy() is allowed on
+   * invalid objects.)
    */
   trackForCleanup<T extends DestroyableObject>(o: T): T {
     this.objectsToCleanUp.push(o);
@@ -164,15 +165,15 @@ export class Fixture {
     return promise;
   }
 
-  private expectErrorValue(expectedName: string, ex: unknown, niceStack: Error): void {
+  private expectErrorValue(expectedError: string | true, ex: unknown, niceStack: Error): void {
     if (!(ex instanceof Error)) {
       niceStack.message = `THREW non-error value, of type ${typeof ex}: ${ex}`;
       this.rec.expectationFailed(niceStack);
       return;
     }
     const actualName = ex.name;
-    if (actualName !== expectedName) {
-      niceStack.message = `THREW ${actualName}, instead of ${expectedName}: ${ex}`;
+    if (expectedError !== true && actualName !== expectedError) {
+      niceStack.message = `THREW ${actualName}, instead of ${expectedError}: ${ex}`;
       this.rec.expectationFailed(niceStack);
     } else {
       niceStack.message = `OK: threw ${actualName}: ${ex.message}`;
@@ -188,7 +189,10 @@ export class Fixture {
         await p;
         niceStack.message = 'resolved as expected' + m;
       } catch (ex) {
-        niceStack.message = `REJECTED${m}\n${ex.message}`;
+        niceStack.message = `REJECTED${m}`;
+        if (ex instanceof Error) {
+          niceStack.message += '\n' + ex.message;
+        }
         this.rec.expectationFailed(niceStack);
       }
     });
@@ -209,14 +213,25 @@ export class Fixture {
     });
   }
 
-  /** Expect that the provided function throws, with the provided exception name. */
-  shouldThrow(expectedName: string, fn: () => void, msg?: string): void {
+  /**
+   * Expect that the provided function throws.
+   * If an `expectedName` is provided, expect that the throw exception has that name.
+   */
+  shouldThrow(expectedError: string | boolean, fn: () => void, msg?: string): void {
     const m = msg ? ': ' + msg : '';
     try {
       fn();
-      this.rec.expectationFailed(new Error('DID NOT THROW' + m));
+      if (expectedError === false) {
+        this.rec.debug(new Error('did not throw, as expected' + m));
+      } else {
+        this.rec.expectationFailed(new Error('unexpectedly did not throw' + m));
+      }
     } catch (ex) {
-      this.expectErrorValue(expectedName, ex, new Error(m));
+      if (expectedError === false) {
+        this.rec.expectationFailed(new Error('threw unexpectedly' + m));
+      } else {
+        this.expectErrorValue(expectedError, ex, new Error(m));
+      }
     }
   }
 
@@ -231,9 +246,9 @@ export class Fixture {
     return cond;
   }
 
-  /** If the argument is an Error, fail (or warn). Otherwise, no-op. */
+  /** If the argument is an `Error`, fail (or warn). If it's `undefined`, no-op. */
   expectOK(
-    error: Error | unknown,
+    error: Error | undefined,
     { mode = 'fail', niceStack }: { mode?: 'fail' | 'warn'; niceStack?: Error } = {}
   ): void {
     if (error instanceof Error) {
@@ -248,5 +263,14 @@ export class Fixture {
         unreachable();
       }
     }
+  }
+
+  eventualExpectOK(
+    error: Promise<Error | undefined>,
+    { mode = 'fail' }: { mode?: 'fail' | 'warn' } = {}
+  ) {
+    this.eventualAsyncExpectation(async niceStack => {
+      this.expectOK(await error, { mode, niceStack });
+    });
   }
 }

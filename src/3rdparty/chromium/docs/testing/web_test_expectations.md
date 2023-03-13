@@ -108,22 +108,27 @@ results from try jobs, by using the command-tool
    * Optionally one can choose to trigger only blink try bots alone.
    Run the tool with the option -
    `blink_tool.py rebaseline-cl --use-blink-try-bots-only`
-   * If you would like to rebaseline for highdpi, use the flag-specific option.
+   * If you would like to rebaseline for flag specific builders, use the flag-specific option.
+   Rebaseline for highdpi and disable-layout-ng are
+   supported for now. For example, to rebaseline for highdpi, use
    `blink_tool.py rebaseline-cl --flag-specific=highdpi`. This will trigger
    only the highdpi try builder. Since this is an experimental builder at this time,
    this will not be triggered with the default or '--use-blink-try-bots-only' options.
-   * If you need to trigger all the builders including highdpi, run the tool with
-   desired options multiple times. There is no need to wait for the builders
-   triggered with default option to finish before triggering the highdpi and vice versa.
+   * If you need to trigger all the builders including supported flag-specific builders, run the
+   tool with desired options multiple times. There is no need to wait for the builders
+   triggered with default option to finish before triggering the flag specific
+   builders and vice versa.
 3. Wait for all try jobs to finish.
 4. Run `blink_tool.py rebaseline-cl` again to fetch new baselines.
    By default, this will download new baselines for any failing tests
    in the blink try jobs and CQ try bots.
    * Again, there is an option to use only blink try jobs results for rebaselining.
    (Run `blink_tool.py rebaseline-cl --help` for more specific options.)
-   * To rebaseline for highdpi runs -
+   * To rebaseline for flag-specific builders (using highdpi as an example again), runs -
    `blink_tool.py rebaseline-cl --flag-specific=highdpi` which will download baselines
-   for any failures in the highdpi run only.
+   for any failures in the highdpi run only. We suggest running flag-specific rebaseline
+   after non-flag-specific rebaseline as baseline optimization is not
+   implemented for flag-specific rebaseline yet.
 5. Commit the new baselines and upload a new patch.
 
 This way, the new baselines can be reviewed along with the changes, which helps
@@ -163,11 +168,11 @@ way to rebaseline tests for a particular platform.
 * Paste.
 * Add files into git and commit.
 
-Unlike other rebaseline methods, the above process may create redundant baselines,
-so optionally you may want to run the following to optimize the baselines before
-the last step above:
-* In the result page, click "Copy test names"
-* In local console, run `third_party/blink/tools/blink_tools.py optimize-baselines <paste>`.
+The generated command includes `blink_tool.py optimize-baselines <tests>` which
+removes redundant baselines. However, the optimization doesn't work for
+flag-specific baselines for now, so the rebaseline script may create redundant
+baselines for flag-specific results. We prefer local manual rebaselining (see
+below) for flag-specific rebaselines when possible.
 
 ### Local manual rebaselining
 
@@ -225,7 +230,7 @@ files. You can follow the steps below for easier review.
 
 3. Request review of the CL and tell the reviewer to compare the patch sets that
    were uploaded in step 1 and step 2 to see the differences of the rebaselines.
-   
+
 ## Kinds of expectations files
 
 * [TestExpectations](../../third_party/blink/web_tests/TestExpectations): The
@@ -298,11 +303,16 @@ The syntax of a line is roughly:
   `Bug(username)`.
 * If no modifiers are specified, the test applies to all of the configurations
   applicable to that file.
-* Modifiers can be one or more of `Mac`, `Mac10.9`, `Mac10.10`, `Mac10.11`,
-  `Retina`, `Win`, `Win7`, `Win10`, `Linux`, `Linux32`, `Precise`, `Trusty`,
-  `Android`, `Release`, `Debug`.
+* If specified, modifiers must be one of `Fuchsia`, `Mac`, `Mac10.12`,
+  `Mac10.13`, `Mac10.14`, `Mac10.15`, `Mac11`, `Mac11-arm64`, `Mac12`, 
+  `Mac12-arm64`, `Linux`, `Trusty`, `Win`, `Win7`, `Win10.20h2`, `Win11`, 
+  and, optionally, `Release`, or `Debug`. Check the top of
+  [TestExpectations](../../third_party/blink/web_tests/TestExpectations) or the
+  `ALL_SYSTEMS` macro in
+  [third_party/blink/tools/blinkpy/web_tests/port/base.py](../../third_party/blink/tools/blinkpy/web_tests/port/base.py)
+  for an up-to-date list.
 * Some modifiers are meta keywords, e.g. `Win` represents both `Win7` and
-  `Win10`. See the `CONFIGURATION_SPECIFIER_MACROS` dictionary in
+  `Win10.20h2`. See the `CONFIGURATION_SPECIFIER_MACROS` dictionary in
   [third_party/blink/tools/blinkpy/web_tests/port/base.py](../../third_party/blink/tools/blinkpy/web_tests/port/base.py)
   for the meta keywords and which modifiers they represent.
 * Expectations can be one or more of `Crash`, `Failure`, `Pass`, `Rebaseline`,

@@ -5,7 +5,7 @@
 #ifndef CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_UPDATED_SCRIPT_LOADER_H_
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_UPDATED_SCRIPT_LOADER_H_
 
-#include "base/macros.h"
+#include "base/time/time.h"
 #include "content/browser/service_worker/service_worker_cache_writer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
@@ -79,6 +79,11 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
       mojo::PendingRemote<network::mojom::URLLoaderClient> client,
       scoped_refptr<ServiceWorkerVersion> version);
 
+  ServiceWorkerUpdatedScriptLoader(const ServiceWorkerUpdatedScriptLoader&) =
+      delete;
+  ServiceWorkerUpdatedScriptLoader& operator=(
+      const ServiceWorkerUpdatedScriptLoader&) = delete;
+
   ~ServiceWorkerUpdatedScriptLoader() override;
 
   // network::mojom::URLLoader:
@@ -94,8 +99,8 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
 
   // network::mojom::URLLoaderClient for the network load:
   void OnReceiveEarlyHints(network::mojom::EarlyHintsPtr early_hints) override;
-  void OnReceiveResponse(
-      network::mojom::URLResponseHeadPtr response_head) override;
+  void OnReceiveResponse(network::mojom::URLResponseHeadPtr response_head,
+                         mojo::ScopedDataPipeConsumerHandle body) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       network::mojom::URLResponseHeadPtr response_head) override;
@@ -228,8 +233,6 @@ class CONTENT_EXPORT ServiceWorkerUpdatedScriptLoader final
   base::OnceCallback<void(net::Error)> write_observer_complete_callback_;
 
   base::WeakPtrFactory<ServiceWorkerUpdatedScriptLoader> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerUpdatedScriptLoader);
 };
 
 }  // namespace content

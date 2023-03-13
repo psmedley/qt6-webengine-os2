@@ -21,6 +21,7 @@
  */
 
 #include "config.h"
+#include "config_components.h"
 #include <float.h>
 #include <stdint.h>
 #if HAVE_UNISTD_H
@@ -281,7 +282,7 @@ static int strftime_expand(const char *fmt, char **dest)
     return r;
 }
 
-static int hlsenc_io_open(AVFormatContext *s, AVIOContext **pb, char *filename,
+static int hlsenc_io_open(AVFormatContext *s, AVIOContext **pb, const char *filename,
                           AVDictionary **options)
 {
     HLSContext *hls = s->priv_data;
@@ -571,6 +572,7 @@ static int hls_delete_file(HLSContext *hls, AVFormatContext *avf,
         AVDictionary *opt = NULL;
         AVIOContext  *out = NULL;
         int ret;
+        set_http_options(avf, &opt, hls);
         av_dict_set(&opt, "method", "DELETE", 0);
         ret = avf->io_open(avf, &out, path, AVIO_FLAG_WRITE, &opt);
         av_dict_free(&opt);
@@ -744,7 +746,6 @@ static int do_encrypt(AVFormatContext *s, VariantStream *vs)
             memcpy(iv, hls->iv, sizeof(iv));
         }
         ff_data_to_hex(buf, iv, sizeof(iv), 0);
-        buf[32] = '\0';
         memcpy(hls->iv_string, buf, sizeof(hls->iv_string));
     }
 
@@ -866,6 +867,7 @@ static int hls_mux_init(AVFormatContext *s, VariantStream *vs)
     oc->opaque                   = s->opaque;
     oc->io_open                  = s->io_open;
     oc->io_close                 = s->io_close;
+    oc->io_close2                = s->io_close2;
     oc->strict_std_compliance    = s->strict_std_compliance;
     av_dict_copy(&oc->metadata, s->metadata, 0);
 
@@ -899,6 +901,7 @@ static int hls_mux_init(AVFormatContext *s, VariantStream *vs)
         st->sample_aspect_ratio = vs->streams[i]->sample_aspect_ratio;
         st->time_base = vs->streams[i]->time_base;
         av_dict_copy(&st->metadata, vs->streams[i]->metadata, 0);
+        st->id = vs->streams[i]->id;
     }
 
     vs->start_pos = 0;
@@ -2292,6 +2295,7 @@ static int hls_write_header(AVFormatContext *s)
     VariantStream *vs = NULL;
 
     for (i = 0; i < hls->nb_varstreams; i++) {
+        int subtitle_streams = 0;
         vs = &hls->var_streams[i];
 
         ret = avformat_write_header(vs->avf, NULL);
@@ -2312,10 +2316,11 @@ static int hls_write_header(AVFormatContext *s)
             }
 
             if (outer_st->codecpar->codec_type != AVMEDIA_TYPE_SUBTITLE)
-                inner_st = vs->avf->streams[j];
-            else if (vs->vtt_avf)
+                inner_st = vs->avf->streams[j - subtitle_streams];
+            else if (vs->vtt_avf) {
                 inner_st = vs->vtt_avf->streams[0];
-            else {
+                subtitle_streams++;
+            } else {
                 /* We have a subtitle stream, when the user does not want one */
                 inner_st = NULL;
                 continue;
@@ -2379,10 +2384,9 @@ static int64_t append_single_file(AVFormatContext *s, VariantStream *vs)
     }
 
     do {
-        memset(buf, 0, sizeof(BUFSIZE));
         read_byte = avio_read(vs->out, buf, BUFSIZE);
-        avio_write(vs->out_single_file, buf, read_byte);
         if (read_byte > 0) {
+            avio_write(vs->out_single_file, buf, read_byte);
             total_size += read_byte;
             ret = total_size;
         }
@@ -2402,6 +2406,7 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     int is_ref_pkt = 1;
     int ret = 0, can_split = 1, i, j;
     int stream_index = 0;
+    int subtitle_streams = 0;
     int range_length = 0;
     const char *proto = NULL;
     int use_temp_file = 0;
@@ -2411,13 +2416,16 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
     for (i = 0; i < hls->nb_varstreams; i++) {
         vs = &hls->var_streams[i];
         for (j = 0; j < vs->nb_streams; j++) {
+            if (vs->streams[j]->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
+                subtitle_streams++;
+            }
             if (vs->streams[j] == st) {
                 if (st->codecpar->codec_type == AVMEDIA_TYPE_SUBTITLE) {
                     oc = vs->vtt_avf;
                     stream_index = 0;
                 } else {
                     oc = vs->avf;
-                    stream_index = j;
+                    stream_index = j - subtitle_streams;
                 }
                 break;
             }
@@ -2646,7 +2654,6 @@ static int hls_write_packet(AVFormatContext *s, AVPacket *pkt)
         if (ret < 0) {
             return ret;
         }
-
     }
 
     vs->packets_written++;
@@ -3096,11 +3103,14 @@ static const AVOption options[] = {
     {"hls_init_time", "set segment length at init list",         OFFSET(init_time),     AV_OPT_TYPE_DURATION, {.i64 = 0},       0, INT64_MAX, E},
     {"hls_list_size", "set maximum number of playlist entries",  OFFSET(max_nb_segments),    AV_OPT_TYPE_INT,    {.i64 = 5},     0, INT_MAX, E},
     {"hls_delete_threshold", "set number of unreferenced segments to keep before deleting",  OFFSET(hls_delete_threshold),    AV_OPT_TYPE_INT,    {.i64 = 1},     1, INT_MAX, E},
-    {"hls_ts_options","set hls mpegts list of options for the container format used for hls", OFFSET(format_options), AV_OPT_TYPE_DICT, {.str = NULL},  0, 0,    E},
+#if FF_HLS_TS_OPTIONS
+    {"hls_ts_options","set hls mpegts list of options for the container format used for hls (deprecated, use hls_segment_options instead of it.)", OFFSET(format_options), AV_OPT_TYPE_DICT, {.str = NULL},  0, 0,    E | AV_OPT_FLAG_DEPRECATED},
+#endif
     {"hls_vtt_options","set hls vtt list of options for the container format used for hls", OFFSET(vtt_format_options_str), AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,    E},
     {"hls_allow_cache", "explicitly set whether the client MAY (1) or MUST NOT (0) cache media segments", OFFSET(allowcache), AV_OPT_TYPE_INT, {.i64 = -1}, INT_MIN, INT_MAX, E},
     {"hls_base_url",  "url to prepend to each playlist entry",   OFFSET(baseurl), AV_OPT_TYPE_STRING, {.str = NULL},  0, 0,       E},
     {"hls_segment_filename", "filename template for segment files", OFFSET(segment_filename),   AV_OPT_TYPE_STRING, {.str = NULL},            0,       0,         E},
+    {"hls_segment_options","set segments files format options of hls", OFFSET(format_options), AV_OPT_TYPE_DICT, {.str = NULL},  0, 0,    E},
     {"hls_segment_size", "maximum size per segment file, (in bytes)",  OFFSET(max_seg_size),    AV_OPT_TYPE_INT,    {.i64 = 0},               0,       INT_MAX,   E},
     {"hls_key_info_file",    "file with key URI and key file path", OFFSET(key_info_file),      AV_OPT_TYPE_STRING, {.str = NULL},            0,       0,         E},
     {"hls_enc",    "enable AES128 encryption support", OFFSET(encrypt),      AV_OPT_TYPE_BOOL, {.i64 = 0},            0,       1,         E},

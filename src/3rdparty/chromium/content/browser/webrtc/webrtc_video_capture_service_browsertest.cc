@@ -7,6 +7,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "cc/base/math_util.h"
 #include "components/viz/common/gpu/context_provider.h"
@@ -45,7 +46,7 @@
 #include "ui/compositor/compositor.h"
 
 // ImageTransportFactory::GetInstance is not available on all build configs.
-#if defined(USE_AURA) || defined(OS_MAC)
+#if defined(USE_AURA) || BUILDFLAG(IS_MAC)
 #define CAN_USE_IMAGE_TRANSPORT_FACTORY 1
 #endif
 
@@ -421,6 +422,11 @@ class WebRtcVideoCaptureServiceBrowserTest : public ContentBrowserTest {
     virtual_device_thread_.Start();
   }
 
+  WebRtcVideoCaptureServiceBrowserTest(
+      const WebRtcVideoCaptureServiceBrowserTest&) = delete;
+  WebRtcVideoCaptureServiceBrowserTest& operator=(
+      const WebRtcVideoCaptureServiceBrowserTest&) = delete;
+
   ~WebRtcVideoCaptureServiceBrowserTest() override {}
 
   void AddVirtualDeviceAndStartCapture(VirtualDeviceExerciser* device_exerciser,
@@ -468,7 +474,7 @@ class WebRtcVideoCaptureServiceBrowserTest : public ContentBrowserTest {
         base::BindOnce(&WebRtcVideoCaptureServiceBrowserTest::
                            PushDummyFrameAndScheduleNextPush,
                        weak_factory_.GetWeakPtr(), device_exerciser),
-        base::TimeDelta::FromMilliseconds(1000 / kDummyFrameRate));
+        base::Milliseconds(1000 / kDummyFrameRate));
   }
 
   void ShutDownVirtualDeviceAndContinue(
@@ -532,8 +538,6 @@ class WebRtcVideoCaptureServiceBrowserTest : public ContentBrowserTest {
   base::TimeTicks first_frame_time_;
   base::WeakPtrFactory<WebRtcVideoCaptureServiceBrowserTest> weak_factory_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(WebRtcVideoCaptureServiceBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(
@@ -553,7 +557,7 @@ IN_PROC_BROWSER_TEST_F(
   run_loop.Run();
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 // TODO(https://crbug.com/1235254): This test is flakey on macOS.
 #define MAYBE_FramesSentThroughSharedMemoryVirtualDeviceGetDisplayedOnPage \
   DISABLED_FramesSentThroughSharedMemoryVirtualDeviceGetDisplayedOnPage
@@ -578,7 +582,7 @@ IN_PROC_BROWSER_TEST_F(
   run_loop.Run();
 }
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 // TODO(https://crbug.com/1235254): This test is flakey on macOS.
 #define MAYBE_PaddedI420FramesSentThroughSharedMemoryVirtualDeviceGetDisplayedOnPage \
   DISABLED_PaddedI420FramesSentThroughSharedMemoryVirtualDeviceGetDisplayedOnPage

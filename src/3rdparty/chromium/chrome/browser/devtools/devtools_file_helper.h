@@ -12,11 +12,12 @@
 #include <vector>
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/devtools/devtools_file_watcher.h"
+#if !defined(TOOLKIT_QT)
 #include "chrome/browser/platform_util.h"
+#endif  // !defined(TOOLKIT_QT)
 #include "components/prefs/pref_change_registrar.h"
 
 class Profile;
@@ -61,6 +62,10 @@ class DevToolsFileHelper {
 
   DevToolsFileHelper(content::WebContents* web_contents, Profile* profile,
                      Delegate* delegate);
+
+  DevToolsFileHelper(const DevToolsFileHelper&) = delete;
+  DevToolsFileHelper& operator=(const DevToolsFileHelper&) = delete;
+
   ~DevToolsFileHelper();
 
   using SaveCallback = base::OnceCallback<void(const std::string&)>;
@@ -120,11 +125,15 @@ class DevToolsFileHelper {
   bool IsFileSystemAdded(const std::string& file_system_path);
 
   // Opens and reveals file in OS's default file manager.
+#if !defined(TOOLKIT_QT)
   void ShowItemInFolder(const std::string& file_system_path);
 
+#endif  // !defined(TOOLKIT_QT)
  private:
+#if !defined(TOOLKIT_QT)
   void OnOpenItemComplete(const base::FilePath& path,
                           platform_util::OpenOperationResult result);
+#endif  // !defined(TOOLKIT_QT)
   void SaveAsFileSelected(const std::string& url,
                           const std::string& content,
                           SaveCallback callback,
@@ -153,7 +162,6 @@ class DevToolsFileHelper {
       file_watcher_;
   scoped_refptr<base::SequencedTaskRunner> file_task_runner_;
   base::WeakPtrFactory<DevToolsFileHelper> weak_factory_{this};
-  DISALLOW_COPY_AND_ASSIGN(DevToolsFileHelper);
 };
 
 #endif  // CHROME_BROWSER_DEVTOOLS_DEVTOOLS_FILE_HELPER_H_

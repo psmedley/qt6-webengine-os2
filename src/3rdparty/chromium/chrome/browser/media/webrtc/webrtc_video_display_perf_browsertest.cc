@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <algorithm>
+#include <tuple>
 
 #include "base/json/json_reader.h"
 #include "base/strings/string_tokenizer.h"
@@ -117,7 +118,8 @@ void AssociateEvents(trace_analyzer::TraceAnalyzer* analyzer,
 
 content::WebContents* OpenWebrtcInternalsTab(Browser* browser) {
   chrome::AddTabAt(browser, GURL(url::kAboutBlankURL), -1, true);
-  ui_test_utils::NavigateToURL(browser, GURL("chrome://webrtc-internals"));
+  EXPECT_TRUE(
+      ui_test_utils::NavigateToURL(browser, GURL("chrome://webrtc-internals")));
   return browser->tab_strip_model()->GetActiveWebContents();
 }
 
@@ -130,7 +132,7 @@ std::vector<double> ParseGoogMaxDecodeFromWebrtcInternalsTab(
   base::DictionaryValue* dictionary = nullptr;
   if (!parsed_json.get() || !parsed_json->GetAsDictionary(&dictionary))
     return goog_decode_ms;
-  ignore_result(parsed_json.release());
+  std::ignore = parsed_json.release();
 
   // |dictionary| should have exactly two entries, one per ssrc.
   if (!dictionary || dictionary->DictSize() != 2u)

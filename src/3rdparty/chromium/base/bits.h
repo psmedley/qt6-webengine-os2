@@ -25,6 +25,8 @@ namespace base {
 namespace bits {
 
 // Returns true iff |value| is a power of 2.
+//
+// TODO(pkasting): When C++20 is available, replace with std::has_single_bit().
 template <typename T, typename = std::enable_if_t<std::is_integral<T>::value>>
 constexpr bool IsPowerOfTwo(T value) {
   // From "Hacker's Delight": Section 2.1 Manipulating Rightmost Bits.
@@ -79,50 +81,30 @@ inline T* AlignUp(T* ptr, size_t alignment) {
 //
 // Prefer the clang path on Windows, as _BitScanReverse() and friends are not
 // constexpr.
+//
+// TODO(pkasting): When C++20 is available, replace with std::countl_zero() and
+// similar.
 #if defined(COMPILER_MSVC) && !defined(__clang__)
 
-constexpr inline unsigned qConstexprPopulationCount(uint64_t v) noexcept
-{
-    // See http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
-    return
-        (((v      ) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
-        (((v >> 12) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
-        (((v >> 24) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
-        (((v >> 36) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
-        (((v >> 48) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f +
-        (((v >> 60) & 0xfff)    * uint64_t(0x1001001001001) & uint64_t(0x84210842108421)) % 0x1f;
-}
-
-constexpr inline unsigned qConstexprCountLeadingZeroBits(uint64_t v) noexcept
-{
-    v = v | (v >> 1);
-    v = v | (v >> 2);
-    v = v | (v >> 4);
-    v = v | (v >> 8);
-    v = v | (v >> 16);
-    v = v | (v >> 32);
-    return qConstexprPopulationCount(~v);
-}
-
 template <typename T, unsigned bits = sizeof(T) * 8>
-ALWAYS_INLINE constexpr
+ALWAYS_INLINE
     typename std::enable_if<std::is_unsigned<T>::value && sizeof(T) <= 4,
                             unsigned>::type
     CountLeadingZeroBits(T x) {
   static_assert(bits > 0, "invalid instantiation");
-  unsigned long index = 0;
+  unsigned long index;
   return LIKELY(_BitScanReverse(&index, static_cast<uint32_t>(x)))
              ? (31 - index - (32 - bits))
              : bits;
 }
 
 template <typename T, unsigned bits = sizeof(T) * 8>
-ALWAYS_INLINE constexpr
+ALWAYS_INLINE
     typename std::enable_if<std::is_unsigned<T>::value && sizeof(T) == 8,
                             unsigned>::type
     CountLeadingZeroBits(T x) {
   static_assert(bits > 0, "invalid instantiation");
-  unsigned long index = 0;
+  unsigned long index;
 // MSVC only supplies _BitScanReverse64 when building for a 64-bit target.
 #if defined(ARCH_CPU_64_BITS)
   return LIKELY(_BitScanReverse64(&index, static_cast<uint64_t>(x)))
@@ -142,23 +124,23 @@ ALWAYS_INLINE constexpr
 }
 
 template <typename T, unsigned bits = sizeof(T) * 8>
-ALWAYS_INLINE constexpr
+ALWAYS_INLINE
     typename std::enable_if<std::is_unsigned<T>::value && sizeof(T) <= 4,
                             unsigned>::type
     CountTrailingZeroBits(T x) {
   static_assert(bits > 0, "invalid instantiation");
-  unsigned long index = 0;
+  unsigned long index;
   return LIKELY(_BitScanForward(&index, static_cast<uint32_t>(x))) ? index
                                                                    : bits;
 }
 
 template <typename T, unsigned bits = sizeof(T) * 8>
-ALWAYS_INLINE constexpr
+ALWAYS_INLINE
     typename std::enable_if<std::is_unsigned<T>::value && sizeof(T) == 8,
                             unsigned>::type
     CountTrailingZeroBits(T x) {
   static_assert(bits > 0, "invalid instantiation");
-  unsigned long index = 0;
+  unsigned long index;
 // MSVC only supplies _BitScanForward64 when building for a 64-bit target.
 #if defined(ARCH_CPU_64_BITS)
   return LIKELY(_BitScanForward64(&index, static_cast<uint64_t>(x))) ? index
@@ -176,13 +158,9 @@ ALWAYS_INLINE constexpr
 #endif
 }
 
-ALWAYS_INLINE uint32_t CountLeadingZeroBits32(uint32_t x) {
-  return CountLeadingZeroBits(x);
-}
-
-ALWAYS_INLINE uint64_t CountLeadingZeroBits64(uint64_t x) {
-  return CountLeadingZeroBits(x);
-}
+// Used in place of "constexpr" below for things which are conditionally
+// constexpr depending on whether the functions above are constexpr.
+#define BASE_BITOPS_CONSTEXPR
 
 #elif defined(COMPILER_GCC) || defined(__clang__)
 
@@ -214,31 +192,52 @@ ALWAYS_INLINE constexpr
                        : bits;
 }
 
-ALWAYS_INLINE constexpr uint32_t CountLeadingZeroBits32(uint32_t x) {
-  return CountLeadingZeroBits(x);
-}
-
-ALWAYS_INLINE constexpr uint64_t CountLeadingZeroBits64(uint64_t x) {
-  return CountLeadingZeroBits(x);
-}
+#define BASE_BITOPS_CONSTEXPR constexpr
 
 #endif
 
-ALWAYS_INLINE constexpr size_t CountLeadingZeroBitsSizeT(size_t x) {
+ALWAYS_INLINE BASE_BITOPS_CONSTEXPR uint32_t
+CountLeadingZeroBits32(uint32_t x) {
   return CountLeadingZeroBits(x);
 }
 
-ALWAYS_INLINE constexpr size_t CountTrailingZeroBitsSizeT(size_t x) {
+ALWAYS_INLINE BASE_BITOPS_CONSTEXPR uint64_t
+CountLeadingZeroBits64(uint64_t x) {
+  return CountLeadingZeroBits(x);
+}
+
+ALWAYS_INLINE BASE_BITOPS_CONSTEXPR size_t CountLeadingZeroBitsSizeT(size_t x) {
+  return CountLeadingZeroBits(x);
+}
+
+ALWAYS_INLINE BASE_BITOPS_CONSTEXPR size_t
+CountTrailingZeroBitsSizeT(size_t x) {
   return CountTrailingZeroBits(x);
 }
 
-// Returns the integer i such as 2^i <= n < 2^(i+1)
+#undef BASE_BITOPS_CONSTEXPR
+
+// Returns the integer i such as 2^i <= n < 2^(i+1).
+//
+// There is a common `BitLength` function, which returns the number of bits
+// required to represent a value. Rather than implement that function,
+// use `Log2Floor` and add 1 to the result.
+//
+// TODO(pkasting): When C++20 is available, replace with std::bit_xxx().
+#if defined(COMPILER_MSVC) && !defined(__clang__)
+inline int Log2Floor(uint32_t n) {
+#else
 constexpr int Log2Floor(uint32_t n) {
+#endif
   return 31 - CountLeadingZeroBits(n);
 }
 
-// Returns the integer i such as 2^(i-1) < n <= 2^i
+// Returns the integer i such as 2^(i-1) < n <= 2^i.
+#if defined(COMPILER_MSVC) && !defined(__clang__)
+inline int Log2Ceiling(uint32_t n) {
+#else
 constexpr int Log2Ceiling(uint32_t n) {
+#endif
   // When n == 0, we want the function to return -1.
   // When n == 0, (n - 1) will underflow to 0xFFFFFFFF, which is
   // why the statement below starts with (n ? 32 : -1).

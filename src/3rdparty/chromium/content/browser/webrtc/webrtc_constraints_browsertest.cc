@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include "base/command_line.h"
+#include "build/build_config.h"
 #include "content/browser/webrtc/webrtc_content_browsertest_base.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
@@ -13,7 +14,7 @@
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/win/windows_version.h"
 #endif
 
@@ -54,8 +55,10 @@ class WebRtcConstraintsBrowserTest
   const UserMediaSizes user_media_;
 };
 
-// Test fails under MSan, http://crbug.com/445745
-#if defined(MEMORY_SANITIZER)
+// Test fails under MSan, https://crbug.com/445745.
+// Test is also flaky (on Mac, Linux, LaCrOS, Android, but mostly on Mac):
+// https://crbug.com/1241538
+#if defined(MEMORY_SANITIZER) || BUILDFLAG(IS_MAC)
 #define MAYBE_GetUserMediaConstraints DISABLED_GetUserMediaConstraints
 #else
 #define MAYBE_GetUserMediaConstraints GetUserMediaConstraints

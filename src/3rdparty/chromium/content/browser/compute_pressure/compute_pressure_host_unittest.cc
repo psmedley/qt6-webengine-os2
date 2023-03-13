@@ -30,7 +30,7 @@ class ComputePressureHostTest : public RenderViewHostImplTestHarness {
     // called while the ComputePressureHost is alive, and this instance owns the
     // ComputePressureHost.
     SetHostImpl(std::make_unique<ComputePressureHost>(
-        kTestOrigin, /*is_supported=*/true, base::TimeDelta::FromSeconds(1),
+        kTestOrigin, /*is_supported=*/true, base::Seconds(1),
         base::BindRepeating(&ComputePressureHostTest::DidHostConnectionsChange,
                             base::Unretained(this))));
   }
@@ -80,7 +80,7 @@ TEST_F(ComputePressureHostTest, OneObserver) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
-                              now + base::TimeDelta::FromSeconds(1));
+                              now + base::Seconds(1));
   observer.WaitForUpdate();
   ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(1u)));
   EXPECT_EQ(observer.updates()[0],
@@ -95,24 +95,47 @@ TEST_F(ComputePressureHostTest, OneObserver_UpdateRateLimiting) {
 
   base::Time after_add = base::Time::Now();
 
-  host_impl_->UpdateObservers(
-      {.cpu_utilization = 0.42, .cpu_speed = 0.84},
-      after_add + base::TimeDelta::FromMilliseconds(1000));
+  host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
+                              after_add + base::Milliseconds(1000));
   observer.WaitForUpdate();
   observer.updates().clear();
 
   // The first update should be blocked due to rate-limiting.
-  host_impl_->UpdateObservers(
-      {.cpu_utilization = 1.0, .cpu_speed = 1.0},
-      after_add + base::TimeDelta::FromMilliseconds(1500));
-  host_impl_->UpdateObservers(
-      {.cpu_utilization = 0.0, .cpu_speed = 0.0},
-      after_add + base::TimeDelta::FromMilliseconds(2100));
+  host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
+                              after_add + base::Milliseconds(1500));
+  host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
+                              after_add + base::Milliseconds(2100));
   observer.WaitForUpdate();
 
   ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(1u)));
   EXPECT_EQ(observer.updates()[0],
             blink::mojom::ComputePressureState(0.1, 0.25));
+}
+
+TEST_F(ComputePressureHostTest, OneObserver_NoCallbackInvoke) {
+  FakeComputePressureObserver observer;
+  ASSERT_EQ(host_sync_->AddObserver(kQuantization,
+                                    observer.BindNewPipeAndPassRemote()),
+            blink::mojom::ComputePressureStatus::kOk);
+
+  base::Time now = base::Time::Now();
+
+  host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
+                              now + base::Seconds(1));
+  observer.WaitForUpdate();
+  ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(1u)));
+  EXPECT_EQ(observer.updates()[0],
+            blink::mojom::ComputePressureState(0.35, 0.75));
+
+  // The first update should be discarded due to same bucket
+  host_impl_->UpdateObservers({.cpu_utilization = 0.37, .cpu_speed = 0.70},
+                              now + base::Seconds(2));
+  host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.42},
+                              now + base::Seconds(3));
+  observer.WaitForUpdate();
+  ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(2u)));
+  EXPECT_EQ(observer.updates()[1],
+            blink::mojom::ComputePressureState(0.35, 0.25));
 }
 
 TEST_F(ComputePressureHostTest, OneObserver_AddRateLimiting) {
@@ -125,16 +148,14 @@ TEST_F(ComputePressureHostTest, OneObserver_AddRateLimiting) {
 
   base::Time after_add = base::Time::Now();
 
-  ASSERT_LE(after_add - before_add, base::TimeDelta::FromMilliseconds(500))
+  ASSERT_LE(after_add - before_add, base::Milliseconds(500))
       << "test timings assume that AddObserver completes in at most 500ms";
 
   // The first update should be blocked due to rate-limiting.
-  host_impl_->UpdateObservers(
-      {.cpu_utilization = 0.42, .cpu_speed = 0.84},
-      before_add + base::TimeDelta::FromMilliseconds(700));
-  host_impl_->UpdateObservers(
-      {.cpu_utilization = 0.0, .cpu_speed = 0.0},
-      before_add + base::TimeDelta::FromMilliseconds(1600));
+  host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
+                              before_add + base::Milliseconds(700));
+  host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
+                              before_add + base::Milliseconds(1600));
   observer.WaitForUpdate();
 
   ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(1u)));
@@ -159,7 +180,7 @@ TEST_F(ComputePressureHostTest, ThreeObservers) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
-                              now + base::TimeDelta::FromSeconds(1));
+                              now + base::Seconds(1));
   FakeComputePressureObserver::WaitForUpdates(
       {&observer1, &observer2, &observer3});
 
@@ -202,10 +223,10 @@ TEST_F(ComputePressureHostTest, AddObserver_NewQuantization) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.42, .cpu_speed = 0.84},
-                              now + base::TimeDelta::FromMilliseconds(1000));
+                              now + base::Milliseconds(1000));
   observer3.WaitForUpdate();
   host_impl_->UpdateObservers({.cpu_utilization = 0.84, .cpu_speed = 0.42},
-                              now + base::TimeDelta::FromMilliseconds(2000));
+                              now + base::Milliseconds(2000));
   observer3.WaitForUpdate();
 
   EXPECT_THAT(observer3.updates(), testing::SizeIs(testing::Eq(2u)));
@@ -222,7 +243,7 @@ TEST_F(ComputePressureHostTest, AddObserver_NewQuantization) {
 
 TEST_F(ComputePressureHostTest, AddObserver_ThirdPartyFrame) {
   ComputePressureHost host_3p_impl(
-      kThirdPartyOrigin, /*is_supported=*/true, base::TimeDelta::FromSeconds(1),
+      kThirdPartyOrigin, /*is_supported=*/true, base::Seconds(1),
       /*did_connections_change*/ base::DoNothing());
   mojo::Remote<blink::mojom::ComputePressureHost> host_3p;
   host_3p_impl.BindReceiver(main_frame_id_,
@@ -240,10 +261,10 @@ TEST_F(ComputePressureHostTest, AddObserver_ThirdPartyFrame) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
-                              now + base::TimeDelta::FromMilliseconds(1000));
+                              now + base::Milliseconds(1000));
   first_party_observer.WaitForUpdate();
   host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
-                              now + base::TimeDelta::FromMilliseconds(2000));
+                              now + base::Milliseconds(2000));
   first_party_observer.WaitForUpdate();
 
   EXPECT_THAT(first_party_observer.updates(), testing::SizeIs(testing::Eq(2u)));
@@ -267,9 +288,9 @@ TEST_F(ComputePressureHostTest, AddObserver_NoVisibility) {
 
   // The first two updates should be blocked due to invisibility.
   host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
-                              now + base::TimeDelta::FromMilliseconds(1000));
+                              now + base::Milliseconds(1000));
   host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
-                              now + base::TimeDelta::FromMilliseconds(2000));
+                              now + base::Milliseconds(2000));
 
   test_rvh()->SimulateWasShown();
 
@@ -277,7 +298,7 @@ TEST_F(ComputePressureHostTest, AddObserver_NoVisibility) {
   // time proximity to the second update, because the second update is not
   // dispatched.
   host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
-                              now + base::TimeDelta::FromMilliseconds(2100));
+                              now + base::Milliseconds(2100));
   observer.WaitForUpdate();
 
   ASSERT_THAT(observer.updates(), testing::SizeIs(testing::Eq(1u)));
@@ -305,10 +326,10 @@ TEST_F(ComputePressureHostTest, AddObserver_InvalidFrame) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
-                              now + base::TimeDelta::FromMilliseconds(1000));
+                              now + base::Milliseconds(1000));
   valid_observer.WaitForUpdate();
   host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
-                              now + base::TimeDelta::FromMilliseconds(2000));
+                              now + base::Milliseconds(2000));
   valid_observer.WaitForUpdate();
 
   EXPECT_THAT(valid_observer.updates(), testing::SizeIs(testing::Eq(2u)));
@@ -342,10 +363,10 @@ TEST_F(ComputePressureHostTest, AddObserver_InvalidQuantization) {
   base::Time now = base::Time::Now();
 
   host_impl_->UpdateObservers({.cpu_utilization = 0.0, .cpu_speed = 0.0},
-                              now + base::TimeDelta::FromMilliseconds(1000));
+                              now + base::Milliseconds(1000));
   valid_observer.WaitForUpdate();
   host_impl_->UpdateObservers({.cpu_utilization = 1.0, .cpu_speed = 1.0},
-                              now + base::TimeDelta::FromMilliseconds(2000));
+                              now + base::Milliseconds(2000));
   valid_observer.WaitForUpdate();
 
   EXPECT_THAT(valid_observer.updates(), testing::SizeIs(testing::Eq(2u)));
@@ -359,7 +380,7 @@ TEST_F(ComputePressureHostTest, AddObserver_InvalidQuantization) {
 
 TEST_F(ComputePressureHostTest, AddObserver_NotSupported) {
   SetHostImpl(std::make_unique<ComputePressureHost>(
-      kTestOrigin, /*is_supported=*/false, base::TimeDelta::FromSeconds(1),
+      kTestOrigin, /*is_supported=*/false, base::Seconds(1),
       /*did_connections_change=*/base::DoNothing()));
 
   FakeComputePressureObserver observer;

@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "components/search_engines/keyword_table.h"
 #include "components/search_engines/template_url_data.h"
@@ -48,6 +48,14 @@ WebDatabase::State SetBuiltinKeywordVersionImpl(int version, WebDatabase* db) {
              : WebDatabase::COMMIT_NOT_NEEDED;
 }
 
+WebDatabase::State SetStarterPackKeywordVersionImpl(int version,
+                                                    WebDatabase* db) {
+  return KeywordTable::FromWebDatabase(db)->SetStarterPackKeywordVersion(
+             version)
+             ? WebDatabase::COMMIT_NEEDED
+             : WebDatabase::COMMIT_NOT_NEEDED;
+}
+
 }  // namespace
 
 WDKeywordsResult::WDKeywordsResult() = default;
@@ -76,7 +84,7 @@ KeywordWebDataService::KeywordWebDataService(
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
     : WebDataServiceBase(std::move(wdbs), std::move(ui_task_runner)),
       timer_(FROM_HERE,
-             base::TimeDelta::FromSeconds(5),
+             base::Seconds(5),
              base::BindRepeating(&KeywordWebDataService::CommitQueuedOperations,
                                  base::Unretained(this))) {}
 
@@ -135,6 +143,11 @@ void KeywordWebDataService::SetBuiltinKeywordVersion(int version) {
                         base::BindOnce(&SetBuiltinKeywordVersionImpl, version));
 }
 
+void KeywordWebDataService::SetStarterPackKeywordVersion(int version) {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE, base::BindOnce(&SetStarterPackKeywordVersionImpl, version));
+}
+
 void KeywordWebDataService::ShutdownOnUISequence() {
   CommitQueuedOperations();
   WebDataServiceBase::ShutdownOnUISequence();
@@ -156,7 +169,7 @@ void KeywordWebDataService::AdjustBatchModeLevel(bool entering_batch_mode) {
       // When killing an app on Android/iOS, shutdown isn't guaranteed to be
       // called. Finishing this task immediately ensures the table is fully
       // populated even if the app is killed before the timer expires.
-#if defined(OS_ANDROID) || defined(OS_IOS)
+#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
       CommitQueuedOperations();
 #else
       timer_.Reset();

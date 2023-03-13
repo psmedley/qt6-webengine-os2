@@ -33,7 +33,7 @@ namespace {
 constexpr char kFirstAlternate[] = "FirstAlternate";
 constexpr char kLastAlternate[] = "LastAlternate";
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const char kExpectedRectanglePostScript[] = R"(
 save
 /im/initmatrix load def
@@ -80,7 +80,7 @@ Q
 
 restore
 )";
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 class MockDownloadHints final : public FX_DOWNLOADHINTS {
  public:
@@ -341,6 +341,20 @@ TEST_F(FPDFViewEmbedderTest, Document) {
 
   EXPECT_EQ(0xFFFFFFFF, FPDF_GetDocPermissions(document()));
   EXPECT_EQ(-1, FPDF_GetSecurityHandlerRevision(document()));
+  CloseDocument();
+
+  // Safe to open again and do the same things all over again.
+  ASSERT_TRUE(OpenDocument("about_blank.pdf"));
+  EXPECT_EQ(1, GetPageCount());
+  EXPECT_EQ(0, GetFirstPageNum());
+
+  version = 42;
+  EXPECT_TRUE(FPDF_GetFileVersion(document(), &version));
+  EXPECT_EQ(14, version);
+
+  EXPECT_EQ(0xFFFFFFFF, FPDF_GetDocPermissions(document()));
+  EXPECT_EQ(-1, FPDF_GetSecurityHandlerRevision(document()));
+  // CloseDocument() called by TearDown().
 }
 
 TEST_F(FPDFViewEmbedderTest, LoadDocument64) {
@@ -373,7 +387,7 @@ TEST_F(FPDFViewEmbedderTest, DocumentWithNoPageCount) {
 
 // See https://crbug.com/pdfium/465
 TEST_F(FPDFViewEmbedderTest, EmptyDocument) {
-  EXPECT_TRUE(CreateEmptyDocument());
+  CreateEmptyDocument();
   {
     int version = 42;
     EXPECT_FALSE(FPDF_GetFileVersion(document(), &version));
@@ -403,14 +417,14 @@ TEST_F(FPDFViewEmbedderTest, SandboxDocument) {
   uint16_t buf[200];
   unsigned long len;
 
-  ASSERT_TRUE(CreateEmptyDocument());
+  CreateEmptyDocument();
   len = FPDF_GetMetaText(document(), "CreationDate", buf, sizeof(buf));
   EXPECT_GT(len, 2u);  // Not just "double NUL" end-of-string indicator.
   EXPECT_NE(0u, buf[0]);
   CloseDocument();
 
   FPDF_SetSandBoxPolicy(FPDF_POLICY_MACHINETIME_ACCESS, false);
-  ASSERT_TRUE(CreateEmptyDocument());
+  CreateEmptyDocument();
   len = FPDF_GetMetaText(document(), "CreationDate", buf, sizeof(buf));
   EXPECT_EQ(2u, len);  // Only a "double NUL" end-of-string indicator.
   EXPECT_EQ(0u, buf[0]);
@@ -418,14 +432,14 @@ TEST_F(FPDFViewEmbedderTest, SandboxDocument) {
 
   constexpr unsigned long kNoSuchPolicy = 102;
   FPDF_SetSandBoxPolicy(kNoSuchPolicy, true);
-  ASSERT_TRUE(CreateEmptyDocument());
+  CreateEmptyDocument();
   len = FPDF_GetMetaText(document(), "CreationDate", buf, sizeof(buf));
   EXPECT_EQ(2u, len);  // Only a "double NUL" end-of-string indicator.
   EXPECT_EQ(0u, buf[0]);
   CloseDocument();
 
   FPDF_SetSandBoxPolicy(FPDF_POLICY_MACHINETIME_ACCESS, true);
-  ASSERT_TRUE(CreateEmptyDocument());
+  CreateEmptyDocument();
   len = FPDF_GetMetaText(document(), "CreationDate", buf, sizeof(buf));
   EXPECT_GT(len, 2u);  // Not just "double NUL" end-of-string indicator.
   EXPECT_NE(0u, buf[0]);
@@ -794,7 +808,7 @@ TEST_F(FPDFViewEmbedderTest, CrossRefV4Loop) {
   // loop either. See bug 875.
   int ret = PDF_DATA_NOTAVAIL;
   while (ret == PDF_DATA_NOTAVAIL)
-    ret = FPDFAvail_IsDocAvail(avail_, &hints);
+    ret = FPDFAvail_IsDocAvail(avail(), &hints);
   EXPECT_EQ(PDF_DATA_AVAIL, ret);
 }
 
@@ -1245,31 +1259,32 @@ TEST_F(FPDFViewEmbedderTest, LoadDocumentWithEmptyXRefConsistently) {
   }
 }
 
-// TODO(crbug.com/pdfium/1500): Fix this test and enable.
+TEST_F(FPDFViewEmbedderTest, RenderBug664284WithNoNativeText) {
 #if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#define MAYBE_RenderBug664284WithNoNativeText \
-  DISABLED_RenderBug664284WithNoNativeText
+  // For Skia/SkiaPaths, since the font used in bug_664284.pdf is not a CID
+  // font, ShouldDrawDeviceText() will always return true. Therefore
+  // FPDF_NO_NATIVETEXT determines whether to go through the rendering path in
+  // CFX_SkiaDeviceDriver::DrawDeviceText() and it will always affect the
+  // rendering results across all platforms.
+  static const char kOriginalChecksum[] = "cfcdc544325a9780be241685d200c47b";
+  static const char kNoNativeTextChecksum[] =
+      "288502887ffc63291f35a0573b944375";
 #else
-#define MAYBE_RenderBug664284WithNoNativeText RenderBug664284WithNoNativeText
-#endif
-TEST_F(FPDFViewEmbedderTest, MAYBE_RenderBug664284WithNoNativeText) {
-// FPDF_NO_NATIVETEXT flag only disables native text support on macOS, therefore
-// Windows and Linux rendering results remain the same as rendering with no
-// flags, while the macOS rendering result doesn't.
-#if defined(OS_WIN)
-  static const char kOriginalChecksum[] = "4671643caf99a1f4b6c0117ccb7bc9e7";
+// For AGG, since CFX_AggDeviceDriver::DrawDeviceText() always returns false,
+// FPDF_NO_NATIVETEXT won't affect device-specific rendering path and it will
+// only disable native text support on macOS. Therefore Windows and Linux
+// rendering results remain the same as rendering with no flags, while the macOS
+// rendering result doesn't.
+#if BUILDFLAG(IS_APPLE)
+  static const char kOriginalChecksum[] = "0e339d606aafb63077f49e238dc27cb0";
   static const char kNoNativeTextChecksum[] =
-      "4671643caf99a1f4b6c0117ccb7bc9e7";
-#elif defined(OS_APPLE)
-  static const char kOriginalChecksum[] = "41ada106c6133b52ea45280eaaa38ae1";
-  static const char kNoNativeTextChecksum[] =
-      "d64d6b0fc39a8cefc43de39da5c60b17";
+      "288502887ffc63291f35a0573b944375";
 #else
-  static const char kOriginalChecksum[] = "d64d6b0fc39a8cefc43de39da5c60b17";
+  static const char kOriginalChecksum[] = "288502887ffc63291f35a0573b944375";
   static const char kNoNativeTextChecksum[] =
-      "d64d6b0fc39a8cefc43de39da5c60b17";
-#endif
-
+      "288502887ffc63291f35a0573b944375";
+#endif  // BUILDFLAG(IS_APPLE)
+#endif  // defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
   ASSERT_TRUE(OpenDocument("bug_664284.pdf"));
   FPDF_PAGE page = LoadPage(0);
   ASSERT_TRUE(page);
@@ -1388,28 +1403,18 @@ TEST_F(FPDFViewEmbedderTest, RenderHelloWorldWithFlags) {
                                 kHelloWorldChecksum);
 
 #if defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
-#if defined(OS_WIN)
-  static const char kLcdTextChecksum[] = "7fca5790ce81c715d74d955ea9939fd8";
+  static const char kLcdTextChecksum[] = "fea3e59b7ac7b7a6940018497034f6cf";
+  static const char kNoSmoothtextChecksum[] =
+      "c4173cf724618e5b68efb74543519bb9";
+#elif BUILDFLAG(IS_APPLE)
+  static const char kLcdTextChecksum[] = "6eef7237f7591f07616e238422086737";
+  static const char kNoSmoothtextChecksum[] =
+      "6eef7237f7591f07616e238422086737";
 #else
-  static const char kLcdTextChecksum[] = "66ecb880a880dd263ff495b28aeda0d1";
-#endif  // defined(OS_WIN)
+  static const char kLcdTextChecksum[] = "09152e25e51fa8ca31fc28d0937bf477";
   static const char kNoSmoothtextChecksum[] =
-      "18156d2a55ae142c3870da7229650890";
-#else
-#if defined(OS_WIN)
-  static const char kLcdTextChecksum[] = "6e32f5a9c46e4e0730481081fe80617d";
-  static const char kNoSmoothtextChecksum[] =
-      "106cb0b6941feb3319e0e7391d02f61e";
-#elif defined(OS_APPLE)
-  static const char kLcdTextChecksum[] = "c38b75e16a13852aee3b97d77a0f0ee7";
-  static const char kNoSmoothtextChecksum[] =
-      "c38b75e16a13852aee3b97d77a0f0ee7";
-#else
-  static const char kLcdTextChecksum[] = "825e881f39e48254e64e2808987a6b8c";
-  static const char kNoSmoothtextChecksum[] =
-      "40740e0f219f6834581119d2ceb48911";
+      "37d0b34e1762fdda4c05ce7ea357b828";
 #endif
-#endif  // defined(_SKIA_SUPPORT_) || defined(_SKIA_SUPPORT_PATHS_)
 
   TestRenderPageBitmapWithFlags(page, FPDF_LCD_TEXT, kLcdTextChecksum);
   TestRenderPageBitmapWithFlags(page, FPDF_RENDER_NO_SMOOTHTEXT,
@@ -1423,7 +1428,7 @@ TEST_F(FPDFViewEmbedderTest, RenderHelloWorldWithFlags) {
   UnloadPage(page);
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 TEST_F(FPDFViewEmbedderTest, FPDFRenderPageEmf) {
   ASSERT_TRUE(OpenDocument("rectangles.pdf"));
   FPDF_PAGE page = LoadPage(0);
@@ -1651,7 +1656,7 @@ TEST_F(FPDFViewEmbedderTest, MAYBE_ImageMask) {
 
   UnloadPage(page);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 TEST_F(FPDFViewEmbedderTest, GetTrailerEnds) {
   ASSERT_TRUE(OpenDocument("two_signatures.pdf"));
@@ -1706,11 +1711,11 @@ TEST_F(FPDFViewEmbedderTest, GetTrailerEndsLinearized) {
   // Set up linearized PDF.
   FileAccessForTesting file_acc("linearized.pdf");
   FakeFileAccess fake_acc(&file_acc);
-  avail_ = FPDFAvail_Create(fake_acc.GetFileAvail(), fake_acc.GetFileAccess());
+  CreateAvail(fake_acc.GetFileAvail(), fake_acc.GetFileAccess());
   fake_acc.SetWholeFileAvailable();
 
   // Multiple trailers, \r line ending at the trailer ends (no \n).
-  document_ = FPDFAvail_GetDocument(avail_, nullptr);
+  SetDocumentFromAvail();
   ASSERT_TRUE(document());
 
   // FPDF_GetTrailerEnds() positive testing.

@@ -12,8 +12,7 @@
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/task/lazy_thread_pool_task_runner.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
 #include "build/build_config.h"
 #include "components/password_manager/core/browser/export/password_csv_writer.h"
 #include "components/password_manager/core/browser/password_form.h"
@@ -82,7 +81,7 @@ PasswordManagerExporter::PasswordManagerExporter(
       last_progress_status_(ExportProgressStatus::NOT_STARTED),
       write_function_(base::BindRepeating(&DefaultWriteFunction)),
       delete_function_(base::BindRepeating(&DefaultDeleteFunction)),
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
       set_permissions_function_(
           base::BindRepeating(base::SetPosixFilePermissions)),
 #else

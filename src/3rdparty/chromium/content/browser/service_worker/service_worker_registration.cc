@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/observer_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/service_worker/embedded_worker_status.h"
 #include "content/browser/service_worker/service_worker_container_host.h"
@@ -33,7 +34,7 @@ namespace {
 // this time ago, or the outgoing worker has had no controllees for a continuous
 // period of time exceeding this time, the outgoing worker will be removed even
 // if it has ongoing requests.
-constexpr base::TimeDelta kMaxLameDuckTime = base::TimeDelta::FromMinutes(5);
+constexpr base::TimeDelta kMaxLameDuckTime = base::Minutes(5);
 
 ServiceWorkerVersionInfo GetVersionInfo(ServiceWorkerVersion* version) {
   if (!version)
@@ -58,14 +59,14 @@ ServiceWorkerRegistration::ServiceWorkerRegistration(
       resources_total_size_bytes_(0),
       context_(context),
       task_runner_(base::ThreadTaskRunnerHandle::Get()) {
-  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_NE(blink::mojom::kInvalidServiceWorkerRegistrationId, registration_id);
   DCHECK(context_);
   context_->AddLiveRegistration(this);
 }
 
 ServiceWorkerRegistration::~ServiceWorkerRegistration() {
-  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(listeners_.empty());
 
   // TODO(crbug.com/1159778): Remove once the bug is fixed.
@@ -153,7 +154,7 @@ void ServiceWorkerRegistration::NotifyVersionAttributesChanged(
 }
 
 ServiceWorkerRegistrationInfo ServiceWorkerRegistration::GetInfo() {
-  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   return ServiceWorkerRegistrationInfo(
       scope(), key(), update_via_cache(), registration_id_,
       is_deleted() ? ServiceWorkerRegistrationInfo::IS_DELETED
@@ -471,7 +472,7 @@ void ServiceWorkerRegistration::RemoveLameDuckIfNeeded() {
 }
 
 void ServiceWorkerRegistration::ActivateWaitingVersion(bool delay) {
-  DCHECK_CURRENTLY_ON(ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(context_);
   DCHECK(IsReadyToActivate());
   should_activate_when_ready_ = false;
@@ -528,7 +529,7 @@ void ServiceWorkerRegistration::ActivateWaitingVersion(bool delay) {
         FROM_HERE,
         base::BindOnce(&ServiceWorkerRegistration::ContinueActivation, this,
                        activating_version),
-        base::TimeDelta::FromSeconds(1));
+        base::Seconds(1));
   } else {
     ContinueActivation(std::move(activating_version));
   }

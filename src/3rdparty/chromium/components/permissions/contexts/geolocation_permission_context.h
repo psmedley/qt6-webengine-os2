@@ -6,7 +6,6 @@
 #define COMPONENTS_PERMISSIONS_CONTEXTS_GEOLOCATION_PERMISSION_CONTEXT_H_
 
 #include "base/callback.h"
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "build/build_config.h"
 #include "components/content_settings/core/common/content_settings.h"
@@ -41,7 +40,7 @@ class GeolocationPermissionContext : public PermissionContextBase {
                                   BrowserPermissionCallback* callback,
                                   GeolocationPermissionContext* context) = 0;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // Returns whether or not this |web_contents| is interactable.
     virtual bool IsInteractable(content::WebContents* web_contents) = 0;
 
@@ -51,16 +50,16 @@ class GeolocationPermissionContext : public PermissionContextBase {
     // Returns whether |requesting_origin| is the default search engine.
     virtual bool IsRequestingOriginDSE(content::BrowserContext* browser_context,
                                        const GURL& requesting_origin) = 0;
-
-    // Called after NotifyPermissionSet() has been called from this context.
-    virtual void FinishNotifyPermissionSet(const PermissionRequestID& id,
-                                           const GURL& requesting_origin,
-                                           const GURL& embedding_origin) = 0;
 #endif
   };
 
   GeolocationPermissionContext(content::BrowserContext* browser_context,
                                std::unique_ptr<Delegate> delegate);
+
+  GeolocationPermissionContext(const GeolocationPermissionContext&) = delete;
+  GeolocationPermissionContext& operator=(const GeolocationPermissionContext&) =
+      delete;
+
   ~GeolocationPermissionContext() override;
 
   void DecidePermission(content::WebContents* web_contents,
@@ -89,8 +88,6 @@ class GeolocationPermissionContext : public PermissionContextBase {
   mojo::Remote<device::mojom::GeolocationControl> geolocation_control_;
 
   base::WeakPtrFactory<GeolocationPermissionContext> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(GeolocationPermissionContext);
 };
 
 }  // namespace permissions

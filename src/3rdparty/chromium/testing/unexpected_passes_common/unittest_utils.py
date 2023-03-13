@@ -10,6 +10,8 @@ from unexpected_passes_common import expectations
 from unexpected_passes_common import data_types
 from unexpected_passes_common import queries as queries_module
 
+# pylint: disable=useless-object-inheritance,super-with-arguments
+
 
 def CreateStatsWithPassFails(passes, fails):
   stats = data_types.BuildStats()
@@ -42,13 +44,19 @@ class SimpleSplitQueryGenerator(queries_module.SplitQueryGenerator):
 
 
 class SimpleBigQueryQuerier(queries_module.BigQueryQuerier):
-  def _GetQueryGeneratorForBuilder(self, _, builder_type):
+  def _GetQueryGeneratorForBuilder(self, builder):
     if not self._large_query_mode:
-      return SimpleFixedQueryGenerator(builder_type, 'AND True')
-    return SimpleSplitQueryGenerator(builder_type, ['test_id'], 200)
+      return SimpleFixedQueryGenerator(builder.builder_type, 'AND True')
+    return SimpleSplitQueryGenerator(builder.builder_type, ['test_id'], 200)
+
+  def _GetRelevantExpectationFilesForQueryResult(self, _):
+    return None
 
   def _StripPrefixFromTestId(self, test_id):
     return test_id.split('.')[-1]
+
+  def _GetActiveBuilderQuery(self, _, __):
+    return ''
 
 
 def CreateGenericQuerier(suite=None,
@@ -133,6 +141,9 @@ class FakeProcess(object):
 
 
 class GenericBuilders(builders.Builders):
+  def __init__(self, include_internal_builders=False):
+    super(GenericBuilders, self).__init__(include_internal_builders)
+
   def _BuilderRunsTestOfInterest(self, test_map, suite):
     return True
 
@@ -151,13 +162,13 @@ def RegisterGenericBuildersImplementation():
 
 
 class GenericExpectations(expectations.Expectations):
-  def _GetExpectationFilepaths(self):
+  def GetExpectationFilepaths(self):
     return []
 
-  def _GetExpectationFileTagHeader(self):
+  def _GetExpectationFileTagHeader(self, _):
     return """\
 # tags: [ linux mac win ]
-# results: [ Failure RetryOnFailure Skip ]
+# results: [ Failure RetryOnFailure Skip Pass ]
 """
 
 

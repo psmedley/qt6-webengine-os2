@@ -9,12 +9,16 @@
 #include <string>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_piece_forward.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_auth_handler_factory.h"
+
+namespace url {
+class SchemeHostPort;
+}
 
 namespace net {
 
@@ -27,12 +31,14 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   class NET_EXPORT_PRIVATE NonceGenerator {
    public:
     NonceGenerator();
+
+    NonceGenerator(const NonceGenerator&) = delete;
+    NonceGenerator& operator=(const NonceGenerator&) = delete;
+
     virtual ~NonceGenerator();
 
     // Generates a client nonce.
     virtual std::string GenerateNonce() const = 0;
-   private:
-    DISALLOW_COPY_AND_ASSIGN(NonceGenerator);
   };
 
   // DynamicNonceGenerator does a random shuffle of 16
@@ -40,10 +46,11 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   class DynamicNonceGenerator : public NonceGenerator {
    public:
     DynamicNonceGenerator();
-    std::string GenerateNonce() const override;
 
-   private:
-    DISALLOW_COPY_AND_ASSIGN(DynamicNonceGenerator);
+    DynamicNonceGenerator(const DynamicNonceGenerator&) = delete;
+    DynamicNonceGenerator& operator=(const DynamicNonceGenerator&) = delete;
+
+    std::string GenerateNonce() const override;
   };
 
   // FixedNonceGenerator always uses the same string specified at
@@ -52,11 +59,13 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
    public:
     explicit FixedNonceGenerator(const std::string& nonce);
 
+    FixedNonceGenerator(const FixedNonceGenerator&) = delete;
+    FixedNonceGenerator& operator=(const FixedNonceGenerator&) = delete;
+
     std::string GenerateNonce() const override;
 
    private:
     const std::string nonce_;
-    DISALLOW_COPY_AND_ASSIGN(FixedNonceGenerator);
   };
 
   class NET_EXPORT_PRIVATE Factory : public HttpAuthHandlerFactory {
@@ -71,7 +80,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
                           HttpAuth::Target target,
                           const SSLInfo& ssl_info,
                           const NetworkIsolationKey& network_isolation_key,
-                          const GURL& origin,
+                          const url::SchemeHostPort& scheme_host_port,
                           CreateReason reason,
                           int digest_nonce_count,
                           const NetLogWithSource& net_log,
@@ -175,7 +184,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerDigest : public HttpAuthHandler {
   std::string original_realm_;
 
   int nonce_count_;
-  const NonceGenerator* nonce_generator_;
+  raw_ptr<const NonceGenerator> nonce_generator_;
 };
 
 }  // namespace net

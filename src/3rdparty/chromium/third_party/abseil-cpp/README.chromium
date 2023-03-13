@@ -4,14 +4,15 @@ URL: https://github.com/abseil/abseil-cpp
 License: Apache 2.0
 License File: LICENSE
 Version: 0
-Revision: 8e088c5f3c290c5ac53dd5010fd501d80b483115
+Revision: 6f43f5bb398b6685575b36874e36cf1695734df1
 Security Critical: yes
 
 Description:
 This directory contains the source code of Abseil for C++. This can be used by
-Chromium, subject to the guidance at https://chromium-cpp.appspot.com/; it can
-be used without restriction by Chromium's dependencies, except that objects
-compiled into Chromium itself cannot use anything relying on
+Chromium, subject to the guidance at
+https://chromium.googlesource.com/chromium/src/+/main/styleguide/c++/c++-features.md;
+it can be used without restriction by Chromium's dependencies, except that
+objects compiled into Chromium itself cannot use anything relying on
 absl::base_internal::FastTypeId (see https://crbug.com/1096380).
 
 How to update Abseil:
@@ -33,4 +34,4 @@ Local Modifications:
 * Patches from //third_party/abseil-cpp/patches have been applied.
 
 * Increment this number to silence presubmits about modifying files in
-  third_party when regenerating absl .def files: 1
+  third_party when regenerating absl .def files: 2

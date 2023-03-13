@@ -119,7 +119,7 @@ int PacFileDecider::Start(const ProxyConfigWithAnnotation& config,
 
   // Save the |wait_delay| as a non-negative value.
   wait_delay_ = wait_delay;
-  if (wait_delay_ < base::TimeDelta())
+  if (wait_delay_.is_negative())
     wait_delay_ = base::TimeDelta();
 
   pac_mandatory_ = config.value().pac_mandatory();
@@ -295,9 +295,8 @@ int PacFileDecider::DoQuickCheck() {
       &PacFileDecider::OnIOCompletion, base::Unretained(this));
 
   next_state_ = STATE_QUICK_CHECK_COMPLETE;
-  quick_check_timer_.Start(
-      FROM_HERE, base::TimeDelta::FromMilliseconds(kQuickCheckDelayMs),
-      base::BindOnce(callback, ERR_NAME_NOT_RESOLVED));
+  quick_check_timer_.Start(FROM_HERE, base::Milliseconds(kQuickCheckDelayMs),
+                           base::BindOnce(callback, ERR_NAME_NOT_RESOLVED));
 
   return resolve_request_->Start(callback);
 }

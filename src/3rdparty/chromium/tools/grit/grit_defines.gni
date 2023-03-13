@@ -4,8 +4,13 @@
 
 import("//build/config/chrome_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
-import("//build/config/crypto.gni")
+import("//build/config/devtools.gni")
 import("//build/config/ui.gni")
+
+shared_intermediate_dir = rebase_path(root_gen_dir, root_build_dir)
+devtools_grd_path = "$shared_intermediate_dir/$devtools_grd_location"
+devtools_grd_path_no_ext = get_path_info(devtools_grd_path, "dir") + "/" +
+                           get_path_info(devtools_grd_path, "name")
 
 grit_defines = [
   "-E",
@@ -13,10 +18,13 @@ grit_defines = [
   "-E",
   "root_src_dir=" + rebase_path("//", root_build_dir),
   "-D",
-  "SHARED_INTERMEDIATE_DIR=" + rebase_path(root_gen_dir, root_build_dir),
+  "SHARED_INTERMEDIATE_DIR=" + shared_intermediate_dir,
+  "-D",
+  "DEVTOOLS_GRD_PATH=" + devtools_grd_path_no_ext,
 ]
 
-if (is_mac || is_win || is_linux || is_chromeos || is_ios) {
+# Must match `enable_hidpi` in ui/base/ui_features.gni.
+if (!is_android) {
   grit_defines += [
     "-D",
     "scale_factors=2x",
@@ -50,32 +58,38 @@ if (is_chrome_branded) {
 
 if (is_chromeos_ash) {
   grit_defines += [
+    # TODO(crbug.com/1230488): Remove |chromeos| when everything is migrated to
+    # |chromeos_ash|
     "-D",
     "chromeos",
+    "-D",
+    "chromeos_ash",
   ]
 }
 
 if (is_chromeos_lacros) {
   grit_defines += [
+    # TODO(crbug.com/1230488): Remove |lacros| when everything is migrated to
+    # |chromeos_lacros|
     "-D",
     "lacros",
+    "-D",
+    "chromeos_lacros",
   ]
 }
 
-if (is_linux || is_chromeos_lacros) {
+# This is related to Chrome OS.
+if (is_reven) {
   grit_defines += [
     "-D",
-    "desktop_linux",
+    "reven",
   ]
 }
 
-if (is_fuchsia) {
-  grit_defines += [
-    "-D",
-    "is_fuchsia",
-  ]
-}
-
+# Prefer using this (and excluding specific platforms) when a resource applies
+# to (most) desktop platforms.
+#assert(toolkit_views == (is_chromeos_ash || is_chromeos_lacros || is_fuchsia ||
+#                         is_linux || is_mac || is_win))
 if (toolkit_views) {
   grit_defines += [
     "-D",
@@ -87,13 +101,6 @@ if (use_aura) {
   grit_defines += [
     "-D",
     "use_aura",
-  ]
-}
-
-if (use_nss_certs) {
-  grit_defines += [
-    "-D",
-    "use_nss_certs",
   ]
 }
 
@@ -141,6 +148,12 @@ if (current_toolchain != host_toolchain) {
     grit_defines += [
       "-t",
       "win32",
+    ]
+  }
+  if (is_fuchsia) {
+    grit_defines += [
+      "-t",
+      "fuchsia",
     ]
   }
 }

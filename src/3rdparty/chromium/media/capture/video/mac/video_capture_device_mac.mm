@@ -20,10 +20,9 @@
 #include "base/mac/scoped_cftyperef.h"
 #include "base/mac/scoped_ioobject.h"
 #include "base/mac/scoped_ioplugininterface.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "media/base/timestamp_constants.h"
@@ -60,7 +59,7 @@ namespace media {
 
 // Mac specific limits for minimum and maximum frame rate.
 const float kMinFrameRate = 1.0f;
-const float kMaxFrameRate = 30.0f;
+const float kMaxFrameRate = 60.0f;
 
 // In device identifiers, the USB VID and PID are stored in 4 bytes each.
 const size_t kVidPidSize = 4;
@@ -765,7 +764,6 @@ void VideoCaptureDeviceMac::SetPhotoOptions(mojom::PhotoSettingsPtr settings,
 }
 
 void VideoCaptureDeviceMac::OnUtilizationReport(
-    int frame_feedback_id,
     media::VideoCaptureFeedback feedback) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   if (!capture_device_)

@@ -12,7 +12,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_math.h"
 #include "base/sequence_checker.h"
-#include "base/sequenced_task_runner.h"
+#include "base/task/sequenced_task_runner.h"
 #include "content/browser/indexed_db/indexed_db_callback_helpers.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
@@ -269,6 +269,66 @@ void DatabaseImpl::GetAll(int64_t transaction_id,
       std::make_unique<IndexedDBKeyRange>(key_range),
       key_only ? indexed_db::CURSOR_KEY_ONLY : indexed_db::CURSOR_KEY_AND_VALUE,
       max_count, std::move(aborting_callback)));
+}
+
+void DatabaseImpl::BatchGetAll(
+    int64_t transaction_id,
+    int64_t object_store_id,
+    int64_t index_id,
+    const std::vector<blink::IndexedDBKeyRange>& key_ranges,
+    uint32_t max_count,
+    blink::mojom::IDBDatabase::BatchGetAllCallback callback) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!connection_->IsConnected()) {
+    IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
+                                 "Not connected.");
+    std::move(callback).Run(
+        blink::mojom::IDBDatabaseBatchGetAllResult::NewErrorResult(
+            blink::mojom::IDBError::New(error.code(), error.message())));
+    return;
+  }
+
+  IndexedDBTransaction* transaction =
+      connection_->GetTransaction(transaction_id);
+  if (!transaction) {
+    IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
+                                 "Unknown transaction.");
+    std::move(callback).Run(
+        blink::mojom::IDBDatabaseBatchGetAllResult::NewErrorResult(
+            blink::mojom::IDBError::New(error.code(), error.message())));
+    return;
+  }
+
+  if (!transaction->IsAcceptingRequests()) {
+    // TODO(https://crbug.com/1249908): If the transaction was already committed
+    // (or is in the process of being committed) we should kill the renderer.
+    // This branch however also includes cases where the browser process aborted
+    // the transaction, as currently we don't distinguish that state from the
+    // transaction having been committed. So for now simply ignore the request.
+    return;
+  }
+
+  if (key_ranges.size() > blink::mojom::kIDBBatchGetAllMaxInputSize) {
+    IndexedDBDatabaseError error(blink::mojom::IDBException::kUnknownError,
+                                 "key_ranges array's size is too large.");
+    std::move(callback).Run(
+        blink::mojom::IDBDatabaseBatchGetAllResult::NewErrorResult(
+            blink::mojom::IDBError::New(error.code(), error.message())));
+    return;
+  }
+
+  blink::mojom::IDBDatabase::BatchGetAllCallback aborting_callback =
+      CreateCallbackAbortOnDestruct<
+          blink::mojom::IDBDatabase::BatchGetAllCallback,
+          blink::mojom::IDBDatabaseBatchGetAllResultPtr>(
+          std::move(callback), transaction->AsWeakPtr());
+
+  transaction->ScheduleTask(BindWeakOperation(
+      &IndexedDBDatabase::BatchGetAllOperation,
+      connection_->database()->AsWeakPtr(), dispatcher_host_->AsWeakPtr(),
+      object_store_id, index_id, key_ranges, max_count,
+      std::move(aborting_callback)));
 }
 
 void DatabaseImpl::SetIndexKeys(

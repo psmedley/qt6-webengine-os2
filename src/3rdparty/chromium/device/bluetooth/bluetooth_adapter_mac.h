@@ -14,10 +14,9 @@
 #include <vector>
 
 #include "base/mac/scoped_nsobject.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "device/bluetooth/bluetooth_adapter.h"
 #include "device/bluetooth/bluetooth_discovery_manager_mac.h"
 #include "device/bluetooth/bluetooth_export.h"
@@ -55,6 +54,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       std::string name,
       std::string address,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
+
+  BluetoothAdapterMac(const BluetoothAdapterMac&) = delete;
+  BluetoothAdapterMac& operator=(const BluetoothAdapterMac&) = delete;
 
   // Converts CBUUID into BluetoothUUID
   static BluetoothUUID BluetoothUUIDWithCBUUID(CBUUID* UUID);
@@ -95,6 +97,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
       AdvertisementErrorCallback error_callback) override;
   BluetoothLocalGattService* GetGattService(
       const std::string& identifier) const override;
+  DeviceList GetDevices() override;
+  ConstDeviceList GetDevices() const override;
 
   // BluetoothDiscoveryManagerMac::Observer overrides:
   void ClassicDeviceFound(IOBluetoothDevice* device) override;
@@ -318,8 +322,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterMac
   std::map<std::string, std::string> low_energy_devices_info_;
 
   base::WeakPtrFactory<BluetoothAdapterMac> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(BluetoothAdapterMac);
 };
 
 }  // namespace device

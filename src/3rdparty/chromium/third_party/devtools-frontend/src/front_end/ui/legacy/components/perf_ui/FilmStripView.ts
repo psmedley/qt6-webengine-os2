@@ -2,11 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Common from '../../../../core/common/common.js';
 import * as Host from '../../../../core/host/host.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import type * as SDK from '../../../../core/sdk/sdk.js';
 import * as UI from '../../legacy.js';
+
+import filmStripViewStyles from './filmStripView.css.legacy.js';
 
 const UIStrings = {
   /**
@@ -33,7 +36,7 @@ const UIStrings = {
 };
 const str_ = i18n.i18n.registerUIStrings('ui/legacy/components/perf_ui/FilmStripView.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
-export class FilmStripView extends UI.Widget.HBox {
+export class FilmStripView extends Common.ObjectWrapper.eventMixin<EventTypes, typeof UI.Widget.HBox>(UI.Widget.HBox) {
   private statusLabel: HTMLElement;
   private zeroTime!: number;
   private spanTime!: number;
@@ -42,7 +45,7 @@ export class FilmStripView extends UI.Widget.HBox {
 
   constructor() {
     super(true);
-    this.registerRequiredCSS('ui/legacy/components/perf_ui/filmStripView.css');
+    this.registerRequiredCSS(filmStripViewStyles);
     this.contentElement.classList.add('film-strip-view');
     this.statusLabel = this.contentElement.createChild('div', 'label');
     this.reset();
@@ -124,13 +127,13 @@ export class FilmStripView extends UI.Widget.HBox {
     }
 
     if (this.mode === Modes.FrameBased) {
-      Promise.all(frames.map(this.createFrameElement.bind(this))).then(appendElements.bind(this));
+      void Promise.all(frames.map(this.createFrameElement.bind(this))).then(appendElements.bind(this));
       return;
     }
 
     const width = this.contentElement.clientWidth;
     const scale = this.spanTime / width;
-    this.createFrameElement(frames[0]).then(
+    void this.createFrameElement(frames[0]).then(
         continueWhenFrameImageLoaded.bind(this));  // Calculate frame width basing on the first frame.
 
     function continueWhenFrameImageLoaded(this: FilmStripView, element0: Element): void {
@@ -144,7 +147,7 @@ export class FilmStripView extends UI.Widget.HBox {
         const time = pos * scale + this.zeroTime;
         promises.push(this.createFrameElement(this.frameByTime(time)).then(fixWidth));
       }
-      Promise.all(promises).then(appendElements.bind(this));
+      void Promise.all(promises).then(appendElements.bind(this));
       function fixWidth(element: Element): Element {
         (element as HTMLElement).style.width = frameWidth + 'px';
         return element;
@@ -195,6 +198,12 @@ export enum Events {
   FrameExit = 'FrameExit',
 }
 
+export type EventTypes = {
+  [Events.FrameSelected]: number,
+  [Events.FrameEnter]: number,
+  [Events.FrameExit]: number,
+};
+
 export const Modes = {
   TimeBased: 'TimeBased',
   FrameBased: 'FrameBased',
@@ -235,7 +244,7 @@ export class Dialog {
     this.index = filmStripFrame.index;
     this.zeroTime = zeroTime || filmStripFrame.model().zeroTime();
     this.dialog = null;
-    this.render();
+    void this.render();
   }
 
   private resize(): void {
@@ -285,24 +294,24 @@ export class Dialog {
     if (this.index > 0) {
       --this.index;
     }
-    this.render();
+    void this.render();
   }
 
   private onNextFrame(): void {
     if (this.index < this.frames.length - 1) {
       ++this.index;
     }
-    this.render();
+    void this.render();
   }
 
   private onFirstFrame(): void {
     this.index = 0;
-    this.render();
+    void this.render();
   }
 
   private onLastFrame(): void {
     this.index = this.frames.length - 1;
-    this.render();
+    void this.render();
   }
 
   private render(): Promise<void> {

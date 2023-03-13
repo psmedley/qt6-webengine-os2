@@ -11,12 +11,11 @@
 #include "base/callback_helpers.h"
 #include "base/check.h"
 #include "base/debug/stack_trace.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/test/task_environment.h"
-#include "components/services/storage/indexed_db/scopes/disjoint_range_lock_manager.h"
+#include "components/services/storage/indexed_db/locks/disjoint_range_lock_manager.h"
 #include "content/browser/indexed_db/fake_indexed_db_metadata_coding.h"
 #include "content/browser/indexed_db/indexed_db_class_factory.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
@@ -44,13 +43,15 @@ class AbortObserver {
  public:
   AbortObserver() = default;
 
+  AbortObserver(const AbortObserver&) = delete;
+  AbortObserver& operator=(const AbortObserver&) = delete;
+
   void AbortTask() { abort_task_called_ = true; }
 
   bool abort_task_called() const { return abort_task_called_; }
 
  private:
   bool abort_task_called_ = false;
-  DISALLOW_COPY_AND_ASSIGN(AbortObserver);
 };
 
 class IndexedDBTransactionTest : public testing::Test {
@@ -61,10 +62,13 @@ class IndexedDBTransactionTest : public testing::Test {
         factory_(std::make_unique<MockIndexedDBFactory>()),
         lock_manager_(kIndexedDBLockLevelCount) {}
 
+  IndexedDBTransactionTest(const IndexedDBTransactionTest&) = delete;
+  IndexedDBTransactionTest& operator=(const IndexedDBTransactionTest&) = delete;
+
   void SetUp() override {
     // DB is created here instead of the constructor to workaround a
     // "peculiarity of C++". More info at
-    // https://github.com/google/googletest/blob/master/docs/faq.md#my-compiler-complains-that-a-constructor-or-destructor-cannot-return-a-value-whats-going-on
+    // https://github.com/google/googletest/blob/main/docs/faq.md#my-compiler-complains-that-a-constructor-or-destructor-cannot-return-a-value-whats-going-on
     leveldb::Status s;
     std::tie(db_, s) = IndexedDBClassFactory::Get()->CreateIndexedDBDatabase(
         u"db", backing_store_.get(), factory_.get(), CreateRunTasksCallback(),
@@ -88,9 +92,7 @@ class IndexedDBTransactionTest : public testing::Test {
                          base::Unretained(this), false));
       return;
     }
-    IndexedDBDatabase::RunTasksResult result;
-    leveldb::Status status;
-    std::tie(result, status) = db_->RunTasks();
+    auto [result, status] = db_->RunTasks();
     switch (result) {
       case IndexedDBDatabase::RunTasksResult::kDone:
         return;
@@ -137,8 +139,6 @@ class IndexedDBTransactionTest : public testing::Test {
 
  private:
   DisjointRangeLockManager lock_manager_;
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBTransactionTest);
 };
 
 class IndexedDBTransactionTestMode
@@ -147,8 +147,9 @@ class IndexedDBTransactionTestMode
  public:
   IndexedDBTransactionTestMode() = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBTransactionTestMode);
+  IndexedDBTransactionTestMode(const IndexedDBTransactionTestMode&) = delete;
+  IndexedDBTransactionTestMode& operator=(const IndexedDBTransactionTestMode&) =
+      delete;
 };
 
 TEST_F(IndexedDBTransactionTest, Timeout) {
@@ -542,13 +543,13 @@ TEST_F(IndexedDBTransactionTest, AbortCancelsLockRequest) {
 
   // Acquire a lock to block the transaction's lock acquisition.
   bool locks_recieved = false;
-  std::vector<ScopesLockManager::ScopeLockRequest> lock_requests;
+  std::vector<LeveledLockManager::LeveledLockRequest> lock_requests;
   lock_requests.emplace_back(kDatabaseRangeLockLevel, GetDatabaseLockRange(id),
-                             ScopesLockManager::LockType::kShared);
+                             LeveledLockManager::LockType::kShared);
   lock_requests.emplace_back(kObjectStoreRangeLockLevel,
                              GetObjectStoreLockRange(id, object_store_id),
-                             ScopesLockManager::LockType::kExclusive);
-  ScopesLocksHolder temp_lock_receiver;
+                             LeveledLockManager::LockType::kExclusive);
+  LeveledLockHolder temp_lock_receiver;
   lock_manager()->AcquireLocks(lock_requests,
                                temp_lock_receiver.weak_factory.GetWeakPtr(),
                                base::BindOnce(SetToTrue, &locks_recieved));

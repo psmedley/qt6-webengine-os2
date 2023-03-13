@@ -31,9 +31,10 @@
 #include <map>
 
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "components/safe_browsing/content/browser/base_blocking_page.h"
 #include "components/safe_browsing/content/browser/base_ui_manager.h"
+#include "components/safe_browsing/core/common/proto/csd.pb.h"
 
 namespace history {
 class HistoryService;
@@ -61,6 +62,9 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   // Interstitial type, used in tests.
   static const security_interstitials::SecurityInterstitialPage::TypeID
       kTypeForTesting;
+
+  SafeBrowsingBlockingPage(const SafeBrowsingBlockingPage&) = delete;
+  SafeBrowsingBlockingPage& operator=(const SafeBrowsingBlockingPage&) = delete;
 
   ~SafeBrowsingBlockingPage() override;
 
@@ -108,6 +112,8 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
       const BaseSafeBrowsingErrorUI::SBErrorDisplayOptions& display_options,
       bool should_trigger_reporting,
       history::HistoryService* history_service,
+      base::RepeatingCallback<ChromeUserPopulation()>
+          get_user_population_callback,
       SafeBrowsingNavigationObserverManager* navigation_observer_manager,
       SafeBrowsingMetricsCollector* metrics_collector,
       TriggerManager* trigger_manager,
@@ -133,12 +139,12 @@ class SafeBrowsingBlockingPage : public BaseBlockingPage {
   ThreatSource threat_source_;
 
  private:
-  history::HistoryService* history_service_ = nullptr;
-  SafeBrowsingNavigationObserverManager* navigation_observer_manager_ = nullptr;
-  SafeBrowsingMetricsCollector* metrics_collector_ = nullptr;
-  TriggerManager* trigger_manager_ = nullptr;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBlockingPage);
+  raw_ptr<history::HistoryService> history_service_ = nullptr;
+  base::RepeatingCallback<ChromeUserPopulation()> get_user_population_callback_;
+  raw_ptr<SafeBrowsingNavigationObserverManager> navigation_observer_manager_ =
+      nullptr;
+  raw_ptr<SafeBrowsingMetricsCollector> metrics_collector_ = nullptr;
+  raw_ptr<TriggerManager> trigger_manager_ = nullptr;
 };
 
 }  // namespace safe_browsing

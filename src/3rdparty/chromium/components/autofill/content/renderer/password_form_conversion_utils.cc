@@ -5,7 +5,6 @@
 #include "components/autofill/content/renderer/password_form_conversion_utils.h"
 
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -94,19 +93,18 @@ bool IsGaiaReauthenticationForm(const blink::WebFormElement& form) {
   for (const WebFormControlElement& element : form.GetFormControlElements()) {
     // We're only interested in the presence
     // of <input type="hidden" /> elements.
-    static base::NoDestructor<WebString> kHidden("hidden");
-    const blink::WebInputElement* input = blink::ToWebInputElement(&element);
-    if (!input || input->FormControlTypeForAutofill() != *kHidden)
+    const WebInputElement input = element.DynamicTo<WebInputElement>();
+    if (input.IsNull() || input.FormControlTypeForAutofill() != "hidden")
       continue;
 
     // There must be a hidden input named "rart".
-    if (input->FormControlName() == "rart")
+    if (input.FormControlName() == "rart")
       has_rart_field = true;
 
     // There must be a hidden input named "continue", whose value points
     // to a password (or password testing) site.
-    if (input->FormControlName() == "continue" &&
-        re2::RE2::PartialMatch(input->Value().Utf8(),
+    if (input.FormControlName() == "continue" &&
+        re2::RE2::PartialMatch(input.Value().Utf8(),
                                g_password_site_matcher.Get())) {
       has_continue_field = true;
     }
@@ -134,12 +132,6 @@ std::unique_ptr<FormData> CreateFormDataFromWebForm(
     return nullptr;
 
   auto form_data = std::make_unique<FormData>();
-  if (base::FeatureList::IsEnabled(features::kAutofillAugmentFormsInRenderer)) {
-    form_data->url =
-        form_util::GetCanonicalOriginForDocument(web_form.GetDocument());
-    form_data->full_url =
-        form_util::GetDocumentUrlWithoutAuth(web_form.GetDocument());
-  }
   form_data->is_gaia_with_skip_save_password_form =
       IsGaiaWithSkipSavePasswordForm(web_form) ||
       IsGaiaReauthenticationForm(web_form);
@@ -187,12 +179,6 @@ std::unique_ptr<FormData> CreateFormDataFromUnownedInputElements(
     return nullptr;
   }
 
-  if (base::FeatureList::IsEnabled(features::kAutofillAugmentFormsInRenderer)) {
-    form_data->url =
-        form_util::GetCanonicalOriginForDocument(frame.GetDocument());
-    form_data->full_url =
-        form_util::GetDocumentUrlWithoutAuth(frame.GetDocument());
-  }
   form_data->username_predictions = GetUsernamePredictions(
       control_elements, *form_data, username_detector_cache, WebFormElement());
   form_data->button_titles = form_util::GetButtonTitles(

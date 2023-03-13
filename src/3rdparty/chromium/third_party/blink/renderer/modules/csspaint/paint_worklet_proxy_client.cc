@@ -7,7 +7,7 @@
 #include <memory>
 #include <utility>
 
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/css/cssom/cross_thread_color_value.h"
 #include "third_party/blink/renderer/core/css/cssom/cross_thread_unit_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_paint_worklet_input.h"
@@ -19,11 +19,13 @@
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/csspaint/css_paint_definition.h"
 #include "third_party/blink/renderer/modules/csspaint/nativepaint/background_color_paint_definition.h"
+#include "third_party/blink/renderer/modules/csspaint/nativepaint/native_paint_definition.h"
 #include "third_party/blink/renderer/modules/csspaint/paint_worklet.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/paint_worklet_paint_dispatcher.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
 #include "third_party/blink/renderer/platform/wtf/casting.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace blink {
@@ -199,7 +201,7 @@ sk_sp<PaintRecord> PaintWorkletProxyClient::Paint(
 
   const CSSPaintWorkletInput* input =
       To<CSSPaintWorkletInput>(compositor_input);
-  device_pixel_ratio_ = input->DeviceScaleFactor() * input->EffectiveZoom();
+  device_pixel_ratio_ = input->EffectiveZoom();
   definition = global_scope->FindDefinition(input->NameCopy());
   return definition->Paint(compositor_input, animated_property_values);
 }

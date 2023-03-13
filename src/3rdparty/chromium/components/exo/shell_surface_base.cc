@@ -8,23 +8,27 @@
 
 #include "ash/constants/ash_constants.h"
 #include "ash/constants/ash_features.h"
+#include "ash/display/screen_orientation_controller.h"
 #include "ash/frame/non_client_frame_view_ash.h"
 #include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/rounded_corner_utils.h"
 #include "ash/public/cpp/shelf_types.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
+#include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/desks/desks_controller.h"
 #include "ash/wm/desks/desks_util.h"
 #include "ash/wm/drag_window_resizer.h"
+#include "ash/wm/resize_shadow_controller.h"
+#include "ash/wm/screen_pinning_controller.h"
 #include "ash/wm/window_resizer.h"
 #include "ash/wm/window_state.h"
-#include "ash/wm/window_state_delegate.h"
 #include "ash/wm/window_util.h"
+#include "base/check.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
@@ -36,11 +40,14 @@
 #include "chromeos/ui/base/window_properties.h"
 #include "chromeos/ui/base/window_state_type.h"
 #include "chromeos/ui/frame/caption_buttons/snap_controller.h"
+#include "components/app_restore/app_restore_info.h"
+#include "components/app_restore/app_restore_utils.h"
+#include "components/app_restore/window_properties.h"
+#include "components/exo/custom_window_state_delegate.h"
 #include "components/exo/shell_surface_util.h"
 #include "components/exo/surface.h"
+#include "components/exo/window_properties.h"
 #include "components/exo/wm_helper.h"
-#include "components/full_restore/full_restore_info.h"
-#include "components/full_restore/full_restore_utils.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
@@ -61,6 +68,7 @@
 #include "ui/compositor_extra/shadow.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
 #include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/layout/fill_layout.h"
@@ -87,6 +95,9 @@ class ShellSurfaceWidget : public views::Widget {
  public:
   ShellSurfaceWidget() = default;
 
+  ShellSurfaceWidget(const ShellSurfaceWidget&) = delete;
+  ShellSurfaceWidget& operator=(const ShellSurfaceWidget&) = delete;
+
   // Overridden from views::Widget:
   void OnKeyEvent(ui::KeyEvent* event) override {
     if (GetFocusManager()->GetFocusedView() &&
@@ -99,9 +110,6 @@ class ShellSurfaceWidget : public views::Widget {
       event->SetHandled();
     }
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ShellSurfaceWidget);
 };
 
 class CustomFrameView : public ash::NonClientFrameViewAsh {
@@ -116,6 +124,9 @@ class CustomFrameView : public ash::NonClientFrameViewAsh {
     if (!enabled)
       NonClientFrameViewAsh::SetShouldPaintHeader(false);
   }
+
+  CustomFrameView(const CustomFrameView&) = delete;
+  CustomFrameView& operator=(const CustomFrameView&) = delete;
 
   ~CustomFrameView() override = default;
 
@@ -187,14 +198,16 @@ class CustomFrameView : public ash::NonClientFrameViewAsh {
 
  private:
   ShellSurfaceBase* const shell_surface_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomFrameView);
 };
 
 class CustomWindowTargeter : public aura::WindowTargeter {
  public:
   explicit CustomWindowTargeter(ShellSurfaceBase* shell_surface)
       : shell_surface_(shell_surface), widget_(shell_surface->GetWidget()) {}
+
+  CustomWindowTargeter(const CustomWindowTargeter&) = delete;
+  CustomWindowTargeter& operator=(const CustomWindowTargeter&) = delete;
+
   ~CustomWindowTargeter() override = default;
 
   // Overridden from aura::WindowTargeter:
@@ -263,25 +276,6 @@ class CustomWindowTargeter : public aura::WindowTargeter {
 
   ShellSurfaceBase* shell_surface_;
   views::Widget* const widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(CustomWindowTargeter);
-};
-
-// A place holder to disable default implementation created by
-// ash::NonClientFrameViewAsh, which triggers immersive fullscreen etc, which
-// we don't need.
-class CustomWindowStateDelegate : public ash::WindowStateDelegate {
- public:
-  CustomWindowStateDelegate() {}
-  ~CustomWindowStateDelegate() override {}
-
-  // Overridden from ash::WindowStateDelegate:
-  bool ToggleFullscreen(ash::WindowState* window_state) override {
-    return false;
-  }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(CustomWindowStateDelegate);
 };
 
 void CloseAllShellSurfaceTransientChildren(aura::Window* window) {
@@ -298,7 +292,9 @@ int shell_id = 0;
 
 void ShowSnapPreview(aura::Window* window,
                      chromeos::SnapDirection snap_direction) {
-  chromeos::SnapController::Get()->ShowSnapPreview(window, snap_direction);
+  chromeos::SnapController::Get()->ShowSnapPreview(
+      window, snap_direction,
+      /*allow_haptic_feedback=*/false);
 }
 
 void CommitSnap(aura::Window* window, chromeos::SnapDirection snap_direction) {
@@ -331,6 +327,13 @@ ShellSurfaceBase::ShellSurfaceBase(Surface* surface,
 }
 
 ShellSurfaceBase::~ShellSurfaceBase() {
+  // If the surface was TrustedPinned, we have to unpin first as this might have
+  // locked down some system functions.
+  if (current_pinned_state_ == chromeos::WindowPinType::kTrustedPinned) {
+    pending_pinned_state_ = chromeos::WindowPinType::kNone;
+    UpdatePinned();
+  }
+
   // Close the overlay in case the window is deleted by the server.
   overlay_widget_.reset();
 
@@ -414,6 +417,28 @@ void ShellSurfaceBase::SetSystemModal(bool system_modal) {
   non_system_modal_window_was_active_ = non_system_modal_window_was_active;
 }
 
+void ShellSurfaceBase::SetBoundsForShadows(
+    const absl::optional<gfx::Rect>& shadow_bounds) {
+  if (shadow_bounds_ != shadow_bounds) {
+    // Set normal shadow bounds.
+    shadow_bounds_ = shadow_bounds;
+    shadow_bounds_changed_ = true;
+    if (widget_ && shadow_bounds) {
+      // Set resize shadow bounds and origin.
+      const gfx::Rect bounds = shadow_bounds.value();
+      const gfx::Point absolute_origin =
+          widget_->GetNativeWindow()->bounds().origin();
+      const gfx::Rect absolute_bounds =
+          gfx::Rect(absolute_origin.x(), absolute_origin.y(), bounds.width(),
+                    bounds.height());
+      ash::Shell::Get()
+          ->resize_shadow_controller()
+          ->UpdateResizeShadowBoundsOfWindow(widget_->GetNativeWindow(),
+                                             absolute_bounds);
+    }
+  }
+}
+
 void ShellSurfaceBase::UpdateSystemModal() {
   DCHECK(widget_);
   DCHECK_EQ(container_, ash::kShellWindowId_SystemModalContainer);
@@ -463,24 +488,26 @@ void ShellSurfaceBase::SetUseImmersiveForFullscreen(bool value) {
     SetShellUseImmersiveForFullscreen(widget_->GetNativeWindow(), value);
 }
 
-void ShellSurfaceBase::ShowSnapPreviewToLeft() {
-  ShowSnapPreview(widget_->GetNativeWindow(), chromeos::SnapDirection::kLeft);
+void ShellSurfaceBase::ShowSnapPreviewToPrimary() {
+  ShowSnapPreview(widget_->GetNativeWindow(),
+                  chromeos::SnapDirection::kPrimary);
 }
 
-void ShellSurfaceBase::ShowSnapPreviewToRight() {
-  ShowSnapPreview(widget_->GetNativeWindow(), chromeos::SnapDirection::kRight);
+void ShellSurfaceBase::ShowSnapPreviewToSecondary() {
+  ShowSnapPreview(widget_->GetNativeWindow(),
+                  chromeos::SnapDirection::kSecondary);
 }
 
 void ShellSurfaceBase::HideSnapPreview() {
   ShowSnapPreview(widget_->GetNativeWindow(), chromeos::SnapDirection::kNone);
 }
 
-void ShellSurfaceBase::SetSnappedToLeft() {
-  CommitSnap(widget_->GetNativeWindow(), chromeos::SnapDirection::kLeft);
+void ShellSurfaceBase::SetSnappedToPrimary() {
+  CommitSnap(widget_->GetNativeWindow(), chromeos::SnapDirection::kPrimary);
 }
 
-void ShellSurfaceBase::SetSnappedToRight() {
-  CommitSnap(widget_->GetNativeWindow(), chromeos::SnapDirection::kRight);
+void ShellSurfaceBase::SetSnappedToSecondary() {
+  CommitSnap(widget_->GetNativeWindow(), chromeos::SnapDirection::kSecondary);
 }
 
 void ShellSurfaceBase::UnsetSnap() {
@@ -544,6 +571,50 @@ void ShellSurfaceBase::SetVisibleOnAllWorkspaces() {
     widget_->SetVisibleOnAllWorkspaces(true);
 }
 
+void ShellSurfaceBase::SetInitialWorkspace(const char* initial_workspace) {
+  if (initial_workspace)
+    initial_workspace_ = std::string(initial_workspace);
+  else
+    initial_workspace_.reset();
+}
+
+void ShellSurfaceBase::Pin(bool trusted) {
+  pending_pinned_state_ = trusted ? chromeos::WindowPinType::kTrustedPinned
+                                  : chromeos::WindowPinType::kPinned;
+  UpdatePinned();
+}
+
+void ShellSurfaceBase::Unpin() {
+  // Only need to do something when we have to set a pinned mode.
+  if (pending_pinned_state_ == chromeos::WindowPinType::kNone)
+    return;
+
+  // Remove any pending pin states which might not have been applied yet.
+  pending_pinned_state_ = chromeos::WindowPinType::kNone;
+  UpdatePinned();
+}
+
+void ShellSurfaceBase::UpdatePinned() {
+  if (!widget_) {
+    // It is possible to get here before the widget has actually been created.
+    // The state will be set once the widget gets created.
+    return;
+  }
+  if (current_pinned_state_ != pending_pinned_state_) {
+    auto* window = widget_->GetNativeWindow();
+    if (pending_pinned_state_ == chromeos::WindowPinType::kNone) {
+      ash::WindowState::Get(window)->Restore();
+    } else {
+      bool trusted_pinned =
+          pending_pinned_state_ == chromeos::WindowPinType::kTrustedPinned;
+      ash::window_util::PinWindow(window,
+                                  /*trusted=*/trusted_pinned);
+    }
+
+    current_pinned_state_ = pending_pinned_state_;
+  }
+}
+
 void ShellSurfaceBase::SetChildAxTreeId(ui::AXTreeID child_ax_tree_id) {
   GetViewAccessibility().OverrideChildTreeID(child_ax_tree_id);
   this->NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
@@ -557,8 +628,20 @@ void ShellSurfaceBase::SetGeometry(const gfx::Rect& geometry) {
     DLOG(WARNING) << "Surface geometry must be non-empty";
     return;
   }
-
   pending_geometry_ = geometry;
+}
+
+void ShellSurfaceBase::SetWindowBounds(const gfx::Rect& bounds) {
+  TRACE_EVENT1("exo", "ShellSurfaceBase::SetWindowBounds", "bounds",
+               bounds.ToString());
+  if (!widget_) {
+    initial_bounds_.emplace(bounds);
+    return;
+  }
+  // TODO(crbug.com/1261321): This will not work if the full server side
+  // decoration is used.
+  DCHECK(!frame_enabled());
+  widget_->SetBounds(bounds);
 }
 
 void ShellSurfaceBase::SetDisplay(int64_t display_id) {
@@ -644,6 +727,28 @@ void ShellSurfaceBase::RebindRootSurface(Surface* root_surface,
   SetRootSurface(root_surface);
   host_window()->Show();
 
+  // Re-apply window properties to the new root surface.
+  auto* window = widget_ ? widget_->GetNativeWindow() : nullptr;
+  if (window) {
+    // Int properties.
+    for (auto* const key :
+         {aura::client::kSkipImeProcessing, chromeos::kFrameRestoreLookKey,
+          ash::kFrameRateThrottleKey}) {
+      if (base::Contains(window->GetAllPropertyKeys(), key)) {
+        OnWindowPropertyChanged(window, key,
+                                /*old_value(unused)=*/0);
+      }
+    }
+    // Boolean property.
+    if (base::Contains(window->GetAllPropertyKeys(),
+                       aura::client::kWindowWorkspaceKey)) {
+      OnWindowPropertyChanged(window, aura::client::kWindowWorkspaceKey,
+                              /*old_value(unused)=*/0);
+    }
+    if (window->HasFocus())
+      host_window()->Focus();
+  }
+
   SetCanMinimize(can_minimize_);
   SetCanMaximize(ash::desks_util::IsDeskContainerId(container_));
   SetCanResize(true);
@@ -687,6 +792,7 @@ void ShellSurfaceBase::AddOverlay(OverlayParams&& overlay_params) {
     params.activatable = views::Widget::InitParams::Activatable::kYes;
 
   params.delegate = new views::WidgetDelegate();
+  params.delegate->SetOwnedByWidget(true);
   params.delegate->SetContentsView(std::move(overlay_params.contents_view));
   params.name = "Overlay";
 
@@ -784,16 +890,16 @@ void ShellSurfaceBase::OnSetFrame(SurfaceFrameType frame_type) {
 
   // Override redirect window and popup can request NONE/SHADOW. The shadow
   // will be updated in next commit.
-  if (!widget_->non_client_view() && !frame_enabled())
-    return;
+  if (widget_->non_client_view()) {
+    CustomFrameView* frame_view =
+        static_cast<CustomFrameView*>(widget_->non_client_view()->frame_view());
+    if (frame_view->GetFrameEnabled() == frame_enabled())
+      return;
 
-  CustomFrameView* frame_view =
-      static_cast<CustomFrameView*>(widget_->non_client_view()->frame_view());
-  if (frame_view->GetFrameEnabled() == frame_enabled())
-    return;
+    frame_view->SetFrameEnabled(frame_enabled());
+    frame_view->SetShouldPaintHeader(frame_enabled());
+  }
 
-  frame_view->SetFrameEnabled(frame_enabled());
-  frame_view->SetShouldPaintHeader(frame_enabled());
   widget_->GetRootView()->Layout();
   // TODO(oshima): We probably should wait applying these if the
   // window is animating.
@@ -807,6 +913,10 @@ void ShellSurfaceBase::OnSetFrameColors(SkColor active_color,
   active_frame_color_ = SkColorSetA(active_color, SK_AlphaOPAQUE);
   inactive_frame_color_ = SkColorSetA(inactive_color, SK_AlphaOPAQUE);
   if (widget_) {
+    // Set kTrackDefaultFrameColors to false to prevent clobbering the active
+    // and inactive frame colors during theme changes.
+    widget_->GetNativeWindow()->SetProperty(chromeos::kTrackDefaultFrameColors,
+                                            false);
     widget_->GetNativeWindow()->SetProperty(chromeos::kFrameActiveColorKey,
                                             active_frame_color_);
     widget_->GetNativeWindow()->SetProperty(chromeos::kFrameInactiveColorKey,
@@ -1003,6 +1113,8 @@ void ShellSurfaceBase::OnWindowDestroying(aura::Window* window) {
   if (window == parent_)
     SetParentInternal(nullptr);
   window->RemoveObserver(this);
+  if (widget_ && window == widget_->GetNativeWindow() && root_surface())
+    root_surface()->ThrottleFrameRate(false);
 }
 
 void ShellSurfaceBase::OnWindowPropertyChanged(aura::Window* window,
@@ -1015,9 +1127,11 @@ void ShellSurfaceBase::OnWindowPropertyChanged(aura::Window* window,
     } else if (key == chromeos::kFrameRestoreLookKey) {
       root_surface()->SetFrameLocked(
           window->GetProperty(chromeos::kFrameRestoreLookKey));
-    } else if (key == aura::client::kVisibleOnAllWorkspacesKey ||
-               key == aura::client::kWindowWorkspaceKey) {
+    } else if (key == aura::client::kWindowWorkspaceKey) {
       root_surface()->OnDeskChanged(GetWindowDeskStateChanged(window));
+    } else if (key == ash::kFrameRateThrottleKey) {
+      root_surface()->ThrottleFrameRate(
+          window->GetProperty(ash::kFrameRateThrottleKey));
     }
   }
 }
@@ -1051,6 +1165,19 @@ void ShellSurfaceBase::OnWindowActivated(ActivationReason reason,
     DCHECK(gained_active != widget_->GetNativeWindow() || CanActivate());
     UpdateShadow();
   }
+}
+
+// Returns true if surface is currently being resized.
+bool ShellSurfaceBase::IsDragged() const {
+  if (in_extended_drag_)
+    return true;
+
+  if (!widget_)
+    return false;
+
+  ash::WindowState* window_state =
+      ash::WindowState::Get(widget_->GetNativeWindow());
+  return window_state->is_dragged();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1100,6 +1227,16 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
   params.shadow_type = views::Widget::InitParams::ShadowType::kNone;
   params.opacity = views::Widget::InitParams::WindowOpacity::kTranslucent;
   params.show_state = show_state;
+  if (initial_workspace_.has_value()) {
+    const std::string kToggleVisibleOnAllWorkspacesValue = "-1";
+    if (initial_workspace_ == kToggleVisibleOnAllWorkspacesValue) {
+      // If |initial_workspace_| is -1, window is visible on all workspaces.
+      params.visible_on_all_workspaces = true;
+    } else {
+      params.workspace = initial_workspace_.value();
+    }
+  }
+
   // Make shell surface a transient child if |parent_| has been set and
   // container_ isn't specified.
   aura::Window* root_window =
@@ -1113,7 +1250,10 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
   } else {
     params.parent = ash::Shell::GetContainer(root_window, container_);
   }
-  params.bounds = gfx::Rect(origin_, gfx::Size());
+  if (initial_bounds_)
+    params.bounds = *initial_bounds_;
+  else
+    params.bounds = gfx::Rect(origin_, gfx::Size());
 
   WMHelper::AppPropertyResolver::Params property_resolver_params;
   if (application_id_)
@@ -1142,9 +1282,9 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
                            : views::Widget::InitParams::Activatable::kNo;
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-  full_restore::ModifyWidgetParams(params.init_properties_container.GetProperty(
-                                       full_restore::kRestoreWindowIdKey),
-                                   &params);
+  app_restore::ModifyWidgetParams(params.init_properties_container.GetProperty(
+                                      app_restore::kRestoreWindowIdKey),
+                                  &params);
 #endif
 
   OverrideInitParams(&params);
@@ -1153,6 +1293,9 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
   widget_ = new ShellSurfaceWidget;
   widget_->Init(std::move(params));
   widget_->AddObserver(this);
+
+  // As setting the pinned mode may have come in earlier we apply it now.
+  UpdatePinned();
 
   aura::Window* window = widget_->GetNativeWindow();
   window->SetName(base::StringPrintf("ExoShellSurface-%d", shell_id++));
@@ -1197,6 +1340,8 @@ void ShellSurfaceBase::CreateShellSurfaceWidget(
   }
 
   root_surface()->OnDeskChanged(GetWindowDeskStateChanged(window));
+
+  WMHelper::GetInstance()->NotifyExoWindowCreated(widget_->GetNativeWindow());
 }
 
 ShellSurfaceBase::OverlayParams::OverlayParams(
@@ -1260,8 +1405,10 @@ void ShellSurfaceBase::UpdateSurfaceBounds() {
   origin += GetSurfaceOrigin().OffsetFromOrigin();
   origin -= ToFlooredVector2d(ScaleVector2d(
       root_surface_origin().OffsetFromOrigin(), 1.f / GetScale()));
-
-  host_window()->SetBounds(gfx::Rect(origin, host_window()->bounds().size()));
+  gfx::Rect surface_bounds(origin, host_window()->bounds().size());
+  if (host_window()->bounds() == surface_bounds)
+    return;
+  host_window()->SetBounds(surface_bounds);
 }
 
 void ShellSurfaceBase::UpdateShadow() {
@@ -1284,7 +1431,33 @@ void ShellSurfaceBase::UpdateShadow() {
     if (!shadow)
       return;
 
-    shadow->SetContentBounds(GetShadowBounds());
+    gfx::Rect shadow_bounds = GetShadowBounds();
+    gfx::Point origin = GetClientViewBounds().origin();
+
+    if (!window->GetProperty(aura::client::kUseWindowBoundsForShadow)) {
+      origin += GetSurfaceOrigin().OffsetFromOrigin();
+      origin -= ToFlooredVector2d(ScaleVector2d(
+          root_surface_origin().OffsetFromOrigin(), 1.f / GetScale()));
+      if (origin.x() != 0 || origin.y() != 0) {
+        shadow_bounds.set_origin(origin);
+        if (widget_) {
+          gfx::Point widget_origin =
+              widget_->GetWindowBoundsInScreen().origin();
+          origin += ToFlooredVector2d(
+              ScaleVector2d(gfx::Vector2d(widget_origin.x(), widget_origin.y()),
+                            1.f / GetScale()));
+          gfx::Rect bounds = geometry_;
+          bounds.set_origin(origin);
+          ash::Shell::Get()
+              ->resize_shadow_controller()
+              ->UpdateResizeShadowBoundsOfWindow(widget_->GetNativeWindow(),
+                                                 bounds);
+        }
+      }
+    }
+
+    shadow->SetContentBounds(shadow_bounds);
+
     // Surfaces that can't be activated are usually menus and tooltips. Use a
     // small style shadow for them.
     if (!CanActivate())
@@ -1319,8 +1492,20 @@ void ShellSurfaceBase::UpdateFrameType() {
 gfx::Rect ShellSurfaceBase::GetVisibleBounds() const {
   // Use |geometry_| if set, otherwise use the visual bounds of the surface.
   if (geometry_.IsEmpty()) {
-    return root_surface() ? gfx::Rect(root_surface()->content_size())
-                          : gfx::Rect();
+    gfx::Size size;
+    if (root_surface()) {
+      float int_part;
+      DCHECK(std::modf(root_surface()->content_size().width(), &int_part) ==
+                 0.0f &&
+             std::modf(root_surface()->content_size().height(), &int_part) ==
+                 0.0f);
+      size = gfx::ToCeiledSize(root_surface()->content_size());
+      if (client_submits_surfaces_in_pixel_coordinates()) {
+        float dsf = host_window()->layer()->device_scale_factor();
+        size = gfx::ScaleToRoundedSize(size, 1.0f / dsf);
+      }
+    }
+    return gfx::Rect(size);
   }
 
   const auto* screen = display::Screen::GetScreen();
@@ -1339,6 +1524,14 @@ gfx::Rect ShellSurfaceBase::GetClientViewBounds() const {
                    ->frame_view()
                    ->GetBoundsForClientView()
              : gfx::Rect(widget_->GetWindowBoundsInScreen().size());
+}
+
+gfx::Rect ShellSurfaceBase::GetWidgetBoundsFromVisibleBounds() const {
+  auto visible_bounds = GetVisibleBounds();
+  return widget_->non_client_view()
+             ? widget_->non_client_view()->GetWindowBoundsForClientBounds(
+                   visible_bounds)
+             : visible_bounds;
 }
 
 gfx::Rect ShellSurfaceBase::GetShadowBounds() const {
@@ -1366,6 +1559,14 @@ ShellSurfaceBase::CreateNonClientFrameViewInternal(views::Widget* widget) {
   if (has_frame_colors_)
     frame_view->SetFrameColors(active_frame_color_, inactive_frame_color_);
   return frame_view;
+}
+
+bool ShellSurfaceBase::ShouldExitFullscreenFromRestoreOrMaximized() {
+  if (widget_ && widget_->GetNativeWindow()) {
+    return widget_->GetNativeWindow()->GetProperty(
+        kRestoreOrMaximizeExitsFullscreen);
+  }
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1409,8 +1610,7 @@ void ShellSurfaceBase::SetParentInternal(aura::Window* parent) {
 bool ShellSurfaceBase::CalculateCanResize() const {
   if (overlay_widget_ && overlay_can_resize_.has_value())
     return *overlay_can_resize_;
-  return !movement_disabled_ &&
-         (minimum_size_.IsEmpty() || minimum_size_ != maximum_size_);
+  return !movement_disabled_ && GetCanResizeFromSizeConstraints();
 }
 
 void ShellSurfaceBase::CommitWidget() {
@@ -1438,6 +1638,11 @@ void ShellSurfaceBase::CommitWidget() {
   UpdateWidgetBounds();
   SurfaceTreeHost::UpdateHostWindowBounds();
   UpdateFrameType();
+  gfx::Rect bounds = geometry_;
+  if (!bounds.IsEmpty() && !widget_->GetNativeWindow()->GetProperty(
+                               aura::client::kUseWindowBoundsForShadow)) {
+    SetBoundsForShadows(absl::make_optional(bounds));
+  }
   UpdateShadow();
 
   // System modal container is used by clients to implement overlay
@@ -1466,11 +1671,46 @@ void ShellSurfaceBase::CommitWidget() {
 
   UpdateSurfaceBounds();
 
+  // Don't show yet if the shell surface doesn't have content or is minimized
+  // while waiting for content.
+  bool should_show =
+      !host_window()->bounds().IsEmpty() && !widget_->IsMinimized();
+  // Do not layout the window if the position should not be controlled by window
+  // manager. (popup, emulating x11 override direct, or requested not to move)
+  if (is_popup_ || movement_disabled_)
+    needs_layout_on_show_ = false;
+
+  // Do not center if the initial bounds is set.
+  if (initial_bounds_)
+    needs_layout_on_show_ = false;
+
   // Show widget if needed.
-  if (pending_show_widget_) {
+  if (pending_show_widget_ && should_show) {
     DCHECK(!widget_->IsClosed());
     DCHECK(!widget_->IsVisible());
     pending_show_widget_ = false;
+
+    auto* window = widget_->GetNativeWindow();
+    auto* window_state = ash::WindowState::Get(window);
+
+    // TODO(crbug.com/1261321): correct the initial origin once lacros can
+    // communicate it instead of centering.
+    if (window_state->IsMaximizedOrFullscreenOrPinned()) {
+      gfx::Size current_content_size = CalculatePreferredSize();
+      gfx::Rect restore_bounds = display::Screen::GetScreen()
+                                     ->GetDisplayNearestWindow(window)
+                                     .work_area();
+      if (!current_content_size.IsEmpty())
+        restore_bounds.ClampToCenteredSize(current_content_size);
+
+      window_state->SetRestoreBoundsInScreen(restore_bounds);
+    }
+
+    // TODO(crbug.com/1291592): Hook this up with the WM's window positioning
+    // logic.
+    if (needs_layout_on_show_)
+      widget_->CenterWindow(GetWidgetBoundsFromVisibleBounds().size());
+
     widget_->Show();
     if (has_grab_)
       StartCapture();
@@ -1490,6 +1730,25 @@ bool ShellSurfaceBase::IsFrameDecorationSupported(SurfaceFrameType frame_type) {
   // Popup doesn't support frame types other than NONE/SHADOW.
   return frame_type == SurfaceFrameType::SHADOW ||
          frame_type == SurfaceFrameType::NONE;
+}
+
+void ShellSurfaceBase::SetOrientationLock(
+    chromeos::OrientationType orientation_lock) {
+#if BUILDFLAG(IS_CHROMEOS_ASH)
+  TRACE_EVENT1("exo", "ShellSurfaceBase::SetOrientationLock",
+               "orientation_lock", static_cast<int>(orientation_lock));
+
+  if (!widget_) {
+    initial_orientation_lock_ = orientation_lock;
+    return;
+  }
+
+  ash::Shell* shell = ash::Shell::Get();
+  shell->screen_orientation_controller()->LockOrientationForWindow(
+      widget_->GetNativeWindow(), orientation_lock);
+#else
+  NOTREACHED();
+#endif  // BUILDFLAG(IS_CHROMEOS_ASH)
 }
 
 }  // namespace exo

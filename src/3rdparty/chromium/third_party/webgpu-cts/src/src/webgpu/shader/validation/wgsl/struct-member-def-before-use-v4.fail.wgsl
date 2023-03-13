@@ -2,11 +2,11 @@
 // is used.
 
 struct foo {
-  b : f32;
-  a : array<f32>;
+  b : f32
+  a : array<f32>
 };
 
-[[stage(fragment)]]
+@stage(fragment)
 fn main() {
   var f : foo;
   f.c = 2;

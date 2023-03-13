@@ -10,9 +10,23 @@ namespace switches {
 // Disable field trial tests configured in fieldtrial_testing_config.json.
 const char kDisableFieldTrialTestingConfig[] = "disable-field-trial-config";
 
+// Disable variations safe mode.
+const char kDisableVariationsSafeMode[] = "disable-variations-safe-mode";
+
 // TODO(asvitkine): Consider removing or renaming this functionality.
 // Enables the benchmarking extensions.
 const char kEnableBenchmarking[] = "enable-benchmarking";
+
+// Enable field trial tests configured in fieldtrial_testing_config.json. If the
+// "disable_fieldtrial_testing_config" GN flag is set to true, then this switch
+// is a no-op. Otherwise, for non-Chrome branded builds, the testing config is
+// already applied by default, unless the "--disable-field-trial-config",
+// "--force-fieldtrials", and/or "--variations-server-url" switches are passed.
+// It is however possible to apply the testing config as well as specify
+// additional field trials (using "--force-fieldtrials") by using this switch.
+// For Chrome-branded builds, the testing config is not enabled by default, so
+// this switch is required to enable it.
+const char kEnableFieldTrialTestingConfig[] = "enable-field-trial-config";
 
 // Fakes the channel of the browser for purposes of Variations filtering. This
 // is to be used for testing only. Possible values are "stable", "beta", "dev"
@@ -55,6 +69,11 @@ const char kVariationsServerURL[] = "variations-server-url";
 // requests to |kVariationsServerURL| fail. Requests to this URL will be
 // encrypted.
 const char kVariationsInsecureServerURL[] = "variations-insecure-server-url";
+
+// Enables delta-compression when fetching a new seed via the "first run" code
+// path on Android.
+const char kEnableFinchSeedDeltaCompression[] =
+    "enable-finch-seed-delta-compression";
 
 }  // namespace switches
 }  // namespace variations

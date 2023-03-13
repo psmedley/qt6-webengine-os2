@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "base/json/json_reader.h"
 #include "base/run_loop.h"
 #include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/extensions/extension_apitest.h"
@@ -12,6 +13,7 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/api/runtime/runtime_api.h"
 #include "extensions/browser/blocklist_extension_prefs.h"
 #include "extensions/browser/blocklist_state.h"
@@ -33,21 +35,10 @@ using ContextType = ExtensionBrowserTest::ContextType;
 class RuntimeApiTest : public ExtensionApiTest,
                        public testing::WithParamInterface<ContextType> {
  public:
-  RuntimeApiTest() = default;
+  RuntimeApiTest() : ExtensionApiTest(GetParam()) {}
   ~RuntimeApiTest() override = default;
   RuntimeApiTest(const RuntimeApiTest&) = delete;
   RuntimeApiTest& operator=(const RuntimeApiTest&) = delete;
-
-  const Extension* LoadExtensionWithParamOptions(const base::FilePath& path) {
-    return LoadExtension(path, {.load_as_service_worker =
-                                    GetParam() == ContextType::kServiceWorker});
-  }
-
-  bool RunTestWithParamOptions(const char* extension_name) {
-    return RunExtensionTest(
-        extension_name, {},
-        {.load_as_service_worker = GetParam() == ContextType::kServiceWorker});
-  }
 };
 
 INSTANTIATE_TEST_SUITE_P(PersistentBackground,
@@ -60,45 +51,36 @@ INSTANTIATE_TEST_SUITE_P(ServiceWorker,
 
 // Tests the privileged components of chrome.runtime.
 IN_PROC_BROWSER_TEST_P(RuntimeApiTest, ChromeRuntimePrivileged) {
-  ASSERT_TRUE(RunTestWithParamOptions("runtime/privileged")) << message_;
+  ASSERT_TRUE(RunExtensionTest("runtime/privileged")) << message_;
 }
 
 // Tests the unprivileged components of chrome.runtime.
 IN_PROC_BROWSER_TEST_P(RuntimeApiTest, ChromeRuntimeUnprivileged) {
   ASSERT_TRUE(StartEmbeddedTestServer());
-  ASSERT_TRUE(LoadExtensionWithParamOptions(
-      test_data_dir_.AppendASCII("runtime/content_script")));
+  ASSERT_TRUE(
+      LoadExtension(test_data_dir_.AppendASCII("runtime/content_script")));
 
   // The content script runs on this page.
   extensions::ResultCatcher catcher;
-  ui_test_utils::NavigateToURL(browser(),
-                               embedded_test_server()->GetURL("/title1.html"));
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
+      browser(), embedded_test_server()->GetURL("/title1.html")));
   EXPECT_TRUE(catcher.GetNextResult()) << message_;
 }
 
 IN_PROC_BROWSER_TEST_P(RuntimeApiTest, ChromeRuntimeUninstallURL) {
-  // TODO(https://crbug.com/977629): Currently, chrome.test.runWithUserGesture()
-  // doesn't support Service Worker-based extensions, so this is a workaround.
-  using ScopedUserGestureForTests =
-      ExtensionFunction::ScopedUserGestureForTests;
-  std::unique_ptr<ScopedUserGestureForTests> scoped_user_gesture;
-  if (GetParam() == ContextType::kServiceWorker)
-    scoped_user_gesture = std::make_unique<ScopedUserGestureForTests>();
-
   // Auto-confirm the uninstall dialog.
   extensions::ScopedTestDialogAutoConfirm auto_confirm(
       extensions::ScopedTestDialogAutoConfirm::ACCEPT);
   ExtensionTestMessageListener ready_listener("ready", false);
-  ASSERT_TRUE(
-      LoadExtensionWithParamOptions(test_data_dir_.AppendASCII("runtime")
-                                        .AppendASCII("uninstall_url")
-                                        .AppendASCII("sets_uninstall_url")));
+  ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("runtime")
+                                .AppendASCII("uninstall_url")
+                                .AppendASCII("sets_uninstall_url")));
   EXPECT_TRUE(ready_listener.WaitUntilSatisfied());
-  ASSERT_TRUE(RunTestWithParamOptions("runtime/uninstall_url")) << message_;
+  ASSERT_TRUE(RunExtensionTest("runtime/uninstall_url")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_P(RuntimeApiTest, GetPlatformInfo) {
-  ASSERT_TRUE(RunTestWithParamOptions("runtime/get_platform_info")) << message_;
+  ASSERT_TRUE(RunExtensionTest("runtime/get_platform_info")) << message_;
 }
 
 namespace {
@@ -115,6 +97,9 @@ std::string GetActiveUrl(Browser* browser) {
 class RuntimeAPIUpdateTest : public ExtensionApiTest {
  public:
   RuntimeAPIUpdateTest() {}
+
+  RuntimeAPIUpdateTest(const RuntimeAPIUpdateTest&) = delete;
+  RuntimeAPIUpdateTest& operator=(const RuntimeAPIUpdateTest&) = delete;
 
  protected:
   void SetUpOnMainThread() override {
@@ -155,8 +140,6 @@ class RuntimeAPIUpdateTest : public ExtensionApiTest {
 
  private:
   base::ScopedTempDir scoped_temp_dir_;
-
-  DISALLOW_COPY_AND_ASSIGN(RuntimeAPIUpdateTest);
 };
 
 }  // namespace
@@ -170,16 +153,12 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeRuntimeOpenOptionsPageError) {
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeRuntimeGetPlatformInfo) {
-  std::unique_ptr<base::Value> result(
+  base::Value::DictStorage dict = extension_function_test_utils::ToDictionary(
       extension_function_test_utils::RunFunctionAndReturnSingleResult(
           new RuntimeGetPlatformInfoFunction(), "[]", browser()));
-  ASSERT_TRUE(result.get() != NULL);
-  base::DictionaryValue* dict =
-      extension_function_test_utils::ToDictionary(result.get());
-  ASSERT_TRUE(dict != NULL);
-  EXPECT_TRUE(dict->HasKey("os"));
-  EXPECT_TRUE(dict->HasKey("arch"));
-  EXPECT_TRUE(dict->HasKey("nacl_arch"));
+  EXPECT_TRUE(dict.contains("os"));
+  EXPECT_TRUE(dict.contains("arch"));
+  EXPECT_TRUE(dict.contains("nacl_arch"));
 }
 
 // Tests chrome.runtime.getPackageDirectory with an app.
@@ -290,6 +269,95 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeRuntimeReload) {
   EXPECT_TRUE(reload_catcher.GetNextResult());
 }
 
+// Tests sending messages from a webpage in the extension using
+// chrome.runtime.sendMessage and responding to those from the extension's
+// service worker in a chrome.runtime.onMessage listener.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeRuntimeSendMessage) {
+  ASSERT_TRUE(
+      RunExtensionTest("runtime/send_message", {.page_url = "test.html"}));
+}
+
+// Simple test for chrome.runtime.getBackgroundPage with a persistent background
+// page.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeGetBackgroundPage) {
+  static constexpr char kManifest[] = R"(
+      {
+        "name": "getBackgroundPage",
+        "version": "1.0",
+        "background": {
+          "scripts": ["background.js"]
+        },
+        "manifest_version": 2
+      })";
+
+  static constexpr char kBackground[] = "window.backgroundExists = true;";
+  static constexpr char kTestPage[] = R"(<script src="test.js"></script>)";
+  static constexpr char kTestJS[] = R"(
+    chrome.test.runTests([
+      function getBackgroundPage() {
+        chrome.runtime.getBackgroundPage((page) => {
+          chrome.test.assertTrue(page.backgroundExists);
+          chrome.test.succeed();
+        });
+      }
+    ]);
+  )";
+
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  dir.WriteFile(FILE_PATH_LITERAL("background.js"), kBackground);
+  dir.WriteFile(FILE_PATH_LITERAL("test.html"), kTestPage);
+  dir.WriteFile(FILE_PATH_LITERAL("test.js"), kTestJS);
+
+  ASSERT_TRUE(RunExtensionTest(dir.UnpackedPath(), {.page_url = "test.html"},
+                               /*load_options=*/{}));
+}
+
+// Simple test for chrome.runtime.getBackgroundPage with an MV3 service worker
+// extension, which should return an error due to there being no background
+// page.
+IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ChromeGetBackgroundPageMV3) {
+  static constexpr char kManifest[] = R"(
+      {
+        "name": "getBackgroundPage",
+        "version": "1.0",
+        "background": {
+          "service_worker": "worker.js"
+        },
+        "manifest_version": 3
+      })";
+
+  static constexpr char kWorker[] = "// We're just expecting an error";
+  static constexpr char kTestPage[] = R"(<script src="test.js"></script>)";
+  static constexpr char kTestJS[] = R"(
+    chrome.test.runTests([
+      function getBackgroundPage() {
+        chrome.runtime.getBackgroundPage((page) => {
+          chrome.test.assertEq(undefined, page);
+          chrome.test.assertLastError('You do not have a background page.');
+          chrome.test.succeed();
+        });
+      },
+
+      async function getBackGroundPagePromise() {
+        await chrome.test.assertPromiseRejects(
+            chrome.runtime.getBackgroundPage(),
+            'Error: You do not have a background page.');
+        chrome.test.succeed();
+      }
+    ]);
+  )";
+
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  dir.WriteFile(FILE_PATH_LITERAL("worker.js"), kWorker);
+  dir.WriteFile(FILE_PATH_LITERAL("test.html"), kTestPage);
+  dir.WriteFile(FILE_PATH_LITERAL("test.js"), kTestJS);
+
+  ASSERT_TRUE(RunExtensionTest(dir.UnpackedPath(), {.page_url = "test.html"},
+                               /*load_options=*/{}));
+}
+
 // Tests that updating a terminated extension sends runtime.onInstalled event
 // with correct previousVersion.
 // Regression test for https://crbug.com/724563.
@@ -338,9 +406,9 @@ IN_PROC_BROWSER_TEST_P(RuntimeApiTest,
   ExtensionTestMessageListener ready_listener("ready", false);
   // Load an extension that has set an uninstall url.
   scoped_refptr<const extensions::Extension> extension =
-      LoadExtensionWithParamOptions(test_data_dir_.AppendASCII("runtime")
-                                        .AppendASCII("uninstall_url")
-                                        .AppendASCII("sets_uninstall_url"));
+      LoadExtension(test_data_dir_.AppendASCII("runtime")
+                        .AppendASCII("uninstall_url")
+                        .AppendASCII("sets_uninstall_url"));
   EXPECT_TRUE(ready_listener.WaitUntilSatisfied());
   ASSERT_TRUE(extension.get());
   extension_service()->AddExtension(extension.get());
@@ -363,10 +431,9 @@ IN_PROC_BROWSER_TEST_P(RuntimeApiTest,
 
   // Load the same extension again, except blocklist it after installation.
   ExtensionTestMessageListener ready_listener_reload("ready", false);
-  extension =
-      LoadExtensionWithParamOptions(test_data_dir_.AppendASCII("runtime")
-                                        .AppendASCII("uninstall_url")
-                                        .AppendASCII("sets_uninstall_url"));
+  extension = LoadExtension(test_data_dir_.AppendASCII("runtime")
+                                .AppendASCII("uninstall_url")
+                                .AppendASCII("sets_uninstall_url"));
   EXPECT_TRUE(ready_listener_reload.WaitUntilSatisfied());
   extension_service()->AddExtension(extension.get());
   ASSERT_TRUE(extension_service()->IsExtensionEnabled(extension->id()));
@@ -386,6 +453,68 @@ IN_PROC_BROWSER_TEST_P(RuntimeApiTest,
   EXPECT_EQ(1, tabs->count());
   EXPECT_TRUE(content::WaitForLoadStop(tabs->GetActiveWebContents()));
   EXPECT_EQ(url::kAboutBlankURL, GetActiveUrl(browser()));
+}
+
+// Used for tests that only make sense with a background page.
+using BackgroundPageOnlyRuntimeApiTest = RuntimeApiTest;
+INSTANTIATE_TEST_SUITE_P(All,
+                         BackgroundPageOnlyRuntimeApiTest,
+                         testing::Values(ContextType::kPersistentBackground));
+
+// Regression test for https://crbug.com/1298195 - whether a tab opened
+// from the background page (via `window.open(...)`) will be correctly
+// marked as `mojom::ViewType::kTabContents`.
+//
+// This test is a BackgroundPageOnlyRuntimeApiTest, because service workers
+// can call neither 1) window.open nor 2) chrome.extension.getViews.
+IN_PROC_BROWSER_TEST_P(BackgroundPageOnlyRuntimeApiTest,
+                       GetViewsOfWindowOpenedFromBackgroundPage) {
+  ASSERT_EQ(GetParam(), ContextType::kPersistentBackground);
+  static constexpr char kManifest[] = R"(
+      {
+        "name": "test",
+        "version": "1.0",
+        "background": {"scripts": ["background.js"]},
+        "manifest_version": 2
+      })";
+  TestExtensionDir dir;
+  dir.WriteManifest(kManifest);
+  dir.WriteFile(FILE_PATH_LITERAL("background.js"), "");
+  dir.WriteFile(FILE_PATH_LITERAL("index.htm"), "");
+
+  const Extension* extension = LoadExtension(dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  GURL new_tab_url = extension->GetResourceURL("/index.htm");
+  {
+    content::TestNavigationObserver nav_observer(new_tab_url);
+    nav_observer.StartWatchingNewWebContents();
+    ASSERT_TRUE(browsertest_util::ExecuteScriptInBackgroundPageNoWait(
+        browser()->profile(), extension->id(),
+        R"(  window.open('/index.htm', '');  )"));
+    nav_observer.Wait();
+  }
+
+  {
+    content::DOMMessageQueue message_queue;
+    static constexpr char kScript[] = R"(
+        const foundWindows = chrome.extension.getViews({type: 'tab'});
+        domAutomationController.send(foundWindows.length);
+        domAutomationController.send(foundWindows[0].location.href);
+    )";
+    ASSERT_TRUE(browsertest_util::ExecuteScriptInBackgroundPageNoWait(
+        browser()->profile(), extension->id(), kScript));
+
+    std::string json;
+    ASSERT_TRUE(message_queue.WaitForMessage(&json));
+    ASSERT_EQ("1", json);
+
+    ASSERT_TRUE(message_queue.WaitForMessage(&json));
+    absl::optional<base::Value> url =
+        base::JSONReader::Read(json, base::JSON_ALLOW_TRAILING_COMMAS);
+    ASSERT_TRUE(url->is_string());
+    ASSERT_EQ(new_tab_url.spec(), url->GetString());
+  }
 }
 
 }  // namespace extensions

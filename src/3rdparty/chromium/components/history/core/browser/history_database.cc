@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -26,8 +27,8 @@
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
-#if defined(OS_MAC)
-#include "base/mac/mac_util.h"
+#if BUILDFLAG(IS_APPLE)
+#include "base/mac/backup_util.h"
 #endif
 
 namespace history {
@@ -37,7 +38,7 @@ namespace {
 // Current version number. We write databases at the "current" version number,
 // but any previous version that can read the "compatible" one can make do with
 // our database without *too* many bad effects.
-const int kCurrentVersionNumber = 48;
+const int kCurrentVersionNumber = 53;
 const int kCompatibleVersionNumber = 16;
 const char kEarlyExpirationThresholdKey[] = "early_expiration_threshold";
 
@@ -108,9 +109,9 @@ sql::InitStatus HistoryDatabase::Init(const base::FilePath& history_name) {
   if (!committer.Begin())
     return LogInitFailure(InitStep::TRANSACTION_BEGIN);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_APPLE)
   // Exclude the history file from backups.
-  base::mac::SetFileBackupExclusion(history_name);
+  base::mac::SetBackupExclusion(history_name);
 #endif
 
   // Prime the cache.
@@ -165,26 +166,6 @@ void HistoryDatabase::ComputeDatabaseMetrics(
     return;
   UMA_HISTOGRAM_COUNTS_1M("History.VisitTableCount", visit_count.ColumnInt(0));
 
-  base::Time one_week_ago = base::Time::Now() - base::TimeDelta::FromDays(7);
-  sql::Statement weekly_visit_sql(db_.GetUniqueStatement(
-      "SELECT count(*) FROM visits WHERE visit_time > ?"));
-  weekly_visit_sql.BindInt64(0, one_week_ago.ToInternalValue());
-  int weekly_visit_count = 0;
-  if (weekly_visit_sql.Step())
-    weekly_visit_count = weekly_visit_sql.ColumnInt(0);
-  UMA_HISTOGRAM_COUNTS_1M("History.WeeklyVisitCount", weekly_visit_count);
-
-  base::Time one_month_ago = base::Time::Now() - base::TimeDelta::FromDays(30);
-  sql::Statement monthly_visit_sql(db_.GetUniqueStatement(
-      "SELECT count(*) FROM visits WHERE visit_time > ? AND visit_time <= ?"));
-  monthly_visit_sql.BindInt64(0, one_month_ago.ToInternalValue());
-  monthly_visit_sql.BindInt64(1, one_week_ago.ToInternalValue());
-  int older_visit_count = 0;
-  if (monthly_visit_sql.Step())
-    older_visit_count = monthly_visit_sql.ColumnInt(0);
-  UMA_HISTOGRAM_COUNTS_1M("History.MonthlyVisitCount",
-                          older_visit_count + weekly_visit_count);
-
   UMA_HISTOGRAM_TIMES("History.DatabaseBasicMetricsTime",
                       base::TimeTicks::Now() - start_time);
 
@@ -194,6 +175,7 @@ void HistoryDatabase::ComputeDatabaseMetrics(
     start_time = base::TimeTicks::Now();
 
     // Collect all URLs visited within the last month.
+    base::Time one_month_ago = base::Time::Now() - base::Days(30);
     sql::Statement url_sql(db_.GetUniqueStatement(
         "SELECT url, last_visit_time FROM urls WHERE last_visit_time > ?"));
     url_sql.BindInt64(0, one_month_ago.ToInternalValue());
@@ -204,6 +186,7 @@ void HistoryDatabase::ComputeDatabaseMetrics(
     int month_url_count = 0;
     std::set<std::string> week_hosts;
     std::set<std::string> month_hosts;
+    base::Time one_week_ago = base::Time::Now() - base::Days(7);
     while (url_sql.Step()) {
       GURL url(url_sql.ColumnString(0));
       base::Time visit_time =
@@ -229,7 +212,7 @@ void HistoryDatabase::ComputeDatabaseMetrics(
 int HistoryDatabase::CountUniqueHostsVisitedLastMonth() {
   base::TimeTicks start_time = base::TimeTicks::Now();
   // Collect all URLs visited within the last month.
-  base::Time one_month_ago = base::Time::Now() - base::TimeDelta::FromDays(30);
+  base::Time one_month_ago = base::Time::Now() - base::Days(30);
 
   sql::Statement url_sql(
       db_.GetUniqueStatement("SELECT url FROM urls "
@@ -284,7 +267,7 @@ int HistoryDatabase::CountUniqueDomainsVisited(base::Time begin_time,
 
 void HistoryDatabase::BeginExclusiveMode() {
   // We need to use a PRAGMA statement here as the DB has already been created.
-  ignore_result(db_.Execute("PRAGMA locking_mode=EXCLUSIVE"));
+  std::ignore = db_.Execute("PRAGMA locking_mode=EXCLUSIVE");
 }
 
 // static
@@ -337,7 +320,7 @@ bool HistoryDatabase::RecreateAllTablesButURL() {
 void HistoryDatabase::Vacuum() {
   DCHECK_EQ(0, db_.transaction_nesting()) <<
       "Can not have a transaction when vacuuming.";
-  ignore_result(db_.Execute("VACUUM"));
+  std::ignore = db_.Execute("VACUUM");
 }
 
 void HistoryDatabase::TrimMemory() {
@@ -425,7 +408,7 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   }
 
   if (cur_version == 16) {
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
     // In this version we bring the time format on Mac & Linux in sync with the
     // Windows version so that profiles can be moved between computers.
     MigrateTimeEpoch();
@@ -469,7 +452,7 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
 
   if (cur_version == 21) {
     // The android_urls table's data schemal was changed in version 21.
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     if (!MigrateToVersion22())
       return LogMigrationFailure(21);
 #endif
@@ -670,6 +653,41 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
     meta_table_.SetVersionNumber(cur_version);
   }
 
+  if (cur_version == 48) {
+    if (!MigrateVisitsWithoutOpenerVisitColumnAndDropPubliclyRoutableColumn())
+      return LogMigrationFailure(48);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 49) {
+    if (!MigrateContentAnnotationsAddVisibilityScore())
+      return LogMigrationFailure(49);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 50) {
+    if (!MigrateContextAnnotationsAddTotalForegroundDuration())
+      return LogMigrationFailure(50);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 51) {
+    if (!MigrateEmbedderDownloadData())
+      return LogMigrationFailure(51);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
+  if (cur_version == 52) {
+    if (!MigrateContentAnnotationsAddSearchMetadata())
+      return LogMigrationFailure(52);
+    cur_version++;
+    meta_table_.SetVersionNumber(cur_version);
+  }
+
   // =========================       ^^ new migration code goes here ^^
   // ADDING NEW MIGRATION CODE
   // =========================
@@ -694,21 +712,21 @@ sql::InitStatus HistoryDatabase::EnsureCurrentVersion() {
   return sql::INIT_OK;
 }
 
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
 void HistoryDatabase::MigrateTimeEpoch() {
   // Update all the times in the URLs and visits table in the main database.
-  ignore_result(db_.Execute(
+  std::ignore = db_.Execute(
       "UPDATE urls "
       "SET last_visit_time = last_visit_time + 11644473600000000 "
-      "WHERE id IN (SELECT id FROM urls WHERE last_visit_time > 0);"));
-  ignore_result(db_.Execute(
+      "WHERE id IN (SELECT id FROM urls WHERE last_visit_time > 0);");
+  std::ignore = db_.Execute(
       "UPDATE visits "
       "SET visit_time = visit_time + 11644473600000000 "
-      "WHERE id IN (SELECT id FROM visits WHERE visit_time > 0);"));
-  ignore_result(db_.Execute(
+      "WHERE id IN (SELECT id FROM visits WHERE visit_time > 0);");
+  std::ignore = db_.Execute(
       "UPDATE segment_usage "
       "SET time_slot = time_slot + 11644473600000000 "
-      "WHERE id IN (SELECT id FROM segment_usage WHERE time_slot > 0);"));
+      "WHERE id IN (SELECT id FROM segment_usage WHERE time_slot > 0);");
 }
 #endif
 

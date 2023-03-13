@@ -14,11 +14,10 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/bind.h"
-#include "base/bits.h"
 #include "base/containers/flat_map.h"
-#include "base/cxx17_backports.h"
 #include "base/debug/crash_logging.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/checked_math.h"
@@ -48,6 +47,7 @@
 #include "gpu/command_buffer/service/gles2_cmd_copy_tex_image.h"
 #include "gpu/command_buffer/service/gles2_cmd_copy_texture_chromium.h"
 #include "gpu/command_buffer/service/gpu_tracer.h"
+#include "gpu/command_buffer/service/image_factory.h"
 #include "gpu/command_buffer/service/logger.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/query_manager.h"
@@ -63,9 +63,10 @@
 #include "gpu/config/gpu_finch_features.h"
 #include "gpu/vulkan/buildflags.h"
 #include "skia/ext/legacy_display_globals.h"
+#include "skia/ext/rgba_to_yuva.h"
 #include "third_party/libyuv/include/libyuv/planar_functions.h"
 #include "third_party/skia/include/core/SkCanvas.h"
-#include "third_party/skia/include/core/SkDeferredDisplayListRecorder.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/core/SkSurfaceProps.h"
@@ -75,8 +76,9 @@
 #include "third_party/skia/include/gpu/GrBackendSurface.h"
 #include "third_party/skia/include/gpu/GrDirectContext.h"
 #include "third_party/skia/include/gpu/GrYUVABackendTextures.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/buffer_format_util.h"
-#include "ui/gfx/skia_util.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_gl_api_implementation.h"
 #include "ui/gl/gl_surface.h"
@@ -87,9 +89,9 @@
 #include "gpu/vulkan/vulkan_device_queue.h"
 #endif  // BUILDFLAG(ENABLE_VULKAN)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "gpu/command_buffer/service/shared_image_backing_factory_d3d.h"
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
 
 // Local versions of the SET_GL_ERROR macros
 #define LOCAL_SET_GL_ERROR(error, function_name, msg) \
@@ -123,14 +125,17 @@ class ScopedGLErrorSuppressor {
       : function_name_(function_name), error_state_(error_state) {
     ERRORSTATE_COPY_REAL_GL_ERRORS_TO_WRAPPER(error_state_, function_name_);
   }
+
+  ScopedGLErrorSuppressor(const ScopedGLErrorSuppressor&) = delete;
+  ScopedGLErrorSuppressor& operator=(const ScopedGLErrorSuppressor&) = delete;
+
   ~ScopedGLErrorSuppressor() {
     ERRORSTATE_CLEAR_REAL_GL_ERRORS(error_state_, function_name_);
   }
 
  private:
   const char* function_name_;
-  gles2::ErrorState* error_state_;
-  DISALLOW_COPY_AND_ASSIGN(ScopedGLErrorSuppressor);
+  raw_ptr<gles2::ErrorState> error_state_;
 };
 
 // Temporarily changes a decoder's bound texture and restore it when this
@@ -150,13 +155,14 @@ class ScopedTextureBinder {
       gr_context->resetContext(kTextureBinding_GrGLBackendState);
   }
 
+  ScopedTextureBinder(const ScopedTextureBinder&) = delete;
+  ScopedTextureBinder& operator=(const ScopedTextureBinder&) = delete;
+
   ~ScopedTextureBinder() { state_->api()->glBindTextureFn(target_, 0); }
 
  private:
-  gles2::ContextState* state_;
+  raw_ptr<gles2::ContextState> state_;
   GLenum target_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedTextureBinder);
 };
 
 // Temporarily changes a decoder's PIXEL_UNPACK_BUFFER to 0 and set pixel
@@ -184,10 +190,11 @@ class ScopedPixelUnpackState {
                                kPixelStore_GrGLBackendState);
     }
   }
-  ~ScopedPixelUnpackState() = default;
 
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScopedPixelUnpackState);
+  ScopedPixelUnpackState(const ScopedPixelUnpackState&) = delete;
+  ScopedPixelUnpackState& operator=(const ScopedPixelUnpackState&) = delete;
+
+  ~ScopedPixelUnpackState() = default;
 };
 
 // Commands that are explicitly listed as OK to occur between
@@ -238,10 +245,13 @@ class SharedImageProviderImpl final : public cc::SharedImageProvider {
 
   ~SharedImageProviderImpl() override { read_accessors_.clear(); }
 
-  sk_sp<SkImage> OpenSharedImageForRead(const gpu::Mailbox& mailbox) override {
+  sk_sp<SkImage> OpenSharedImageForRead(const gpu::Mailbox& mailbox,
+                                        Error& error) override {
     auto it = read_accessors_.find(mailbox);
-    if (it != read_accessors_.end())
+    error = Error::kNoError;
+    if (it != read_accessors_.end()) {
       return it->second.read_access_sk_image;
+    }
 
     auto shared_image_skia =
         shared_image_factory_->ProduceSkia(mailbox, shared_context_state_);
@@ -251,6 +261,7 @@ class SharedImageProviderImpl final : public cc::SharedImageProvider {
                               ("Attempting to operate on unknown mailbox:" +
                                mailbox.ToDebugString())
                                   .c_str());
+      error = Error::kUnknownMailbox;
       return nullptr;
     }
 
@@ -265,6 +276,7 @@ class SharedImageProviderImpl final : public cc::SharedImageProvider {
                               ("Couldn't access shared image for mailbox:" +
                                mailbox.ToDebugString())
                                   .c_str());
+      error = Error::kNoAccess;
       return nullptr;
     }
 
@@ -281,6 +293,7 @@ class SharedImageProviderImpl final : public cc::SharedImageProvider {
       ERRORSTATE_SET_GL_ERROR(error_state_, GL_INVALID_OPERATION,
                               "SharedImageProviderImpl::OpenSharedImageForRead",
                               "Couldn't create output SkImage.");
+      error = Error::kSkImageCreationFailed;
       return nullptr;
     }
 
@@ -290,11 +303,11 @@ class SharedImageProviderImpl final : public cc::SharedImageProvider {
   }
 
  private:
-  SharedImageRepresentationFactory* shared_image_factory_;
+  raw_ptr<SharedImageRepresentationFactory> shared_image_factory_;
   scoped_refptr<SharedContextState> shared_context_state_;
-  SkSurface* output_surface_;
-  std::vector<GrBackendSemaphore>* end_semaphores_;
-  gles2::ErrorState* error_state_;
+  raw_ptr<SkSurface> output_surface_;
+  raw_ptr<std::vector<GrBackendSemaphore>> end_semaphores_;
+  raw_ptr<gles2::ErrorState> error_state_;
 
   struct SharedImageReadAccess {
     std::unique_ptr<SharedImageRepresentationSkia> shared_image_skia;
@@ -318,7 +331,6 @@ class RasterCommandsCompletedQuery : public QueryManager::Query {
 
   // Overridden from QueryManager::Query:
   void Begin() override {
-    DCHECK(!begin_time_);
     MarkAsActive();
     begin_time_.emplace(base::TimeTicks::Now());
   }
@@ -425,8 +437,13 @@ class RasterDecoderImpl final : public RasterDecoder,
                     const GpuPreferences& gpu_preferences,
                     MemoryTracker* memory_tracker,
                     SharedImageManager* shared_image_manager,
+                    ImageFactory* image_factory,
                     scoped_refptr<SharedContextState> shared_context_state,
                     bool is_privileged);
+
+  RasterDecoderImpl(const RasterDecoderImpl&) = delete;
+  RasterDecoderImpl& operator=(const RasterDecoderImpl&) = delete;
+
   ~RasterDecoderImpl() override;
 
   gles2::GLES2Util* GetGLES2Util() override { return &util_; }
@@ -605,7 +622,7 @@ class RasterDecoderImpl final : public RasterDecoder,
   }
 
   void FlushToWorkAroundMacCrashes() {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     if (!shared_context_state_->GrContextIsGL())
       return;
     // This function does aggressive flushes to work around crashes in the
@@ -734,10 +751,33 @@ class RasterDecoderImpl final : public RasterDecoder,
                                         GLuint v_offset,
                                         GLuint v_stride,
                                         const volatile GLbyte* mailbox);
+
+  // Return true if all of `sk_yuv_color_space`, `sk_plane_config`,
+  // `sk_subsampling`, `rgba_image, `num_yuva_images`, and `yuva_images` were
+  // successfully populated. Return false on error. If this returns false, some
+  // of the output arguments may be left populated.
+  bool ConvertYUVACommon(
+      const char* function_name,
+      GLenum yuv_color_space,
+      GLenum plane_config,
+      GLenum subsampling,
+      const volatile GLbyte* raw_mailboxes,
+      SkYUVColorSpace& sk_yuv_color_space,
+      SkYUVAInfo::PlaneConfig& sk_plane_config,
+      SkYUVAInfo::Subsampling& sk_subsampling,
+      std::unique_ptr<SharedImageRepresentationSkia>& rgba_image,
+      int& num_yuva_images,
+      std::array<std::unique_ptr<SharedImageRepresentationSkia>,
+                 SkYUVAInfo::kMaxPlanes>& yuva_images);
+
   void DoConvertYUVAMailboxesToRGBINTERNAL(GLenum yuv_color_space,
                                            GLenum plane_config,
                                            GLenum subsampling,
                                            const volatile GLbyte* mailboxes);
+  void DoConvertRGBAToYUVAMailboxesINTERNAL(GLenum yuv_color_space,
+                                            GLenum plane_config,
+                                            GLenum subsampling,
+                                            const volatile GLbyte* mailboxes);
 
   void DoLoseContextCHROMIUM(GLenum current, GLenum other);
   void DoBeginRasterCHROMIUM(GLuint sk_color,
@@ -745,6 +785,7 @@ class RasterDecoderImpl final : public RasterDecoder,
                              GLuint msaa_sample_count,
                              MsaaMode msaa_mode,
                              GLboolean can_use_lcd_text,
+                             GLboolean visible,
                              const volatile GLbyte* key);
   void DoRasterCHROMIUM(GLuint raster_shm_id,
                         GLuint raster_shm_offset,
@@ -782,12 +823,22 @@ class RasterDecoderImpl final : public RasterDecoder,
     bool sync_cpu = gpu::ShouldVulkanSyncCpuForSkiaSubmit(
         shared_context_state_->vk_context_provider());
     if (signal_semaphores.empty()) {
-      if (surface)
+      if (surface) {
         surface->flush();
-      else
+      } else {
         gr_context()->flush();
-      if (sync_cpu)
+      }
+
+      // If DrDc is enabled, submit the gr_context() to ensure correct ordering
+      // of vulkan commands between raster and display compositor.
+      // TODO(vikassoni): This submit could be happening more often than
+      // intended resulting in perf penalty. Explore ways to reduce it by
+      // trying to issue submit only once per draw call for both gpu main and
+      // drdc thread gr_context. Also add metric to see how often submits are
+      // happening per frame.
+      if (sync_cpu || is_drdc_enabled_) {
         gr_context()->submit(sync_cpu);
+      }
       return;
     }
 
@@ -869,11 +920,11 @@ class RasterDecoderImpl final : public RasterDecoder,
   // Number of commands remaining to be processed in DoCommands().
   int commands_to_process_ = 0;
 
-  bool supports_gpu_raster_ = false;
-  bool supports_oop_raster_ = false;
+  bool gpu_raster_enabled_ = false;
+  bool use_gpu_raster_ = false;
+  bool supports_oop_canvas_ = false;
+  bool texture_storage_image_enabled_ = false;
   bool use_passthrough_ = false;
-  bool use_ddl_ = false;
-  bool use_ddl_in_current_raster_session_ = false;
 
   // The current decoder error communicates the decoder error through command
   // processing functions that do not return the error value. Should be set
@@ -913,17 +964,19 @@ class RasterDecoderImpl final : public RasterDecoder,
   std::unique_ptr<SharedImageRepresentationSkia> shared_image_;
   std::unique_ptr<SharedImageRepresentationSkia::ScopedWriteAccess>
       scoped_shared_image_write_;
-  SkSurface* sk_surface_ = nullptr;
+
+  std::unique_ptr<SharedImageRepresentationRaster> shared_image_raster_;
+  std::unique_ptr<SharedImageRepresentationRaster::ScopedWriteAccess>
+      scoped_shared_image_raster_write_;
+
+  raw_ptr<SkSurface> sk_surface_ = nullptr;
   std::unique_ptr<SharedImageProviderImpl> paint_op_shared_image_provider_;
 
   sk_sp<SkSurface> sk_surface_for_testing_;
   std::vector<GrBackendSemaphore> end_semaphores_;
   std::unique_ptr<cc::ServicePaintCache> paint_cache_;
 
-  std::unique_ptr<SkDeferredDisplayListRecorder> recorder_;
-  sk_sp<SkDeferredDisplayList> ddl_;
-  absl::optional<SkDeferredDisplayList::ProgramIterator> program_iterator_;
-  SkCanvas* raster_canvas_ = nullptr;  // ptr into recorder_ or sk_surface_
+  raw_ptr<SkCanvas> raster_canvas_ = nullptr;
   std::vector<SkDiscardableHandleId> locked_handles_;
 
   // Tracing helpers.
@@ -937,11 +990,13 @@ class RasterDecoderImpl final : public RasterDecoder,
 
   bool is_privileged_ = false;
 
-  gl::GLApi* api_ = nullptr;
+  const bool is_raw_draw_enabled_;
+
+  const bool is_drdc_enabled_;
+
+  raw_ptr<gl::GLApi> api_ = nullptr;
 
   base::WeakPtrFactory<DecoderContext> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(RasterDecoderImpl);
 };
 
 constexpr RasterDecoderImpl::CommandInfo RasterDecoderImpl::command_info[] = {
@@ -965,12 +1020,13 @@ RasterDecoder* RasterDecoder::Create(
     const GpuPreferences& gpu_preferences,
     MemoryTracker* memory_tracker,
     SharedImageManager* shared_image_manager,
+    ImageFactory* image_factory,
     scoped_refptr<SharedContextState> shared_context_state,
     bool is_privileged) {
-  return new RasterDecoderImpl(client, command_buffer_service, outputter,
-                               gpu_feature_info, gpu_preferences,
-                               memory_tracker, shared_image_manager,
-                               std::move(shared_context_state), is_privileged);
+  return new RasterDecoderImpl(
+      client, command_buffer_service, outputter, gpu_feature_info,
+      gpu_preferences, memory_tracker, shared_image_manager, image_factory,
+      std::move(shared_context_state), is_privileged);
 }
 
 RasterDecoder::RasterDecoder(DecoderClient* client,
@@ -1022,6 +1078,7 @@ RasterDecoderImpl::RasterDecoderImpl(
     const GpuPreferences& gpu_preferences,
     MemoryTracker* memory_tracker,
     SharedImageManager* shared_image_manager,
+    ImageFactory* image_factory,
     scoped_refptr<SharedContextState> shared_context_state,
     bool is_privileged)
     : RasterDecoder(client, command_buffer_service, outputter),
@@ -1029,9 +1086,15 @@ RasterDecoderImpl::RasterDecoderImpl(
       disable_legacy_mailbox_(
           shared_image_manager &&
           shared_image_manager->display_context_on_another_thread()),
-      supports_gpu_raster_(
+      gpu_raster_enabled_(
           gpu_feature_info.status_values[GPU_FEATURE_TYPE_GPU_RASTERIZATION] ==
           kGpuFeatureStatusEnabled),
+      supports_oop_canvas_(
+          gpu_feature_info
+              .status_values[GPU_FEATURE_TYPE_CANVAS_OOP_RASTERIZATION] ==
+          kGpuFeatureStatusEnabled),
+      texture_storage_image_enabled_(
+          image_factory && image_factory->SupportsCreateAnonymousImage()),
       use_passthrough_(gles2::PassthroughCommandDecoderSupported() &&
                        gpu_preferences.use_passthrough_cmd_decoder),
       gpu_preferences_(gpu_preferences),
@@ -1050,7 +1113,9 @@ RasterDecoderImpl::RasterDecoderImpl(
       font_manager_(base::MakeRefCounted<ServiceFontManager>(
           this,
           gpu_preferences_.disable_oopr_debug_crash_dump)),
-      is_privileged_(is_privileged) {
+      is_privileged_(is_privileged),
+      is_raw_draw_enabled_(features::IsUsingRawDraw()),
+      is_drdc_enabled_(features::IsDrDcEnabled()) {
   DCHECK(shared_context_state_);
   shared_context_state_->AddContextLostObserver(this);
 }
@@ -1102,17 +1167,15 @@ ContextResult RasterDecoderImpl::Initialize(
   query_manager_ = std::make_unique<RasterQueryManager>(shared_context_state_);
 
   if (attrib_helper.enable_oop_rasterization) {
-    if (!features().chromium_raster_transport) {
-      LOG(ERROR) << "ContextResult::kFatalFailure: "
-                    "chromium_raster_transport not present";
+    if (!gpu_raster_enabled_) {
+      LOG(ERROR) << "ContextResult::kFatalFailure: GPU raster is disabled";
       Destroy(true);
       return ContextResult::kFatalFailure;
     }
 
-    supports_oop_raster_ = !!shared_context_state_->gr_context();
-    if (supports_oop_raster_)
-      paint_cache_ = std::make_unique<cc::ServicePaintCache>();
-    use_ddl_ = gpu_preferences_.enable_oop_rasterization_ddl;
+    DCHECK(gr_context());
+    use_gpu_raster_ = true;
+    paint_cache_ = std::make_unique<cc::ServicePaintCache>();
   }
 
   return ContextResult::kSuccess;
@@ -1125,7 +1188,7 @@ void RasterDecoderImpl::Destroy(bool have_context) {
   DCHECK(!have_context || shared_context_state_->context()->IsCurrent(nullptr));
 
   if (have_context) {
-    if (supports_oop_raster_) {
+    if (use_gpu_raster_) {
       transfer_cache()->DeleteAllEntriesForDecoder(raster_decoder_id_);
     }
 
@@ -1195,6 +1258,9 @@ bool RasterDecoderImpl::MakeCurrent() {
   // Rebind textures if the service ids may have changed.
   RestoreAllExternalTextureBindingsIfNeeded();
 
+  // We're going to use skia, so make sure we reset context afterwards.
+  shared_context_state_->set_need_context_state_reset(true);
+
   return true;
 }
 
@@ -1213,16 +1279,15 @@ gl::GLSurface* RasterDecoderImpl::GetGLSurface() {
 Capabilities RasterDecoderImpl::GetCapabilities() {
   // TODO(enne): reconcile this with gles2_cmd_decoder's capability settings.
   Capabilities caps;
-  caps.gpu_rasterization = supports_gpu_raster_;
-  caps.supports_oop_raster = supports_oop_raster_;
+  caps.gpu_rasterization = use_gpu_raster_;
+  caps.supports_oop_raster = use_gpu_raster_;
   caps.gpu_memory_buffer_formats =
       feature_info()->feature_flags().gpu_memory_buffer_formats;
   caps.texture_target_exception_list =
       gpu_preferences_.texture_target_exception_list;
   caps.texture_format_bgra8888 =
       feature_info()->feature_flags().ext_texture_format_bgra8888;
-  caps.texture_storage_image =
-      feature_info()->feature_flags().chromium_texture_storage_image;
+  caps.texture_storage_image = texture_storage_image_enabled_;
   caps.texture_storage = feature_info()->feature_flags().ext_texture_storage;
   // TODO(piman): have a consistent limit in shared image backings.
   // https://crbug.com/960588
@@ -1276,10 +1341,10 @@ Capabilities RasterDecoderImpl::GetCapabilities() {
     caps.texture_half_float_linear =
         feature_info()->feature_flags().enable_texture_half_float_linear;
   }
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   caps.shared_image_swap_chain =
       SharedImageBackingFactoryD3D::IsSwapChainSupported();
-#endif  // OS_WIN
+#endif  // BUILDFLAG(IS_WIN)
   caps.disable_legacy_mailbox = disable_legacy_mailbox_;
   return caps;
 }
@@ -1516,7 +1581,7 @@ error::Error RasterDecoderImpl::DoCommandsImpl(unsigned int num_commands,
 
     const unsigned int arg_count = size - 1;
     unsigned int command_index = command - kFirstRasterCommand;
-    if (command_index < base::size(command_info)) {
+    if (command_index < std::size(command_info)) {
       const CommandInfo& info = command_info[command_index];
       if (sk_surface_) {
         if (!AllowedBetweenBeginEndRaster(command)) {
@@ -1589,7 +1654,7 @@ error::Error RasterDecoderImpl::DoCommandsImpl(unsigned int num_commands,
                << GetCommandName(command);
   }
 
-  if (supports_oop_raster_)
+  if (use_gpu_raster_)
     client()->ScheduleGrContextCleanup();
 
   return result;
@@ -2083,9 +2148,10 @@ void RasterDecoderImpl::DoCopySubTextureINTERNAL(
     return;
   }
 
-  if (!shared_context_state_->GrContextIsGL() ||
-      base::FeatureList::IsEnabled(features::kCanvasOopRasterization)) {
-    // Use Skia to copy texture if raster's gr_context() is not using GL.
+  if (!shared_context_state_->GrContextIsGL() || supports_oop_canvas_) {
+    // Use Skia to copy texture if raster's gr_context() is not using GL. Or if
+    // we the oop canvas is enabled, so canvas can allocate shared images that
+    // doesn't support GLES2 access (i.e WrappedSkImage).
     DoCopySubTextureINTERNALSkia(xoffset, yoffset, x, y, width, height,
                                  unpack_flip_y, source_mailbox, dest_mailbox);
   } else if (use_passthrough_) {
@@ -2354,7 +2420,7 @@ void RasterDecoderImpl::DoCopySubTextureINTERNALGL(
       GetFeatureInfo(), source_target, source_level, source_internal_format,
       source_type, dest_target, dest_level, dest_internal_format, unpack_flip_y,
       NeedsUnpackPremultiplyAlpha(*source_shared_image),
-      false /* unpack_unmultiply_alpha */, false /* dither */);
+      false /* unpack_unmultiply_alpha */);
 #if BUILDFLAG(IS_CHROMEOS_ASH) && defined(ARCH_CPU_X86_FAMILY)
   // glDrawArrays is faster than glCopyTexSubImage2D on IA Mesa driver,
   // although opposite in Android.
@@ -2376,8 +2442,7 @@ void RasterDecoderImpl::DoCopySubTextureINTERNALGL(
       dest_size.width(), dest_size.height(), source_size.width(),
       source_size.height(), unpack_flip_y,
       NeedsUnpackPremultiplyAlpha(*source_shared_image),
-      false /* unpack_unmultiply_alpha */, false /* dither */, method,
-      copy_tex_image_blit_.get());
+      false /* unpack_unmultiply_alpha */, method, copy_tex_image_blit_.get());
   dest_texture->SetLevelClearedRect(dest_target, dest_level, new_cleared_rect);
   if (!dest_shared_image->IsCleared()) {
     dest_shared_image->SetClearedRect(new_cleared_rect);
@@ -2428,8 +2493,6 @@ void RasterDecoderImpl::DoCopySubTextureINTERNALSkia(
 
   std::vector<GrBackendSemaphore> begin_semaphores;
   std::vector<GrBackendSemaphore> end_semaphores;
-
-  shared_context_state_->set_need_context_state_reset(true);
 
   // Allow uncleared access, as we manually handle clear tracking.
   std::unique_ptr<SharedImageRepresentationSkia::ScopedWriteAccess>
@@ -2505,10 +2568,10 @@ void RasterDecoderImpl::DoCopySubTextureINTERNALSkia(
 
     auto* canvas = dest_scoped_access->surface()->getCanvas();
     SkPaint paint;
-    if (unpack_flip_y) {
-      canvas->scale(1, -1);
-      canvas->translate(0, -height);
-    }
+
+    // Skia will flip the image if the surface origins do not match.
+    DCHECK_EQ(unpack_flip_y, source_shared_image->surface_origin() !=
+                                 dest_shared_image->surface_origin());
     paint.setBlendMode(SkBlendMode::kSrc);
     canvas->drawImageRect(source_image, gfx::RectToSkRect(source_rect),
                           gfx::RectToSkRect(dest_rect), SkSamplingOptions(),
@@ -2536,7 +2599,7 @@ bool RasterDecoderImpl::TryCopySubTextureINTERNALMemory(
     SharedImageRepresentationSkia::ScopedWriteAccess* dest_scoped_access,
     const std::vector<GrBackendSemaphore>& begin_semaphores,
     std::vector<GrBackendSemaphore>& end_semaphores) {
-  if (unpack_flip_y || x != 0 || y != 0)
+  if (unpack_flip_y)
     return false;
 
   auto source_shared_image =
@@ -2554,7 +2617,9 @@ bool RasterDecoderImpl::TryCopySubTextureINTERNALMemory(
     return false;
 
   SkPixmap pm = scoped_read_access->pixmap();
-  if (pm.width() != source_rect.width() || pm.height() != source_rect.height())
+  SkIRect skIRect = RectToSkIRect(source_rect);
+  SkPixmap subset;
+  if (!pm.extractSubset(&subset, skIRect))
     return false;
 
   if (!begin_semaphores.empty()) {
@@ -2564,7 +2629,7 @@ bool RasterDecoderImpl::TryCopySubTextureINTERNALMemory(
     DCHECK(result);
   }
 
-  dest_scoped_access->surface()->writePixels(pm, xoffset, yoffset);
+  dest_scoped_access->surface()->writePixels(subset, xoffset, yoffset);
 
   FlushAndSubmitIfNecessary(dest_scoped_access->surface(),
                             std::move(end_semaphores));
@@ -2586,6 +2651,7 @@ void RasterDecoderImpl::DoWritePixelsINTERNAL(GLint x_offset,
                                               GLuint shm_offset,
                                               GLuint pixels_offset,
                                               const volatile GLbyte* mailbox) {
+  TRACE_EVENT0("gpu", "RasterDecoderImpl::DoWritePixelsINTERNAL");
   if (src_sk_color_type > kLastEnum_SkColorType) {
     LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "WritePixels",
                        "src_sk_color_type must be a valid SkColorType");
@@ -2669,6 +2735,11 @@ void RasterDecoderImpl::DoWritePixelsINTERNAL(GLint x_offset,
   // Try a direct texture upload without using SkSurface.
   if (gfx::Size(src_width, src_height) == dest_shared_image->size() &&
       x_offset == 0 && y_offset == 0 &&
+      (src_info.alphaType() == dest_shared_image->alpha_type() ||
+       src_info.alphaType() == kUnknown_SkAlphaType) &&
+      SkColorSpace::Equals(
+          src_info.colorSpace(),
+          dest_shared_image->color_space().ToSkColorSpace().get()) &&
       DoWritePixelsINTERNALDirectTextureUpload(
           dest_shared_image.get(), src_info, pixel_data, row_bytes)) {
     return;
@@ -2765,6 +2836,7 @@ void RasterDecoderImpl::DoReadbackARGBImagePixelsINTERNAL(
     GLuint color_space_offset,
     GLuint pixels_offset,
     const volatile GLbyte* mailbox) {
+  TRACE_EVENT0("gpu", "RasterDecoderImpl::DoReadbackARGBImagePixelsINTERNAL");
   if (dst_sk_color_type > kLastEnum_SkColorType) {
     LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "ReadbackImagePixels",
                        "dst_sk_color_type must be a valid SkColorType");
@@ -2928,6 +3000,7 @@ void RasterDecoderImpl::DoReadbackYUVImagePixelsINTERNAL(
     GLuint v_offset,
     GLuint v_stride,
     const volatile GLbyte* mailbox) {
+  TRACE_EVENT0("gpu", "RasterDecoderImpl::DoReadbackYUVImagePixelsINTERNAL");
   if (dst_width % 2 != 0 || dst_height % 2 != 0) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glReadbackImagePixels",
                        "|dst_width| and |dst_height| must be divisible by 2");
@@ -3103,81 +3176,105 @@ void RasterDecoderImpl::DoReadbackYUVImagePixelsINTERNAL(
   *result = 1;
 }
 
+bool RasterDecoderImpl::ConvertYUVACommon(
+    const char* function_name,
+    GLenum yuv_color_space_in,
+    GLenum plane_config_in,
+    GLenum subsampling_in,
+    const volatile GLbyte* mailboxes_in,
+    SkYUVColorSpace& sk_yuv_color_space,
+    SkYUVAInfo::PlaneConfig& sk_plane_config,
+    SkYUVAInfo::Subsampling& sk_subsampling,
+    std::unique_ptr<SharedImageRepresentationSkia>& rgba_image,
+    int& num_yuva_planes,
+    std::array<std::unique_ptr<SharedImageRepresentationSkia>,
+               SkYUVAInfo::kMaxPlanes>& yuva_images) {
+  if (yuv_color_space_in > kLastEnum_SkYUVColorSpace) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, function_name,
+                       "yuv_color_space must be a valid SkYUVColorSpace");
+    return false;
+  }
+  sk_yuv_color_space = static_cast<SkYUVColorSpace>(yuv_color_space_in);
+  if (plane_config_in > static_cast<GLenum>(SkYUVAInfo::PlaneConfig::kLast)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, function_name,
+                       "plane_config must be a valid SkYUVAInfo::PlaneConfig");
+    return false;
+  }
+  sk_plane_config = static_cast<SkYUVAInfo::PlaneConfig>(plane_config_in);
+  if (subsampling_in > static_cast<GLenum>(SkYUVAInfo::Subsampling::kLast)) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, function_name,
+                       "subsampling must be a valid SkYUVAInfo::Subsampling");
+    return false;
+  }
+  sk_subsampling = static_cast<SkYUVAInfo::Subsampling>(subsampling_in);
+
+  std::array<gpu::Mailbox, SkYUVAInfo::kMaxPlanes> yuva_mailboxes;
+  num_yuva_planes = SkYUVAInfo::NumPlanes(sk_plane_config);
+  for (int i = 0; i < num_yuva_planes; ++i) {
+    yuva_mailboxes[i] = Mailbox::FromVolatile(
+        reinterpret_cast<const volatile Mailbox*>(mailboxes_in)[i]);
+    DLOG_IF(ERROR, !yuva_mailboxes[i].Verify())
+        << function_name
+        << " was "
+           "passed an invalid mailbox for YUVA plane: "
+        << i << " with plane config " << plane_config_in;
+  }
+  gpu::Mailbox rgba_mailbox;
+  rgba_mailbox =
+      Mailbox::FromVolatile(reinterpret_cast<const volatile Mailbox*>(
+          mailboxes_in)[SkYUVAInfo::kMaxPlanes]);
+  DLOG_IF(ERROR, !rgba_mailbox.Verify())
+      << function_name
+      << " was "
+         "passed an invalid mailbox for RGBA";
+
+  for (int i = 0; i < num_yuva_planes; ++i) {
+    yuva_images[i] = shared_image_representation_factory_.ProduceSkia(
+        yuva_mailboxes[i], shared_context_state_);
+    if (!yuva_images[i]) {
+      LOCAL_SET_GL_ERROR(
+          GL_INVALID_OPERATION, function_name,
+          ("Attempting to operate on unknown mailbox for plane index " +
+           base::NumberToString(i) + " using plane config " +
+           base::NumberToString(plane_config_in) + ".")
+              .c_str());
+      return false;
+    }
+  }
+  rgba_image = shared_image_representation_factory_.ProduceSkia(
+      rgba_mailbox, shared_context_state_);
+  if (!rgba_image) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "ConvertYUVAMailboxesToRGB",
+                       "Attempting to operate on unknown dest mailbox.");
+    return false;
+  }
+  return true;
+}
+
 void RasterDecoderImpl::DoConvertYUVAMailboxesToRGBINTERNAL(
     GLenum planes_yuv_color_space,
     GLenum plane_config,
     GLenum subsampling,
     const volatile GLbyte* mailboxes_in) {
-  if (planes_yuv_color_space > kLastEnum_SkYUVColorSpace) {
-    LOCAL_SET_GL_ERROR(
-        GL_INVALID_ENUM, "glConvertYUVAMailboxesToRGB",
-        "planes_yuv_color_space must be a valid SkYUVColorSpace");
-    return;
-  }
-  if (plane_config > static_cast<GLenum>(SkYUVAInfo::PlaneConfig::kLast)) {
-    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "glConvertYUVAMailboxesToRGB",
-                       "plane_config must be a valid SkYUVAInfo::PlaneConfig");
-    return;
-  }
-  if (subsampling > static_cast<GLenum>(SkYUVAInfo::Subsampling::kLast)) {
-    LOCAL_SET_GL_ERROR(GL_INVALID_ENUM, "glConvertYUVAMailboxesToRGB",
-                       "subsampling must be a valid SkYUVAInfo::Subsampling");
-    return;
-  }
-  SkYUVColorSpace src_color_space =
-      static_cast<SkYUVColorSpace>(planes_yuv_color_space);
-  SkYUVAInfo::PlaneConfig src_plane_config =
-      static_cast<SkYUVAInfo::PlaneConfig>(plane_config);
-  SkYUVAInfo::Subsampling src_subsampling =
-      static_cast<SkYUVAInfo::Subsampling>(subsampling);
-
-  static constexpr size_t kNumInputMailboxes = SkYUVAInfo::kMaxPlanes;
-  static constexpr size_t kTotalMailboxes = kNumInputMailboxes + 1;
-  static constexpr size_t kDestIndex = kTotalMailboxes - 1;
-  int num_src_planes = SkYUVAInfo::NumPlanes(src_plane_config);
-
-  std::array<gpu::Mailbox, kTotalMailboxes> mailboxes;
-  for (int i = 0; i < num_src_planes; ++i) {
-    mailboxes[i] = Mailbox::FromVolatile(
-        reinterpret_cast<const volatile Mailbox*>(mailboxes_in)[i]);
-    DLOG_IF(ERROR, !mailboxes[i].Verify())
-        << "ConvertYUVAMailboxesToRGB was "
-           "passed an invalid mailbox for src plane: "
-        << i << " with plane config " << plane_config;
-  }
-  mailboxes[kDestIndex] = Mailbox::FromVolatile(
-      reinterpret_cast<const volatile Mailbox*>(mailboxes_in)[kDestIndex]);
-  DLOG_IF(ERROR, !mailboxes[kDestIndex].Verify())
-      << "ConvertYUVAMailboxesToRGB was "
-         "passed an invalid mailbox for dest";
-
-  std::array<std::unique_ptr<SharedImageRepresentationSkia>, kTotalMailboxes>
-      images;
-  for (int i = 0; i < num_src_planes; ++i) {
-    images[i] = shared_image_representation_factory_.ProduceSkia(
-        mailboxes[i], shared_context_state_);
-    if (!images[i]) {
-      LOCAL_SET_GL_ERROR(
-          GL_INVALID_OPERATION, "glConvertYUVAMailboxesToRGB",
-          ("Attempting to operate on unknown mailbox for plane index " +
-           base::NumberToString(i) + " using plane config " +
-           base::NumberToString(plane_config) + ".")
-              .c_str());
-      return;
-    }
-  }
-  images[kDestIndex] = shared_image_representation_factory_.ProduceSkia(
-      mailboxes[kDestIndex], shared_context_state_);
-  if (!images[kDestIndex]) {
-    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glConvertYUVAMailboxesToRGB",
-                       "Attempting to operate on unknown dest mailbox.");
+  SkYUVColorSpace src_color_space;
+  SkYUVAInfo::PlaneConfig src_plane_config;
+  SkYUVAInfo::Subsampling src_subsampling;
+  std::unique_ptr<SharedImageRepresentationSkia> rgba_image;
+  int num_src_planes;
+  std::array<std::unique_ptr<SharedImageRepresentationSkia>,
+             SkYUVAInfo::kMaxPlanes>
+      yuva_images;
+  if (!ConvertYUVACommon("ConvertYUVAMailboxesToRGB", planes_yuv_color_space,
+                         plane_config, subsampling, mailboxes_in,
+                         src_color_space, src_plane_config, src_subsampling,
+                         rgba_image, num_src_planes, yuva_images)) {
     return;
   }
 
   std::vector<GrBackendSemaphore> begin_semaphores;
   std::vector<GrBackendSemaphore> end_semaphores;
 
-  auto dest_scoped_access = images[kDestIndex]->BeginScopedWriteAccess(
+  auto dest_scoped_access = rgba_image->BeginScopedWriteAccess(
       &begin_semaphores, &end_semaphores,
       SharedImageRepresentation::AllowUnclearedAccess::kYes);
   if (!dest_scoped_access) {
@@ -3189,11 +3286,11 @@ void RasterDecoderImpl::DoConvertYUVAMailboxesToRGBINTERNAL(
 
   bool source_access_valid = true;
   std::array<std::unique_ptr<SharedImageRepresentationSkia::ScopedReadAccess>,
-             kNumInputMailboxes>
+             SkYUVAInfo::kMaxPlanes>
       source_scoped_access;
   for (int i = 0; i < num_src_planes; ++i) {
-    source_scoped_access[i] =
-        images[i]->BeginScopedReadAccess(&begin_semaphores, &end_semaphores);
+    source_scoped_access[i] = yuva_images[i]->BeginScopedReadAccess(
+        &begin_semaphores, &end_semaphores);
 
     if (!source_scoped_access[i]) {
       LOCAL_SET_GL_ERROR(
@@ -3217,7 +3314,7 @@ void RasterDecoderImpl::DoConvertYUVAMailboxesToRGBINTERNAL(
 
   bool drew_image = false;
   if (source_access_valid) {
-    std::array<GrBackendTexture, kNumInputMailboxes> yuva_textures;
+    std::array<GrBackendTexture, SkYUVAInfo::kMaxPlanes> yuva_textures;
     for (int i = 0; i < num_src_planes; ++i) {
       yuva_textures[i] =
           source_scoped_access[i]->promise_image_texture()->backendTexture();
@@ -3246,8 +3343,86 @@ void RasterDecoderImpl::DoConvertYUVAMailboxesToRGBINTERNAL(
 
   FlushAndSubmitIfNecessary(dest_scoped_access->surface(),
                             std::move(end_semaphores));
-  if (!images[kDestIndex]->IsCleared() && drew_image) {
-    images[kDestIndex]->SetCleared();
+  if (!rgba_image->IsCleared() && drew_image) {
+    rgba_image->SetCleared();
+  }
+}
+
+void RasterDecoderImpl::DoConvertRGBAToYUVAMailboxesINTERNAL(
+    GLenum yuv_color_space,
+    GLenum plane_config,
+    GLenum subsampling,
+    const volatile GLbyte* mailboxes_in) {
+  SkYUVColorSpace dst_color_space;
+  SkYUVAInfo::PlaneConfig dst_plane_config;
+  SkYUVAInfo::Subsampling dst_subsampling;
+  std::unique_ptr<SharedImageRepresentationSkia> rgba_image;
+  int num_yuva_planes;
+  std::array<std::unique_ptr<SharedImageRepresentationSkia>,
+             SkYUVAInfo::kMaxPlanes>
+      yuva_images;
+  if (!ConvertYUVACommon("ConvertYUVAMailboxesToRGB", yuv_color_space,
+                         plane_config, subsampling, mailboxes_in,
+                         dst_color_space, dst_plane_config, dst_subsampling,
+                         rgba_image, num_yuva_planes, yuva_images)) {
+    return;
+  }
+
+  std::vector<GrBackendSemaphore> begin_semaphores;
+  std::vector<GrBackendSemaphore> end_semaphores;
+
+  auto rgba_scoped_access =
+      rgba_image->BeginScopedReadAccess(&begin_semaphores, &end_semaphores);
+  if (!rgba_scoped_access) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glConvertYUVAMailboxesToRGB",
+                       "RGBA shared image is not readable");
+    DCHECK(begin_semaphores.empty());
+    return;
+  }
+  auto rgba_sk_image =
+      rgba_scoped_access->CreateSkImage(shared_context_state_->gr_context());
+  if (!rgba_sk_image) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glReadbackImagePixels",
+                       "Couldn't create SkImage for reading.");
+    return;
+  }
+
+  std::array<std::unique_ptr<SharedImageRepresentationSkia::ScopedWriteAccess>,
+             SkYUVAInfo::kMaxPlanes>
+      yuva_scoped_access;
+  for (int i = 0; i < num_yuva_planes; ++i) {
+    yuva_scoped_access[i] = yuva_images[i]->BeginScopedWriteAccess(
+        &begin_semaphores, &end_semaphores,
+        SharedImageRepresentation::AllowUnclearedAccess::kYes);
+    if (!yuva_scoped_access[i]) {
+      LOCAL_SET_GL_ERROR(
+          GL_INVALID_OPERATION, "glConvertRGBAToYUVAMailboxes",
+          ("Couldn't write shared image for mailbox of plane index " +
+           base::NumberToString(i) + " using plane config " +
+           base::NumberToString(plane_config) + ".")
+              .c_str());
+      return;
+    }
+  }
+  SkSurface* yuva_sk_surfaces[SkYUVAInfo::kMaxPlanes];
+  for (int i = 0; i < num_yuva_planes; ++i) {
+    yuva_sk_surfaces[i] = yuva_scoped_access[i]->surface();
+    if (!begin_semaphores.empty()) {
+      bool result = yuva_sk_surfaces[i]->wait(
+          begin_semaphores.size(), begin_semaphores.data(),
+          /*deleteSemaphoresAfterWait=*/false);
+      DCHECK(result);
+    }
+  }
+
+  SkYUVAInfo yuva_info(rgba_sk_image->dimensions(), dst_plane_config,
+                       dst_subsampling, dst_color_space);
+  skia::BlitRGBAToYUVA(rgba_sk_image.get(), yuva_sk_surfaces, yuva_info);
+
+  for (int i = 0; i < num_yuva_planes; ++i) {
+    FlushAndSubmitIfNecessary(yuva_scoped_access[i]->surface(), end_semaphores);
+    if (!yuva_images[i]->IsCleared())
+      yuva_images[i]->SetCleared();
   }
 }
 
@@ -3267,6 +3442,12 @@ class TransferCacheDeserializeHelperImpl final
       : raster_decoder_id_(raster_decoder_id), transfer_cache_(transfer_cache) {
     DCHECK(transfer_cache_);
   }
+
+  TransferCacheDeserializeHelperImpl(
+      const TransferCacheDeserializeHelperImpl&) = delete;
+  TransferCacheDeserializeHelperImpl& operator=(
+      const TransferCacheDeserializeHelperImpl&) = delete;
+
   ~TransferCacheDeserializeHelperImpl() override = default;
 
   void CreateLocalEntry(
@@ -3287,9 +3468,7 @@ class TransferCacheDeserializeHelperImpl final
   }
 
   const int raster_decoder_id_;
-  ServiceTransferCache* const transfer_cache_;
-
-  DISALLOW_COPY_AND_ASSIGN(TransferCacheDeserializeHelperImpl);
+  const raw_ptr<ServiceTransferCache> transfer_cache_;
 };
 
 }  // namespace
@@ -3297,7 +3476,7 @@ class TransferCacheDeserializeHelperImpl final
 void RasterDecoderImpl::DeletePaintCacheTextBlobsINTERNALHelper(
     GLsizei n,
     const volatile GLuint* paint_cache_ids) {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION,
                        "glDeletePaintCacheEntriesINTERNAL",
                        "No chromium raster support");
@@ -3310,7 +3489,7 @@ void RasterDecoderImpl::DeletePaintCacheTextBlobsINTERNALHelper(
 void RasterDecoderImpl::DeletePaintCachePathsINTERNALHelper(
     GLsizei n,
     const volatile GLuint* paint_cache_ids) {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION,
                        "glDeletePaintCacheEntriesINTERNAL",
                        "No chromium raster support");
@@ -3321,7 +3500,7 @@ void RasterDecoderImpl::DeletePaintCachePathsINTERNALHelper(
 }
 
 void RasterDecoderImpl::DoClearPaintCacheINTERNAL() {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glClearPaintCacheINTERNAL",
                        "No chromium raster support");
     return;
@@ -3335,14 +3514,15 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
                                               GLuint msaa_sample_count,
                                               MsaaMode msaa_mode,
                                               GLboolean can_use_lcd_text,
+                                              GLboolean visible,
                                               const volatile GLbyte* key) {
   // Workaround for https://crbug.com/906453: Flush before BeginRaster (the
   // commands between BeginRaster and EndRaster will not flush).
   FlushToWorkAroundMacCrashes();
 
-  if (!gr_context() || !supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glBeginRasterCHROMIUM",
-                       "chromium_raster_transport not enabled via attribs");
+                       "No chromium raster support");
     return;
   }
   if (sk_surface_) {
@@ -3358,30 +3538,40 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
                                        "generated by ProduceTextureCHROMIUM.";
 
   DCHECK(!shared_image_);
-  shared_image_ = shared_image_representation_factory_.ProduceSkia(
-      mailbox, shared_context_state_.get());
-  if (!shared_image_) {
+  DCHECK(!shared_image_raster_);
+
+  SharedImageRepresentation* shared_image = nullptr;
+  if (is_raw_draw_enabled_) {
+    shared_image_raster_ =
+        shared_image_representation_factory_.ProduceRaster(mailbox);
+    shared_image = shared_image_raster_.get();
+  }
+
+  if (!shared_image) {
+    shared_image_ = shared_image_representation_factory_.ProduceSkia(
+        mailbox, shared_context_state_.get());
+    shared_image = shared_image_.get();
+  }
+
+  if (!shared_image) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glBeginRasterCHROMIUM",
                        "passed invalid mailbox.");
     return;
   }
 
-  // This check only fails on validating decoder since clear tracking for
-  // passthrough textures is done by ANGLE. Nonetheless the check is important
-  // so that clients cannot use uninitialized textures with validating decoder.
-  if (!needs_clear && !shared_image_->IsCleared()) {
+  if (!needs_clear && !shared_image->IsCleared()) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glBeginRasterCHROMIUM",
                        "SharedImage not cleared before use.");
+    shared_image_raster_.reset();
     shared_image_.reset();
     return;
   }
 
   DCHECK(locked_handles_.empty());
   DCHECK(!raster_canvas_);
-  shared_context_state_->set_need_context_state_reset(true);
 
   SkColorType sk_color_type = viz::ResourceFormatToClosestSkColorType(
-      /*gpu_compositing=*/true, shared_image_->format());
+      /*gpu_compositing=*/true, shared_image->format());
 
   int final_msaa_count;
   uint32_t flags;
@@ -3390,7 +3580,6 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
     case kNoMSAA:
       final_msaa_count = 0;
       flags = 0;
-      use_ddl_in_current_raster_session_ = use_ddl_;
       break;
     case kMSAA:
       // If we can't match requested MSAA samples, don't use MSAA.
@@ -3399,13 +3588,10 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
           gr_context()->maxSurfaceSampleCountForColorType(sk_color_type))
         final_msaa_count = 0;
       flags = 0;
-      use_ddl_in_current_raster_session_ = use_ddl_;
       break;
     case kDMSAA:
       final_msaa_count = 1;
       flags = SkSurfaceProps::kDynamicMSAA_Flag;
-      // DMSAA is not compatible with DDL
-      use_ddl_in_current_raster_session_ = false;
       break;
   }
 
@@ -3413,6 +3599,27 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
   SkSurfaceProps surface_props(flags, kUnknown_SkPixelGeometry);
   if (can_use_lcd_text) {
     surface_props = skia::LegacyDisplayGlobals::GetSkSurfaceProps(flags);
+  }
+
+  if (shared_image_raster_) {
+    absl::optional<SkColor> clear_color;
+    if (needs_clear)
+      clear_color.emplace(sk_color);
+    scoped_shared_image_raster_write_ =
+        shared_image_raster_->BeginScopedWriteAccess(
+            shared_context_state_, final_msaa_count, surface_props, clear_color,
+            visible);
+    if (!scoped_shared_image_raster_write_) {
+      LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glBeginRasterCHROMIUM",
+                         "failed to create surface");
+      shared_image_raster_.reset();
+      return;
+    }
+
+    if (needs_clear)
+      shared_image_raster_->SetCleared();
+
+    return;
   }
 
   std::vector<GrBackendSemaphore> begin_semaphores;
@@ -3439,16 +3646,7 @@ void RasterDecoderImpl::DoBeginRasterCHROMIUM(GLuint sk_color,
     DCHECK(result);
   }
 
-  if (use_ddl_in_current_raster_session_) {
-    SkSurfaceCharacterization characterization;
-    bool result = sk_surface_->characterize(&characterization);
-    DCHECK(result) << "Failed to characterize raster SkSurface.";
-    recorder_ =
-        std::make_unique<SkDeferredDisplayListRecorder>(characterization);
-    raster_canvas_ = recorder_->getCanvas();
-  } else {
-    raster_canvas_ = sk_surface_->getCanvas();
-  }
+  raster_canvas_ = sk_surface_->getCanvas();
 
   paint_op_shared_image_provider_ = std::make_unique<SharedImageProviderImpl>(
       &shared_image_representation_factory_, shared_context_state_, sk_surface_,
@@ -3487,13 +3685,18 @@ void RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
   TRACE_EVENT1("gpu", "RasterDecoderImpl::DoRasterCHROMIUM", "raster_id",
                ++raster_chromium_id_);
 
-  if (!sk_surface_) {
+  if (!use_gpu_raster_) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glRasterCHROMIUM",
+                       "No chromium raster support");
+    return;
+  }
+
+  if (!sk_surface_ && !scoped_shared_image_raster_write_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glRasterCHROMIUM",
                        "RasterCHROMIUM without BeginRasterCHROMIUM");
     return;
   }
   DCHECK(transfer_cache());
-  shared_context_state_->set_need_context_state_reset(true);
 
   if (font_shm_size > 0) {
     // Deserialize fonts before raster.
@@ -3524,9 +3727,6 @@ void RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
     return;
   }
 
-  alignas(
-      cc::PaintOpBuffer::PaintOpAlign) char data[sizeof(cc::LargestPaintOp)];
-
   cc::PlaybackParams playback_params(nullptr, SkM44());
   TransferCacheDeserializeHelperImpl impl(raster_decoder_id_, transfer_cache());
   cc::PaintOp::DeserializeOptions options(
@@ -3535,6 +3735,16 @@ void RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
       paint_op_shared_image_provider_.get());
   options.crash_dump_on_failure =
       !gpu_preferences_.disable_oopr_debug_crash_dump;
+
+  if (scoped_shared_image_raster_write_) {
+    auto* paint_op_buffer =
+        scoped_shared_image_raster_write_->paint_op_buffer();
+    paint_op_buffer->Deserialize(paint_buffer_memory, raster_shm_size, options);
+    return;
+  }
+
+  alignas(
+      cc::PaintOpBuffer::PaintOpAlign) char data[sizeof(cc::LargestPaintOp)];
 
   size_t paint_buffer_size = raster_shm_size;
   gl::ScopedProgressReporter report_progress(
@@ -3558,55 +3768,28 @@ void RasterDecoderImpl::DoRasterCHROMIUM(GLuint raster_shm_id,
   }
 }
 
-bool RasterDecoderImpl::EnsureDDLReadyForRaster() {
-  DCHECK(use_ddl_in_current_raster_session_);
-  DCHECK_EQ(current_decoder_error_, error::kNoError);
-
-  if (!ddl_) {
-    DCHECK(recorder_);
-    DCHECK(!program_iterator_);
-
-    TRACE_EVENT0("gpu",
-                 "RasterDecoderImpl::EnsureDDLReadyForRaster::DetachDDL");
-    ddl_ = recorder_->detach();
-    program_iterator_.emplace(shared_context_state_->gr_context(), ddl_.get());
-  }
-
-  while (!program_iterator_->done()) {
-    TRACE_EVENT0("gpu",
-                 "RasterDecoderImpl::EnsureDDLReadyForRaster::MaybeCompile");
-    bool did_compile = program_iterator_->compile();
-    program_iterator_->next();
-    if (did_compile)
-      return false;
-  }
-
-  program_iterator_.reset();
-  return true;
-}
-
 void RasterDecoderImpl::DoEndRasterCHROMIUM() {
   TRACE_EVENT0("gpu", "RasterDecoderImpl::DoEndRasterCHROMIUM");
-  if (!sk_surface_) {
+  if (!sk_surface_ && !scoped_shared_image_raster_write_) {
     LOCAL_SET_GL_ERROR(GL_INVALID_OPERATION, "glEndRasterCHROMIUM",
                        "EndRasterCHROMIUM without BeginRasterCHROMIUM");
     return;
   }
 
-  shared_context_state_->set_need_context_state_reset(true);
-  raster_canvas_ = nullptr;
-
-  if (use_ddl_in_current_raster_session_) {
-    if (!EnsureDDLReadyForRaster()) {
-      // This decoder error indicates that this command has not finished
-      // executing. The decoder will yield and re-execute this command when it
-      // resumes decoding.
-      current_decoder_error_ = error::kDeferCommandUntilLater;
-      return;
-    }
-    TRACE_EVENT0("gpu", "RasterDecoderImpl::DoEndRasterCHROMIUM::DrawDDL");
-    sk_surface_->draw(std::move(ddl_));
+  if (scoped_shared_image_raster_write_) {
+    scoped_shared_image_raster_write_->set_callback(base::BindOnce(
+        [](scoped_refptr<ServiceFontManager> font_manager,
+           std::vector<SkDiscardableHandleId> handles) {
+          font_manager->Unlock(handles);
+        },
+        font_manager_, std::move(locked_handles_)));
+    scoped_shared_image_raster_write_.reset();
+    shared_image_raster_.reset();
+    locked_handles_.clear();
+    return;
   }
+
+  raster_canvas_ = nullptr;
 
   {
     TRACE_EVENT0("gpu", "RasterDecoderImpl::DoEndRasterCHROMIUM::Flush");
@@ -3653,7 +3836,7 @@ void RasterDecoderImpl::DoCreateTransferCacheEntryINTERNAL(
     GLuint data_shm_id,
     GLuint data_shm_offset,
     GLuint data_size) {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(
         GL_INVALID_VALUE, "glCreateTransferCacheEntryINTERNAL",
         "Attempt to use OOP transfer cache on a context without OOP raster.");
@@ -3701,9 +3884,6 @@ void RasterDecoderImpl::DoCreateTransferCacheEntryINTERNAL(
   GrDirectContext* context_for_entry =
       cc::ServiceTransferCacheEntry::UsesGrContext(entry_type) ? gr_context()
                                                                : nullptr;
-  if (context_for_entry)
-    shared_context_state_->set_need_context_state_reset(true);
-
   if (!transfer_cache()->CreateLockedEntry(
           ServiceTransferCache::EntryKey(raster_decoder_id_, entry_type,
                                          entry_id),
@@ -3723,7 +3903,7 @@ void RasterDecoderImpl::DoCreateTransferCacheEntryINTERNAL(
 void RasterDecoderImpl::DoUnlockTransferCacheEntryINTERNAL(
     GLuint raw_entry_type,
     GLuint entry_id) {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(
         GL_INVALID_VALUE, "glUnlockTransferCacheEntryINTERNAL",
         "Attempt to use OOP transfer cache on a context without OOP raster.");
@@ -3749,7 +3929,7 @@ void RasterDecoderImpl::DoUnlockTransferCacheEntryINTERNAL(
 void RasterDecoderImpl::DoDeleteTransferCacheEntryINTERNAL(
     GLuint raw_entry_type,
     GLuint entry_id) {
-  if (!supports_oop_raster_) {
+  if (!use_gpu_raster_) {
     LOCAL_SET_GL_ERROR(
         GL_INVALID_VALUE, "glDeleteTransferCacheEntryINTERNAL",
         "Attempt to use OOP transfer cache on a context without OOP raster.");
@@ -3780,7 +3960,6 @@ void RasterDecoderImpl::RestoreStateForAttrib(GLuint attrib_index,
 // Include the auto-generated part of this file. We split this because it means
 // we can easily edit the non-auto generated parts right here in this file
 // instead of having to edit some template or the code generator.
-#include "base/macros.h"
 #include "build/chromeos_buildflags.h"
 #include "gpu/command_buffer/service/raster_decoder_autogen.h"
 

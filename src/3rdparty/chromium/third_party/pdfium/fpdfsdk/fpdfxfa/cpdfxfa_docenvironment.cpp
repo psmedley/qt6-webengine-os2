@@ -6,7 +6,6 @@
 
 #include "fpdfsdk/fpdfxfa/cpdfxfa_docenvironment.h"
 
-#include <memory>
 #include <utility>
 
 #include "core/fpdfapi/parser/cpdf_array.h"
@@ -285,8 +284,8 @@ void CPDFXFA_DocEnvironment::OnPageViewEvent(CXFA_FFPageView* pPageView,
   if (!pFormFillEnv)
     return;
 
-  if (m_pContext->GetLoadStatus() == FXFA_LOADSTATUS_LOADING ||
-      m_pContext->GetLoadStatus() == FXFA_LOADSTATUS_CLOSING ||
+  if (m_pContext->GetLoadStatus() == CPDFXFA_Context::LoadStatus::kLoading ||
+      m_pContext->GetLoadStatus() == CPDFXFA_Context::LoadStatus::kClosing ||
       eEvent != CXFA_FFDoc::PageViewEvent::kStopLayout) {
     return;
   }
@@ -316,7 +315,7 @@ void CPDFXFA_DocEnvironment::OnPageViewEvent(CXFA_FFPageView* pPageView,
 }
 
 void CPDFXFA_DocEnvironment::WidgetPostAdd(CXFA_FFWidget* hWidget) {
-  if (m_pContext->GetFormType() != FormType::kXFAFull || !hWidget)
+  if (m_pContext->GetFormType() != FormType::kXFAFull)
     return;
 
   CXFA_FFPageView* pPageView = hWidget->GetPageView();
@@ -327,13 +326,12 @@ void CPDFXFA_DocEnvironment::WidgetPostAdd(CXFA_FFWidget* hWidget) {
   if (!pXFAPage)
     return;
 
-  m_pContext->GetFormFillEnv()
-      ->GetOrCreatePageView(pXFAPage.Get())
-      ->AddAnnot(hWidget);
+  auto* formfill = m_pContext->GetFormFillEnv();
+  formfill->GetOrCreatePageView(pXFAPage.Get())->AddAnnotForFFWidget(hWidget);
 }
 
 void CPDFXFA_DocEnvironment::WidgetPreRemove(CXFA_FFWidget* hWidget) {
-  if (m_pContext->GetFormType() != FormType::kXFAFull || !hWidget)
+  if (m_pContext->GetFormType() != FormType::kXFAFull)
     return;
 
   CXFA_FFPageView* pPageView = hWidget->GetPageView();
@@ -346,9 +344,7 @@ void CPDFXFA_DocEnvironment::WidgetPreRemove(CXFA_FFWidget* hWidget) {
 
   CPDFSDK_PageView* pSdkPageView =
       m_pContext->GetFormFillEnv()->GetOrCreatePageView(pXFAPage.Get());
-  CPDFSDK_Annot* pAnnot = pSdkPageView->GetAnnotByXFAWidget(hWidget);
-  if (pAnnot)
-    pSdkPageView->DeleteAnnot(pAnnot);
+  pSdkPageView->DeleteAnnotForFFWidget(hWidget);
 }
 
 int32_t CPDFXFA_DocEnvironment::CountPages(const CXFA_FFDoc* hDoc) const {
@@ -418,7 +414,7 @@ void CPDFXFA_DocEnvironment::SetTitle(CXFA_FFDoc* hDoc,
 
   CPDF_Dictionary* pInfoDict = m_pContext->GetPDFDoc()->GetInfo();
   if (pInfoDict)
-    pInfoDict->SetNewFor<CPDF_String>("Title", wsTitle);
+    pInfoDict->SetNewFor<CPDF_String>("Title", wsTitle.AsStringView());
 }
 
 void CPDFXFA_DocEnvironment::ExportData(CXFA_FFDoc* hDoc,
@@ -555,7 +551,7 @@ void CPDFXFA_DocEnvironment::SetFocusWidget(CXFA_FFDoc* hDoc,
 
   if (!hWidget) {
     ObservedPtr<CPDFSDK_Annot> pNull;
-    m_pContext->GetFormFillEnv()->SetFocusAnnot(&pNull);
+    m_pContext->GetFormFillEnv()->SetFocusAnnot(pNull);
     return;
   }
 
@@ -566,9 +562,9 @@ void CPDFXFA_DocEnvironment::SetFocusWidget(CXFA_FFDoc* hDoc,
     if (!pPageView)
       continue;
 
-    ObservedPtr<CPDFSDK_Annot> pAnnot(pPageView->GetAnnotByXFAWidget(hWidget));
+    ObservedPtr<CPDFSDK_Annot> pAnnot(pPageView->GetAnnotForFFWidget(hWidget));
     if (pAnnot) {
-      m_pContext->GetFormFillEnv()->SetFocusAnnot(&pAnnot);
+      m_pContext->GetFormFillEnv()->SetFocusAnnot(pAnnot);
       break;
     }
   }

@@ -8,8 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include "base/memory/raw_ptr.h"
 #include "base/process/memory.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "cc/base/math_util.h"
 #include "cc/paint/image_provider.h"
 #include "cc/paint/render_surface_filters.h"
@@ -32,7 +34,6 @@
 #include "skia/ext/image_operations.h"
 #include "skia/ext/legacy_display_globals.h"
 #include "skia/ext/opacity_filter_canvas.h"
-#include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImageFilter.h"
@@ -43,8 +44,8 @@
 #include "third_party/skia/include/effects/SkShaderMaskFilter.h"
 #include "ui/gfx/geometry/axis_transform2d.h"
 #include "ui/gfx/geometry/rect_conversions.h"
-#include "ui/gfx/skia_util.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/skia_conversions.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace viz {
 namespace {
@@ -72,7 +73,7 @@ class AnimatedImagesProvider : public cc::ImageProvider {
   }
 
  private:
-  const PictureDrawQuad::ImageAnimationMap* image_animation_map_;
+  raw_ptr<const PictureDrawQuad::ImageAnimationMap> image_animation_map_;
 };
 
 }  // namespace
@@ -169,7 +170,7 @@ void SoftwareRenderer::SetClipRect(const gfx::Rect& rect) {
   // Checks below are incompatible with WebView as the canvas size and clip
   // provided by Android or embedder app. And Chrome doesn't use
   // SoftwareRenderer on Android.
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // SetClipRect is assumed to be applied temporarily, on an
   // otherwise-unclipped canvas.
   DCHECK_EQ(current_canvas_->getDeviceClipBounds().width(),
@@ -188,7 +189,7 @@ void SoftwareRenderer::SetClipRRect(const gfx::RRectF& rrect) {
   gfx::Transform screen_transform =
       current_frame()->window_matrix * current_frame()->projection_matrix;
   SkRRect result;
-  if (SkRRect(rrect).transform(SkMatrix(screen_transform.matrix()), &result)) {
+  if (SkRRect(rrect).transform(screen_transform.matrix().asM33(), &result)) {
     // Skia applies the current matrix to clip rects so we reset it temporarily.
     SkMatrix current_matrix = current_canvas_->getTotalMatrix();
     current_canvas_->resetMatrix();
@@ -347,6 +348,7 @@ void SoftwareRenderer::DoDrawQuad(const DrawQuad* quad,
     case DrawQuad::Material::kInvalid:
     case DrawQuad::Material::kYuvVideoContent:
     case DrawQuad::Material::kStreamVideoContent:
+    case DrawQuad::Material::kSharedElement:
       DrawUnsupportedQuad(quad);
       NOTREACHED();
       break;
@@ -439,9 +441,10 @@ void SoftwareRenderer::DrawTextureQuad(const TextureDrawQuad* quad) {
     return;
   }
 
-  // TODO(skaslev): Add support for non-premultiplied alpha.
   DisplayResourceProviderSoftware::ScopedReadLockSkImage lock(
-      resource_provider(), quad->resource_id());
+      resource_provider(), quad->resource_id(),
+      quad->premultiplied_alpha ? kPremul_SkAlphaType : kUnpremul_SkAlphaType);
+
   if (!lock.valid())
     return;
   const SkImage* image = lock.sk_image();
@@ -486,7 +489,8 @@ void SoftwareRenderer::DrawTileQuad(const TileDrawQuad* quad) {
   DCHECK(IsSoftwareResource(quad->resource_id()));
 
   DisplayResourceProviderSoftware::ScopedReadLockSkImage lock(
-      resource_provider(), quad->resource_id());
+      resource_provider(), quad->resource_id(),
+      quad->is_premultiplied ? kPremul_SkAlphaType : kUnpremul_SkAlphaType);
   if (!lock.valid())
     return;
 
@@ -558,7 +562,7 @@ void SoftwareRenderer::DrawRenderPassQuad(
 
   if (quad->mask_resource_id()) {
     DisplayResourceProviderSoftware::ScopedReadLockSkImage mask_lock(
-        resource_provider(), quad->mask_resource_id());
+        resource_provider(), quad->mask_resource_id(), kPremul_SkAlphaType);
     if (!mask_lock.valid())
       return;
 
@@ -821,7 +825,7 @@ sk_sp<SkShader> SoftwareRenderer::GetBackdropFilterShader(
     return nullptr;
 
   SkMatrix filter_backdrop_transform =
-      SkMatrix(contents_device_transform_inverse.matrix());
+      contents_device_transform_inverse.matrix().asM33();
   filter_backdrop_transform.preTranslate(backdrop_rect.x(), backdrop_rect.y());
 
   SkBitmap backdrop_bitmap = GetBackdropBitmap(backdrop_rect);
@@ -873,7 +877,7 @@ sk_sp<SkShader> SoftwareRenderer::GetBackdropFilterShader(
 
   // Clip the filtered image to the (rounded) bounding box of the element.
   if (backdrop_filter_bounds) {
-    canvas.setMatrix(SkMatrix(backdrop_filter_bounds_transform.matrix()));
+    canvas.setMatrix(backdrop_filter_bounds_transform.matrix().asM33());
     canvas.clipRRect(SkRRect(*backdrop_filter_bounds), SkClipOp::kIntersect,
                      true /* antialias */);
     canvas.resetMatrix();

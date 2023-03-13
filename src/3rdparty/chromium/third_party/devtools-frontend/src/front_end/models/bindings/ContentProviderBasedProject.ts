@@ -30,6 +30,7 @@
 
 import type * as Common from '../../core/common/common.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as Platform from '../../core/platform/platform.js';
 import type * as TextUtils from '../text_utils/text_utils.js';
 import * as Workspace from '../workspace/workspace.js';
 
@@ -46,25 +47,24 @@ interface UISourceCodeData {
   metadata: Workspace.UISourceCode.UISourceCodeMetadata|null;
 }
 
-export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStore implements
-    Workspace.Workspace.Project {
-  private readonly contentProviders: Map<string, TextUtils.ContentProvider.ContentProvider>;
-  private readonly isServiceProjectInternal: boolean;
-  private readonly uiSourceCodeToData: WeakMap<Workspace.UISourceCode.UISourceCode, UISourceCodeData>;
+export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStore {
+  readonly #contentProviders: Map<string, TextUtils.ContentProvider.ContentProvider>;
+  readonly #isServiceProjectInternal: boolean;
+  readonly #uiSourceCodeToData: WeakMap<Workspace.UISourceCode.UISourceCode, UISourceCodeData>;
   constructor(
       workspace: Workspace.Workspace.WorkspaceImpl, id: string, type: Workspace.Workspace.projectTypes,
       displayName: string, isServiceProject: boolean) {
     super(workspace, id, type, displayName);
-    this.contentProviders = new Map();
-    this.isServiceProjectInternal = isServiceProject;
-    this.uiSourceCodeToData = new WeakMap();
+    this.#contentProviders = new Map();
+    this.#isServiceProjectInternal = isServiceProject;
+    this.#uiSourceCodeToData = new WeakMap();
     workspace.addProject(this);
   }
 
   async requestFileContent(uiSourceCode: Workspace.UISourceCode.UISourceCode):
       Promise<TextUtils.ContentProvider.DeferredContent> {
     const contentProvider =
-        (this.contentProviders.get(uiSourceCode.url()) as TextUtils.ContentProvider.ContentProvider);
+        (this.#contentProviders.get(uiSourceCode.url()) as TextUtils.ContentProvider.ContentProvider);
     try {
       const [content, isEncoded] =
           await Promise.all([contentProvider.requestContent(), contentProvider.contentEncoded()]);
@@ -80,12 +80,12 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
   }
 
   isServiceProject(): boolean {
-    return this.isServiceProjectInternal;
+    return this.#isServiceProjectInternal;
   }
 
   async requestMetadata(uiSourceCode: Workspace.UISourceCode.UISourceCode):
       Promise<Workspace.UISourceCode.UISourceCodeMetadata|null> {
-    const {metadata} = (this.uiSourceCodeToData.get(uiSourceCode) as UISourceCodeData);
+    const {metadata} = (this.#uiSourceCodeToData.get(uiSourceCode) as UISourceCodeData);
     return metadata;
   }
 
@@ -107,7 +107,7 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
   }
 
   mimeType(uiSourceCode: Workspace.UISourceCode.UISourceCode): string {
-    const {mimeType} = (this.uiSourceCodeToData.get(uiSourceCode) as UISourceCodeData);
+    const {mimeType} = (this.#uiSourceCodeToData.get(uiSourceCode) as UISourceCodeData);
     return mimeType;
   }
 
@@ -116,9 +116,9 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
   }
 
   rename(
-      uiSourceCode: Workspace.UISourceCode.UISourceCode, newName: string,
+      uiSourceCode: Workspace.UISourceCode.UISourceCode, newName: Platform.DevToolsPath.RawPathString,
       callback:
-          (arg0: boolean, arg1?: string|undefined, arg2?: string|undefined,
+          (arg0: boolean, arg1?: string|undefined, arg2?: Platform.DevToolsPath.UrlString|undefined,
            arg3?: Common.ResourceType.ResourceType|undefined) => void): void {
     const path = uiSourceCode.url();
     this.performRename(path, newName, innerCallback.bind(this));
@@ -128,24 +128,25 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
         const copyOfPath = path.split('/');
         copyOfPath[copyOfPath.length - 1] = newName;
         const newPath = copyOfPath.join('/');
-        const contentProvider = (this.contentProviders.get(path) as TextUtils.ContentProvider.ContentProvider);
-        this.contentProviders.set(newPath, contentProvider);
-        this.contentProviders.delete(path);
+        const contentProvider = (this.#contentProviders.get(path) as TextUtils.ContentProvider.ContentProvider);
+        this.#contentProviders.set(newPath, contentProvider);
+        this.#contentProviders.delete(path);
         this.renameUISourceCode(uiSourceCode, newName);
       }
       callback(success, newName);
     }
   }
 
-  excludeFolder(_path: string): void {
+  excludeFolder(_path: Platform.DevToolsPath.UrlString): void {
   }
 
-  canExcludeFolder(_path: string): boolean {
+  canExcludeFolder(_path: Platform.DevToolsPath.EncodedPathString): boolean {
     return false;
   }
 
-  async createFile(_path: string, _name: string|null, _content: string, _isBase64?: boolean):
-      Promise<Workspace.UISourceCode.UISourceCode|null> {
+  async createFile(
+      _path: Platform.DevToolsPath.EncodedPathString, _name: string|null, _content: string,
+      _isBase64?: boolean): Promise<Workspace.UISourceCode.UISourceCode|null> {
     return null;
   }
 
@@ -159,7 +160,9 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
   remove(): void {
   }
 
-  performRename(path: string, newName: string, callback: (arg0: boolean, arg1?: string|undefined) => void): void {
+  performRename(
+      path: Platform.DevToolsPath.UrlString, newName: string,
+      callback: (arg0: boolean, arg1?: string|undefined) => void): void {
     callback(false);
   }
 
@@ -167,21 +170,21 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
       uiSourceCode: Workspace.UISourceCode.UISourceCode, query: string, caseSensitive: boolean,
       isRegex: boolean): Promise<TextUtils.ContentProvider.SearchMatch[]> {
     const contentProvider =
-        (this.contentProviders.get(uiSourceCode.url()) as TextUtils.ContentProvider.ContentProvider);
+        (this.#contentProviders.get(uiSourceCode.url()) as TextUtils.ContentProvider.ContentProvider);
     return contentProvider.searchInContent(query, caseSensitive, isRegex);
   }
 
   async findFilesMatchingSearchRequest(
-      searchConfig: Workspace.Workspace.ProjectSearchConfig, filesMathingFileQuery: string[],
+      searchConfig: Workspace.Workspace.ProjectSearchConfig, filesMatchingFileQuery: Platform.DevToolsPath.UrlString[],
       progress: Common.Progress.Progress): Promise<string[]> {
     const result: string[] = [];
-    progress.setTotalWork(filesMathingFileQuery.length);
-    await Promise.all(filesMathingFileQuery.map(searchInContent.bind(this)));
+    progress.setTotalWork(filesMatchingFileQuery.length);
+    await Promise.all(filesMatchingFileQuery.map(searchInContent.bind(this)));
     progress.done();
     return result;
 
     async function searchInContent(this: ContentProviderBasedProject, path: string): Promise<void> {
-      const contentProvider = (this.contentProviders.get(path) as TextUtils.ContentProvider.ContentProvider);
+      const contentProvider = (this.#contentProviders.get(path) as TextUtils.ContentProvider.ContentProvider);
       let allMatchesFound = true;
       for (const query of searchConfig.queries().slice()) {
         const searchMatches =
@@ -199,37 +202,38 @@ export class ContentProviderBasedProject extends Workspace.Workspace.ProjectStor
   }
 
   indexContent(progress: Common.Progress.Progress): void {
-    Promise.resolve().then(progress.done.bind(progress));
+    queueMicrotask(progress.done.bind(progress));
   }
 
   addUISourceCodeWithProvider(
       uiSourceCode: Workspace.UISourceCode.UISourceCode, contentProvider: TextUtils.ContentProvider.ContentProvider,
       metadata: Workspace.UISourceCode.UISourceCodeMetadata|null, mimeType: string): void {
-    this.contentProviders.set(uiSourceCode.url(), contentProvider);
-    this.uiSourceCodeToData.set(uiSourceCode, {mimeType, metadata});
+    this.#contentProviders.set(uiSourceCode.url(), contentProvider);
+    this.#uiSourceCodeToData.set(uiSourceCode, {mimeType, metadata});
     this.addUISourceCode(uiSourceCode);
   }
 
-  addContentProvider(url: string, contentProvider: TextUtils.ContentProvider.ContentProvider, mimeType: string):
-      Workspace.UISourceCode.UISourceCode {
+  addContentProvider(
+      url: Platform.DevToolsPath.UrlString, contentProvider: TextUtils.ContentProvider.ContentProvider,
+      mimeType: string): Workspace.UISourceCode.UISourceCode {
     const uiSourceCode = this.createUISourceCode(url, contentProvider.contentType());
     this.addUISourceCodeWithProvider(uiSourceCode, contentProvider, null, mimeType);
     return uiSourceCode;
   }
 
-  removeFile(path: string): void {
-    this.contentProviders.delete(path);
+  removeFile(path: Platform.DevToolsPath.UrlString): void {
+    this.#contentProviders.delete(path);
     this.removeUISourceCode(path);
   }
 
   reset(): void {
-    this.contentProviders.clear();
+    this.#contentProviders.clear();
     this.removeProject();
     this.workspace().addProject(this);
   }
 
   dispose(): void {
-    this.contentProviders.clear();
+    this.#contentProviders.clear();
     this.removeProject();
   }
 }

@@ -66,10 +66,11 @@
 
 #include <float.h>
 #include "avcodec.h"
+#include "codec_internal.h"
 #include "encode.h"
-#include "internal.h"
 #include "bytestream.h"
 #include "jpeg2000.h"
+#include "version.h"
 #include "libavutil/common.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/opt.h"
@@ -468,11 +469,11 @@ static int init_tiles(Jpeg2000EncoderContext *s)
         for (tilex = 0; tilex < s->numXtiles; tilex++, tileno++){
             Jpeg2000Tile *tile = s->tile + tileno;
 
-            tile->comp = av_mallocz_array(s->ncomponents, sizeof(Jpeg2000Component));
+            tile->comp = av_calloc(s->ncomponents, sizeof(*tile->comp));
             if (!tile->comp)
                 return AVERROR(ENOMEM);
 
-            tile->layer_rates = av_mallocz_array(s->nlayers, sizeof(*tile->layer_rates));
+            tile->layer_rates = av_calloc(s->nlayers, sizeof(*tile->layer_rates));
             if (!tile->layer_rates)
                 return AVERROR(ENOMEM);
 
@@ -1272,7 +1273,6 @@ static void makelayers(Jpeg2000EncoderContext *s, Jpeg2000Tile *tile)
     double min = DBL_MAX;
     double max = 0;
     double thresh;
-    int tile_disto = 0;
 
     Jpeg2000CodingStyle *codsty = &s->codsty;
 
@@ -1294,7 +1294,6 @@ static void makelayers(Jpeg2000EncoderContext *s, Jpeg2000Tile *tile)
                             int dr;
                             double dd, drslope;
 
-                            tile_disto += pass->disto;
                             if (passno == 0) {
                                 dr = (int32_t)pass->rate;
                                 dd = pass->disto;
@@ -1661,7 +1660,6 @@ static int encode_frame(AVCodecContext *avctx, AVPacket *pkt,
 
     av_log(s->avctx, AV_LOG_DEBUG, "end\n");
     pkt->size = s->buf - s->buf_start;
-    pkt->flags |= AV_PKT_FLAG_KEY;
     *got_packet = 1;
 
     return 0;
@@ -1818,11 +1816,11 @@ static const AVOption options[] = {
     { "sop",           "SOP marker",        OFFSET(sop),           AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, },
     { "eph",           "EPH marker",        OFFSET(eph),           AV_OPT_TYPE_INT,   { .i64 = 0           }, 0,         1,           VE, },
     { "prog",          "Progression Order", OFFSET(prog),          AV_OPT_TYPE_INT,   { .i64 = 0           }, JPEG2000_PGOD_LRCP,         JPEG2000_PGOD_CPRL,           VE, "prog" },
-    { "lrcp",          NULL,                OFFSET(prog),          AV_OPT_TYPE_CONST,   { .i64 = JPEG2000_PGOD_LRCP           }, 0,         0,           VE, "prog" },
-    { "rlcp",          NULL,                OFFSET(prog),          AV_OPT_TYPE_CONST,   { .i64 = JPEG2000_PGOD_RLCP            }, 0,         0,           VE, "prog" },
-    { "rpcl",          NULL,                OFFSET(prog),          AV_OPT_TYPE_CONST,   { .i64 = JPEG2000_PGOD_RPCL            }, 0,         0,           VE, "prog" },
-    { "pcrl",          NULL,                OFFSET(prog),          AV_OPT_TYPE_CONST,   { .i64 = JPEG2000_PGOD_PCRL            }, 0,         0,           VE, "prog" },
-    { "cprl",          NULL,                OFFSET(prog),          AV_OPT_TYPE_CONST,   { .i64 = JPEG2000_PGOD_CPRL            }, 0,         0,           VE, "prog" },
+    { "lrcp",          NULL,                0,                     AV_OPT_TYPE_CONST,  { .i64 = JPEG2000_PGOD_LRCP }, 0,         0,           VE, "prog" },
+    { "rlcp",          NULL,                0,                     AV_OPT_TYPE_CONST,  { .i64 = JPEG2000_PGOD_RLCP }, 0,         0,           VE, "prog" },
+    { "rpcl",          NULL,                0,                     AV_OPT_TYPE_CONST,  { .i64 = JPEG2000_PGOD_RPCL }, 0,         0,           VE, "prog" },
+    { "pcrl",          NULL,                0,                     AV_OPT_TYPE_CONST,  { .i64 = JPEG2000_PGOD_PCRL }, 0,         0,           VE, "prog" },
+    { "cprl",          NULL,                0,                     AV_OPT_TYPE_CONST,  { .i64 = JPEG2000_PGOD_CPRL }, 0,         0,           VE, "prog" },
     { "layer_rates",   "Layer Rates",       OFFSET(lr_str),        AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, VE },
     { NULL }
 };
@@ -1834,16 +1832,16 @@ static const AVClass j2k_class = {
     .version    = LIBAVUTIL_VERSION_INT,
 };
 
-const AVCodec ff_jpeg2000_encoder = {
-    .name           = "jpeg2000",
-    .long_name      = NULL_IF_CONFIG_SMALL("JPEG 2000"),
-    .type           = AVMEDIA_TYPE_VIDEO,
-    .id             = AV_CODEC_ID_JPEG2000,
+const FFCodec ff_jpeg2000_encoder = {
+    .p.name         = "jpeg2000",
+    .p.long_name    = NULL_IF_CONFIG_SMALL("JPEG 2000"),
+    .p.type         = AVMEDIA_TYPE_VIDEO,
+    .p.id           = AV_CODEC_ID_JPEG2000,
     .priv_data_size = sizeof(Jpeg2000EncoderContext),
     .init           = j2kenc_init,
     .encode2        = encode_frame,
     .close          = j2kenc_destroy,
-    .pix_fmts       = (const enum AVPixelFormat[]) {
+    .p.pix_fmts     = (const enum AVPixelFormat[]) {
         AV_PIX_FMT_RGB24, AV_PIX_FMT_YUV444P, AV_PIX_FMT_GRAY8,
         AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUV410P, AV_PIX_FMT_YUV411P,
@@ -1851,6 +1849,6 @@ const AVCodec ff_jpeg2000_encoder = {
         AV_PIX_FMT_RGB48, AV_PIX_FMT_GRAY16,
         AV_PIX_FMT_NONE
     },
-    .priv_class     = &j2k_class,
+    .p.priv_class   = &j2k_class,
     .caps_internal  = FF_CODEC_CAP_INIT_THREADSAFE | FF_CODEC_CAP_INIT_CLEANUP,
 };

@@ -43,7 +43,7 @@ class CFX_DIBAttribute;
 
 class Dummy {};  // Placeholder to work around C++ syntax issues
 
-class ProgressiveDecoder :
+class ProgressiveDecoder final :
 #ifdef PDF_ENABLE_XFA_BMP
     public BmpDecoder::Delegate,
 #endif  // PDF_ENABLE_XFA_BMP
@@ -197,13 +197,12 @@ class ProgressiveDecoder :
                        CFX_DIBAttribute* pAttribute);
   bool ReadMoreData(ProgressiveDecoderIface* pModule,
                     ProgressiveDecoderIface::Context* pContext,
-                    bool invalidate_buffer,
                     FXCODEC_STATUS* err_status);
 
   int GetDownScale();
   void GetTransMethod(FXDIB_Format dest_format, FXCodec_Format src_format);
 
-  void ReSampleScanline(const RetainPtr<CFX_DIBitmap>& pDeviceBitmap,
+  void ResampleScanline(const RetainPtr<CFX_DIBitmap>& pDeviceBitmap,
                         int32_t dest_line,
                         uint8_t* src_scan,
                         FXCodec_Format src_format);
@@ -218,7 +217,7 @@ class ProgressiveDecoder :
                       double scale_y,
                       int dest_row);
 
-  FXCODEC_STATUS m_status = FXCODEC_STATUS_DECODE_FINISH;
+  FXCODEC_STATUS m_status = FXCODEC_STATUS::kDecodeFinished;
   FXCODEC_IMAGE_TYPE m_imageType = FXCODEC_IMAGE_UNKNOWN;
   RetainPtr<IFX_SeekableReadStream> m_pFile;
   RetainPtr<CFX_DIBitmap> m_pDeviceBitmap;
@@ -265,7 +264,6 @@ class ProgressiveDecoder :
   int32_t m_GifPltNumber = 0;
   int m_GifTransIndex = -1;
   FX_RECT m_GifFrameRect;
-  bool m_InvalidateGifBuffer = true;
 #endif  // PDF_ENABLE_XFA_GIF
 #ifdef PDF_ENABLE_XFA_BMP
   bool m_BmpIsTopBottom = false;

@@ -19,7 +19,6 @@
 #include "device/vr/android/arcore/type_converters.h"
 #include "device/vr/public/mojom/pose.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
-#include "skia/ext/skia_matrix_44.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -29,8 +28,8 @@
 #include "ui/display/display.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/point_f.h"
-#include "ui/gfx/transform.h"
-#include "ui/gfx/transform_util.h"
+#include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/transform_util.h"
 
 using base::android::JavaRef;
 
@@ -39,7 +38,7 @@ namespace {
 // Anchor creation requests that are older than 3 seconds are considered
 // outdated and should be failed.
 constexpr base::TimeDelta kOutdatedAnchorCreationRequestThreshold =
-    base::TimeDelta::FromSeconds(3);
+    base::Seconds(3);
 
 // Helper, returns new VRPosePtr with position and orientation set to match the
 // position and orientation of passed in |pose|.
@@ -233,7 +232,7 @@ device::mojom::XRReflectionProbePtr GetReflectionProbe(
       &cube_map->negative_y, &cube_map->positive_z, &cube_map->negative_z};
 
   static_assert(
-      base::size(cube_map_faces) == base::size(arcore_cube_map),
+      std::size(cube_map_faces) == std::size(arcore_cube_map),
       "`ArImageCubemap` and `device::mojom::XRCubeMap` are expected to "
       "have the same number of faces (6).");
 
@@ -241,7 +240,7 @@ device::mojom::XRReflectionProbePtr GetReflectionProbe(
                 "`device::mojom::XRCubeMap::kNumComponentsPerPixel` is "
                 "expected to be 4 (RGBA)`, as that's the format ArCore uses.");
 
-  for (size_t i = 0; i < base::size(arcore_cube_map); ++i) {
+  for (size_t i = 0; i < std::size(arcore_cube_map); ++i) {
     auto* arcore_cube_map_face = arcore_cube_map[i];
     if (!arcore_cube_map_face) {
       DVLOG(1) << "`ArLightEstimate_acquireEnvironmentalHdrCubemap` failed to "
@@ -1054,7 +1053,7 @@ base::TimeDelta ArCoreImpl::GetFrameTimestamp() {
   int64_t out_timestamp_ns;
   ArFrame_getTimestamp(arcore_session_.get(), arcore_frame_.get(),
                        &out_timestamp_ns);
-  return base::TimeDelta::FromNanoseconds(out_timestamp_ns);
+  return base::Nanoseconds(out_timestamp_ns);
 }
 
 mojom::XRPlaneDetectionDataPtr ArCoreImpl::GetDetectedPlanesData() {
@@ -1154,7 +1153,7 @@ gfx::Transform ArCoreImpl::GetProjectionMatrix(float near, float far) {
   ArCamera_getProjectionMatrix(arcore_session_.get(), arcore_camera.get(), near,
                                far, matrix_4x4);
   gfx::Transform result;
-  result.matrix().setColMajorf(matrix_4x4);
+  result.matrix().setColMajor(matrix_4x4);
   return result;
 }
 
@@ -1856,7 +1855,7 @@ mojom::XRDepthDataPtr ArCoreImpl::GetDepthData() {
 
   int64_t timestamp_ns;
   ArImage_getTimestamp(arcore_session_.get(), ar_image.get(), &timestamp_ns);
-  base::TimeDelta time_delta = base::TimeDelta::FromNanoseconds(timestamp_ns);
+  base::TimeDelta time_delta = base::Nanoseconds(timestamp_ns);
   DVLOG(3) << __func__ << ": depth image time_delta=" << time_delta;
 
   // The image returned from ArFrame_acquireDepthImage() is documented to have

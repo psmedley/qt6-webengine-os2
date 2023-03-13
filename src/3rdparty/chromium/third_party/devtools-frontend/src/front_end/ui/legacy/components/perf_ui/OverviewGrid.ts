@@ -32,9 +32,11 @@ import * as Common from '../../../../core/common/common.js';
 import * as i18n from '../../../../core/i18n/i18n.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as UI from '../../legacy.js';
+import * as ThemeSupport from '../../theme_support/theme_support.js';
 
 import type {Calculator} from './TimelineGrid.js';
 import {TimelineGrid} from './TimelineGrid.js';
+import overviewGridStyles from './overviewGrid.css.legacy.js';
 
 const UIStrings = {
   /**
@@ -101,8 +103,8 @@ export class OverviewGrid {
     this.window.setWindow(left, right);
   }
 
-  addEventListener(
-      eventType: string|symbol, listener: (arg0: Common.EventTarget.EventTargetEvent) => void,
+  addEventListener<T extends keyof EventTypes>(
+      eventType: T, listener: Common.EventTarget.EventListener<EventTypes, T>,
       thisObject?: Object): Common.EventTarget.EventDescriptor {
     return this.window.addEventListener(eventType, listener, thisObject);
   }
@@ -125,7 +127,7 @@ export const WindowScrollSpeedFactor = .3;
 export const ResizerOffset = 3.5;  // half pixel because offset values are not rounded but ceiled
 export const OffsetFromWindowEnds = 10;
 
-export class Window extends Common.ObjectWrapper.ObjectWrapper {
+export class Window extends Common.ObjectWrapper.ObjectWrapper<EventTypes> {
   private parentElement: Element;
   private calculator: Calculator|undefined;
   private leftResizeElement: HTMLElement;
@@ -161,7 +163,7 @@ export class Window extends Common.ObjectWrapper.ObjectWrapper {
 
     this.parentElement.addEventListener('wheel', this.onMouseWheel.bind(this), true);
     this.parentElement.addEventListener('dblclick', this.resizeWindowMaximum.bind(this), true);
-    UI.Utils.appendStyle(this.parentElement, 'ui/legacy/components/perf_ui/overviewGrid.css');
+    ThemeSupport.ThemeSupport.instance().appendStyle(this.parentElement, overviewGridStyles);
 
     this.leftResizeElement = parentElement.createChild('div', 'overview-grid-window-resizer') as HTMLElement;
     UI.UIUtils.installDragHandle(
@@ -417,11 +419,10 @@ export class Window extends Common.ObjectWrapper.ObjectWrapper {
     this.windowLeft = windowLeft;
     this.windowRight = windowRight;
     this.updateCurtains();
-    let windowPosition;
     if (this.calculator) {
-      windowPosition = this.calculateWindowPosition();
+      this.dispatchEventToListeners(Events.WindowChangedWithPosition, this.calculateWindowPosition());
     }
-    this.dispatchEventToListeners(Events.WindowChanged, windowPosition);
+    this.dispatchEventToListeners(Events.WindowChanged);
   }
 
   private updateCurtains(): void {
@@ -523,7 +524,18 @@ export class Window extends Common.ObjectWrapper.ObjectWrapper {
 // eslint-disable-next-line rulesdir/const_enum
 export enum Events {
   WindowChanged = 'WindowChanged',
+  WindowChangedWithPosition = 'WindowChangedWithPosition',
 }
+
+export interface WindowChangedWithPositionEvent {
+  rawStartValue: number;
+  rawEndValue: number;
+}
+
+export type EventTypes = {
+  [Events.WindowChanged]: void,
+  [Events.WindowChangedWithPosition]: WindowChangedWithPositionEvent,
+};
 
 export class WindowSelector {
   private startPosition: number;

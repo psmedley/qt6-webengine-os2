@@ -29,7 +29,7 @@
 #include "av1/common/restoration.h"
 #include "av1/common/tile_common.h"
 #include "av1/common/timing.h"
-#include "aom_dsp/grain_synthesis.h"
+#include "aom_dsp/grain_params.h"
 #include "aom_dsp/grain_table.h"
 #include "aom_dsp/odintrin.h"
 #ifdef __cplusplus
@@ -134,10 +134,8 @@ typedef struct RefCntBuffer {
   // distance when a very old frame is used as a reference.
   unsigned int display_order_hint;
   unsigned int ref_display_order_hint[INTER_REFS_PER_FRAME];
-#if CONFIG_FRAME_PARALLEL_ENCODE
   // Frame's level within the hierarchical structure.
   unsigned int pyramid_level;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   MV_REF *mvs;
   uint8_t *seg_map;
   struct segmentation seg;
@@ -344,10 +342,8 @@ typedef struct {
 
   unsigned int order_hint;
   unsigned int display_order_hint;
-#if CONFIG_FRAME_PARALLEL_ENCODE
   // Frame's level within the hierarchical structure.
   unsigned int pyramid_level;
-#endif  // CONFIG_FRAME_PARALLEL_ENCODE
   unsigned int frame_number;
   SkipModeInfo skip_mode_info;
   int refresh_frame_flags;  // Which ref frames are overwritten by this frame
@@ -548,8 +544,8 @@ struct CommonModeInfoParams {
   /*!
    * The minimum block size that each element in 'mi_alloc' can correspond to.
    * For decoder, this is always BLOCK_4X4.
-   * For encoder, this is currently set to BLOCK_4X4 for resolution < 4k,
-   * and BLOCK_8X8 for resolution >= 4k.
+   * For encoder, this is BLOCK_8X8 for resolution >= 4k case or REALTIME mode
+   * case. Otherwise, this is BLOCK_4X4.
    */
   BLOCK_SIZE mi_alloc_bsize;
 
@@ -594,12 +590,15 @@ struct CommonModeInfoParams {
   void (*setup_mi)(struct CommonModeInfoParams *mi_params);
   /*!
    * Allocate required memory for arrays in 'mi_params'.
-   * \param[in,out]   mi_params   object containing common mode info parameters
-   * \param           width       frame width
-   * \param           height      frame height
+   * \param[in,out]   mi_params           object containing common mode info
+   *                                      parameters
+   * \param           width               frame width
+   * \param           height              frame height
+   * \param           min_partition_size  minimum partition size allowed while
+   *                                      encoding
    */
   void (*set_mb_mi)(struct CommonModeInfoParams *mi_params, int width,
-                    int height);
+                    int height, BLOCK_SIZE min_partition_size);
   /**@}*/
 };
 

@@ -16,6 +16,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/stringprintf.h"
+#include "base/time/time.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/unpacked_installer.h"
 #include "chrome/browser/profiles/profile.h"
@@ -109,9 +110,9 @@ void TabCapturePerformanceTestBase::NavigateToTestPage(
     const std::string& test_page_html_content) {
   LOG(INFO) << "Navigating to test page...";
   test_page_to_serve_ = test_page_html_content;
-  ui_test_utils::NavigateToURL(
+  ASSERT_TRUE(ui_test_utils::NavigateToURL(
       browser(),
-      embedded_test_server()->GetURL(kTestWebPageHostname, kTestWebPagePath));
+      embedded_test_server()->GetURL(kTestWebPageHostname, kTestWebPagePath)));
 }
 
 base::Value TabCapturePerformanceTestBase::SendMessageToExtension(
@@ -245,6 +246,8 @@ void TabCapturePerformanceTestBase::QueryTraceEvents(
       trace_analyzer::Query::EventNameIs(std::string(event_name)) &&
       (trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_ASYNC_BEGIN) ||
+       trace_analyzer::Query::EventPhaseIs(
+           TRACE_EVENT_PHASE_NESTABLE_ASYNC_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_FLOW_BEGIN) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_INSTANT) ||
        trace_analyzer::Query::EventPhaseIs(TRACE_EVENT_PHASE_COMPLETE));

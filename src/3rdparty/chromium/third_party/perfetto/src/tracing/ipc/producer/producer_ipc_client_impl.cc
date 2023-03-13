@@ -174,13 +174,6 @@ void ProducerIPCClientImpl::OnConnect() {
 #endif
   }
 
-#if PERFETTO_DCHECK_IS_ON()
-  req.set_build_flags(
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_ON);
-#else
-  req.set_build_flags(
-      protos::gen::InitializeConnectionRequest::BUILD_FLAGS_DCHECKS_OFF);
-#endif
   req.set_sdk_version(base::GetVersionString());
   producer_port_.InitializeConnection(req, std::move(on_init), shm_fd);
 
@@ -346,6 +339,24 @@ void ProducerIPCClientImpl::RegisterDataSource(
           PERFETTO_DLOG("RegisterDataSource() failed: connection reset");
       });
   producer_port_.RegisterDataSource(req, std::move(async_response));
+}
+
+void ProducerIPCClientImpl::UpdateDataSource(
+    const DataSourceDescriptor& descriptor) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (!connected_) {
+    PERFETTO_DLOG(
+        "Cannot UpdateDataSource(), not connected to tracing service");
+  }
+  protos::gen::UpdateDataSourceRequest req;
+  *req.mutable_data_source_descriptor() = descriptor;
+  ipc::Deferred<protos::gen::UpdateDataSourceResponse> async_response;
+  async_response.Bind(
+      [](ipc::AsyncResult<protos::gen::UpdateDataSourceResponse> response) {
+        if (!response)
+          PERFETTO_DLOG("UpdateDataSource() failed: connection reset");
+      });
+  producer_port_.UpdateDataSource(req, std::move(async_response));
 }
 
 void ProducerIPCClientImpl::UnregisterDataSource(const std::string& name) {

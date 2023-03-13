@@ -13,6 +13,7 @@
 #include "gpu/command_buffer/service/mailbox_manager.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/skia_utils.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkPromiseImageTexture.h"
 #include "third_party/skia/include/gpu/GrContextThreadSafeProxy.h"
 #include "ui/gl/gl_context.h"
@@ -22,7 +23,7 @@
 #include "ui/gl/scoped_binders.h"
 #include "ui/gl/trace_util.h"
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 #include "gpu/command_buffer/service/shared_image_backing_factory_iosurface.h"
 #endif
 
@@ -190,10 +191,14 @@ sk_sp<SkSurface> SharedImageRepresentationSkiaImpl::BeginWriteAccess(
 
   SkColorType sk_color_type = viz::ResourceFormatToClosestSkColorType(
       /*gpu_compositing=*/true, format());
+  // Gray is not a renderable single channel format, but alpha is.
+  if (sk_color_type == kGray_8_SkColorType)
+    sk_color_type = kAlpha_8_SkColorType;
   auto surface = SkSurface::MakeFromBackendTexture(
       context_state_->gr_context(), promise_texture_->backendTexture(),
       surface_origin(), final_msaa_count, sk_color_type,
-      backing()->color_space().ToSkColorSpace(), &surface_props);
+      backing()->color_space().GetAsFullRangeRGB().ToSkColorSpace(),
+      &surface_props);
   write_surface_ = surface.get();
   return surface;
 }
@@ -249,7 +254,7 @@ bool SharedImageRepresentationSkiaImpl::SupportsMultipleConcurrentReadAccess() {
 
 void SharedImageRepresentationSkiaImpl::CheckContext() {
 #if DCHECK_IS_ON()
-  if (context_)
+  if (!context_state_->context_lost() && context_)
     DCHECK(gl::GLContext::GetCurrent() == context_);
 #endif
 }
@@ -289,6 +294,40 @@ gl::GLImage* SharedImageRepresentationOverlayImpl::GetGLImage() {
 
 ///////////////////////////////////////////////////////////////////////////////
 // SharedImageBackingGLImage
+
+// static
+std::unique_ptr<SharedImageBackingGLImage>
+SharedImageBackingGLImage::CreateFromGLTexture(
+    scoped_refptr<gl::GLImage> image,
+    const Mailbox& mailbox,
+    viz::ResourceFormat format,
+    const gfx::Size& size,
+    const gfx::ColorSpace& color_space,
+    GrSurfaceOrigin surface_origin,
+    SkAlphaType alpha_type,
+    uint32_t usage,
+    GLenum texture_target,
+    scoped_refptr<gles2::TexturePassthrough> wrapped_gl_texture) {
+  DCHECK(!!wrapped_gl_texture);
+
+  // We don't expect the backing to allocate a new
+  // texture but it does need to know the texture target so we supply that
+  // one param.
+  InitializeGLTextureParams params;
+  params.target = texture_target;
+  UnpackStateAttribs attribs;
+
+  auto shared_image = std::make_unique<SharedImageBackingGLImage>(
+      std::move(image), mailbox, format, size, color_space, surface_origin,
+      alpha_type, usage, params, attribs, true);
+
+  shared_image->passthrough_texture_ = std::move(wrapped_gl_texture);
+  shared_image->gl_texture_retained_for_legacy_mailbox_ = true;
+  shared_image->gl_texture_retain_count_ = 1;
+  shared_image->image_bind_or_copy_needed_ = false;
+
+  return shared_image;
+}
 
 SharedImageBackingGLImage::SharedImageBackingGLImage(
     scoped_refptr<gl::GLImage> image,
@@ -492,12 +531,12 @@ SharedImageBackingGLImage::ProduceGLTexturePassthrough(
 std::unique_ptr<SharedImageRepresentationOverlay>
 SharedImageBackingGLImage::ProduceOverlay(SharedImageManager* manager,
                                           MemoryTypeTracker* tracker) {
-#if defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN)
+#if BUILDFLAG(IS_MAC) || defined(USE_OZONE) || BUILDFLAG(IS_WIN)
   return std::make_unique<SharedImageRepresentationOverlayImpl>(
       manager, this, tracker, image_);
-#else   // !(defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN))
+#else   // !(BUILDFLAG(IS_MAC) || defined(USE_OZONE) || BUILDFLAG(IS_WIN))
   return SharedImageBacking::ProduceOverlay(manager, tracker);
-#endif  // defined(OS_MAC) || defined(USE_OZONE) || defined(OS_WIN)
+#endif  // BUILDFLAG(IS_MAC) || defined(USE_OZONE) || BUILDFLAG(IS_WIN)
 }
 
 std::unique_ptr<SharedImageRepresentationDawn>
@@ -505,12 +544,12 @@ SharedImageBackingGLImage::ProduceDawn(SharedImageManager* manager,
                                        MemoryTypeTracker* tracker,
                                        WGPUDevice device,
                                        WGPUBackendType backend_type) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   auto result = SharedImageBackingFactoryIOSurface::ProduceDawn(
       manager, this, tracker, device, image_);
   if (result)
     return result;
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
   if (!factory()) {
     DLOG(ERROR) << "No SharedImageFactory to create a dawn representation.";
     return nullptr;
@@ -535,7 +574,7 @@ SharedImageBackingGLImage::ProduceSkia(
 
   if (!cached_promise_texture_) {
     if (context_state->GrContextIsMetal()) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
       cached_promise_texture_ =
           SharedImageBackingFactoryIOSurface::ProduceSkiaPromiseTextureMetal(
               this, context_state, image_);
@@ -666,7 +705,7 @@ bool SharedImageBackingGLImage::
 
 void SharedImageBackingGLImage::SharedImageRepresentationGLTextureEndAccess(
     bool readonly) {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   // If this image could potentially be shared with Metal via WebGPU, then flush
   // the GL context to ensure Metal will see it.
   if (usage() & SHARED_IMAGE_USAGE_WEBGPU) {
@@ -691,10 +730,23 @@ void SharedImageBackingGLImage::SharedImageRepresentationGLTextureEndAccess(
     }
   }
 #else
+
   // If the image will be used for an overlay, we insert a fence that can be
   // used by OutputPresenter to synchronize image writes with presentation.
   if (!readonly && usage() & SHARED_IMAGE_USAGE_SCANOUT &&
       gl::GLFence::IsGpuFenceSupported()) {
+    // If the image will be used for delegated compositing, no need to put
+    // fences at this moment as there are many raster tasks in the CPU gl
+    // context that end up creating a big number of fences, which may have some
+    // performance overhead depending on the gpu. Instead, when these images
+    // will be scheduled as overlays, a single fence will be created.
+    // TODO(crbug.com/1254033): this block of code shall be removed after cc is
+    // able to set a single (duplicated) fence for bunch of tiles instead of
+    // having the SI framework creating fences for each single message when
+    // write access ends.
+    if (usage() & SHARED_IMAGE_USAGE_RASTER_DELEGATED_COMPOSITING)
+      return;
+
     last_write_gl_fence_ = gl::GLFence::CreateForGpuFence();
     DCHECK(last_write_gl_fence_);
   }
@@ -771,7 +823,7 @@ void SharedImageBackingGLImage::InitializePixels(GLenum format,
                                                  GLenum type,
                                                  const uint8_t* data) {
   DCHECK_EQ(image_->ShouldBindOrCopy(), gl::GLImage::BIND);
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   if (SharedImageBackingFactoryIOSurface::InitializePixels(this, image_, data))
     return;
 #else

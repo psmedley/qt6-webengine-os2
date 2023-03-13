@@ -116,6 +116,18 @@ void FidoAuthenticator::DeleteCredential(
   NOTREACHED();
 }
 
+bool FidoAuthenticator::SupportsUpdateUserInformation() const {
+  return false;
+}
+
+void FidoAuthenticator::UpdateUserInformation(
+    const pin::TokenResponse& pin_token,
+    const PublicKeyCredentialDescriptor& credential_id,
+    const PublicKeyCredentialUserEntity& updated_user,
+    UpdateUserInformationCallback callback) {
+  NOTREACHED();
+}
+
 void FidoAuthenticator::GetModality(BioEnrollmentCallback) {
   NOTREACHED();
 }
@@ -179,6 +191,10 @@ bool FidoAuthenticator::DiscoverableCredentialStorageFull() const {
 void FidoAuthenticator::Reset(ResetCallback callback) {
   std::move(callback).Run(CtapDeviceResponseCode::kCtap1ErrInvalidCommand,
                           absl::nullopt);
+}
+
+FidoAuthenticator::Type FidoAuthenticator::GetType() const {
+  return Type::kOther;
 }
 
 std::string FidoAuthenticator::GetDisplayName() const {

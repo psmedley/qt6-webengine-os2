@@ -5,16 +5,29 @@
 #ifndef UI_LOTTIE_ANIMATION_H_
 #define UI_LOTTIE_ANIMATION_H_
 
+#include <functional>
 #include <memory>
 
 #include "base/component_export.h"
+#include "base/containers/flat_map.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/observer_list.h"
 #include "base/time/time.h"
+#include "cc/paint/skottie_color_map.h"
+#include "cc/paint/skottie_frame_data.h"
+#include "cc/paint/skottie_frame_data_provider.h"
+#include "cc/paint/skottie_resource_metadata.h"
+#include "cc/paint/skottie_text_property_value.h"
 #include "cc/paint/skottie_wrapper.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkStream.h"
 #include "third_party/skia/modules/skottie/include/Skottie.h"
 #include "ui/gfx/geometry/size.h"
+
+class SkImage;
+struct SkSamplingOptions;
 
 namespace gfx {
 class Canvas;
@@ -58,8 +71,8 @@ class AnimationObserver;
 //        // This will seek to the 1st second of the animation and from there
 //        // play it for 5 seconds.
 //        Animation animation_ = Animation(data);
-//        animation_.Start(TimeDelta::FromSeconds(1),
-//                         TimeDelta::FromSeconds(5));
+//        animation_.Start(Seconds(1),
+//                         Seconds(5));
 //      }
 //
 //      // overrides cc::CompositorAnimationObserver
@@ -81,12 +94,18 @@ class COMPONENT_EXPORT(UI_LOTTIE) Animation final {
     kLoop         // Same as LINEAR, except the animation repeats after it ends.
   };
 
-  explicit Animation(scoped_refptr<cc::SkottieWrapper> skottie);
+  // |frame_data_provider| may be null if it's known that the incoming skottie
+  // animation does not contain any image assets.
+  explicit Animation(
+      scoped_refptr<cc::SkottieWrapper> skottie,
+      cc::SkottieColorMap color_map = cc::SkottieColorMap(),
+      cc::SkottieFrameDataProvider* frame_data_provider = nullptr);
   Animation(const Animation&) = delete;
   Animation& operator=(const Animation&) = delete;
   ~Animation();
 
-  void SetAnimationObserver(AnimationObserver* Observer);
+  void AddObserver(AnimationObserver* observer);
+  void RemoveObserver(AnimationObserver* observer);
 
   // Animation properties ------------------------------------------------------
   // Returns the total duration of the animation as reported by |animation_|.
@@ -141,6 +160,13 @@ class COMPONENT_EXPORT(UI_LOTTIE) Animation final {
 
   // Returns the skottie object that contins the animation data.
   scoped_refptr<cc::SkottieWrapper> skottie() const { return skottie_; }
+
+  // Returns the text nodes in the animation and their corresponding current
+  // property values. The text nodes' initial property values reflect those
+  // embedded in the Lottie animation file. A mutable reference is returned
+  // so that the caller may modify the text map with its own custom values
+  // before calling Paint(). The caller may do so as many times as desired.
+  cc::SkottieTextPropertyValueMap& text_map() { return text_map_; }
 
  private:
   friend class AnimationTest;
@@ -214,7 +240,14 @@ class COMPONENT_EXPORT(UI_LOTTIE) Animation final {
   };
 
   void InitTimer(const base::TimeTicks& timestamp);
-  void UpdateState(const base::TimeTicks& timestamp);
+  void TryNotifyAnimationCycleEnded() const;
+  cc::SkottieWrapper::FrameDataFetchResult LoadImageForAsset(
+      gfx::Canvas* canvas,
+      cc::SkottieFrameDataMap& all_frame_data,
+      cc::SkottieResourceIdHash asset_id,
+      float t,
+      sk_sp<SkImage>&,
+      SkSamplingOptions&);
 
   // Manages the timeline for the current playing animation.
   std::unique_ptr<TimerControl> timer_control_;
@@ -230,9 +263,14 @@ class COMPONENT_EXPORT(UI_LOTTIE) Animation final {
   base::TimeDelta scheduled_start_offset_;
   base::TimeDelta scheduled_duration_;
 
-  AnimationObserver* observer_ = nullptr;
+  base::ObserverList<AnimationObserver> observers_;
 
   scoped_refptr<cc::SkottieWrapper> skottie_;
+  cc::SkottieColorMap color_map_;
+  cc::SkottieTextPropertyValueMap text_map_;
+  base::flat_map<cc::SkottieResourceIdHash,
+                 scoped_refptr<cc::SkottieFrameDataProvider::ImageAsset>>
+      image_assets_;
 };
 
 }  // namespace lottie

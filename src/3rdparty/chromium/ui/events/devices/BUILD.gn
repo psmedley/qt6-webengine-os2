@@ -17,6 +17,7 @@ jumbo_component("devices") {
     "events_devices_export.h",
     "gamepad_device.cc",
     "gamepad_device.h",
+    "haptic_touchpad_effects.h",
     "input_device.cc",
     "input_device.h",
     "input_device_event_observer.h",
@@ -62,8 +63,8 @@ jumbo_component("devices") {
     "//base/third_party/dynamic_annotations",
     "//skia",
     "//ui/events:platform_event",
-    "//ui/gfx:geometry_skia",
     "//ui/gfx/geometry",
+    "//ui/gfx/geometry:geometry_skia",
   ]
 
   if (is_android) {

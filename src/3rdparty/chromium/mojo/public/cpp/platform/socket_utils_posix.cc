@@ -8,28 +8,28 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#if !defined(OS_NACL)
-#include <sys/uio.h>
-#endif
-
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/notreached.h"
 #include "base/posix/eintr_wrapper.h"
 #include "build/build_config.h"
 
+#if !BUILDFLAG(IS_NACL)
+#include <sys/uio.h>
+#endif
+
 namespace mojo {
 
 namespace {
 
-#if !defined(OS_NACL)
+#if !BUILDFLAG(IS_NACL)
 bool IsRecoverableError() {
   return errno == ECONNABORTED || errno == EMFILE || errno == ENFILE ||
          errno == ENOMEM || errno == ENOBUFS;
 }
 
 bool GetPeerEuid(base::PlatformFile fd, uid_t* peer_euid) {
-#if defined(OS_APPLE) || defined(OS_OPENBSD) || defined(OS_FREEBSD)
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_FREEBSD)
   uid_t socket_euid;
   gid_t socket_gid;
   if (getpeereid(fd, &socket_euid, &socket_gid) < 0) {
@@ -70,11 +70,11 @@ bool IsPeerAuthorized(base::PlatformFile fd) {
   }
   return true;
 }
-#endif  // !defined(OS_NACL)
+#endif  // !BUILDFLAG(IS_NACL)
 
 // NOTE: On Linux |SIGPIPE| is suppressed by passing |MSG_NOSIGNAL| to
 // |sendmsg()|. On Mac we instead set |SO_NOSIGPIPE| on the socket itself.
-#if defined(OS_APPLE) || defined(OS_OS2)
+#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_OS2)
 constexpr int kSendmsgFlags = 0;
 #else
 constexpr int kSendmsgFlags = MSG_NOSIGNAL;
@@ -85,7 +85,7 @@ constexpr int kSendmsgFlags = MSG_NOSIGNAL;
 ssize_t SocketWrite(base::PlatformFile socket,
                     const void* bytes,
                     size_t num_bytes) {
-#if defined(OS_APPLE) || defined(OS_NACL_NONSFI)
+#if BUILDFLAG(IS_APPLE)
   return HANDLE_EINTR(write(socket, bytes, num_bytes));
 #else
   return send(socket, bytes, num_bytes, kSendmsgFlags);
@@ -95,7 +95,7 @@ ssize_t SocketWrite(base::PlatformFile socket,
 ssize_t SocketWritev(base::PlatformFile socket,
                      struct iovec* iov,
                      size_t num_iov) {
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   return HANDLE_EINTR(writev(socket, iov, static_cast<int>(num_iov)));
 #else
   struct msghdr msg = {};
@@ -191,7 +191,7 @@ bool AcceptSocketConnection(base::PlatformFile server_fd,
                             bool check_peer_user) {
   DCHECK_GE(server_fd, 0);
   connection_fd->reset();
-#if defined(OS_NACL)
+#if BUILDFLAG(IS_NACL)
   NOTREACHED();
   return false;
 #else
@@ -207,7 +207,7 @@ bool AcceptSocketConnection(base::PlatformFile server_fd,
 
   *connection_fd = std::move(accepted_handle);
   return true;
-#endif  // defined(OS_NACL)
+#endif  // BUILDFLAG(IS_NACL)
 }
 
 }  // namespace mojo

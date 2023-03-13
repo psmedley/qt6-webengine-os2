@@ -80,10 +80,6 @@ struct CYCLIC_REFRESH {
    */
   int8_t *map;
   /*!
-   * Map of the last q a block was coded at.
-   */
-  uint8_t *last_coded_q_map;
-  /*!
    * Threshold applied to the projected rate of the coding block,
    * when deciding whether block should be refreshed.
    */
@@ -111,6 +107,8 @@ struct CYCLIC_REFRESH {
   int qindex_delta[3];
   double weight_segment;
   int apply_cyclic_refresh;
+  int skip_over4x4;
+  int counter_encode_maxq_scene_change;
   /*!\endcond */
 };
 
@@ -312,6 +310,8 @@ void av1_cyclic_refresh_setup(struct AV1_COMP *const cpi);
 int av1_cyclic_refresh_get_rdmult(const CYCLIC_REFRESH *cr);
 
 void av1_cyclic_refresh_reset_resize(struct AV1_COMP *const cpi);
+
+int av1_cyclic_refresh_disable_lf_cdef(struct AV1_COMP *const cpi);
 
 static INLINE int cyclic_refresh_segment_id_boosted(int segment_id) {
   return segment_id == CR_SEGMENT_ID_BOOST1 ||

@@ -5,8 +5,10 @@
 #include "chrome/browser/net/net_export_helper.h"
 
 #include <memory>
+#include <utility>
 
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/prefetch/no_state_prefetch/no_state_prefetch_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/no_state_prefetch/browser/no_state_prefetch_manager.h"
@@ -20,7 +22,7 @@
 #include "extensions/common/extension_set.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/net/service_providers_win.h"
@@ -55,12 +57,11 @@ std::unique_ptr<base::ListValue> GetExtensionInfo(Profile* profile) {
           extensions::ExtensionRegistry::Get(profile)
               ->GenerateInstalledExtensionsSet());
       for (const auto& extension : *extensions) {
-        std::unique_ptr<base::DictionaryValue> extension_info(
-            new base::DictionaryValue());
+        base::Value::Dict extension_info;
         bool enabled = extension_service->IsExtensionEnabled(extension->id());
         extensions::GetExtensionBasicInfo(extension.get(), enabled,
-                                          extension_info.get());
-        extension_list->Append(std::move(extension_info));
+                                          &extension_info);
+        extension_list->Append(base::Value(std::move(extension_info)));
       }
     }
   }
@@ -68,7 +69,7 @@ std::unique_ptr<base::ListValue> GetExtensionInfo(Profile* profile) {
   return extension_list;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 std::unique_ptr<base::DictionaryValue> GetWindowsServiceProviders() {
   auto service_providers = std::make_unique<base::DictionaryValue>();
 

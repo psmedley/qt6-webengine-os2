@@ -14,7 +14,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task/post_task.h"
+#include "base/observer_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/offline_pages/core/archive_manager.h"
@@ -681,8 +681,7 @@ void OfflinePageModelTaskified::RemovePagesMatchingUrlAndNamespace(
   auto task = DeletePageTask::CreateTaskDeletingForPageLimit(
       store_.get(),
       base::BindOnce(&OfflinePageModelTaskified::OnDeleteDone,
-                     weak_ptr_factory_.GetWeakPtr(),
-                     base::DoNothing::Once<DeletePageResult>()),
+                     weak_ptr_factory_.GetWeakPtr(), base::DoNothing()),
       page);
   task_queue_.AddTask(std::move(task));
 }

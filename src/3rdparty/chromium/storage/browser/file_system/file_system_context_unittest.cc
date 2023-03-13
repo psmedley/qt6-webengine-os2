@@ -6,9 +6,7 @@
 
 #include <stddef.h>
 
-#include "base/cxx17_backports.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/task_environment.h"
@@ -69,7 +67,7 @@ class FileSystemContextTest : public testing::Test {
         storage_policy_, mock_quota_manager_->proxy(),
         std::vector<std::unique_ptr<FileSystemBackend>>(),
         std::vector<URLRequestAutoMountHandler>(), data_dir_.GetPath(),
-        CreateAllowFileAccessOptions());
+        data_dir_.GetPath(), CreateAllowFileAccessOptions());
   }
 
   // Verifies a *valid* filesystem url has expected values.
@@ -210,7 +208,6 @@ TEST_F(FileSystemContextTest, CrackFileSystemURL) {
       "ext", kFileSystemTypeLocal, FileSystemMountOption(),
       base::FilePath(DRIVE FPL("/test/local/ext/"))));
 
-  const GURL kTestOrigin = GURL("http://chromium.org/");
   const base::FilePath kVirtualPathNoRoot = base::FilePath(FPL("root/file"));
 
   struct TestCase {
@@ -262,9 +259,9 @@ TEST_F(FileSystemContextTest, CrackFileSystemURL) {
        kFileSystemTypeUnknown, kFileSystemTypeUnknown, FPL(""), std::string()},
   };
 
-  for (size_t i = 0; i < base::size(kTestCases); ++i) {
+  for (size_t i = 0; i < std::size(kTestCases); ++i) {
     const base::FilePath virtual_path =
-        base::FilePath::FromUTF8Unsafe(kTestCases[i].root)
+        base::FilePath::FromASCII(kTestCases[i].root)
             .Append(kVirtualPathNoRoot);
 
     GURL raw_url =

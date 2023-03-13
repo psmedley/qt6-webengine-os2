@@ -41,7 +41,7 @@ TEST_COPTS = COMMON_COPTS + select({
 
 DEBUGINFO_GRAMMAR_JSON_FILE = "@spirv_headers//:spirv_ext_inst_debuginfo_grammar_unified1"
 CLDEBUGINFO100_GRAMMAR_JSON_FILE = "@spirv_headers//:spirv_ext_inst_opencl_debuginfo_100_grammar_unified1"
-VKDEBUGINFO100_GRAMMAR_JSON_FILE = "source/extinst.nonsemantic.vulkan.debuginfo.100.grammar.json"
+SHDEBUGINFO100_GRAMMAR_JSON_FILE = "@spirv_headers//:spirv_ext_inst_nonsemantic_shader_debuginfo_100_grammar_unified1"
 
 def generate_core_tables(version = None):
     if not version:
@@ -61,6 +61,14 @@ def generate_core_tables(version = None):
         srcs = grammars,
         outs = outs,
         cmd = (
+            "$(location :generate_grammar_tables) " +
+            "--spirv-core-grammar=$(location {0}) " +
+            "--extinst-debuginfo-grammar=$(location {1}) " +
+            "--extinst-cldebuginfo100-grammar=$(location {2}) " +
+            "--core-insts-output=$(location {3}) " +
+            "--operand-kinds-output=$(location {4})"
+        ).format(*fmtargs),
+        cmd_bat = (
             "$(location :generate_grammar_tables) " +
             "--spirv-core-grammar=$(location {0}) " +
             "--extinst-debuginfo-grammar=$(location {1}) " +
@@ -97,6 +105,14 @@ def generate_enum_string_mapping(version = None):
             "--extension-enum-output=$(location {3}) " +
             "--enum-string-mapping-output=$(location {4})"
         ).format(*fmtargs),
+        cmd_bat = (
+            "$(location :generate_grammar_tables) " +
+            "--spirv-core-grammar=$(location {0}) " +
+            "--extinst-debuginfo-grammar=$(location {1}) " +
+            "--extinst-cldebuginfo100-grammar=$(location {2}) " +
+            "--extension-enum-output=$(location {3}) " +
+            "--enum-string-mapping-output=$(location {4})"
+        ).format(*fmtargs),
         tools = [":generate_grammar_tables"],
         visibility = ["//visibility:private"],
     )
@@ -118,6 +134,11 @@ def generate_opencl_tables(version = None):
             "--extinst-opencl-grammar=$(location {0}) " +
             "--opencl-insts-output=$(location {1})"
         ).format(*fmtargs),
+        cmd_bat = (
+            "$(location :generate_grammar_tables) " +
+            "--extinst-opencl-grammar=$(location {0}) " +
+            "--opencl-insts-output=$(location {1})"
+        ).format(*fmtargs),
         tools = [":generate_grammar_tables"],
         visibility = ["//visibility:private"],
     )
@@ -135,6 +156,11 @@ def generate_glsl_tables(version = None):
         srcs = grammars,
         outs = outs,
         cmd = (
+            "$(location :generate_grammar_tables) " +
+            "--extinst-glsl-grammar=$(location {0}) " +
+            "--glsl-insts-output=$(location {1})"
+        ).format(*fmtargs),
+        cmd_bat = (
             "$(location :generate_grammar_tables) " +
             "--extinst-glsl-grammar=$(location {0}) " +
             "--glsl-insts-output=$(location {1})"
@@ -161,23 +187,7 @@ def generate_vendor_tables(extension, operand_kind_prefix = ""):
             "--vendor-insts-output=$(location {1}) " +
             "--vendor-operand-kind-prefix={2}"
         ).format(*fmtargs),
-        tools = [":generate_grammar_tables"],
-        visibility = ["//visibility:private"],
-    )
-
-def generate_vendor_tables_local(extension, operand_kind_prefix = ""):
-    if not extension:
-        fail("Must specify extension", "extension")
-    extension_rule = extension.replace("-", "_").replace(".", "_")
-    grammars = ["source/extinst.{}.grammar.json".format(extension)]
-    outs = ["{}.insts.inc".format(extension)]
-    prefices = [operand_kind_prefix]
-    fmtargs = grammars + outs + prefices
-    native.genrule(
-        name = "gen_vendor_tables_" + extension_rule,
-        srcs = grammars,
-        outs = outs,
-        cmd = (
+        cmd_bat = (
             "$(location :generate_grammar_tables) " +
             "--extinst-vendor-grammar=$(location {0}) " +
             "--vendor-insts-output=$(location {1}) " +
@@ -197,6 +207,11 @@ def generate_extinst_lang_headers(name, grammar = None):
         srcs = [grammar],
         outs = outs,
         cmd = (
+            "$(location :generate_language_headers) " +
+            "--extinst-grammar=$< " +
+            "--extinst-output-path=$(location {0})"
+        ).format(*fmtargs),
+        cmd_bat = (
             "$(location :generate_language_headers) " +
             "--extinst-grammar=$< " +
             "--extinst-output-path=$(location {0})"

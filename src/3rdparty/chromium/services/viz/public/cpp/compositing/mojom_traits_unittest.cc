@@ -17,10 +17,12 @@
 #include "components/viz/common/resources/resource_settings.h"
 #include "components/viz/common/resources/returned_resource.h"
 #include "components/viz/common/resources/transferable_resource.h"
+#include "components/viz/common/surfaces/region_capture_bounds.h"
 #include "components/viz/common/surfaces/subtree_capture_id.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/test/begin_frame_args_test.h"
+#include "components/viz/test/compositor_frame_helpers.h"
 #include "gpu/ipc/common/mailbox_holder_mojom_traits.h"
 #include "gpu/ipc/common/mailbox_mojom_traits.h"
 #include "gpu/ipc/common/sync_token_mojom_traits.h"
@@ -57,6 +59,8 @@
 #include "skia/public/mojom/bitmap_skbitmap_mojom_traits.h"
 #include "skia/public/mojom/tile_mode_mojom_traits.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
+#include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkString.h"
 #include "ui/gfx/geometry/mojom/geometry_mojom_traits.h"
 #include "ui/gfx/hdr_metadata.h"
@@ -77,7 +81,7 @@ using StructTraitsTest = testing::Test;
 TEST_F(StructTraitsTest, BeginFrameArgs) {
   const base::TimeTicks frame_time = base::TimeTicks::Now();
   const base::TimeTicks deadline = base::TimeTicks::Now();
-  const base::TimeDelta interval = base::TimeDelta::FromMilliseconds(1337);
+  const base::TimeDelta interval = base::Milliseconds(1337);
   const BeginFrameArgs::BeginFrameArgsType type = BeginFrameArgs::NORMAL;
   const bool on_critical_path = true;
   const uint64_t source_id = 5;
@@ -359,7 +363,7 @@ TEST_F(StructTraitsTest, CopyOutputRequest_TextureRequest) {
       run_loop_for_release.QuitClosure(), sync_token));
 
   output->SendResult(std::make_unique<CopyOutputTextureResult>(
-      result_rect,
+      result_format, result_rect,
       CopyOutputResult::TextureResult(mailbox, sync_token,
                                       gfx::ColorSpace::CreateSRGB()),
       std::move(release_callbacks)));
@@ -522,7 +526,7 @@ TEST_F(StructTraitsTest, CompositorFrame) {
 
   // CompositorFrameMetadata constants.
   const float device_scale_factor = 2.6f;
-  const gfx::Vector2dF root_scroll_offset(1234.5f, 6789.1f);
+  const gfx::PointF root_scroll_offset(1234.5f, 6789.1f);
   const float page_scale_factor = 1337.5f;
   const gfx::SizeF scrollable_viewport_size(1337.7f, 1234.5f);
   const BeginFrameAck begin_frame_ack(5, 10, false);
@@ -588,6 +592,39 @@ TEST_F(StructTraitsTest, CompositorFrame) {
             out_solid_color_draw_quad->force_anti_aliasing_off);
 }
 
+TEST_F(StructTraitsTest, CompositorFrameTransitionDirective) {
+  auto frame = CompositorFrameBuilder()
+                   .AddDefaultRenderPass()
+                   .AddDefaultRenderPass()
+                   .AddDefaultRenderPass()
+                   .Build();
+
+  CompositorFrameTransitionDirective::SharedElement element;
+  element.render_pass_id = frame.render_pass_list.front()->id;
+  frame.metadata.transition_directives.push_back(
+      CompositorFrameTransitionDirective(
+          1u, CompositorFrameTransitionDirective::Type::kSave, false,
+          CompositorFrameTransitionDirective::Effect::kNone,
+          CompositorFrameTransitionDirective::TransitionConfig(), {element}));
+
+  // This ensures de-serialization succeeds if all passes are present.
+  CompositorFrame output;
+  ASSERT_TRUE(mojo::test::SerializeAndDeserialize<mojom::CompositorFrame>(
+      frame, output));
+
+  element.render_pass_id = CompositorRenderPassId(
+      frame.render_pass_list.back()->id.GetUnsafeValue() + 1);
+  frame.metadata.transition_directives.push_back(
+      CompositorFrameTransitionDirective(
+          1u, CompositorFrameTransitionDirective::Type::kSave, false,
+          CompositorFrameTransitionDirective::Effect::kNone,
+          CompositorFrameTransitionDirective::TransitionConfig(), {element}));
+
+  // This ensures de-serialization fails if a pass is missing.
+  ASSERT_FALSE(mojo::test::SerializeAndDeserialize<mojom::CompositorFrame>(
+      frame, output));
+}
+
 TEST_F(StructTraitsTest, SurfaceInfo) {
   const SurfaceId surface_id(
       FrameSinkId(1234, 4321),
@@ -634,7 +671,7 @@ TEST_F(StructTraitsTest, ReturnedResource) {
 
 TEST_F(StructTraitsTest, CompositorFrameMetadata) {
   const float device_scale_factor = 2.6f;
-  const gfx::Vector2dF root_scroll_offset(1234.5f, 6789.1f);
+  const gfx::PointF root_scroll_offset(1234.5f, 6789.1f);
   const float page_scale_factor = 1337.5f;
   const gfx::SizeF scrollable_viewport_size(1337.7f, 1234.5f);
   const bool may_contain_video = true;
@@ -734,9 +771,9 @@ TEST_F(StructTraitsTest, RenderPass) {
   input->SetAll(render_pass_id, output_rect, damage_rect, transform_to_root,
                 filters, backdrop_filters, backdrop_filter_bounds,
                 subtree_capture_id, output_rect.size(),
-                has_transparent_background, cache_render_pass,
-                has_damage_from_contributing_content, generate_mipmap,
-                has_per_quad_damage);
+                SharedElementResourceId(), has_transparent_background,
+                cache_render_pass, has_damage_from_contributing_content,
+                generate_mipmap, has_per_quad_damage);
   input->copy_requests.push_back(CopyOutputRequest::CreateStubForTesting());
   const gfx::Rect copy_output_area(24, 42, 75, 57);
   input->copy_requests.back()->set_area(copy_output_area);
@@ -881,9 +918,9 @@ TEST_F(StructTraitsTest, RenderPassWithEmptySharedQuadStateList) {
   input->SetAll(render_pass_id, output_rect, damage_rect, transform_to_root,
                 cc::FilterOperations(), cc::FilterOperations(),
                 backdrop_filter_bounds, subtree_capture_id, output_rect.size(),
-                has_transparent_background, cache_render_pass,
-                has_damage_from_contributing_content, generate_mipmap,
-                has_per_quad_damage);
+                SharedElementResourceId(), has_transparent_background,
+                cache_render_pass, has_damage_from_contributing_content,
+                generate_mipmap, has_per_quad_damage);
 
   // Unlike the previous test, don't add any quads to the list; we need to
   // verify that the serialization code can deal with that.
@@ -1303,7 +1340,7 @@ TEST_F(StructTraitsTest, CopyOutputResult_Texture) {
   mailbox.SetName(mailbox_name);
   std::unique_ptr<CopyOutputResult> input =
       std::make_unique<CopyOutputTextureResult>(
-          result_rect,
+          CopyOutputResult::Format::RGBA, result_rect,
           CopyOutputResult::TextureResult(mailbox, sync_token,
                                           result_color_space),
           std::move(release_callbacks));

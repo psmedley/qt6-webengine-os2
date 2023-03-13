@@ -17,6 +17,15 @@ cc_library(
         "util.cpp",
     ],
     hdrs = ["//:public_headers"],
+    linkopts = select({
+        # TODO: Bazel uses `clang` instead of `clang++` to link
+        # C++ code on BSD. Temporarily adding these linker flags while
+        # we wait for Bazel to resolve
+        # https://github.com/bazelbuild/bazel/issues/12023.
+        "//:platform_freebsd": ["-lm"],
+        "//:platform_openbsd": ["-lm"],
+        "//conditions:default": [],
+    }),
     strip_include_prefix = "/include",
     visibility = ["//:__pkg__"],
 )
@@ -25,6 +34,9 @@ cc_library(
 cc_library(
     name = "flatc_library",
     srcs = [
+        "bfbs_gen.h",
+        "bfbs_gen_lua.cpp",
+        "bfbs_gen_lua.h",
         "flatc.cpp",
     ],
     hdrs = [
@@ -41,6 +53,9 @@ cc_library(
 cc_library(
     name = "flatc",
     srcs = [
+        "bfbs_gen.h",
+        "bfbs_gen_lua.cpp",
+        "bfbs_gen_lua.h",
         "flatc_main.cpp",
         "idl_gen_cpp.cpp",
         "idl_gen_csharp.cpp",

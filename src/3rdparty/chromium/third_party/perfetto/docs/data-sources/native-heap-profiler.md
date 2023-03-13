@@ -424,6 +424,13 @@ LD_PRELOAD=out/linux_clang_release/libheapprofd_glibc_preload.so out/linux_clang
 Then, Ctrl-C the Perfetto invocation and upload ~/heapprofd-trace to the
 [Perfetto UI](https://ui.perfetto.dev).
 
+NOTE: by default, heapprofd lazily initalizes to avoid blocking your program's
+main thread. However, if your program makes memory allocations on startup,
+these can be missed. To avoid this from happening, set the enironment variable
+`PERFETTO_HEAPPROFD_BLOCKING_INIT=1`; on the first malloc, your program will
+be blocked until heapprofd initializes fully but means every allocation will
+be correctly tracked.
+
 ## Known Issues
 
 ### {#known-issues-android11} Android 11
@@ -566,9 +573,12 @@ subject to change**.
 
 ```sql
 select name, map_name, cumulative_size
-       from experimental_flamegraph(8300973884377,1,'native')
+       from experimental_flamegraph
+       where ts = 8300973884377
+            and upid = 1
+            and profile_type = 'native'
        order by abs(cumulative_size) desc;
-``` 
+```
 
 | name | map_name | cumulative_size |
 |------|----------|----------------|

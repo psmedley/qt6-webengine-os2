@@ -26,7 +26,8 @@
 
 #include "third_party/blink/renderer/core/editing/ime/input_method_controller.h"
 
-#include "base/macros.h"
+#include <tuple>
+
 #include "third_party/blink/public/mojom/input/focus_type.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
@@ -597,7 +598,7 @@ bool InputMethodController::FinishComposingText(
     RevealSelectionScope reveal_selection_scope(GetFrame());
 
     if (is_too_long) {
-      ignore_result(ReplaceComposition(ComposingText()));
+      std::ignore = ReplaceComposition(ComposingText());
     } else {
       Clear();
       DispatchCompositionEndEvent(GetFrame(), composing);
@@ -764,6 +765,18 @@ void InputMethodController::AddImeTextSpans(
             !SpellChecker::IsSpellCheckingEnabledAt(
                 ephemeral_line_range.StartPosition()))
           continue;
+
+        // Do not add the grammar marker if it overlaps with existing spellcheck
+        // markers.
+        if (suggestion_type == SuggestionMarker::SuggestionType::kGrammar &&
+            !GetDocument()
+                 .Markers()
+                 .MarkersIntersectingRange(
+                     ToEphemeralRangeInFlatTree(ephemeral_line_range),
+                     DocumentMarker::MarkerTypes::Spelling())
+                 .IsEmpty()) {
+          continue;
+        }
 
         GetDocument().Markers().AddSuggestionMarker(
             ephemeral_line_range,
@@ -1399,7 +1412,7 @@ void InputMethodController::ExtendSelectionAndDelete(int before, int after) {
                                    .End() &&
            before <= static_cast<int>(selection_offsets.Start()));
   // TODO(editing-dev): Find a way to distinguish Forward and Backward.
-  ignore_result(DeleteSelection());
+  std::ignore = DeleteSelection();
 }
 
 // TODO(ctzsm): We should reduce the number of selectionchange events.
@@ -1653,11 +1666,11 @@ int InputMethodController::ComputeWebTextInputNextPreviousFlags() const {
     return kWebTextInputFlagNone;
 
   int flags = kWebTextInputFlagNone;
-  if (page->GetFocusController().NextFocusableElementInForm(
+  if (page->GetFocusController().NextFocusableElementForIME(
           element, mojom::blink::FocusType::kForward))
     flags |= kWebTextInputFlagHaveNextFocusableElement;
 
-  if (page->GetFocusController().NextFocusableElementInForm(
+  if (page->GetFocusController().NextFocusableElementForIME(
           element, mojom::blink::FocusType::kBackward))
     flags |= kWebTextInputFlagHavePreviousFocusableElement;
 

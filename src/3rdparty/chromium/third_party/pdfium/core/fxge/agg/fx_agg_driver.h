@@ -42,13 +42,13 @@ class CFX_AggDeviceDriver final : public RenderDeviceDriverIface {
   int GetDeviceCaps(int caps_id) const override;
   void SaveState() override;
   void RestoreState(bool bKeepSaved) override;
-  bool SetClip_PathFill(const CFX_Path* pPath,
+  bool SetClip_PathFill(const CFX_Path& path,
                         const CFX_Matrix* pObject2Device,
                         const CFX_FillRenderOptions& fill_options) override;
-  bool SetClip_PathStroke(const CFX_Path* pPath,
+  bool SetClip_PathStroke(const CFX_Path& path,
                           const CFX_Matrix* pObject2Device,
                           const CFX_GraphStateData* pGraphState) override;
-  bool DrawPath(const CFX_Path* pPath,
+  bool DrawPath(const CFX_Path& path,
                 const CFX_Matrix* pObject2Device,
                 const CFX_GraphStateData* pGraphState,
                 uint32_t fill_color,
@@ -87,8 +87,7 @@ class CFX_AggDeviceDriver final : public RenderDeviceDriverIface {
                    BlendMode blend_type) override;
   bool ContinueDIBits(CFX_ImageRenderer* handle,
                       PauseIndicatorIface* pPause) override;
-  bool DrawDeviceText(int nChars,
-                      const TextCharPos* pCharPos,
+  bool DrawDeviceText(pdfium::span<const TextCharPos> pCharPos,
                       CFX_Font* pFont,
                       const CFX_Matrix& mtObject2Device,
                       float font_size,
@@ -107,7 +106,7 @@ class CFX_AggDeviceDriver final : public RenderDeviceDriverIface {
   RetainPtr<CFX_DIBitmap> const m_pBitmap;
   std::unique_ptr<CFX_ClipRgn> m_pClipRgn;
   std::vector<std::unique_ptr<CFX_ClipRgn>> m_StateStack;
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   void* m_pPlatformGraphics = nullptr;
 #endif
   CFX_FillRenderOptions m_FillOptions;

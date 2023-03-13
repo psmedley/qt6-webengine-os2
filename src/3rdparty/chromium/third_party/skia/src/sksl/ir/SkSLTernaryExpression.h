@@ -8,7 +8,6 @@
 #ifndef SKSL_TERNARYEXPRESSION
 #define SKSL_TERNARYEXPRESSION
 
-#include "src/sksl/SkSLPosition.h"
 #include "src/sksl/ir/SkSLExpression.h"
 
 namespace SkSL {
@@ -18,26 +17,28 @@ namespace SkSL {
  */
 class TernaryExpression final : public Expression {
 public:
-    static constexpr Kind kExpressionKind = Kind::kTernary;
+    inline static constexpr Kind kExpressionKind = Kind::kTernary;
 
-    TernaryExpression(int offset, std::unique_ptr<Expression> test,
-                      std::unique_ptr<Expression> ifTrue, std::unique_ptr<Expression> ifFalse)
-        : INHERITED(offset, kExpressionKind, &ifTrue->type())
+    TernaryExpression(Position pos, std::unique_ptr<Expression> test,
+            std::unique_ptr<Expression> ifTrue, std::unique_ptr<Expression> ifFalse)
+        : INHERITED(pos, kExpressionKind, &ifTrue->type())
         , fTest(std::move(test))
         , fIfTrue(std::move(ifTrue))
         , fIfFalse(std::move(ifFalse)) {
-        SkASSERT(this->ifTrue()->type() == this->ifFalse()->type());
+        SkASSERT(this->ifTrue()->type().matches(this->ifFalse()->type()));
     }
 
     // Creates a potentially-simplified form of the ternary. Typechecks and coerces input
     // expressions; reports errors via ErrorReporter.
     static std::unique_ptr<Expression> Convert(const Context& context,
-                                            std::unique_ptr<Expression> test,
-                                            std::unique_ptr<Expression> ifTrue,
-                                            std::unique_ptr<Expression> ifFalse);
+                                               Position pos,
+                                               std::unique_ptr<Expression> test,
+                                               std::unique_ptr<Expression> ifTrue,
+                                               std::unique_ptr<Expression> ifFalse);
 
     // Creates a potentially-simplified form of the ternary; reports errors via ASSERT.
     static std::unique_ptr<Expression> Make(const Context& context,
+                                            Position pos,
                                             std::unique_ptr<Expression> test,
                                             std::unique_ptr<Expression> ifTrue,
                                             std::unique_ptr<Expression> ifFalse);
@@ -77,12 +78,12 @@ public:
     }
 
     std::unique_ptr<Expression> clone() const override {
-        return std::make_unique<TernaryExpression>(fOffset, this->test()->clone(),
+        return std::make_unique<TernaryExpression>(fPosition, this->test()->clone(),
                                                    this->ifTrue()->clone(),
                                                    this->ifFalse()->clone());
     }
 
-    String description() const override {
+    std::string description() const override {
         return "(" + this->test()->description() + " ? " + this->ifTrue()->description() + " : " +
                this->ifFalse()->description() + ")";
     }

@@ -15,17 +15,17 @@
 #include "ui/display/types/display_snapshot.h"
 #include "ui/display/types/gamma_ramp_rgb_entry.h"
 #include "ui/gfx/linux/drm_util_linux.h"
-#include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_device.h"
 #include "ui/ozone/platform/drm/gpu/drm_device_manager.h"
 #include "ui/ozone/platform/drm/gpu/drm_display.h"
+#include "ui/ozone/platform/drm/gpu/drm_gpu_util.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
 
 namespace ui {
 
 namespace {
-constexpr char kDisplayIdCollisionDetected[] =
-    "Display.GenerateDisplayId.CollisionDetection";
+constexpr char kMultipleDisplayIdsCollisionDetected[] =
+    "Display.MultipleDisplays.GenerateId.CollisionDetection";
 using MapDisplayIdToIndexAndSnapshotPair =
     base::flat_map<int64_t, display::DisplaySnapshot*>;
 
@@ -107,9 +107,9 @@ DrmGpuDisplayManager::DrmGpuDisplayManager(ScreenManager* screen_manager,
 
 DrmGpuDisplayManager::~DrmGpuDisplayManager() = default;
 
-void DrmGpuDisplayManager::SetClearOverlayCacheCallback(
+void DrmGpuDisplayManager::SetDisplaysConfiguredCallback(
     base::RepeatingClosure callback) {
-  clear_overlay_cache_callback_ = std::move(callback);
+  displays_configured_callback_ = std::move(callback);
 }
 
 MovableDisplaySnapshots DrmGpuDisplayManager::GetDisplays() {
@@ -132,7 +132,7 @@ MovableDisplaySnapshots DrmGpuDisplayManager::GetDisplays() {
     // Receiving a signal that DRM state was updated. Need to reset the plane
     // manager's resource cache since IDs may have changed.
     drm->plane_manager()->ResetConnectorsCache(drm->GetResources());
-    auto display_infos = GetAvailableDisplayControllerInfos(drm->get_fd());
+    auto display_infos = GetDisplayInfosAndUpdateCrtcs(drm->get_fd());
     for (const auto& display_info : display_infos) {
       auto it = std::find_if(
           old_displays.begin(), old_displays.end(),
@@ -168,7 +168,12 @@ MovableDisplaySnapshots DrmGpuDisplayManager::GetDisplays() {
     }
     device_index++;
   }
-  base::UmaHistogramBoolean(kDisplayIdCollisionDetected, collision_detected);
+
+  const bool multiple_connected_displays = params_list.size() > 1;
+  if (multiple_connected_displays) {
+    base::UmaHistogramBoolean(kMultipleDisplayIdsCollisionDetected,
+                              collision_detected);
+  }
 
   NotifyScreenManager(displays_, old_displays);
   return params_list;
@@ -231,11 +236,12 @@ bool DrmGpuDisplayManager::ConfigureDisplays(
     controllers_to_configure.push_back(std::move(params));
   }
 
-  if (clear_overlay_cache_callback_)
-    clear_overlay_cache_callback_.Run();
-
   bool config_success =
       screen_manager_->ConfigureDisplayControllers(controllers_to_configure);
+
+  if (displays_configured_callback_) {
+    displays_configured_callback_.Run();
+  }
 
   for (const auto& controller : controllers_to_configure) {
     if (config_success) {
@@ -318,14 +324,14 @@ void DrmGpuDisplayManager::SetGammaCorrection(
   display->SetGammaCorrection(degamma_lut, gamma_lut);
 }
 
-void DrmGpuDisplayManager::SetPrivacyScreen(int64_t display_id, bool enabled) {
+bool DrmGpuDisplayManager::SetPrivacyScreen(int64_t display_id, bool enabled) {
   DrmDisplay* display = FindDisplay(display_id);
   if (!display) {
     LOG(ERROR) << "There is no display with ID " << display_id;
-    return;
+    return false;
   }
 
-  display->SetPrivacyScreen(enabled);
+  return display->SetPrivacyScreen(enabled);
 }
 
 void DrmGpuDisplayManager::SetColorSpace(int64_t crtc_id,

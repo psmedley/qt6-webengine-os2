@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/shared_buffer.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "third_party/skia/include/core/SkData.h"
 #include "third_party/skia/include/core/SkImageInfo.h"
 
@@ -70,13 +71,13 @@ DecodingImageGenerator::CreateAsSkImageGenerator(sk_sp<SkData> data) {
   if (!decoder || !decoder->IsSizeAvailable())
     return nullptr;
 
-  const IntSize size = decoder->Size();
+  const gfx::Size size = decoder->Size();
   const SkImageInfo info =
-      SkImageInfo::MakeN32(size.Width(), size.Height(), kPremul_SkAlphaType,
+      SkImageInfo::MakeN32(size.width(), size.height(), kPremul_SkAlphaType,
                            decoder->ColorSpaceForSkImages());
 
   scoped_refptr<ImageFrameGenerator> frame = ImageFrameGenerator::Create(
-      SkISize::Make(size.Width(), size.Height()), false,
+      SkISize::Make(size.width(), size.height()), false,
       decoder->GetColorBehavior(), decoder->GetSupportedDecodeSizes());
   if (!frame)
     return nullptr;

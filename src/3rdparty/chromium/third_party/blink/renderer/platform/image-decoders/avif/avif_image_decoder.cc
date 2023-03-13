@@ -28,6 +28,7 @@
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/libavif/src/include/avif/avif.h"
 #include "third_party/libyuv/include/libyuv.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 #include "ui/gfx/color_space.h"
 #include "ui/gfx/color_transform.h"
 #include "ui/gfx/half_float.h"
@@ -110,39 +111,52 @@ gfx::ColorSpace GetColorSpace(const avifImage* image) {
 // for the YUV-to-RGB conversion.
 bool IsColorSpaceSupportedByPCVR(const avifImage* image) {
   SkYUVColorSpace yuv_color_space;
-  // libyuv supports the alpha channel only with the I420 pixel format, which is
-  // 8-bit YUV 4:2:0.
+  // libyuv supports the 8-bit and 10-bit YUVA pixel formats.
   return GetColorSpace(image).ToSkYUVColorSpace(image->depth,
                                                 &yuv_color_space) &&
          (!image->alphaPlane ||
-          (image->depth == 8 && image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420 &&
+          ((image->depth == 8 || image->depth == 10) &&
+           (image->yuvFormat == AVIF_PIXEL_FORMAT_YUV420 ||
+            image->yuvFormat == AVIF_PIXEL_FORMAT_YUV422 ||
+            image->yuvFormat == AVIF_PIXEL_FORMAT_YUV444) &&
            image->alphaRange == AVIF_RANGE_FULL));
 }
 
-media::VideoPixelFormat AvifToVideoPixelFormat(avifPixelFormat fmt, int depth) {
+media::VideoPixelFormat AvifToVideoPixelFormat(avifPixelFormat fmt,
+                                               bool has_alpha,
+                                               int depth) {
   if (depth != 8 && depth != 10 && depth != 12) {
     // Unsupported bit depth.
     NOTREACHED();
     return media::PIXEL_FORMAT_UNKNOWN;
   }
-  int index = (depth - 8) / 2;
-  static constexpr media::VideoPixelFormat kYUV420Formats[] = {
-      media::PIXEL_FORMAT_I420, media::PIXEL_FORMAT_YUV420P10,
-      media::PIXEL_FORMAT_YUV420P12};
-  static constexpr media::VideoPixelFormat kYUV422Formats[] = {
-      media::PIXEL_FORMAT_I422, media::PIXEL_FORMAT_YUV422P10,
-      media::PIXEL_FORMAT_YUV422P12};
-  static constexpr media::VideoPixelFormat kYUV444Formats[] = {
-      media::PIXEL_FORMAT_I444, media::PIXEL_FORMAT_YUV444P10,
-      media::PIXEL_FORMAT_YUV444P12};
+  int depth_index = (depth - 8) / 2;
+  // In these lookup tables, the first index is has_alpha and the second index
+  // is depth_index. Note that there are no media::VideoPixelFormat values for
+  // 12-bit YUVA.
+  static constexpr media::VideoPixelFormat kYUV420Formats[][3] = {
+      {media::PIXEL_FORMAT_I420, media::PIXEL_FORMAT_YUV420P10,
+       media::PIXEL_FORMAT_YUV420P12},
+      {media::PIXEL_FORMAT_I420A, media::PIXEL_FORMAT_YUV420AP10,
+       media::PIXEL_FORMAT_UNKNOWN}};
+  static constexpr media::VideoPixelFormat kYUV422Formats[][3] = {
+      {media::PIXEL_FORMAT_I422, media::PIXEL_FORMAT_YUV422P10,
+       media::PIXEL_FORMAT_YUV422P12},
+      {media::PIXEL_FORMAT_I422A, media::PIXEL_FORMAT_YUV422AP10,
+       media::PIXEL_FORMAT_UNKNOWN}};
+  static constexpr media::VideoPixelFormat kYUV444Formats[][3] = {
+      {media::PIXEL_FORMAT_I444, media::PIXEL_FORMAT_YUV444P10,
+       media::PIXEL_FORMAT_YUV444P12},
+      {media::PIXEL_FORMAT_I444A, media::PIXEL_FORMAT_YUV444AP10,
+       media::PIXEL_FORMAT_UNKNOWN}};
   switch (fmt) {
     case AVIF_PIXEL_FORMAT_YUV420:
     case AVIF_PIXEL_FORMAT_YUV400:
-      return kYUV420Formats[index];
+      return kYUV420Formats[has_alpha][depth_index];
     case AVIF_PIXEL_FORMAT_YUV422:
-      return kYUV422Formats[index];
+      return kYUV422Formats[has_alpha][depth_index];
     case AVIF_PIXEL_FORMAT_YUV444:
-      return kYUV444Formats[index];
+      return kYUV444Formats[has_alpha][depth_index];
     case AVIF_PIXEL_FORMAT_NONE:
       NOTREACHED();
       return media::PIXEL_FORMAT_UNKNOWN;
@@ -189,7 +203,7 @@ inline void WritePixel(float max_channel,
   }
 
   gfx::FloatToHalfFloat(rgba_pixels, reinterpret_cast<uint16_t*>(rgba_dest),
-                        base::size(rgba_pixels));
+                        std::size(rgba_pixels));
 }
 
 enum class ColorType { kMono, kColor };
@@ -297,11 +311,11 @@ cc::YUVSubsampling AVIFImageDecoder::GetYUVSubsampling() const {
   }
 }
 
-IntSize AVIFImageDecoder::DecodedYUVSize(cc::YUVIndex index) const {
+gfx::Size AVIFImageDecoder::DecodedYUVSize(cc::YUVIndex index) const {
   DCHECK(IsDecodedSizeAvailable());
   if (index == cc::YUVIndex::kU || index == cc::YUVIndex::kV) {
-    return IntSize(UVSize(Size().Width(), chroma_shift_x_),
-                   UVSize(Size().Height(), chroma_shift_y_));
+    return gfx::Size(UVSize(Size().width(), chroma_shift_x_),
+                     UVSize(Size().height(), chroma_shift_y_));
   }
   return Size();
 }
@@ -314,7 +328,7 @@ wtf_size_t AVIFImageDecoder::DecodedYUVWidthBytes(cc::YUVIndex index) const {
   // The comments for Dav1dPicAllocator in dav1d/picture.h require the pixel
   // width be padded to a multiple of 128 pixels.
   wtf_size_t aligned_width =
-      static_cast<wtf_size_t>(base::bits::AlignUp(Size().Width(), 128));
+      static_cast<wtf_size_t>(base::bits::AlignUp(Size().width(), 128));
   if (index == cc::YUVIndex::kU || index == cc::YUVIndex::kV) {
     aligned_width >>= chroma_shift_x_;
   }
@@ -531,12 +545,12 @@ void AVIFImageDecoder::InitializeNewFrame(wtf_size_t index) {
     buffer.SetPixelFormat(ImageFrame::PixelFormat::kRGBA_F16);
 
   // For AVIFs, the frame always fills the entire image.
-  buffer.SetOriginalFrameRect(IntRect(IntPoint(), Size()));
+  buffer.SetOriginalFrameRect(gfx::Rect(Size()));
 
   avifImageTiming timing;
   auto ret = avifDecoderNthImageTiming(decoder_.get(), index, &timing);
   DCHECK_EQ(ret, AVIF_RESULT_OK);
-  buffer.SetDuration(base::TimeDelta::FromSecondsD(timing.duration));
+  buffer.SetDuration(base::Seconds(timing.duration));
 }
 
 void AVIFImageDecoder::Decode(wtf_size_t index) {
@@ -693,9 +707,6 @@ bool AVIFImageDecoder::UpdateDemuxer() {
     // https://github.com/AOMediaCodec/libavif/issues/636.
     decoder_->maxThreads = 2;
 
-    // TODO(wtc): Currently libavif always prioritizes the animation, but that's
-    // not correct. It should instead select animation or still image based on
-    // the preferred and major brands listed in the file.
     if (animation_option_ != AnimationOption::kUnspecified &&
         avifDecoderSetSource(
             decoder_.get(),
@@ -891,9 +902,10 @@ avifResult AVIFImageDecoder::DecodeImage(wtf_size_t index) {
 
   const auto* image = decoder_->image;
   // Frame size must be equal to container size.
-  if (IntSize(image->width, image->height) != Size()) {
-    DVLOG(1) << "Frame size " << IntSize(image->width, image->height)
-             << " differs from container size " << Size();
+  if (gfx::Size(image->width, image->height) != Size()) {
+    DVLOG(1) << "Frame size "
+             << gfx::Size(image->width, image->height).ToString()
+             << " differs from container size " << Size().ToString();
     return AVIF_RESULT_UNKNOWN_ERROR;
   }
   // Frame bit depth must be equal to container bit depth.
@@ -950,14 +962,14 @@ bool AVIFImageDecoder::RenderImage(const avifImage* image, ImageFrame* buffer) {
   // supported.
   if (IsColorSpaceSupportedByPCVR(image)) {
     // Create temporary frame wrapping the YUVA planes.
-    auto pixel_format = AvifToVideoPixelFormat(image->yuvFormat, image->depth);
+    const bool has_alpha = image->alphaPlane != nullptr;
+    auto pixel_format =
+        AvifToVideoPixelFormat(image->yuvFormat, has_alpha, image->depth);
     if (pixel_format == media::PIXEL_FORMAT_UNKNOWN)
       return false;
     auto size = gfx::Size(image->width, image->height);
     scoped_refptr<media::VideoFrame> frame;
-    if (image->alphaPlane) {
-      DCHECK_EQ(pixel_format, media::PIXEL_FORMAT_I420);
-      pixel_format = media::PIXEL_FORMAT_I420A;
+    if (has_alpha) {
       frame = media::VideoFrame::WrapExternalYuvaData(
           pixel_format, size, gfx::Rect(size), size, image->yuvRowBytes[0],
           image->yuvRowBytes[1], image->yuvRowBytes[2], image->alphaRowBytes,
@@ -983,7 +995,7 @@ bool AVIFImageDecoder::RenderImage(const avifImage* image, ImageFrame* buffer) {
     // https://bugs.chromium.org/p/libyuv/issues/detail?id=845
     media::PaintCanvasVideoRenderer::ConvertVideoFrameToRGBPixels(
         frame.get(), rgba_8888, frame->visible_rect().width() * 4,
-        premultiply_alpha);
+        premultiply_alpha, media::PaintCanvasVideoRenderer::kFilterBilinear);
     return true;
   }
 
@@ -1018,20 +1030,20 @@ void AVIFImageDecoder::ColorCorrectImage(ImageFrame* buffer) {
                                 : skcms_AlphaFormat_Unpremul;
   if (decode_to_half_float_) {
     const skcms_PixelFormat color_format = skcms_PixelFormat_RGBA_hhhh;
-    for (int y = 0; y < Size().Height(); ++y) {
+    for (int y = 0; y < Size().height(); ++y) {
       ImageFrame::PixelDataF16* const row = buffer->GetAddrF16(0, y);
       const bool success = skcms_Transform(
           row, color_format, alpha_format, transform->SrcProfile(), row,
-          color_format, alpha_format, transform->DstProfile(), Size().Width());
+          color_format, alpha_format, transform->DstProfile(), Size().width());
       DCHECK(success);
     }
   } else {
     const skcms_PixelFormat color_format = XformColorFormat();
-    for (int y = 0; y < Size().Height(); ++y) {
+    for (int y = 0; y < Size().height(); ++y) {
       ImageFrame::PixelData* const row = buffer->GetAddr(0, y);
       const bool success = skcms_Transform(
           row, color_format, alpha_format, transform->SrcProfile(), row,
-          color_format, alpha_format, transform->DstProfile(), Size().Width());
+          color_format, alpha_format, transform->DstProfile(), Size().width());
       DCHECK(success);
     }
   }

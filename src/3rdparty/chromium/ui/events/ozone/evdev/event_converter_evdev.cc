@@ -48,8 +48,10 @@ EventConverterEvdev::EventConverterEvdev(int fd,
   input_device_.enabled = false;
 }
 
-EventConverterEvdev::~EventConverterEvdev() {
-}
+EventConverterEvdev::~EventConverterEvdev() = default;
+
+void EventConverterEvdev::ApplyDeviceSettings(
+    const InputDeviceSettingsEvdev& settings) {}
 
 void EventConverterEvdev::Start() {
   base::CurrentUIThread::Get()->WatchFileDescriptor(
@@ -81,17 +83,13 @@ bool EventConverterEvdev::IsEnabled() const {
   return input_device_.enabled;
 }
 
-void EventConverterEvdev::OnStopped() {
-}
+void EventConverterEvdev::OnStopped() {}
 
-void EventConverterEvdev::OnEnabled() {
-}
+void EventConverterEvdev::OnEnabled() {}
 
-void EventConverterEvdev::OnDisabled() {
-}
+void EventConverterEvdev::OnDisabled() {}
 
-void EventConverterEvdev::DumpTouchEventLog(const char* filename) {
-}
+void EventConverterEvdev::DumpTouchEventLog(const char* filename) {}
 
 void EventConverterEvdev::OnFileCanWriteWithoutBlocking(int fd) {
   NOTREACHED();
@@ -110,6 +108,10 @@ bool EventConverterEvdev::HasPointingStick() const {
 }
 
 bool EventConverterEvdev::HasTouchpad() const {
+  return false;
+}
+
+bool EventConverterEvdev::HasHapticTouchpad() const {
   return false;
 }
 
@@ -163,6 +165,18 @@ void EventConverterEvdev::StopVibration() {
   NOTREACHED();
 }
 
+void EventConverterEvdev::PlayHapticTouchpadEffect(
+    HapticTouchpadEffect effect,
+    HapticTouchpadEffectStrength strength) {
+  NOTREACHED();
+}
+
+void EventConverterEvdev::SetHapticTouchpadEffectForNextButtonRelease(
+    HapticTouchpadEffect effect,
+    HapticTouchpadEffectStrength strength) {
+  NOTREACHED();
+}
+
 int EventConverterEvdev::GetTouchPoints() const {
   NOTREACHED();
   return 0;
@@ -200,17 +214,22 @@ void EventConverterEvdev::SetCapsLockLed(bool enabled) {
   }
 }
 
-void EventConverterEvdev::SetTouchEventLoggingEnabled(bool enabled) {
-}
+void EventConverterEvdev::SetTouchEventLoggingEnabled(bool enabled) {}
 
 void EventConverterEvdev::SetPalmSuppressionCallback(
     const base::RepeatingCallback<void(bool)>& callback) {}
+
+void EventConverterEvdev::SetReportStylusStateCallback(
+    const ReportStylusStateCallback& callback) {}
+
+void EventConverterEvdev::SetGetLatestStylusStateCallback(
+    const GetLatestStylusStateCallback& callback) {}
 
 base::TimeTicks EventConverterEvdev::TimeTicksFromInputEvent(
     const input_event& event) {
   base::TimeTicks timestamp =
       ui::EventTimeStampFromSeconds(event.input_event_sec) +
-      base::TimeDelta::FromMicroseconds(event.input_event_usec);
+      base::Microseconds(event.input_event_usec);
   ValidateEventTimeClock(&timestamp);
   return timestamp;
 }

@@ -31,16 +31,17 @@ bool CanUseBackgroundPriorityForWorkerThreadImpl() {
   if (!Lock::HandlesMultipleThreadPriorities())
     return false;
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
   // When thread priority can't be increased to NORMAL, run all threads with a
   // NORMAL priority to avoid priority inversions on shutdown (ThreadPoolImpl
   // increases BACKGROUND threads priority to NORMAL on shutdown while resolving
   // remaining shutdown blocking tasks).
   //
   // This is ignored on Android, because it doesn't have a clean shutdown phase.
-  if (!PlatformThread::CanIncreaseThreadPriority(ThreadPriority::NORMAL))
+  if (!PlatformThread::CanChangeThreadPriority(ThreadPriority::BACKGROUND,
+                                               ThreadPriority::NORMAL))
     return false;
-#endif  // defined(OS_ANDROID)
+#endif  // BUILDFLAG(IS_ANDROID)
 
   return true;
 }

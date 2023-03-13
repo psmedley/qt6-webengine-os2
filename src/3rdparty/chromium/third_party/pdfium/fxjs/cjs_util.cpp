@@ -16,7 +16,6 @@
 #include "build/build_config.h"
 #include "core/fxcrt/fx_extension.h"
 #include "fxjs/cjs_event_context.h"
-#include "fxjs/cjs_eventrecorder.h"
 #include "fxjs/cjs_object.h"
 #include "fxjs/cjs_publicmethods.h"
 #include "fxjs/cjs_runtime.h"
@@ -26,8 +25,9 @@
 #include "fxjs/js_resources.h"
 #include "third_party/base/check_op.h"
 #include "third_party/base/cxx17_backports.h"
+#include "v8/include/v8-date.h"
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
 #include <ctype.h>
 #endif
 
@@ -52,7 +52,7 @@ const TbConvert TbConvertTable[] = {
     {L"ddd", L"%a"},  {L"dd", L"%d"},  {L"yyyy", L"%Y"}, {L"yy", L"%y"},
     {L"HH", L"%H"},   {L"hh", L"%I"},  {L"MM", L"%M"},   {L"ss", L"%S"},
     {L"TT", L"%p"},
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     {L"tt", L"%p"},   {L"h", L"%#I"},
 #else
     {L"tt", L"%P"},   {L"h", L"%l"},
@@ -112,7 +112,8 @@ CJS_Result CJS_Util::printf(CJS_Runtime* pRuntime,
   {
     size_t offset = 0;
     while (true) {
-      Optional<size_t> offset_end = unsafe_fmt_string.Find(L"%", offset + 1);
+      absl::optional<size_t> offset_end =
+          unsafe_fmt_string.Find(L"%", offset + 1);
       if (!offset_end.has_value()) {
         unsafe_conversion_specifiers.push_back(
             unsafe_fmt_string.Last(unsafe_fmt_string.GetLength() - offset));
@@ -217,12 +218,14 @@ CJS_Result CJS_Util::printd(CJS_Runtime* pRuntime,
                 cFormat.end());
 
   for (size_t i = 0; i < pdfium::size(TbConvertTable); ++i) {
-    int iStart = 0;
-    int iEnd;
-    while ((iEnd = cFormat.find(TbConvertTable[i].lpszJSMark, iStart)) != -1) {
-      cFormat.replace(iEnd, wcslen(TbConvertTable[i].lpszJSMark),
+    size_t nFound = 0;
+    while (true) {
+      nFound = cFormat.find(TbConvertTable[i].lpszJSMark, nFound);
+      if (nFound == std::wstring::npos)
+        break;
+
+      cFormat.replace(nFound, wcslen(TbConvertTable[i].lpszJSMark),
                       TbConvertTable[i].lpszCppMark);
-      iStart = iEnd;
     }
   }
 
@@ -236,18 +239,18 @@ CJS_Result CJS_Util::printd(CJS_Runtime* pRuntime,
   };
 
   for (size_t i = 0; i < pdfium::size(cTableAd); ++i) {
-    int iStart = 0;
-    int iEnd;
-    while ((iEnd = cFormat.find(cTableAd[i].js_mark, iStart)) != -1) {
-      if (iEnd > 0) {
-        if (cFormat[iEnd - 1] == L'%') {
-          iStart = iEnd + 1;
-          continue;
-        }
+    size_t nFound = 0;
+    while (true) {
+      nFound = cFormat.find(cTableAd[i].js_mark, nFound);
+      if (nFound == std::wstring::npos)
+        break;
+
+      if (nFound != 0 && cFormat[nFound - 1] == L'%') {
+        ++nFound;
+        continue;
       }
-      cFormat.replace(iEnd, 1,
+      cFormat.replace(nFound, 1,
                       WideString::Format(L"%d", cTableAd[i].value).c_str());
-      iStart = iEnd;
     }
   }
 
@@ -375,7 +378,8 @@ CJS_Result CJS_Util::scand(CJS_Runtime* pRuntime,
   WideString sDate = pRuntime->ToWideString(params[1]);
   double dDate = FX_GetDateTime();
   if (sDate.GetLength() > 0)
-    dDate = CJS_PublicMethods::ParseDateUsingFormat(sDate, sFormat, nullptr);
+    dDate = CJS_PublicMethods::ParseDateUsingFormat(pRuntime->GetIsolate(),
+                                                    sDate, sFormat, nullptr);
   if (isnan(dDate))
     return CJS_Result::Success(pRuntime->NewUndefined());
 

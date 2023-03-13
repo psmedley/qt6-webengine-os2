@@ -33,6 +33,7 @@
 
 #include "audio.h"
 #include "avfilter.h"
+#include "filters.h"
 #include "formats.h"
 #include "internal.h"
 
@@ -73,7 +74,6 @@ typedef struct AudioCrossoverContext {
 
     AVFrame *xover;
 
-    AVFrame *input_frame;
     AVFrame *frames[MAX_BANDS];
 
     int (*filter_channels)(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs);
@@ -191,10 +191,8 @@ static av_cold int init(AVFilterContext *ctx)
             return AVERROR(ENOMEM);
         pad.name = name;
 
-        if ((ret = ff_insert_outpad(ctx, i, &pad)) < 0) {
-            av_freep(&pad.name);
+        if ((ret = ff_append_outpad_free_name(ctx, &pad)) < 0)
             return ret;
-        }
     }
 
     return ret;
@@ -303,36 +301,6 @@ static void calc_q_factors(int order, double *q)
         q[i] = 1. / (-2. * cos(M_PI * (2. * (i + 1) + n - 1.) / (2. * n)));
 }
 
-static int query_formats(AVFilterContext *ctx)
-{
-    AVFilterFormats *formats;
-    AVFilterChannelLayouts *layouts;
-    static const enum AVSampleFormat sample_fmts[] = {
-        AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_DBLP,
-        AV_SAMPLE_FMT_NONE
-    };
-    int ret;
-
-    layouts = ff_all_channel_counts();
-    if (!layouts)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_channel_layouts(ctx, layouts);
-    if (ret < 0)
-        return ret;
-
-    formats = ff_make_format_list(sample_fmts);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_formats(ctx, formats);
-    if (ret < 0)
-        return ret;
-
-    formats = ff_all_samplerates();
-    if (!formats)
-        return AVERROR(ENOMEM);
-    return ff_set_common_samplerates(ctx, formats);
-}
-
 #define BIQUAD_PROCESS(name, type)                             \
 static void biquad_process_## name(const type *const c,        \
                                    type *b,                    \
@@ -386,10 +354,10 @@ BIQUAD_PROCESS(dblp, double)
 static int filter_channels_## name(AVFilterContext *ctx, void *arg, int jobnr, int nb_jobs) \
 {                                                                                           \
     AudioCrossoverContext *s = ctx->priv;                                                   \
-    AVFrame *in = s->input_frame;                                                           \
+    AVFrame *in = arg;                                                           \
     AVFrame **frames = s->frames;                                                           \
-    const int start = (in->channels * jobnr) / nb_jobs;                                     \
-    const int end = (in->channels * (jobnr+1)) / nb_jobs;                                   \
+    const int start = (in->ch_layout.nb_channels * jobnr) / nb_jobs;                        \
+    const int end = (in->ch_layout.nb_channels * (jobnr+1)) / nb_jobs;                      \
     const int nb_samples = in->nb_samples;                                                  \
     const int nb_outs = ctx->nb_outputs;                                                    \
     const int first_order = s->first_order;                                                 \
@@ -496,6 +464,7 @@ static int config_input(AVFilterLink *inlink)
     switch (inlink->format) {
     case AV_SAMPLE_FMT_FLTP: s->filter_channels = filter_channels_fltp; break;
     case AV_SAMPLE_FMT_DBLP: s->filter_channels = filter_channels_dblp; break;
+    default: return AVERROR_BUG;
     }
 
     s->xover = ff_get_audio_buffer(inlink, 2 * (ctx->nb_outputs * 10 + ctx->nb_outputs * 10 +
@@ -511,11 +480,10 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     AVFilterContext *ctx = inlink->dst;
     AudioCrossoverContext *s = ctx->priv;
     AVFrame **frames = s->frames;
-    int i, ret = 0;
+    int ret = 0;
 
-    for (i = 0; i < ctx->nb_outputs; i++) {
+    for (int i = 0; i < ctx->nb_outputs; i++) {
         frames[i] = ff_get_audio_buffer(ctx->outputs[i], in->nb_samples);
-
         if (!frames[i]) {
             ret = AVERROR(ENOMEM);
             break;
@@ -527,11 +495,15 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     if (ret < 0)
         goto fail;
 
-    s->input_frame = in;
-    ctx->internal->execute(ctx, s->filter_channels, NULL, NULL, FFMIN(inlink->channels,
-                                                                      ff_filter_get_nb_threads(ctx)));
+    ff_filter_execute(ctx, s->filter_channels, in, NULL,
+                      FFMIN(inlink->ch_layout.nb_channels, ff_filter_get_nb_threads(ctx)));
 
-    for (i = 0; i < ctx->nb_outputs; i++) {
+    for (int i = 0; i < ctx->nb_outputs; i++) {
+        if (ff_outlink_get_status(ctx->outputs[i])) {
+            av_frame_free(&frames[i]);
+            continue;
+        }
+
         ret = ff_filter_frame(ctx->outputs[i], frames[i]);
         frames[i] = NULL;
         if (ret < 0)
@@ -539,34 +511,69 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     }
 
 fail:
-    for (i = 0; i < ctx->nb_outputs; i++)
+    for (int i = 0; i < ctx->nb_outputs; i++)
         av_frame_free(&frames[i]);
-    av_frame_free(&in);
-    s->input_frame = NULL;
 
     return ret;
+}
+
+static int activate(AVFilterContext *ctx)
+{
+    AVFilterLink *inlink = ctx->inputs[0];
+    int status, ret;
+    AVFrame *in;
+    int64_t pts;
+
+    for (int i = 0; i < ctx->nb_outputs; i++) {
+        FF_FILTER_FORWARD_STATUS_BACK_ALL(ctx->outputs[i], ctx);
+    }
+
+    ret = ff_inlink_consume_frame(inlink, &in);
+    if (ret < 0)
+        return ret;
+    if (ret > 0) {
+        ret = filter_frame(inlink, in);
+        av_frame_free(&in);
+        if (ret < 0)
+            return ret;
+    }
+
+    if (ff_inlink_acknowledge_status(inlink, &status, &pts)) {
+        for (int i = 0; i < ctx->nb_outputs; i++) {
+            if (ff_outlink_get_status(ctx->outputs[i]))
+                continue;
+            ff_outlink_set_status(ctx->outputs[i], status, pts);
+        }
+        return 0;
+    }
+
+    for (int i = 0; i < ctx->nb_outputs; i++) {
+        if (ff_outlink_get_status(ctx->outputs[i]))
+            continue;
+
+        if (ff_outlink_frame_wanted(ctx->outputs[i])) {
+            ff_inlink_request_frame(inlink);
+            return 0;
+        }
+    }
+
+    return FFERROR_NOT_READY;
 }
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
     AudioCrossoverContext *s = ctx->priv;
-    int i;
 
     av_freep(&s->fdsp);
     av_frame_free(&s->xover);
-
-    for (i = 0; i < ctx->nb_outputs; i++)
-        av_freep(&ctx->output_pads[i].name);
 }
 
 static const AVFilterPad inputs[] = {
     {
         .name         = "default",
         .type         = AVMEDIA_TYPE_AUDIO,
-        .filter_frame = filter_frame,
         .config_props = config_input,
     },
-    { NULL }
 };
 
 const AVFilter ff_af_acrossover = {
@@ -575,10 +582,11 @@ const AVFilter ff_af_acrossover = {
     .priv_size      = sizeof(AudioCrossoverContext),
     .priv_class     = &acrossover_class,
     .init           = init,
+    .activate       = activate,
     .uninit         = uninit,
-    .query_formats  = query_formats,
-    .inputs         = inputs,
+    FILTER_INPUTS(inputs),
     .outputs        = NULL,
+    FILTER_SAMPLEFMTS(AV_SAMPLE_FMT_FLTP, AV_SAMPLE_FMT_DBLP),
     .flags          = AVFILTER_FLAG_DYNAMIC_OUTPUTS |
                       AVFILTER_FLAG_SLICE_THREADS,
 };

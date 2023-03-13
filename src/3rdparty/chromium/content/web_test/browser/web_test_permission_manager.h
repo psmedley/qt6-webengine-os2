@@ -9,7 +9,6 @@
 
 #include "base/callback_forward.h"
 #include "base/containers/id_map.h"
-#include "base/macros.h"
 #include "base/synchronization/lock.h"
 #include "content/public/browser/permission_controller_delegate.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -24,6 +23,10 @@ class WebTestPermissionManager
       public blink::test::mojom::PermissionAutomation {
  public:
   WebTestPermissionManager();
+
+  WebTestPermissionManager(const WebTestPermissionManager&) = delete;
+  WebTestPermissionManager& operator=(const WebTestPermissionManager&) = delete;
+
   ~WebTestPermissionManager() override;
 
   // PermissionManager overrides.
@@ -53,8 +56,16 @@ class WebTestPermissionManager
       content::PermissionType permission,
       content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin) override;
+  blink::mojom::PermissionStatus GetPermissionStatusForCurrentDocument(
+      content::PermissionType permission,
+      content::RenderFrameHost* render_frame_host) override;
+  blink::mojom::PermissionStatus GetPermissionStatusForWorker(
+      content::PermissionType permission,
+      RenderProcessHost* render_process_host,
+      const GURL& worker_origin) override;
   SubscriptionId SubscribePermissionStatusChange(
       PermissionType permission,
+      RenderProcessHost* render_process_host,
       RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
       base::RepeatingCallback<void(blink::mojom::PermissionStatus)> callback)
@@ -122,8 +133,6 @@ class WebTestPermissionManager
   SubscriptionId::Generator subscription_id_generator_;
 
   mojo::ReceiverSet<blink::test::mojom::PermissionAutomation> receivers_;
-
-  DISALLOW_COPY_AND_ASSIGN(WebTestPermissionManager);
 };
 
 }  // namespace content

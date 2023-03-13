@@ -4,7 +4,7 @@ package(
     default_visibility = [
         "//tensorflow:internal",
     ],
-    licenses = ["notice"],  # Apache 2.0
+    licenses = ["notice"],
 )
 
 py_library(
@@ -13,12 +13,14 @@ py_library(
         "__init__.py",
         "np_array_ops.py",
         "np_arrays.py",
+        "np_config.py",
         "np_dtypes.py",
+        "np_export.py",
         "np_math_ops.py",
         "np_random.py",
         "np_utils.py",
     ],
-    srcs_version = "PY2AND3",
+    srcs_version = "PY3",
     visibility = ["//visibility:public"],
     deps = [
         "//tensorflow/python:array_ops",
@@ -40,6 +42,17 @@ py_library(
 )
 
 cuda_py_test(
+    name = "np_dtypes_test",
+    srcs = ["np_dtypes_test.py"],
+    deps = [
+        ":numpy",
+        "//tensorflow/python:platform",
+        "//third_party/py/numpy",
+        "@absl_py//absl/testing:parameterized",
+    ],
+)
+
+cuda_py_test(
     name = "np_arrays_test",
     srcs = ["np_arrays_test.py"],
     deps = [
@@ -56,11 +69,13 @@ cuda_py_test(
 cuda_py_test(
     name = "np_array_ops_test",
     srcs = ["np_array_ops_test.py"],
+    tags = [
+        "no_windows",  # TODO(b/215381493)
+    ],
     deps = [
         ":numpy",
         "//tensorflow/python:platform",
         "//third_party/py/numpy",
-        "@six_archive//:six",
     ],
 )
 
@@ -92,7 +107,6 @@ cuda_py_test(
         "//tensorflow/python:platform",
         "//third_party/py/numpy",
         "@absl_py//absl/testing:parameterized",
-        "@six_archive//:six",
     ],
 )
 

@@ -67,7 +67,7 @@ class AudioContextTestPlatform : public TestingPlatformSupport {
         break;
       case WebAudioLatencyHint::kCategoryExact:
         buffer_size =
-            clampTo(latency_hint.Seconds() * AudioHardwareSampleRate(),
+            ClampTo(latency_hint.Seconds() * AudioHardwareSampleRate(),
                     static_cast<double>(AudioHardwareBufferSize()),
                     static_cast<double>(playback_size));
         break;
@@ -94,7 +94,7 @@ class AudioContextTest : public PageTestBase {
   ~AudioContextTest() override { platform_.reset(); }
 
   void SetUp() override {
-    PageTestBase::SetUp(IntSize());
+    PageTestBase::SetUp(gfx::Size());
     CoreInitializer::GetInstance().ProvideModulesToPage(GetPage(),
                                                         base::EmptyString());
   }

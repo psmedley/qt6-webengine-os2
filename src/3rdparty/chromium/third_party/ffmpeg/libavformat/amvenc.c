@@ -62,7 +62,7 @@ typedef struct AMVContext
 
     int32_t aframe_size;  /* Expected audio frame size.      */
     int32_t ablock_align; /* Expected audio block align.     */
-    AVPacket *apad;       /* Dummy audio packet for padding. */
+    AVPacket *apad;       /* Dummy audio packet for padding; not owned by us. */
     AVPacket *vpad;       /* Most recent video frame, for padding. */
 
     /*
@@ -183,9 +183,7 @@ static av_cold int amv_init(AVFormatContext *s)
     }
 
     /* Allocate and fill dummy packet so we can pad the audio. */
-    amv->apad = av_packet_alloc();
-    if (!amv->apad)
-        return AVERROR(ENOMEM);
+    amv->apad = ffformatcontext(s)->pkt;
     if ((ret = av_new_packet(amv->apad, amv->ablock_align)) < 0) {
         return ret;
     }
@@ -207,7 +205,6 @@ static void amv_deinit(AVFormatContext *s)
 {
     AMVContext *amv = s->priv_data;
 
-    av_packet_free(&amv->apad);
     av_packet_free(&amv->vpad);
 }
 
@@ -247,9 +244,9 @@ static void amv_write_alist(AVFormatContext *s, AVCodecParameters *par)
     /* Bodge an (incorrect) WAVEFORMATEX (+2 pad bytes) */
     tag_str = ff_start_tag(pb, "strf");
     AV_WL16(buf +  0, 1);
-    AV_WL16(buf +  2, par->channels);
+    AV_WL16(buf +  2, par->ch_layout.nb_channels);
     AV_WL32(buf +  4, par->sample_rate);
-    AV_WL32(buf +  8, par->sample_rate * par->channels * 2);
+    AV_WL32(buf +  8, par->sample_rate * par->ch_layout.nb_channels * 2);
     AV_WL16(buf + 12, 2);
     AV_WL16(buf + 14, 16);
     AV_WL16(buf + 16, 0);

@@ -14,9 +14,13 @@ const UIStrings = {
   */
   noSnippetsFound: 'No snippets found.',
   /**
-  *@description Text to run a code snippet
+  *@description Text for command prefix of run a code snippet
   */
-  runSnippet: 'Run snippet',
+  run: 'Run',
+  /**
+  *@description Text for suggestion of run a code snippet
+  */
+  snippet: 'Snippet',
 };
 const str_ = i18n.i18n.registerUIStrings('panels/snippets/SnippetsQuickOpen.ts', UIStrings);
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
@@ -44,7 +48,7 @@ export class SnippetsQuickOpen extends QuickOpen.FilteredListWidget.Provider {
     if (itemIndex === null) {
       return;
     }
-    evaluateScriptSnippet(this.snippets[itemIndex]);
+    void evaluateScriptSnippet(this.snippets[itemIndex]);
   }
 
   notFoundText(_query: string): string {
@@ -59,6 +63,11 @@ export class SnippetsQuickOpen extends QuickOpen.FilteredListWidget.Provider {
     this.snippets = [];
   }
 
+  itemScoreAt(itemIndex: number, query: string): number {
+    // Prefer short matches over long matches
+    return query.length / this.snippets[itemIndex].name().length;
+  }
+
   itemCount(): number {
     return this.snippets.length;
   }
@@ -68,7 +77,7 @@ export class SnippetsQuickOpen extends QuickOpen.FilteredListWidget.Provider {
   }
 
   renderItem(itemIndex: number, query: string, titleElement: Element, _subtitleElement: Element): void {
-    titleElement.textContent = unescape(this.snippets[itemIndex].name());
+    titleElement.textContent = this.snippets[itemIndex].name();
     titleElement.classList.add('monospace');
     QuickOpen.FilteredListWidget.FilteredListWidget.highlightRanges(titleElement, query, true);
   }
@@ -76,6 +85,8 @@ export class SnippetsQuickOpen extends QuickOpen.FilteredListWidget.Provider {
 
 QuickOpen.FilteredListWidget.registerProvider({
   prefix: '!',
-  title: i18nLazyString(UIStrings.runSnippet),
+  iconName: 'ic_command_run_snippet',
   provider: () => Promise.resolve(SnippetsQuickOpen.instance()),
+  titlePrefix: i18nLazyString(UIStrings.run),
+  titleSuggestion: i18nLazyString(UIStrings.snippet),
 });

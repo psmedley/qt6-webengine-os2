@@ -132,6 +132,7 @@ inline __m128i GetScalingFactors(const int16_t* scaling_lut,
   static_assert(bitdepth <= kBitdepth10,
                 "SSE4 Film Grain is not yet implemented for 12bpp.");
   for (int i = 0; i < 8; ++i) {
+    assert(source[i] < kScalingLookupTableSize << (bitdepth - 2));
     start_vals[i] = scaling_lut[source[i]];
   }
   return LoadAligned16(start_vals);
@@ -149,9 +150,8 @@ template <int bitdepth, typename GrainType, typename Pixel>
 void BlendNoiseWithImageLuma_SSE4_1(
     const void* LIBGAV1_RESTRICT noise_image_ptr, int min_value, int max_luma,
     int scaling_shift, int width, int height, int start_height,
-    const int16_t* scaling_lut_y, const void* LIBGAV1_RESTRICT source_plane_y,
-    ptrdiff_t source_stride_y, void* LIBGAV1_RESTRICT dest_plane_y,
-    ptrdiff_t dest_stride_y) {
+    const int16_t* scaling_lut_y, const void* source_plane_y,
+    ptrdiff_t source_stride_y, void* dest_plane_y, ptrdiff_t dest_stride_y) {
   const auto* noise_image =
       static_cast<const Array2D<GrainType>*>(noise_image_ptr);
   const auto* in_y_row = static_cast<const Pixel*>(source_plane_y);
@@ -218,8 +218,8 @@ LIBGAV1_ALWAYS_INLINE void BlendChromaPlaneWithCfl_SSE4_1(
     int width, int height, int start_height, int subsampling_x,
     int subsampling_y, int scaling_shift, const int16_t* scaling_lut,
     const Pixel* LIBGAV1_RESTRICT in_y_row, ptrdiff_t source_stride_y,
-    const Pixel* LIBGAV1_RESTRICT in_chroma_row, ptrdiff_t source_stride_chroma,
-    Pixel* LIBGAV1_RESTRICT out_chroma_row, ptrdiff_t dest_stride) {
+    const Pixel* in_chroma_row, ptrdiff_t source_stride_chroma,
+    Pixel* out_chroma_row, ptrdiff_t dest_stride) {
   const __m128i floor = _mm_set1_epi16(min_value);
   const __m128i ceiling = _mm_set1_epi16(max_chroma);
   alignas(16) Pixel luma_buffer[16];
@@ -292,8 +292,8 @@ void BlendNoiseWithImageChromaWithCfl_SSE4_1(
     int width, int height, int start_height, int subsampling_x,
     int subsampling_y, const int16_t* scaling_lut,
     const void* LIBGAV1_RESTRICT source_plane_y, ptrdiff_t source_stride_y,
-    const void* LIBGAV1_RESTRICT source_plane_uv, ptrdiff_t source_stride_uv,
-    void* LIBGAV1_RESTRICT dest_plane_uv, ptrdiff_t dest_stride_uv) {
+    const void* source_plane_uv, ptrdiff_t source_stride_uv,
+    void* dest_plane_uv, ptrdiff_t dest_stride_uv) {
   const auto* noise_image =
       static_cast<const Array2D<GrainType>*>(noise_image_ptr);
   const auto* in_y = static_cast<const Pixel*>(source_plane_y);
@@ -344,9 +344,8 @@ LIBGAV1_ALWAYS_INLINE void BlendChromaPlane8bpp_SSE4_1(
     int subsampling_y, int scaling_shift, int chroma_offset,
     int chroma_multiplier, int luma_multiplier, const int16_t* scaling_lut,
     const uint8_t* LIBGAV1_RESTRICT in_y_row, ptrdiff_t source_stride_y,
-    const uint8_t* LIBGAV1_RESTRICT in_chroma_row,
-    ptrdiff_t source_stride_chroma, uint8_t* LIBGAV1_RESTRICT out_chroma_row,
-    ptrdiff_t dest_stride) {
+    const uint8_t* in_chroma_row, ptrdiff_t source_stride_chroma,
+    uint8_t* out_chroma_row, ptrdiff_t dest_stride) {
   const __m128i floor = _mm_set1_epi16(min_value);
   const __m128i ceiling = _mm_set1_epi16(max_chroma);
 
@@ -418,8 +417,8 @@ void BlendNoiseWithImageChroma8bpp_SSE4_1(
     int width, int height, int start_height, int subsampling_x,
     int subsampling_y, const int16_t* scaling_lut,
     const void* LIBGAV1_RESTRICT source_plane_y, ptrdiff_t source_stride_y,
-    const void* LIBGAV1_RESTRICT source_plane_uv, ptrdiff_t source_stride_uv,
-    void* LIBGAV1_RESTRICT dest_plane_uv, ptrdiff_t dest_stride_uv) {
+    const void* source_plane_uv, ptrdiff_t source_stride_uv,
+    void* dest_plane_uv, ptrdiff_t dest_stride_uv) {
   assert(plane == kPlaneU || plane == kPlaneV);
   const auto* noise_image =
       static_cast<const Array2D<int8_t>*>(noise_image_ptr);

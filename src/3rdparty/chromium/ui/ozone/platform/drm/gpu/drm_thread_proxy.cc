@@ -34,6 +34,10 @@ void OnBufferCreatedOnDrmThread(
 class GbmDeviceGenerator : public DrmDeviceGenerator {
  public:
   GbmDeviceGenerator() {}
+
+  GbmDeviceGenerator(const GbmDeviceGenerator&) = delete;
+  GbmDeviceGenerator& operator=(const GbmDeviceGenerator&) = delete;
+
   ~GbmDeviceGenerator() override {}
 
   // DrmDeviceGenerator:
@@ -52,9 +56,6 @@ class GbmDeviceGenerator : public DrmDeviceGenerator {
       return nullptr;
     return drm;
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(GbmDeviceGenerator);
 };
 
 }  // namespace
@@ -129,13 +130,13 @@ void DrmThreadProxy::CreateBufferFromHandle(
                               base::Unretained(&drm_thread_), std::move(task)));
 }
 
-void DrmThreadProxy::SetClearOverlayCacheCallback(
+void DrmThreadProxy::SetDisplaysConfiguredCallback(
     base::RepeatingClosure callback) {
   DCHECK(drm_thread_.task_runner());
 
   drm_thread_.task_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(&DrmThread::SetClearOverlayCacheCallback,
+      base::BindOnce(&DrmThread::SetDisplaysConfiguredCallback,
                      base::Unretained(&drm_thread_),
                      CreateSafeRepeatingCallback(std::move(callback))));
 }
@@ -169,6 +170,20 @@ std::vector<OverlayStatus> DrmThreadProxy::CheckOverlayCapabilitiesSync(
                base::BindOnce(&DrmThread::RunTaskAfterDeviceReady,
                               base::Unretained(&drm_thread_), std::move(task)));
   return result;
+}
+
+void DrmThreadProxy::GetHardwareCapabilities(
+    gfx::AcceleratedWidget widget,
+    const HardwareCapabilitiesCallback& receive_callback) {
+  TRACE_EVENT0("drm", "DrmThreadProxy::GetHardwareCapabilities");
+  DCHECK(drm_thread_.task_runner());
+  base::RepeatingClosure task = base::BindRepeating(
+      &DrmThread::GetHardwareCapabilities, base::Unretained(&drm_thread_),
+      widget, CreateSafeRepeatingCallback(receive_callback));
+  drm_thread_.task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DrmThread::RunTaskAfterDeviceReady,
+                     base::Unretained(&drm_thread_), std::move(task), nullptr));
 }
 
 void DrmThreadProxy::AddDrmDeviceReceiver(

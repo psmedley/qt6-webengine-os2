@@ -30,8 +30,8 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache_client.h"
 #include "third_party/blink/renderer/platform/fonts/font_fallback_priority.h"
 #include "third_party/blink/renderer/platform/fonts/font_invalidation_reason.h"
-#include "third_party/blink/renderer/platform/fonts/font_matching_metrics.h"
-#include "third_party/blink/renderer/platform/fonts/segmented_font_data.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
+#include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -40,22 +40,26 @@ namespace blink {
 
 class ExecutionContext;
 class FontData;
+class FontDataForRangeSet;
 class FontDescription;
 class FontFaceCache;
 class FontFallbackMap;
+class FontFamily;
 class FontSelectorClient;
 class GenericFontFamilySettings;
+class SimpleFontData;
+class UseCounter;
 
 class PLATFORM_EXPORT FontSelector : public FontCacheClient {
  public:
   ~FontSelector() override = default;
   virtual scoped_refptr<FontData> GetFontData(const FontDescription&,
-                                       const AtomicString& family_name) = 0;
+                                              const FontFamily&) = 0;
 
   // TODO crbug.com/542629 - The String variant of this method shouldbe replaced
   // with a better approach, now that we only have complex text.
   virtual void WillUseFontData(const FontDescription&,
-                               const AtomicString& family_name,
+                               const FontFamily& family,
                                const String& text) = 0;
   virtual void WillUseRange(const FontDescription&,
                             const AtomicString& family_name,
@@ -131,7 +135,7 @@ class PLATFORM_EXPORT FontSelector : public FontCacheClient {
 
   virtual bool IsPlatformFamilyMatchAvailable(
       const FontDescription&,
-      const AtomicString& passed_family) = 0;
+      const FontFamily& passed_family) = 0;
 
   FontFallbackMap& GetFontFallbackMap();
 
@@ -141,7 +145,10 @@ class PLATFORM_EXPORT FontSelector : public FontCacheClient {
   static AtomicString FamilyNameFromSettings(
       const GenericFontFamilySettings&,
       const FontDescription&,
-      const AtomicString& generic_family_name);
+      const FontFamily& generic_family_name,
+      UseCounter*);
+
+  static bool IsWebkitBodyFamily(const FontDescription& font_description);
 
  private:
   Member<FontFallbackMap> font_fallback_map_;

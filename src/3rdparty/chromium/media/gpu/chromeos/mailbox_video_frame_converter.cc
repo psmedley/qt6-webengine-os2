@@ -5,13 +5,11 @@
 #include "media/gpu/chromeos/mailbox_video_frame_converter.h"
 
 #include "base/bind.h"
-#include "base/callback_helpers.h"
 #include "base/containers/contains.h"
 #include "base/location.h"
 #include "base/memory/ptr_util.h"
-#include "base/single_thread_task_runner.h"
-#include "base/task/post_task.h"
-#include "base/task_runner_util.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/task/task_runner_util.h"
 #include "base/trace_event/trace_event.h"
 #include "gpu/command_buffer/common/shared_image_usage.h"
 #include "gpu/command_buffer/service/scheduler.h"
@@ -43,6 +41,10 @@ class MailboxVideoFrameConverter::ScopedSharedImage {
 
   ScopedSharedImage(scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner)
       : destruction_task_runner_(std::move(gpu_task_runner)) {}
+
+  ScopedSharedImage(const ScopedSharedImage&) = delete;
+  ScopedSharedImage& operator=(const ScopedSharedImage&) = delete;
+
   ~ScopedSharedImage() { Destroy(); }
 
   void Reset(const gpu::Mailbox& mailbox,
@@ -76,15 +78,14 @@ class MailboxVideoFrameConverter::ScopedSharedImage {
   gfx::Size size_;
   DestroySharedImageCB destroy_shared_image_cb_;
   const scoped_refptr<base::SequencedTaskRunner> destruction_task_runner_;
-
-  DISALLOW_COPY_AND_ASSIGN(ScopedSharedImage);
 };
 
 // static
 std::unique_ptr<VideoFrameConverter> MailboxVideoFrameConverter::Create(
     UnwrapFrameCB unwrap_frame_cb,
     scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-    GetCommandBufferStubCB get_stub_cb) {
+    GetCommandBufferStubCB get_stub_cb,
+    bool enable_unsafe_webgpu) {
   DCHECK(unwrap_frame_cb);
   DCHECK(gpu_task_runner);
   DCHECK(get_stub_cb);
@@ -101,16 +102,18 @@ std::unique_ptr<VideoFrameConverter> MailboxVideoFrameConverter::Create(
 
   return base::WrapUnique<VideoFrameConverter>(new MailboxVideoFrameConverter(
       std::move(unwrap_frame_cb), std::move(gpu_task_runner),
-      get_gpu_channel_cb));
+      get_gpu_channel_cb, enable_unsafe_webgpu));
 }
 
 MailboxVideoFrameConverter::MailboxVideoFrameConverter(
     UnwrapFrameCB unwrap_frame_cb,
     scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
-    GetGpuChannelCB get_gpu_channel_cb)
+    GetGpuChannelCB get_gpu_channel_cb,
+    bool enable_unsafe_webgpu)
     : unwrap_frame_cb_(std::move(unwrap_frame_cb)),
       gpu_task_runner_(std::move(gpu_task_runner)),
-      get_gpu_channel_cb_(get_gpu_channel_cb) {
+      get_gpu_channel_cb_(get_gpu_channel_cb),
+      enable_unsafe_webgpu_(enable_unsafe_webgpu) {
   DVLOGF(2);
 
   parent_weak_this_ = parent_weak_this_factory_.GetWeakPtr();
@@ -241,7 +244,10 @@ void MailboxVideoFrameConverter::WrapMailboxAndVideoFrameAndOutput(
   mailbox_frame->set_color_space(frame->ColorSpace());
   mailbox_frame->set_hdr_metadata(frame->hdr_metadata());
   mailbox_frame->set_metadata(frame->metadata());
+  mailbox_frame->set_ycbcr_info(frame->ycbcr_info());
   mailbox_frame->metadata().read_lock_fences_enabled = true;
+  mailbox_frame->metadata().is_webgpu_compatible =
+      enable_unsafe_webgpu_ && frame->metadata().is_webgpu_compatible;
 
   output_cb_.Run(mailbox_frame);
 }
@@ -353,8 +359,11 @@ bool MailboxVideoFrameConverter::GenerateSharedImageOnGPUThread(
 
   // The allocated SharedImages should be usable for the (Display) compositor
   // and, potentially, for overlays (Scanout).
-  const uint32_t shared_image_usage =
+  uint32_t shared_image_usage =
       gpu::SHARED_IMAGE_USAGE_DISPLAY | gpu::SHARED_IMAGE_USAGE_SCANOUT;
+  if (enable_unsafe_webgpu_ && video_frame->metadata().is_webgpu_compatible)
+    shared_image_usage |= gpu::SHARED_IMAGE_USAGE_WEBGPU;
+
   const bool success = shared_image_stub->CreateSharedImage(
       mailbox, gpu::kPlatformVideoFramePoolClientId,
       std::move(gpu_memory_buffer_handle), *buffer_format,
@@ -430,8 +439,8 @@ void MailboxVideoFrameConverter::WaitOnSyncTokenAndReleaseFrameOnGPUThread(
   gpu::SharedImageStub* shared_image_stub = gpu_channel_->shared_image_stub();
   DCHECK(shared_image_stub);
 
-  auto keep_video_frame_alive = base::BindOnce(
-      base::DoNothing::Once<scoped_refptr<VideoFrame>>(), std::move(frame));
+  auto keep_video_frame_alive =
+      base::BindOnce([](scoped_refptr<VideoFrame>) {}, std::move(frame));
   auto* scheduler = gpu_channel_->scheduler();
   DCHECK(scheduler);
   scheduler->ScheduleTask(gpu::Scheduler::Task(

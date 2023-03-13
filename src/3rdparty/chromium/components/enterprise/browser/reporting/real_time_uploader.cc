@@ -6,11 +6,11 @@
 
 #include <queue>
 
-#include "base/bind_post_task.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/task/bind_post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "components/enterprise/browser/controller/browser_dm_token_storage.h"
 #include "components/prefs/pref_service.h"
 
 namespace enterprise_reporting {
@@ -41,6 +41,10 @@ void RealTimeUploader::CreateReportQueue(const std::string& dm_token,
   auto config = reporting::ReportQueueConfiguration::Create(
       dm_token, destination,
       base::BindRepeating([]() { return reporting::Status::StatusOK(); }));
+
+  base::UmaHistogramEnumeration(
+      "Enterprise.CBCMRealTimeReportQueueConfigurationCreation",
+      config.status().code(), reporting::error::Code::MAX_VALUE);
 
   if (!config.ok()) {
     LOG(ERROR) << "Failed to create CBCM reporting queue config: "
@@ -78,18 +82,21 @@ void RealTimeUploader::CreateReportQueueRequest(
     reporting::StatusOr<std::unique_ptr<reporting::ReportQueueConfiguration>>
         config,
     reporting::ReportQueueProvider::CreateReportQueueCallback callback) {
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
   reporting::ReportQueueProvider::CreateQueue(std::move(config.ValueOrDie()),
                                               std::move(callback));
 #else
   NOTREACHED();
-#endif  // !defined(OS_IOS)
+#endif  // !BUILDFLAG(IS_IOS)
 }
 
 void RealTimeUploader::OnReportQueueCreated(
     reporting::ReportQueueProvider::CreateReportQueueResponse
         create_report_queue_response) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  base::UmaHistogramEnumeration("Enterprise.CBCMRealTimeReportQueueCreation",
+                                create_report_queue_response.status().code(),
+                                reporting::error::Code::MAX_VALUE);
 
   if (!create_report_queue_response.ok()) {
     // TODO(crbug.com/1192292): Retry on unavailable error, and collect metrics
@@ -122,6 +129,9 @@ void RealTimeUploader::UploadClosure(
 void RealTimeUploader::OnReportEnqueued(EnqueueCallback callback,
                                         reporting::Status status) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  base::UmaHistogramEnumeration("Enterprise.CBCMRealTimeReportEnqueue",
+                                status.code(),
+                                reporting::error::Code::MAX_VALUE);
   std::move(callback).Run(status.ok());
 }
 

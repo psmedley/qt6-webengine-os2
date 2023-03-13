@@ -59,8 +59,7 @@ namespace settings {
 const char KeyboardHandler::kShowKeysChangedName[] = "show-keys-changed";
 
 void KeyboardHandler::TestAPI::Initialize() {
-  base::ListValue args;
-  handler_->HandleInitialize(&args);
+  handler_->HandleInitialize(base::Value::List());
 }
 
 KeyboardHandler::KeyboardHandler() = default;
@@ -98,18 +97,18 @@ void KeyboardHandler::OnInputDeviceConfigurationChanged(
   }
 }
 
-void KeyboardHandler::HandleInitialize(const base::ListValue* args) {
+void KeyboardHandler::HandleInitialize(const base::Value::List& args) {
   AllowJavascript();
   UpdateShowKeys();
   UpdateKeyboards();
 }
 
 void KeyboardHandler::HandleShowKeyboardShortcutViewer(
-    const base::ListValue* args) const {
+    const base::Value::List& args) const {
   ash::ToggleKeyboardShortcutViewer();
 }
 
-void KeyboardHandler::HandleKeyboardChange(const base::ListValue* args) {
+void KeyboardHandler::HandleKeyboardChange(const base::Value::List& args) {
   AllowJavascript();
   UpdateKeyboards();
 }
@@ -139,7 +138,7 @@ void KeyboardHandler::UpdateShowKeys() {
   const bool has_caps_lock = keyboards_state.has_external_apple_keyboard ||
                              keyboards_state.has_external_generic_keyboard ||
                              !base::CommandLine::ForCurrentProcess()->HasSwitch(
-                                 chromeos::switches::kHasChromeOSKeyboard);
+                                 switches::kHasChromeOSKeyboard);
 
   base::Value keyboard_params(base::Value::Type::DICTIONARY);
   keyboard_params.SetKey("showCapsLock", base::Value(has_caps_lock));

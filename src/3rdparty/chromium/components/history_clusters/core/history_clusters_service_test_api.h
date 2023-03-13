@@ -7,6 +7,7 @@
 
 #include <vector>
 
+#include "base/run_loop.h"
 #include "base/test/bind.h"
 #include "base/time/time.h"
 #include "components/history/core/browser/history_service.h"
@@ -30,8 +31,10 @@ class HistoryClustersServiceTestApi {
     std::vector<history::AnnotatedVisit> annotated_visits;
 
     base::CancelableTaskTracker tracker;
+    history::QueryOptions options;
+    options.duplicate_policy = history::QueryOptions::KEEP_ALL_DUPLICATES;
     history_service_->GetAnnotatedVisits(
-        history::QueryOptions(),
+        options,
         base::BindLambdaForTesting(
             [&](std::vector<history::AnnotatedVisit> visits) {
               annotated_visits = std::move(visits);
@@ -44,13 +47,15 @@ class HistoryClustersServiceTestApi {
 
   void SetClusteringBackendForTest(std::unique_ptr<ClusteringBackend> backend) {
     DCHECK(backend.get());
-
     history_clusters_service_->backend_ = std::move(backend);
-    // TODO(tommycli): Eliminate this `backend_weak_factory_` idiom. It's error
-    // prone, and I think we can work around the need for it.
-    history_clusters_service_->backend_weak_factory_ =
-        std::make_unique<base::WeakPtrFactory<ClusteringBackend>>(
-            history_clusters_service_->backend_.get());
+  }
+
+  void SetAllKeywordsCacheTimestamp(base::Time time) {
+    history_clusters_service_->all_keywords_cache_timestamp_ = time;
+  }
+
+  void SetShortKeywordCacheTimestamp(base::Time time) {
+    history_clusters_service_->short_keyword_cache_timestamp_ = time;
   }
 
   HistoryClustersService* const history_clusters_service_;
@@ -59,6 +64,9 @@ class HistoryClustersServiceTestApi {
 
 // Fetches two hardcoded test visits.
 std::vector<history::AnnotatedVisit> GetHardcodedTestVisits();
+
+// Fetches the hardcoded `ClusterVisit` with ID `visit_id`.
+history::ClusterVisit GetHardcodedClusterVisit(history::VisitID visit_id);
 
 }  // namespace history_clusters
 

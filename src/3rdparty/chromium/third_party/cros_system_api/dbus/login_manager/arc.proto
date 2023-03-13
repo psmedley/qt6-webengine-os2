@@ -50,7 +50,8 @@ message StartArcMiniContainerRequest {
   optional bool arc_print_spooler_experiment = 6
       [default = false, deprecated = true];
 
-  reserved 7;
+  // Option to disable ureadahead, Used in specialized tests.
+  optional bool disable_ureadahead = 7 [default = false];
 
   // Option to disable by hiding default apps shipped on the system image.
   // To be used locally in development that involves overriding these apps.
@@ -73,7 +74,10 @@ message StartArcMiniContainerRequest {
   // rosters.
   optional bool arc_generate_pai = 11 [default = false];
 
-  // Next ID to use: 13
+  // Enables use of new notifications ui.
+  optional bool enable_notifications_refresh = 13 [default = false];
+
+  // Next ID to use: 14
 }
 
 // ARC upgrade options sent from Chrome to session manager. This message is used
@@ -115,7 +119,8 @@ message UpgradeArcContainerRequest {
   // managed.
   optional bool is_managed_adb_sideloading_allowed = 16;
 
-  reserved 15;
+  // See description in StartArcMiniContainerRequest.
+  optional bool disable_ureadahead = 15 [default = false];
 
   // Option to disable ACTION_BOOT_COMPLETED broadcast for 3rd party apps.
   optional bool skip_boot_completed_broadcast = 2 [default = false];

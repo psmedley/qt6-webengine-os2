@@ -125,9 +125,9 @@ fail:
     // This ensures that the timestamps will already be properly shifted
     // when the packets arrive here, so we don't need to shift again.
     s->avoid_negative_ts  = oc->avoid_negative_ts;
-    s->internal->avoid_negative_ts_use_pts =
-        oc->internal->avoid_negative_ts_use_pts;
-    oc->avoid_negative_ts = 0;
+    ffformatcontext(s)->avoid_negative_ts_use_pts =
+        ffformatcontext(oc)->avoid_negative_ts_use_pts;
+    oc->avoid_negative_ts = AVFMT_AVOID_NEG_TS_DISABLED;
 
     return 0;
 }

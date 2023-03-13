@@ -5,8 +5,10 @@
 #include "components/password_manager/core/browser/password_scripts_fetcher_impl.h"
 
 #include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/task_environment.h"
 #include "base/version.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
@@ -66,15 +68,20 @@ base::Version GetVersion() {
 namespace password_manager {
 class PasswordScriptsFetcherImplTest : public ::testing::Test {
  public:
-  void SetUp() override {
-    // Recreate all classes as they are stateful.
+  void Reinitialize(const base::Version& version) {
+    recorded_responses_.clear();
     test_url_loader_factory_ =
         std::make_unique<network::TestURLLoaderFactory>();
     test_shared_loader_factory_ =
         base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             test_url_loader_factory_.get());
     fetcher_ = std::make_unique<PasswordScriptsFetcherImpl>(
-        test_shared_loader_factory_);
+        version, test_shared_loader_factory_);
+  }
+
+  void SetUp() override {
+    // Recreate all classes as they are stateful.
+    Reinitialize(GetVersion());
   }
 
   void TearDown() override {
@@ -118,8 +125,7 @@ class PasswordScriptsFetcherImplTest : public ::testing::Test {
 
  private:
   void RequestSingleScriptAvailability(const url::Origin& origin) {
-    fetcher_->FetchScriptAvailability(origin, GetVersion(),
-                                      GenerateResponseCallback(origin));
+    fetcher_->FetchScriptAvailability(origin, GenerateResponseCallback(origin));
   }
 
   void RecordResponse(url::Origin origin, bool has_script) {
@@ -169,7 +175,7 @@ TEST_F(PasswordScriptsFetcherImplTest, PrewarmCache) {
   EXPECT_EQ(0, GetNumberOfPendingRequests());
   histogram_tester->ExpectUniqueSample(
       "PasswordManager.PasswordScriptsFetcher.CacheState",
-      PasswordScriptsFetcherImpl::CacheState::kReady, 1u);
+      PasswordScriptsFetcher::CacheState::kReady, 1u);
 
   // Make cache stale and re-fetch the map.
   histogram_tester = std::make_unique<base::HistogramTester>();
@@ -197,7 +203,7 @@ TEST_F(PasswordScriptsFetcherImplTest, PrewarmCache) {
   EXPECT_EQ(0, GetNumberOfPendingRequests());
   histogram_tester->ExpectUniqueSample(
       "PasswordManager.PasswordScriptsFetcher.CacheState",
-      PasswordScriptsFetcherImpl::CacheState::kStale, 1u);
+      PasswordScriptsFetcher::CacheState::kStale, 1u);
 }
 
 TEST_F(PasswordScriptsFetcherImplTest, SlowResponse) {
@@ -210,7 +216,7 @@ TEST_F(PasswordScriptsFetcherImplTest, SlowResponse) {
 
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.PasswordScriptsFetcher.CacheState",
-      PasswordScriptsFetcherImpl::CacheState::kWaiting, 1u);
+      PasswordScriptsFetcher::CacheState::kWaiting, 1u);
 }
 
 TEST_F(PasswordScriptsFetcherImplTest, NoPrewarmCache) {
@@ -229,7 +235,7 @@ TEST_F(PasswordScriptsFetcherImplTest, NoPrewarmCache) {
 
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.PasswordScriptsFetcher.CacheState",
-      PasswordScriptsFetcherImpl::CacheState::kNeverSet, 1u);
+      PasswordScriptsFetcher::CacheState::kNeverSet, 1u);
   histogram_tester.ExpectUniqueSample(
       "PasswordManager.PasswordScriptsFetcher.ParsingResult",
       PasswordScriptsFetcherImpl::ParsingResult::kOk, 1u);
@@ -301,14 +307,10 @@ TEST_F(PasswordScriptsFetcherImplTest, ServerError) {
 TEST_F(PasswordScriptsFetcherImplTest, IsScriptAvailable) {
   // |IsScriptAvailable| does not trigger any network requests and returns the
   // default value (false).
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript1(), GetVersion()));
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript2(), GetVersion()));
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript3(), GetVersion()));
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithoutScript(), GetVersion()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
   EXPECT_EQ(0, GetNumberOfPendingRequests());
 
   StartBulkCheck();
@@ -320,26 +322,51 @@ TEST_F(PasswordScriptsFetcherImplTest, IsScriptAvailable) {
   SimulateResponse();
   base::RunLoop().RunUntilIdle();
   // Cache is ready.
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript1(), GetVersion()));
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript2(), GetVersion()));
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript3(), GetVersion()));
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithoutScript(), GetVersion()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
 
   // |IsScriptAvailable| does not trigger refetching and returns stale values.
   fetcher()->make_cache_stale_for_testing();
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript1(), GetVersion()));
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript2(), GetVersion()));
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript3(), GetVersion()));
-  EXPECT_FALSE(
-      fetcher()->IsScriptAvailable(GetOriginWithoutScript(), GetVersion()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
   EXPECT_EQ(0, GetNumberOfPendingRequests());
+}
+
+TEST_F(PasswordScriptsFetcherImplTest, EnablePasswordDomainCapabilitiesFlag) {
+  // |kEnablePasswordDomainCapabilities| flag is disabled, |IsScriptAvailable|
+  // returns the default value (false).
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
+
+  base::test::ScopedFeatureList features;
+  features.InitAndEnableFeature(
+      password_manager::features::kForceEnablePasswordDomainCapabilities);
+
+  // |kEnablePasswordDomainCapabilities| is enabled, all scripts should have
+  // capabilities enabled.
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
+
+  EXPECT_EQ(0, GetNumberOfPendingRequests());
+  // Request capabilities from the server.
+  StartBulkCheck();
+  EXPECT_EQ(1, GetNumberOfPendingRequests());
+  SimulateResponse();
+  base::RunLoop().RunUntilIdle();
+  // Cache is ready.
+  // All scripts should have capabilities regardless of the server response.
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript1()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript2()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithoutScript()));
 }
 
 TEST_F(PasswordScriptsFetcherImplTest, AnotherScriptsListUrl) {
@@ -350,7 +377,7 @@ TEST_F(PasswordScriptsFetcherImplTest, AnotherScriptsListUrl) {
   scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory =
       base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
           &test_url_loader_factory);
-  PasswordScriptsFetcherImpl fetcher(test_shared_loader_factory,
+  PasswordScriptsFetcherImpl fetcher(GetVersion(), test_shared_loader_factory,
                                      kNonDefaultScriptsListUrl);
 
   fetcher.PrewarmCache();
@@ -370,8 +397,8 @@ TEST_F(PasswordScriptsFetcherImplTest, AnotherScriptsListUrl) {
   // Use |IsScriptAvailable(origin)| instead of |FetchScriptAvailability(origin,
   // callback)| to simplify the test.
   EXPECT_TRUE(fetcher.IsScriptAvailable(
-      url::Origin::Create(GURL(kExperimentalDomain)), GetVersion()));
-  EXPECT_FALSE(fetcher.IsScriptAvailable(GetOriginWithScript3(), GetVersion()));
+      url::Origin::Create(GURL(kExperimentalDomain))));
+  EXPECT_FALSE(fetcher.IsScriptAvailable(GetOriginWithScript3()));
 }
 
 TEST_F(PasswordScriptsFetcherImplTest, DifferentVersions) {
@@ -380,11 +407,30 @@ TEST_F(PasswordScriptsFetcherImplTest, DifferentVersions) {
   SimulateResponse();
   base::RunLoop().RunUntilIdle();
 
+  EXPECT_TRUE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+
   const char kOlderVersion[] = "86";
-  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript3(),
-                                            base::Version(kOlderVersion)));
-  EXPECT_TRUE(
-      fetcher()->IsScriptAvailable(GetOriginWithScript3(), GetVersion()));
+  Reinitialize(base::Version(kOlderVersion));
+  StartBulkCheck();
+  EXPECT_EQ(1, GetNumberOfPendingRequests());
+  SimulateResponse();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_FALSE(fetcher()->IsScriptAvailable(GetOriginWithScript3()));
+}
+
+TEST_F(PasswordScriptsFetcherImplTest, DebugInformationForInternals) {
+  base::Value::Dict debug_info = fetcher()->GetDebugInformationForInternals();
+
+  const std::string* engine = debug_info.FindString("engine");
+  EXPECT_TRUE(engine);
+  EXPECT_EQ("gstatic lookup", *engine);
+
+  const std::string* script_list_url = debug_info.FindString("script_list_url");
+  EXPECT_TRUE(script_list_url);
+  EXPECT_EQ(
+      "https://www.gstatic.com/chrome/duplex/change_password_scripts.json",
+      *script_list_url);
 }
 
 }  // namespace password_manager

@@ -11,6 +11,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/client/gles2_lib.h"
 #include "gpu/command_buffer/common/thread_local.h"
 #include "gpu/config/gpu_info_collector.h"
@@ -24,6 +25,10 @@
 #include "ui/gl/gl_surface.h"
 #include "ui/gl/gl_switches.h"
 #include "ui/gl/init/gl_factory.h"
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
 
 namespace gles2_conform_support {
 // Thread local key for ThreadState instance. Accessed when holding g_egl_lock
@@ -64,7 +69,7 @@ egl::ThreadState* ThreadState::Get() {
       std::unique_ptr<base::Environment> env(base::Environment::Create());
       std::string env_string;
       env->GetVar("CHROME_COMMAND_BUFFER_GLES2_ARGS", &env_string);
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       argv =
           base::SplitString(base::UTF8ToWide(env_string), base::kWhitespaceWide,
                             base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
@@ -80,7 +85,11 @@ egl::ThreadState* ThreadState::Get() {
       // Need to call both Init and InitFromArgv, since Windows does not use
       // argc, argv in CommandLine::Init(argc, argv).
       command_line->InitFromArgv(argv);
-      gl::init::InitializeGLNoExtensionsOneOff(/*init_bindings*/ true);
+#if defined(USE_OZONE)
+      ui::OzonePlatform::InitializeForGPU(ui::OzonePlatform::InitParams());
+#endif
+      gl::init::InitializeGLNoExtensionsOneOff(/*init_bindings=*/true,
+                                               /*system_device_id=*/0);
       gpu::GpuFeatureInfo gpu_feature_info;
       if (!command_line->HasSwitch(switches::kDisableGpuDriverBugWorkarounds)) {
         gpu::GPUInfo gpu_info;

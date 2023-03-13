@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/values.h"
 #include "chrome/common/sandbox_status_extension_android.mojom.h"
@@ -30,6 +29,9 @@ class SandboxStatusExtension
  public:
   // Creates a new SandboxStatusExtension for the |frame|.
   static void Create(content::RenderFrame* frame);
+
+  SandboxStatusExtension(const SandboxStatusExtension&) = delete;
+  SandboxStatusExtension& operator=(const SandboxStatusExtension&) = delete;
 
   // content::RenderFrameObserver:
   void OnDestruct() override;
@@ -71,8 +73,6 @@ class SandboxStatusExtension
 
   mojo::AssociatedReceiver<chrome::mojom::SandboxStatusExtension> receiver_{
       this};
-
-  DISALLOW_COPY_AND_ASSIGN(SandboxStatusExtension);
 };
 
 #endif  // CHROME_RENDERER_SANDBOX_STATUS_EXTENSION_ANDROID_H_

@@ -11,6 +11,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/hash/hash.h"
+#include "base/memory/raw_ptr.h"
 #include "base/process/process_metrics.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
@@ -20,6 +21,7 @@
 #include "base/test/test_file_util.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
+#include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "net/base/cache_type.h"
@@ -100,7 +102,7 @@ perf_test::PerfResultReporter SetUpSimpleIndexReporter(
 }
 
 void MaybeIncreaseFdLimitTo(unsigned int max_descriptors) {
-#if defined(OS_POSIX)
+#if BUILDFLAG(IS_POSIX)
   base::IncreaseFdLimitTo(max_descriptors);
 #endif
 }
@@ -171,8 +173,8 @@ class WriteHandler {
  private:
   bool CheckForErrorAndCancel(int result);
 
-  const DiskCachePerfTest* test_;
-  disk_cache::Backend* cache_;
+  raw_ptr<const DiskCachePerfTest> test_;
+  raw_ptr<disk_cache::Backend> cache_;
   net::CompletionOnceCallback final_callback_;
 
   size_t next_entry_index_ = 0;
@@ -298,10 +300,10 @@ class ReadHandler {
  private:
   bool CheckForErrorAndCancel(int result);
 
-  const DiskCachePerfTest* test_;
+  raw_ptr<const DiskCachePerfTest> test_;
   const WhatToRead what_to_read_;
 
-  disk_cache::Backend* cache_;
+  raw_ptr<disk_cache::Backend> cache_;
   net::CompletionOnceCallback final_callback_;
 
   size_t next_entry_index_ = 0;
@@ -460,7 +462,7 @@ void DiskCachePerfTest::ResetAndEvictSystemDiskCache() {
        file_path = enumerator.Next()) {
     ASSERT_TRUE(base::EvictFileFromSystemCache(file_path));
   }
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
   // And, cache directories, on platforms where the eviction utility supports
   // this (currently Linux and Android only).
   if (simple_cache_mode_) {
@@ -671,8 +673,7 @@ TEST(SimpleIndexPerfTest, EvictionPerformance) {
 
     for (int i = 0; i < kEntries; ++i) {
       index.InsertEntryForTesting(
-          i, disk_cache::EntryMetadata(start + base::TimeDelta::FromSeconds(i),
-                                       1u));
+          i, disk_cache::EntryMetadata(start + base::Seconds(i), 1u));
     }
 
     // Trigger an eviction.

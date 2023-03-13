@@ -20,6 +20,9 @@
 
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 
+#include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
+#include "base/metrics/histogram_functions.h"
 #include "services/network/public/mojom/content_security_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
@@ -55,7 +58,6 @@
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
@@ -123,38 +125,132 @@ bool IsFrameLazyLoadable(ExecutionContext* context,
   return true;
 }
 
-bool ShouldLazilyLoadFrame(const Document& document,
-                           bool is_loading_attr_lazy) {
+// These values are persisted to logs. Entries should not be renumbered and
+// numeric values should never be reused.
+enum class AutomaticLazyLoadFrame {
+  kFeatureNotEnabled = 0,
+  kTargetFramesNotFound = 1,
+  kTargetFramesFound = 2,
+  kMaxValue = kTargetFramesFound,
+};
+
+bool CheckAndRecordIfShouldLazilyLoadFrame(const Document& document,
+                                           bool is_loading_attr_lazy,
+                                           bool is_eligible_for_lazy_embeds,
+                                           bool is_eligible_for_lazy_ads,
+                                           bool record_uma) {
   DCHECK(document.GetSettings());
   if (!RuntimeEnabledFeatures::LazyFrameLoadingEnabled() ||
       !document.GetSettings()->GetLazyLoadEnabled()) {
     return false;
   }
 
-  // Disable explicit and automatic lazyload for backgrounded pages.
+  // Disable explicit lazyload for backgrounded pages.
   if (!document.IsPageVisible())
     return false;
 
   if (is_loading_attr_lazy)
     return true;
-  if (!RuntimeEnabledFeatures::AutomaticLazyFrameLoadingEnabled())
-    return false;
 
-  // If lazy loading is restricted to only Data Saver users, then avoid
-  // lazy loading unless Data Saver is enabled, taking the Data Saver
-  // holdback into consideration.
-  if (RuntimeEnabledFeatures::
-          RestrictAutomaticLazyFrameLoadingToDataSaverEnabled() &&
-      !GetNetworkStateNotifier().SaveDataEnabled()) {
-    return false;
+  if (record_uma) {
+    base::UmaHistogramEnumeration(
+        "Blink.AutomaticLazyLoadFrame",
+        !base::FeatureList::IsEnabled(
+            features::kAutomaticLazyFrameLoadingToEmbeds)
+            ? AutomaticLazyLoadFrame::kFeatureNotEnabled
+            : is_eligible_for_lazy_embeds
+                  ? AutomaticLazyLoadFrame::kTargetFramesFound
+                  : AutomaticLazyLoadFrame::kTargetFramesNotFound);
   }
 
-  // Skip automatic lazyload when reloading a page.
-  if (!RuntimeEnabledFeatures::AutoLazyLoadOnReloadsEnabled() &&
-      document.Loader() && IsReloadLoadType(document.Loader()->LoadType())) {
-    return false;
+  if (is_eligible_for_lazy_embeds)
+    document.TopDocument().IncrementLazyEmbedsFrameCount();
+
+  if (is_eligible_for_lazy_ads)
+    document.TopDocument().IncrementLazyAdsFrameCount();
+
+  if (is_eligible_for_lazy_embeds &&
+      base::FeatureList::IsEnabled(
+          features::kAutomaticLazyFrameLoadingToEmbeds)) {
+    return true;
   }
-  return true;
+
+  if (is_eligible_for_lazy_ads &&
+      base::FeatureList::IsEnabled(features::kAutomaticLazyFrameLoadingToAds)) {
+    return true;
+  }
+
+  return false;
+}
+
+using AllowedListForLazyLoading =
+    WTF::Vector<std::pair<scoped_refptr<const SecurityOrigin>, WTF::String>>;
+
+// The format of params from Finch experiment is like below:
+// "https://www.exampole.com(:443)|/embed,https://www.exampole.com|embed=true"
+// Expecting the param is a comma separated string, and each string is
+// separated by the vertical bar. The left side of the vertical bar is a
+// host name, and the right side is a part of path or search params.
+// Both are the indicators of html embeds.
+AllowedListForLazyLoading
+ParseFieldParamForAutomaticLazyFrameLoadingToEmbeds() {
+  AllowedListForLazyLoading allowed_list;
+  WTF::Vector<WTF::String> parsed_strings;
+  WTF::String(
+      base::GetFieldTrialParamValueByFeature(
+          features::kAutomaticLazyFrameLoadingToEmbedUrls, "allowed_websites")
+          .c_str())
+      .Split(",", /*allow_empty_entries=*/false, parsed_strings);
+  WTF::Vector<WTF::String> site_info;
+  for (const auto& it : parsed_strings) {
+    it.Split("|", /*allow_empty_entries=*/false, site_info);
+    DCHECK_EQ(site_info.size(), 2u)
+        << "Got unexpected AutomaticLazyFrameLoadingToEmbeds entry: " << it;
+
+    allowed_list.push_back(std::make_pair(
+        SecurityOrigin::CreateFromString(site_info[0]), site_info[1]));
+  }
+
+  return allowed_list;
+}
+
+const AllowedListForLazyLoading& AllowedWebsitesForLazyLoading() {
+  DEFINE_STATIC_LOCAL(AllowedListForLazyLoading, allowed_websites,
+                      (ParseFieldParamForAutomaticLazyFrameLoadingToEmbeds()));
+  return allowed_websites;
+}
+
+// Checks if the passed `url` is in the allowlist for automatic
+// lazy-loading. Returns true if the url is in the list.
+bool IsEligibleForLazyEmbeds(KURL url) {
+#if DCHECK_IS_ON()
+  if (base::FeatureList::IsEnabled(
+          features::kAutomaticLazyFrameLoadingToEmbeds)) {
+    DCHECK(base::FeatureList::IsEnabled(
+        features::kAutomaticLazyFrameLoadingToEmbedUrls))
+        << "kAutomaticLazyFrameLoadingToEmbedUrls should be enabled when "
+           "kAutomaticLazyFrameLoadingToEmbeds is enabled.";
+  }
+#endif  // DCHECK_IS_ON()
+
+  scoped_refptr<const SecurityOrigin> origin = SecurityOrigin::Create(url);
+  for (const auto& it : AllowedWebsitesForLazyLoading()) {
+    // TODO(sisidovski): IsSameOriginWith is more strict but we skip the port
+    // number check in order to avoid hardcoding port numbers to corresponding
+    // WPT test suites. To check port numbers, we need to set them to the
+    // allowlist which is passed by Chrome launch flag or Finch params. But,
+    // WPT server could have multiple ports, and it's difficult to expect which
+    // ports are available and set to the feature params before starting the
+    // test. That will affect the test reliability.
+    if ((origin.get()->Protocol() == it.first->Protocol() &&
+         origin.get()->Host() == it.first->Host()) &&
+        (url.GetPath().Contains(it.second) ||
+         url.Query().Contains(it.second))) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -475,6 +571,69 @@ EmbeddedContentView* HTMLFrameOwnerElement::ReleaseEmbeddedContentView() {
   return embedded_content_view_.Release();
 }
 
+bool HTMLFrameOwnerElement::LoadImmediatelyIfLazy() {
+  if (!lazy_load_frame_observer_)
+    return false;
+
+  bool lazy_load_pending = lazy_load_frame_observer_->IsLazyLoadPending();
+  if (lazy_load_pending)
+    lazy_load_frame_observer_->LoadImmediately();
+  return lazy_load_pending;
+}
+
+bool HTMLFrameOwnerElement::LazyLoadIfPossible(
+    const KURL& url,
+    const ResourceRequestHead& request,
+    WebFrameLoadType frame_load_type) {
+  const auto& loading_attr = FastGetAttribute(html_names::kLoadingAttr);
+  bool loading_lazy_set = EqualIgnoringASCIICase(loading_attr, "lazy");
+
+  if (!IsFrameLazyLoadable(GetExecutionContext(), url, loading_lazy_set,
+                           should_lazy_load_children_)) {
+    return false;
+  }
+
+  // Avoid automatically deferring subresources inside
+  // a lazily loaded frame. This will make it possible
+  // for subresources in hidden frames to load that
+  // will never be visible, as well as make it so that
+  // deferred frames that have multiple layers of
+  // iframes inside them can load faster once they're
+  // near the viewport or visible.
+  should_lazy_load_children_ = false;
+
+  if (lazy_load_frame_observer_)
+    lazy_load_frame_observer_->CancelPendingLazyLoad();
+
+  lazy_load_frame_observer_ = MakeGarbageCollected<LazyLoadFrameObserver>(
+      *this, LazyLoadFrameObserver::LoadType::kSubsequent);
+
+  if (RuntimeEnabledFeatures::LazyFrameVisibleLoadTimeMetricsEnabled())
+    lazy_load_frame_observer_->StartTrackingVisibilityMetrics();
+
+  if (CheckAndRecordIfShouldLazilyLoadFrame(
+          GetDocument(),
+          /*is_loading_attr_lazy=*/loading_lazy_set,
+          /*is_eligible_for_lazy_embeds=*/IsEligibleForLazyEmbeds(url),
+          /*is_eligible_for_lazy_ads=*/IsAdRelated(),
+          /*record_uma=*/true)) {
+    lazy_load_frame_observer_->DeferLoadUntilNearViewport(request,
+                                                          frame_load_type);
+    return true;
+  }
+  return false;
+}
+
+bool HTMLFrameOwnerElement::IsCurrentlyWithinFrameLimit() const {
+  LocalFrame* frame = GetDocument().GetFrame();
+  if (!frame)
+    return false;
+  Page* page = frame->GetPage();
+  if (!page)
+    return false;
+  return page->SubframeCount() < Page::MaxNumberOfFrames();
+}
+
 bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
     const KURL& url,
     const AtomicString& frame_name,
@@ -489,7 +648,18 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   // https://docs.google.com/document/d/1ijTZJT3DHQ1ljp4QQe4E4XCCRaYAxmInNzN1SzeJM8s/edit.
   if (ContainingShadowRoot() && ContainingShadowRoot()->IsUserAgent() &&
       IsA<HTMLFencedFrameElement>(ContainingShadowRoot()->host())) {
+    // Note that if a fenced frame's `is_fenced` status or `mode` attribute ever
+    // changes, the browser process will bad-message the renderer since this
+    // should never happen. Therefore it is safe to just naively always set it
+    // here because:
+    //   - A fenced frame always has `is_fenced = true`
+    //   - A fenced frame's mode is only settable once, enforced by
+    //     `HTMLFencedFrameElement::ParseAttribute()` as well as the browser
+    //     process
     frame_policy_.is_fenced = true;
+    frame_policy_.fenced_frame_mode =
+        DynamicTo<HTMLFencedFrameElement>(ContainingShadowRoot()->host())
+            ->GetMode();
   }
 
   // Update the |should_lazy_load_children_| value according to the "loading"
@@ -514,9 +684,6 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   if (trust_token_params)
     request.SetTrustTokenParams(*trust_token_params);
 
-  const auto& loading_attr = FastGetAttribute(html_names::kLoadingAttr);
-  bool loading_lazy_set = EqualIgnoringASCIICase(loading_attr, "lazy");
-
   if (ContentFrame()) {
     FrameLoadRequest frame_load_request(GetDocument().domWindow(), request);
     // TODO(crbug.com/1123606): This is how we're temporarily restricting the
@@ -539,29 +706,10 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
     if (replace_current_item)
       frame_load_type = WebFrameLoadType::kReplaceCurrentItem;
 
-    if (IsFrameLazyLoadable(GetExecutionContext(), url, loading_lazy_set,
-                            should_lazy_load_children_)) {
-      // Avoid automatically deferring subresources inside a lazily loaded
-      // frame. This will make it possible for subresources in hidden frames to
-      // load that will never be visible, as well as make it so that deferred
-      // frames that have multiple layers of iframes inside them can load faster
-      // once they're near the viewport or visible.
-      should_lazy_load_children_ = false;
-
-      if (lazy_load_frame_observer_)
-        lazy_load_frame_observer_->CancelPendingLazyLoad();
-
-      lazy_load_frame_observer_ = MakeGarbageCollected<LazyLoadFrameObserver>(
-          *this, LazyLoadFrameObserver::LoadType::kSubsequent);
-
-      if (RuntimeEnabledFeatures::LazyFrameVisibleLoadTimeMetricsEnabled())
-        lazy_load_frame_observer_->StartTrackingVisibilityMetrics();
-
-      if (ShouldLazilyLoadFrame(GetDocument(), loading_lazy_set)) {
-        lazy_load_frame_observer_->DeferLoadUntilNearViewport(request,
-                                                              frame_load_type);
-        return true;
-      }
+    // Check if the existing frame is eligible to be lazy-loaded. This method
+    // should be called before starting the navigation.
+    if (LazyLoadIfPossible(url, request, frame_load_type)) {
+      return true;
     }
 
     ContentFrame()->Navigate(frame_load_request, frame_load_type);
@@ -604,27 +752,11 @@ bool HTMLFrameOwnerElement::LoadOrRedirectSubframe(
   if (IsPlugin())
     request.SetSkipServiceWorker(true);
 
+  // Check if the newly created child frame is eligible to be lazy-loaded.
+  // This method should be called before starting the navigation.
   if (!lazy_load_frame_observer_ &&
-      IsFrameLazyLoadable(GetExecutionContext(), url, loading_lazy_set,
-                          should_lazy_load_children_)) {
-    // Avoid automatically deferring subresources inside a lazily loaded frame.
-    // This will make it possible for subresources in hidden frames to load that
-    // will never be visible, as well as make it so that deferred frames that
-    // have multiple layers of iframes inside them can load faster once they're
-    // near the viewport or visible.
-    should_lazy_load_children_ = false;
-
-    lazy_load_frame_observer_ = MakeGarbageCollected<LazyLoadFrameObserver>(
-        *this, LazyLoadFrameObserver::LoadType::kFirst);
-
-    if (RuntimeEnabledFeatures::LazyFrameVisibleLoadTimeMetricsEnabled())
-      lazy_load_frame_observer_->StartTrackingVisibilityMetrics();
-
-    if (ShouldLazilyLoadFrame(GetDocument(), loading_lazy_set)) {
-      lazy_load_frame_observer_->DeferLoadUntilNearViewport(request,
-                                                            child_load_type);
-      return true;
-    }
+      LazyLoadIfPossible(url, request, child_load_type)) {
+    return true;
   }
 
   FrameLoadRequest frame_load_request(GetDocument().domWindow(), request);
@@ -660,8 +792,11 @@ void HTMLFrameOwnerElement::ParseAttribute(
     // loading is disabled.
     if (loading == LoadingAttributeValue::kEager ||
         (GetDocument().GetSettings() &&
-         !ShouldLazilyLoadFrame(GetDocument(),
-                                loading == LoadingAttributeValue::kLazy))) {
+         !CheckAndRecordIfShouldLazilyLoadFrame(
+             GetDocument(), loading == LoadingAttributeValue::kLazy,
+             /*is_eligible_for_lazy_embeds=*/false,
+             /*is_eligible_for_lazy_ads=*/false,
+             /*record_uma=*/false))) {
       should_lazy_load_children_ = false;
       if (lazy_load_frame_observer_ &&
           lazy_load_frame_observer_->IsLazyLoadPending()) {
@@ -682,7 +817,7 @@ bool HTMLFrameOwnerElement::IsAdRelated() const {
 
 mojom::blink::ColorScheme HTMLFrameOwnerElement::GetColorScheme() const {
   if (const auto* style = GetComputedStyle())
-    return style->UsedColorSchemeForInitialColors();
+    return style->UsedColorScheme();
   return mojom::blink::ColorScheme::kLight;
 }
 

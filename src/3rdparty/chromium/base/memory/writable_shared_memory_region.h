@@ -5,12 +5,15 @@
 #ifndef BASE_MEMORY_WRITABLE_SHARED_MEMORY_REGION_H_
 #define BASE_MEMORY_WRITABLE_SHARED_MEMORY_REGION_H_
 
-#include "base/macros.h"
+#include "base/base_export.h"
+#include "base/check.h"
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_mapping.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "build/build_config.h"
+
+#include <stdint.h>
 
 namespace base {
 
@@ -69,6 +72,10 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   WritableSharedMemoryRegion(WritableSharedMemoryRegion&&);
   WritableSharedMemoryRegion& operator=(WritableSharedMemoryRegion&&);
 
+  WritableSharedMemoryRegion(const WritableSharedMemoryRegion&) = delete;
+  WritableSharedMemoryRegion& operator=(const WritableSharedMemoryRegion&) =
+      delete;
+
   // Destructor closes shared memory region if valid.
   // All created mappings will remain valid.
   ~WritableSharedMemoryRegion();
@@ -84,7 +91,7 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   // starting with the given |offset|. |offset| must be aligned to value of
   // |SysInfo::VMAllocationGranularity()|. Returns an invalid mapping if
   // requested bytes are out of the region limits.
-  WritableSharedMemoryMapping MapAt(off_t offset, size_t size) const;
+  WritableSharedMemoryMapping MapAt(uint64_t offset, size_t size) const;
 
   // Whether underlying platform handles are valid.
   bool IsValid() const;
@@ -101,7 +108,7 @@ class BASE_EXPORT WritableSharedMemoryRegion {
     return handle_.GetGUID();
   }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows it is necessary in rare cases to take a writable handle from a
   // region that will be converted to read-only. On this platform it is a safe
   // operation, as the handle returned from this method will remain writable
@@ -121,8 +128,6 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   static CreateFunction* create_hook_;
 
   subtle::PlatformSharedMemoryRegion handle_;
-
-  DISALLOW_COPY_AND_ASSIGN(WritableSharedMemoryRegion);
 };
 
 }  // namespace base

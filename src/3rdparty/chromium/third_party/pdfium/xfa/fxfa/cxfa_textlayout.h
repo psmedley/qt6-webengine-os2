@@ -12,9 +12,9 @@
 
 #include "core/fxcrt/css/cfx_css.h"
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/retain_ptr.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/widestring.h"
 #include "core/fxge/dib/fx_dib.h"
 #include "fxjs/gc/heap.h"
 #include "v8/include/cppgc/garbage-collected.h"
@@ -110,7 +110,7 @@ class CXFA_TextLayout final : public cppgc::GarbageCollected<CXFA_TextLayout> {
     float fHeight = 0;
     float fLastPos = 0;
     float fStartLineOffset = 0;
-    int32_t iChar = 0;
+    size_t nCharIdx = 0;
     // TODO(thestig): Make this size_t?
     int32_t iTotalLines = -1;
     UnownedPtr<const CFX_XMLNode> pXMLNode;

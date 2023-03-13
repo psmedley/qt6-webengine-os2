@@ -10,10 +10,11 @@ import './shared/onboarding_background.js';
 import './shared/splash_pages_shared_css.js';
 import '../strings.m.js';
 
-import {html, PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
+import {PolymerElement} from 'chrome://resources/polymer/v3_0/polymer/polymer_bundled.min.js';
 
 import {NavigationMixin} from './navigation_mixin.js';
 import {OnboardingBackgroundElement} from './shared/onboarding_background.js';
+import {getTemplate} from './signin_view.html.js';
 import {SigninViewProxy, SigninViewProxyImpl} from './signin_view_proxy.js';
 import {WelcomeBrowserProxy, WelcomeBrowserProxyImpl} from './welcome_browser_proxy.js';
 
@@ -31,6 +32,10 @@ export class SigninViewElement extends SigninViewElementBase {
     return 'signin-view';
   }
 
+  static get template() {
+    return getTemplate();
+  }
+
   private finalized_: boolean = false;
   private welcomeBrowserProxy_: WelcomeBrowserProxy;
   private signinViewProxy_: SigninViewProxy;
@@ -42,13 +47,13 @@ export class SigninViewElement extends SigninViewElementBase {
     this.welcomeBrowserProxy_ = WelcomeBrowserProxyImpl.getInstance();
   }
 
-  onRouteEnter() {
+  override onRouteEnter() {
     this.finalized_ = false;
     this.signinViewProxy_.recordPageShown();
     this.$.background.play();
   }
 
-  onRouteExit() {
+  override onRouteExit() {
     if (this.finalized_) {
       return;
     }
@@ -57,7 +62,7 @@ export class SigninViewElement extends SigninViewElementBase {
     this.$.background.pause();
   }
 
-  onRouteUnload() {
+  override onRouteUnload() {
     // URL is expected to change when signing in or skipping.
     if (this.finalized_) {
       return;
@@ -78,9 +83,12 @@ export class SigninViewElement extends SigninViewElementBase {
     this.signinViewProxy_.recordSkip();
     this.welcomeBrowserProxy_.handleUserDecline();
   }
+}
 
-  static get template() {
-    return html`{__html_template__}`;
+declare global {
+  interface HTMLElementTagNameMap {
+    'signin-view': SigninViewElement;
   }
 }
+
 customElements.define(SigninViewElement.is, SigninViewElement);

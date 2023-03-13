@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_MOCK_MOJO_MEDIA_STREAM_DISPATCHER_HOST_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_MEDIASTREAM_MOCK_MOJO_MEDIA_STREAM_DISPATCHER_HOST_H_
 
-#include "base/macros.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -19,6 +19,12 @@ class MockMojoMediaStreamDispatcherHost
     : public mojom::blink::MediaStreamDispatcherHost {
  public:
   MockMojoMediaStreamDispatcherHost();
+
+  MockMojoMediaStreamDispatcherHost(const MockMojoMediaStreamDispatcherHost&) =
+      delete;
+  MockMojoMediaStreamDispatcherHost& operator=(
+      const MockMojoMediaStreamDispatcherHost&) = delete;
+
   ~MockMojoMediaStreamDispatcherHost() override;
 
   mojo::PendingRemote<mojom::blink::MediaStreamDispatcherHost>
@@ -45,6 +51,16 @@ class MockMojoMediaStreamDispatcherHost
                     mojom::blink::MediaStreamType,
                     bool));
   MOCK_METHOD1(OnStreamStarted, void(const WTF::String&));
+#if !BUILDFLAG(IS_ANDROID)
+  MOCK_METHOD2(FocusCapturedSurface, void(const WTF::String&, bool));
+  MOCK_METHOD4(Crop,
+               void(const base::UnguessableToken&,
+                    const base::Token&,
+                    uint32_t,
+                    CropCallback));
+#endif
+  MOCK_METHOD2(GetOpenDevice,
+               void(const base::UnguessableToken&, GetOpenDeviceCallback));
 
   void ResetSessionId() { session_id_ = base::UnguessableToken::Create(); }
   void DoNotRunCallback() { do_not_run_cb_ = true; }
@@ -72,8 +88,6 @@ class MockMojoMediaStreamDispatcherHost
   WTF::Vector<MediaStreamDevice> video_devices_;
   GenerateStreamCallback generate_stream_cb_;
   mojo::Receiver<mojom::blink::MediaStreamDispatcherHost> receiver_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(MockMojoMediaStreamDispatcherHost);
 };
 
 }  // namespace blink

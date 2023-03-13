@@ -292,7 +292,7 @@ bool MHTMLArchive::CanLoadArchive(const KURL& url) {
     return true;
   if (url.ProtocolIsInHTTPFamily())
     return true;
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
   if (url.ProtocolIs("content"))
     return true;
 #endif
@@ -444,7 +444,8 @@ void MHTMLArchive::AddSubresource(ArchiveResource* resource) {
 }
 
 ArchiveResource* MHTMLArchive::SubresourceForURL(const KURL& url) const {
-  return subresources_.DeprecatedAtOrEmptyValue(url.GetString());
+  const auto it = subresources_.find(url.GetString());
+  return it != subresources_.end() ? it->value : nullptr;
 }
 
 String MHTMLArchive::GetCacheIdentifier() const {

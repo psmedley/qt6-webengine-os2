@@ -35,11 +35,12 @@ and if no tag is displayed the current channel is `stable`.
 
 ![perfetto-ui-channel.png](/docs/images/perfetto-ui-channel.png)
 
-To change the channel the UI is using between `stable` and `canery` you can use the toggle on the [entrance page](https://ui.perfetto.dev).
+To change the channel the UI is using between `stable` and `canary` you can use the toggle on the [entrance page](https://ui.perfetto.dev).
 
 ![perfetto-ui-channel-toggle.png](/docs/images/perfetto-ui-channel-toggle.png)
 
-To change to the `autopush` channel open devtools and enter `localStorage.setItem('perfettoUiChannel', 'autopush');` then reload.
+To change to the `autopush` channel, open the `Flags` screen in the `Support`
+section of the sidebar, and choose `Autopush` in `Release channel`.
 
 ## Which version am I using?
 
@@ -47,7 +48,7 @@ You can see the version of the UI you are currently using in the bottom left han
 
 ![perfetto-ui-version.png](/docs/images/perfetto-ui-version.png)
 
-Clicking on the version number takes you to Github where you can see which commits are part of this version. The version number format is `v<maj>.<min>.<Commits since that version>` where `<maj>.<min>` are extracted from the top entry in the
+Clicking on the version number takes you to Github where you can see which commits are part of this version. The version number format is `v<maj>.<min>.<Commit SHA1 prefix>` where `<maj>.<min>` are extracted from the top entry in the
 [CHANGELOG](/CHANGELOG).
 
 ## Cherry-picking a change
@@ -102,3 +103,6 @@ Googlers: You can check build progress and logs on
 [go/perfetto-ui-autopush](http://go/perfetto-ui-autopush) and
 [go/perfetto-ui-channels](http://go/perfetto-ui-channels) for the design docs of
 the serving infrastructure.
+
+## Publishing the Perfetto Chrome extension
+Googlers: see go/perfetto-release-chrome-extension

@@ -13,6 +13,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/reputation/core/safety_tips.pb.h"
 #include "components/url_formatter/url_formatter.h"
+#include "components/version_info/channel.h"
 #include "url/gurl.h"
 
 class GURL;
@@ -99,6 +100,14 @@ enum class NavigationSuggestionEvent {
   kMaxValue = kMatchCharacterSwapTop500,
 };
 
+struct Top500DomainsParams {
+  // Skeletons of top 500 domains. There can be fewer than 500 skeletons in
+  // this array.
+  const char* const* edit_distance_skeletons;
+  // Number of skeletons in `edit_distance_skeletons`.
+  size_t num_edit_distance_skeletons;
+};
+
 struct DomainInfo {
   // The full ASCII hostname, used in detecting target embedding. For
   // "https://www.google.com/mail" this will be "www.google.com".
@@ -147,6 +156,13 @@ bool IsEditDistanceAtMostOne(const std::u16string& str1,
 bool IsLikelyEditDistanceFalsePositive(const DomainInfo& navigated_domain,
                                        const DomainInfo& matched_domain);
 
+// Returns whether |navigated_domain| and |matched_domain| are likely to be
+// character swap false positives, and thus the user should *not* be warned.
+//
+// Assumes |navigated_domain| and |matched_domain| are within 1 character swap.
+bool IsLikelyCharacterSwapFalsePositive(const DomainInfo& navigated_domain,
+                                        const DomainInfo& matched_domain);
+
 // Returns true if the domain given by |domain_info| is a top domain.
 bool IsTopDomain(const DomainInfo& domain_info);
 
@@ -156,7 +172,8 @@ bool IsTopDomain(const DomainInfo& domain_info);
 // which doesn't have a notion of private registries.
 std::string GetETLDPlusOne(const std::string& hostname);
 
-// Returns true if a lookalike interstitial should be shown.
+// Returns true if a lookalike interstitial should be shown for the given
+// match type.
 bool ShouldBlockLookalikeUrlNavigation(LookalikeUrlMatchType match_type);
 
 // Returns true if a domain is visually similar to the hostname of |url|. The
@@ -213,5 +230,18 @@ void SetEnterpriseAllowlistForTesting(PrefService* pref_service,
 // characters are swapped. E.g. example.com vs exapmle.com.
 bool HasOneCharacterSwap(const std::u16string& str1,
                          const std::u16string& str2);
+
+// Sets information about top 500 domains for testing.
+void SetTop500DomainsParamsForTesting(const Top500DomainsParams& params);
+// Resets information about top 500 domains for testing.
+void ResetTop500DomainsParamsForTesting();
+
+// Returns true if the launch configuration provided by the component updater
+// enables `heuristic` for the given `etld_plus_one`.
+bool IsHeuristicEnabledForHostname(
+    const reputation::SafetyTipsConfig* config_proto,
+    reputation::HeuristicLaunchConfig::Heuristic heuristic,
+    const std::string& lookalike_etld_plus_one,
+    version_info::Channel channel);
 
 #endif  // COMPONENTS_LOOKALIKES_CORE_LOOKALIKE_URL_UTIL_H_

@@ -196,6 +196,9 @@ FEATURE_GRAMMAR = ({
             'subtype': str
         }
     },
+    'developer_mode_only': {
+        bool: {}
+    },
     'disallow_for_service_workers': {
         bool: {}
     },
@@ -263,6 +266,7 @@ FEATURE_GRAMMAR = ({
                 'linux': 'Feature::LINUX_PLATFORM',
                 'mac': 'Feature::MACOSX_PLATFORM',
                 'win': 'Feature::WIN_PLATFORM',
+                'fuchsia': 'Feature::FUCHSIA_PLATFORM',
             }
         }
     },

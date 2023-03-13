@@ -8,24 +8,29 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
+#include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer_delegate.h"
 #include "components/page_load_metrics/common/page_load_timing.h"
 #include "content/public/browser/global_routing_id.h"
-#include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/ip_endpoint.h"
+#include "net/base/net_errors.h"
 #include "net/cookies/canonical_cookie.h"
-#include "services/metrics/public/cpp/ukm_source.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "third_party/blink/public/common/use_counter/use_counter_feature.h"
 #include "url/gurl.h"
 
 namespace content {
+class NavigationHandle;
 class RenderFrameHost;
 }  // namespace content
+
+namespace net {
+struct LoadTimingInfo;
+}
 
 namespace page_load_metrics {
 
@@ -131,10 +136,6 @@ struct PageRenderData {
 
   // How many times LayoutNG-based LayoutObject::UpdateLayout() is called.
   uint64_t ng_layout_call_count = 0;
-
-  uint64_t flexbox_ng_layout_block_count = 0;
-
-  uint64_t grid_ng_layout_block_count = 0;
 };
 
 // Information related to layout shift normalization for different strategies.
@@ -205,18 +206,31 @@ struct ExtraRequestCompleteInfo {
 };
 
 // Interface for PageLoadMetrics observers. All instances of this class are
-// owned by the PageLoadTracker tracking a page load.
+// owned by the PageLoadTracker tracking a page load. The page would be a
+// primary page, Prerendering page, FencedFrames page, or pages for new other
+// features based on MPArch.
+// TODO(https://crbug.com/1301880): Split observer interfaces into a pure
+// virtual class so that PageLoadMetricsForwardObserver can override it
+// directly. It helps to ensure that the class override all virtual methods
+// to forward all events certainly. Other inheritances will override it via
+// PageLoadMetricsObserver.
 class PageLoadMetricsObserver {
  public:
   // ObservePolicy is used as a return value on some PageLoadMetricsObserver
-  // callbacks to indicate whether the observer would like to continue observing
-  // metric callbacks. Observers that wish to continue observing metric
-  // callbacks should return CONTINUE_OBSERVING; observers that wish to stop
-  // observing callbacks should return STOP_OBSERVING. Observers that return
-  // STOP_OBSERVING may be deleted.
+  // callbacks to indicate how the observer would like to handle subsequent
+  // callbacks. Observers that wish to continue observing metric callbacks
+  // should return CONTINUE_OBSERVING; observers that wish to stop observing
+  // callbacks should return STOP_OBSERVING; observers that wish to forward
+  // callbacks to the one bound with the parent page should return
+  // FORWARD_OBSERVING. Observers that return STOP_OBSERVING or
+  // FORWARD_OBSERVING may be deleted. If the observer in the parent page
+  // receives forward metrics via FORWARD_OBSERVING, and returns STOP_OBSERVING,
+  // It just stop observing forward metrics, and still see other callbacks for
+  // the orinally bound page.
   enum ObservePolicy {
     CONTINUE_OBSERVING,
     STOP_OBSERVING,
+    FORWARD_OBSERVING,
   };
 
   // These values are persisted to logs. Entries should not be renumbered and
@@ -231,15 +245,26 @@ class PageLoadMetricsObserver {
 
   using FrameTreeNodeId = int;
 
-  virtual ~PageLoadMetricsObserver() {}
+  PageLoadMetricsObserver();
+  virtual ~PageLoadMetricsObserver();
 
   static bool IsStandardWebPageMimeType(const std::string& mime_type);
+
+  // Obtains a weak pointer for this instance.
+  base::WeakPtr<PageLoadMetricsObserver> GetWeakPtr();
 
   // Gets/Sets the delegate. The delegate must outlive the observer and is
   // normally set when the observer is first registered for the page load. The
   // delegate can only be set once.
   const PageLoadMetricsObserverDelegate& GetDelegate() const;
   void SetDelegate(PageLoadMetricsObserverDelegate*);
+
+  // Returns the observer name. It should points a fixed address that is bound
+  // to the class as we use the pointer as a key in a map at PageLoadTracker.
+  // Should be implemented when the class needs to return FORWARD_OBSERVING.
+  // TODO(https://crbug.com/1301880): Make all inheritances override this method
+  // and make it pure virtual method.
+  virtual const char* GetObserverName() const;
 
   // The page load started, with the given navigation handle.
   // currently_committed_url contains the URL of the committed page load at the
@@ -249,6 +274,16 @@ class PageLoadMetricsObserver {
   virtual ObservePolicy OnStart(content::NavigationHandle* navigation_handle,
                                 const GURL& currently_committed_url,
                                 bool started_in_foreground);
+
+  // For FencedFrames pages, OnFencedFramesStart is called instead of OnStart.
+  // The default implementation returns STOP_OBSERVING, so that observers that
+  // are not aware of FencedFrames will not mix FencedFrames metrics into the
+  // existing reports. FencedFrames will show different characteristics as it's
+  // content is likely a subframe rather than a main frame.
+  // TODO(crbug.com/1301880): FencedFrames support is still in progress.
+  virtual ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url);
 
   // For prerendered pages, OnPrerenderStart is called instead of OnStart. The
   // default implementation returns STOP_OBSERVING, so that observers that are
@@ -272,8 +307,7 @@ class PageLoadMetricsObserver {
   // reference to it.
   // Observers that return STOP_OBSERVING will not receive any additional
   // callbacks, and will be deleted after invocation of this method returns.
-  virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
-                                 ukm::SourceId source_id);
+  virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle);
 
   // OnDidInternalNavigationAbort is triggered when the main frame navigation
   // aborts with HTTP responses that don't commit, such as HTTP 204 responses
@@ -369,6 +403,13 @@ class PageLoadMetricsObserver {
   virtual void OnMobileFriendlinessUpdate(
       const blink::MobileFriendliness& mobile_friendliness) {}
 
+  // OnInputTimingUpdate is triggered when an updated InputTiming is available
+  // at the subframe level. This method may be called multiple times over the
+  // course of the page load.
+  virtual void OnInputTimingUpdate(
+      content::RenderFrameHost* subframe_rfh,
+      const mojom::InputTiming& input_timing_delta) {}
+
   // OnRenderDataUpdate is triggered when an updated PageRenderData is available
   // at the subframe level. This method may be called multiple times over the
   // course of the page load.
@@ -451,12 +492,6 @@ class PageLoadMetricsObserver {
   virtual void OnResourceDataUseObserved(
       content::RenderFrameHost* rfh,
       const std::vector<mojom::ResourceDataUpdatePtr>& resources) {}
-
-  // Invoked when there is new information about lazy loaded or deferred
-  // resources. |new_deferred_resource_data| only has new deferral/lazy load
-  // events since the last update.
-  virtual void OnNewDeferredResourceCounts(
-      const mojom::DeferredResourceCounts& new_deferred_resource_data) {}
 
   // Invoked when a media element starts playing.
   virtual void MediaStartedPlaying(
@@ -570,6 +605,8 @@ class PageLoadMetricsObserver {
 
  private:
   PageLoadMetricsObserverDelegate* delegate_ = nullptr;
+
+  base::WeakPtrFactory<PageLoadMetricsObserver> weak_factory_{this};
 };
 
 }  // namespace page_load_metrics

@@ -11,10 +11,11 @@ along with a detailed description for each histogram.
 For best practices on writing histogram descriptions, see
 https://chromium.googlesource.com/chromium/src.git/+/HEAD/tools/metrics/histograms/README.md
 
-Please send CLs to chromium-metrics-reviews@google.com rather than to specific
-individuals. These CLs will be automatically reassigned to a reviewer within
-about 5 minutes. This approach helps the metrics team to load-balance incoming
-reviews. Googlers can read more about this at go/gwsq-gerrit.
+Please follow the instructions in the OWNERS file in this directory to find a
+reviewer. If no OWNERS file exists, please consider signing up at
+go/reviewing-metrics (Googlers only), as all subdirectories are expected to
+have an OWNERS file. As a last resort you can send the CL to
+chromium-metrics-reviews@google.com.
 -->
 
 <histogram-configuration>
@@ -22,7 +23,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 <histograms>
 
 <histogram name="Renderer4.Browser.RasterTaskSchedulingDelayNoAtRasterDecodes"
-    units="microseconds" expires_after="2021-09-30">
+    units="microseconds" expires_after="2022-09-30">
   <owner>andrescj@chromium.org</owner>
   <owner>chromeos-gfx@google.com</owner>
   <summary>
@@ -36,7 +37,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.Browser.RasterTaskTotalDuration"
-    units="microseconds" expires_after="2021-12-12">
+    units="microseconds" expires_after="2022-08-28">
   <owner>khushalsagar@chromium.org</owner>
   <owner>chrome-gpu@google.com</owner>
   <summary>
@@ -123,7 +124,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.GpuRasterizationEnabled" enum="BooleanEnabled"
-    expires_after="2021-12-12">
+    expires_after="2022-08-21">
   <owner>ericrk@chromium.org</owner>
   <owner>enne@chromium.org</owner>
   <summary>
@@ -133,7 +134,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram base="true" name="Renderer4.ImageDecodeTaskDurationUs"
-    units="microseconds" expires_after="2021-12-12">
+    units="microseconds" expires_after="2022-08-14">
 <!-- Name completed by histogram_suffixes name="DecodedImageType" -->
 
 <!-- Name completed by histogram_suffixes name="OutOfRaster" -->
@@ -179,7 +180,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.MainThreadGestureScrollReason"
-    enum="MainThreadScrollingReason" expires_after="M97">
+    enum="MainThreadScrollingReason" expires_after="2022-08-14">
   <owner>flackr@chromium.org</owner>
   <owner>pdr@chromium.org</owner>
   <owner>input-dev@chromium.org</owner>
@@ -194,7 +195,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.MainThreadWheelScrollReason"
-    enum="MainThreadScrollingReason" expires_after="M97">
+    enum="MainThreadScrollingReason" expires_after="2022-10-09">
   <owner>flackr@chromium.org</owner>
   <owner>pdr@chromium.org</owner>
   <owner>input-dev@chromium.org</owner>
@@ -232,7 +233,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.Renderer.RasterTaskSchedulingDelayNoAtRasterDecodes"
-    units="microseconds" expires_after="2021-09-30">
+    units="microseconds" expires_after="2022-09-30">
   <owner>andrescj@chromium.org</owner>
   <owner>chromeos-gfx@google.com</owner>
   <summary>
@@ -246,7 +247,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.Renderer.RasterTaskTotalDuration"
-    units="microseconds" expires_after="2022-02-06">
+    units="microseconds" expires_after="2022-08-14">
   <owner>khushalsagar@chromium.org</owner>
   <owner>chrome-gpu@google.com</owner>
   <summary>
@@ -272,7 +273,7 @@ reviews. Googlers can read more about this at go/gwsq-gerrit.
 </histogram>
 
 <histogram name="Renderer4.ScrollingThread" enum="ScrollingThreadStatus"
-    expires_after="2022-02-06">
+    expires_after="2022-08-21">
 <!-- Name completed by histogram_suffixes name="ScrollSourceDevice" -->
 
   <owner>bokan@chromium.org</owner>

@@ -12,6 +12,7 @@
 #include "core/fpdfapi/font/cpdf_cidfont.h"
 #include "core/fpdfapi/font/cpdf_font.h"
 #include "third_party/base/check.h"
+#include "third_party/base/span.h"
 
 #define ISLATINWORD(u) (u != 0x20 && u <= 0x28FF)
 
@@ -151,7 +152,7 @@ std::unique_ptr<CPDF_TextObject> CPDF_TextObject::Clone() const {
 }
 
 CPDF_PageObject::Type CPDF_TextObject::GetType() const {
-  return TEXT;
+  return Type::kText;
 }
 
 void CPDF_TextObject::Transform(const CFX_Matrix& matrix) {
@@ -172,13 +173,13 @@ const CPDF_TextObject* CPDF_TextObject::AsText() const {
 }
 
 CFX_Matrix CPDF_TextObject::GetTextMatrix() const {
-  const float* pTextMatrix = m_TextState.GetMatrix();
+  pdfium::span<const float> pTextMatrix = m_TextState.GetMatrix();
   return CFX_Matrix(pTextMatrix[0], pTextMatrix[2], pTextMatrix[1],
                     pTextMatrix[3], m_Pos.x, m_Pos.y);
 }
 
 void CPDF_TextObject::SetTextMatrix(const CFX_Matrix& matrix) {
-  float* pTextMatrix = m_TextState.GetMutableMatrix();
+  pdfium::span<float> pTextMatrix = m_TextState.GetMutableMatrix();
   pTextMatrix[0] = matrix.a;
   pTextMatrix[1] = matrix.c;
   pTextMatrix[2] = matrix.b;
@@ -190,13 +191,15 @@ void CPDF_TextObject::SetTextMatrix(const CFX_Matrix& matrix) {
 void CPDF_TextObject::SetSegments(const ByteString* pStrs,
                                   const std::vector<float>& kernings,
                                   size_t nSegs) {
+  CHECK(nSegs);
   m_CharCodes.clear();
   m_CharPos.clear();
   RetainPtr<CPDF_Font> pFont = GetFont();
-  int nChars = 0;
+  size_t nChars = nSegs - 1;
   for (size_t i = 0; i < nSegs; ++i)
     nChars += pFont->CountChar(pStrs[i].AsStringView());
-  nChars += nSegs - 1;
+
+  CHECK(nChars);
   m_CharCodes.resize(nChars);
   m_CharPos.resize(nChars - 1);
   size_t index = 0;

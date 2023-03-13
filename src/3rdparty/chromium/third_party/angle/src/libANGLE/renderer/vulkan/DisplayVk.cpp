@@ -10,13 +10,17 @@
 #include "libANGLE/renderer/vulkan/DisplayVk.h"
 
 #include "common/debug.h"
+#include "common/system_utils.h"
 #include "libANGLE/Context.h"
 #include "libANGLE/Display.h"
+#include "libANGLE/renderer/vulkan/BufferVk.h"
 #include "libANGLE/renderer/vulkan/ContextVk.h"
+#include "libANGLE/renderer/vulkan/DeviceVk.h"
 #include "libANGLE/renderer/vulkan/ImageVk.h"
 #include "libANGLE/renderer/vulkan/RendererVk.h"
 #include "libANGLE/renderer/vulkan/SurfaceVk.h"
 #include "libANGLE/renderer/vulkan/SyncVk.h"
+#include "libANGLE/renderer/vulkan/VkImageImageSiblingVk.h"
 #include "libANGLE/trace.h"
 
 namespace rx
@@ -92,20 +96,26 @@ std::string DisplayVk::getVendorString()
     return std::string();
 }
 
-std::string DisplayVk::getVersionString()
+std::string DisplayVk::getVersionString(bool includeFullVersion)
 {
     if (mRenderer)
     {
-        return mRenderer->getVersionString();
+        return mRenderer->getVersionString(includeFullVersion);
     }
     return std::string();
+}
+
+DeviceImpl *DisplayVk::createDevice()
+{
+    return new DeviceVk();
 }
 
 egl::Error DisplayVk::waitClient(const gl::Context *context)
 {
     ANGLE_TRACE_EVENT0("gpu.angle", "DisplayVk::waitClient");
     ContextVk *contextVk = vk::GetImpl(context);
-    return angle::ToEGL(contextVk->finishImpl(), this, EGL_BAD_ACCESS);
+    return angle::ToEGL(contextVk->finishImpl(RenderPassClosureReason::EGLWaitClient), this,
+                        EGL_BAD_ACCESS);
 }
 
 egl::Error DisplayVk::waitNative(const gl::Context *context, EGLint engine)
@@ -195,13 +205,80 @@ gl::Version DisplayVk::getMaxConformantESVersion() const
     return mRenderer->getMaxConformantESVersion();
 }
 
+egl::Error DisplayVk::validateImageClientBuffer(const gl::Context *context,
+                                                EGLenum target,
+                                                EGLClientBuffer clientBuffer,
+                                                const egl::AttributeMap &attribs) const
+{
+    switch (target)
+    {
+        case EGL_VULKAN_IMAGE_ANGLE:
+        {
+            VkImage *vkImage = reinterpret_cast<VkImage *>(clientBuffer);
+            if (!vkImage || *vkImage == VK_NULL_HANDLE)
+            {
+                return egl::EglBadParameter() << "clientBuffer is invalid.";
+            }
+
+            GLenum internalFormat =
+                static_cast<GLenum>(attribs.get(EGL_TEXTURE_INTERNAL_FORMAT_ANGLE, GL_NONE));
+            switch (internalFormat)
+            {
+                case GL_RGBA:
+                case GL_BGRA_EXT:
+                case GL_RGB:
+                case GL_RED_EXT:
+                case GL_RG_EXT:
+                case GL_RGB10_A2_EXT:
+                case GL_R16_EXT:
+                case GL_RG16_EXT:
+                case GL_NONE:
+                    break;
+                default:
+                    return egl::EglBadParameter() << "Invalid EGLImage texture internal format: 0x"
+                                                  << std::hex << internalFormat;
+            }
+
+            uint64_t hi = static_cast<uint64_t>(attribs.get(EGL_VULKAN_IMAGE_CREATE_INFO_HI_ANGLE));
+            uint64_t lo = static_cast<uint64_t>(attribs.get(EGL_VULKAN_IMAGE_CREATE_INFO_LO_ANGLE));
+            uint64_t info = ((hi & 0xffffffff) << 32) | (lo & 0xffffffff);
+            if (reinterpret_cast<const VkImageCreateInfo *>(info)->sType !=
+                VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO)
+            {
+                return egl::EglBadParameter()
+                       << "EGL_VULKAN_IMAGE_CREATE_INFO_HI_ANGLE and "
+                          "EGL_VULKAN_IMAGE_CREATE_INFO_LO_ANGLE are not pointing to a "
+                          "valid VkImageCreateInfo structure.";
+            }
+
+            return egl::NoError();
+        }
+        default:
+            return DisplayImpl::validateImageClientBuffer(context, target, clientBuffer, attribs);
+    }
+}
+
+ExternalImageSiblingImpl *DisplayVk::createExternalImageSibling(const gl::Context *context,
+                                                                EGLenum target,
+                                                                EGLClientBuffer buffer,
+                                                                const egl::AttributeMap &attribs)
+{
+    switch (target)
+    {
+        case EGL_VULKAN_IMAGE_ANGLE:
+            return new VkImageImageSiblingVk(buffer, attribs);
+        default:
+            return DisplayImpl::createExternalImageSibling(context, target, buffer, attribs);
+    }
+}
+
 void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
 {
-    outExtensions->createContextRobustness      = getRenderer()->getNativeExtensions().robustness;
-    outExtensions->surfaceOrientation           = true;
-    outExtensions->displayTextureShareGroup     = true;
-    outExtensions->displaySemaphoreShareGroup   = true;
-    outExtensions->robustResourceInitialization = true;
+    outExtensions->createContextRobustness    = getRenderer()->getNativeExtensions().robustnessEXT;
+    outExtensions->surfaceOrientation         = true;
+    outExtensions->displayTextureShareGroup   = true;
+    outExtensions->displaySemaphoreShareGroup = true;
+    outExtensions->robustResourceInitializationANGLE = true;
 
     // The Vulkan implementation will always say that EGL_KHR_swap_buffers_with_damage is supported.
     // When the Vulkan driver supports VK_KHR_incremental_present, it will use it.  Otherwise, it
@@ -221,7 +298,7 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->imageNativeBuffer =
         getRenderer()->getFeatures().supportsAndroidHardwareBuffer.enabled;
     outExtensions->surfacelessContext = true;
-    outExtensions->glColorspace = getRenderer()->getFeatures().supportsSwapchainColorspace.enabled;
+    outExtensions->glColorspace       = true;
     outExtensions->imageGlColorspace =
         outExtensions->glColorspace && getRenderer()->getFeatures().supportsImageFormatList.enabled;
 
@@ -229,6 +306,14 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->getNativeClientBufferANDROID = true;
     outExtensions->framebufferTargetANDROID     = true;
 #endif  // defined(ANGLE_PLATFORM_ANDROID)
+
+    // EGL_EXT_image_dma_buf_import is only exposed if EGL_EXT_image_dma_buf_import_modifiers can
+    // also be exposed.  The Vulkan extensions that support these EGL extensions are not split in
+    // the same way; both Vulkan extensions are needed for EGL_EXT_image_dma_buf_import, and with
+    // both Vulkan extensions, EGL_EXT_image_dma_buf_import_modifiers is also supportable.
+    outExtensions->imageDmaBufImportEXT =
+        getRenderer()->getFeatures().supportsExternalMemoryDmaBufAndModifiers.enabled;
+    outExtensions->imageDmaBufImportModifiersEXT = outExtensions->imageDmaBufImportEXT;
 
     // Disable context priority when non-zero memory init is enabled. This enforces a queue order.
     outExtensions->contextPriority = !getRenderer()->getFeatures().allocateNonZeroMemory.enabled;
@@ -249,12 +334,24 @@ void DisplayVk::generateExtensions(egl::DisplayExtensions *outExtensions) const
     outExtensions->protectedContentEXT =
         (getRenderer()->getFeatures().supportsProtectedMemory.enabled &&
          getRenderer()->getFeatures().supportsSurfaceProtectedSwapchains.enabled);
+
+    outExtensions->createSurfaceSwapIntervalANGLE = true;
+
+    outExtensions->mutableRenderBufferKHR =
+        getRenderer()->getFeatures().supportsSharedPresentableImageExtension.enabled;
+
+    outExtensions->vulkanImageANGLE = true;
+
+    outExtensions->lockSurface3KHR =
+        getRenderer()->getFeatures().supportsLockSurfaceExtension.enabled;
+
+    outExtensions->partialUpdateKHR = true;
 }
 
 void DisplayVk::generateCaps(egl::Caps *outCaps) const
 {
     outCaps->textureNPOT = true;
-    outCaps->stencil8    = getRenderer()->getNativeExtensions().stencilIndex8;
+    outCaps->stencil8    = getRenderer()->getNativeExtensions().textureStencil8OES;
 }
 
 const char *DisplayVk::getWSILayer() const
@@ -310,15 +407,63 @@ void DisplayVk::populateFeatureList(angle::FeatureList *features)
     mRenderer->getFeatures().populateFeatureList(features);
 }
 
-ShareGroupVk::ShareGroupVk() : mSyncObjectPendingFlush(false) {}
+ShareGroupVk::ShareGroupVk()
+{
+    mLastPruneTime = angle::GetCurrentSystemTime();
+}
 
 void ShareGroupVk::onDestroy(const egl::Display *display)
 {
-    DisplayVk *displayVk = vk::GetImpl(display);
+    RendererVk *renderer = vk::GetImpl(display)->getRenderer();
 
-    mPipelineLayoutCache.destroy(displayVk->getRenderer());
-    mDescriptorSetLayoutCache.destroy(displayVk->getRenderer());
+    for (std::unique_ptr<vk::BufferPool> &pool : mDefaultBufferPools)
+    {
+        if (pool)
+        {
+            pool->destroy(renderer);
+        }
+    }
+
+    if (mSmallBufferPool)
+    {
+        mSmallBufferPool->destroy(renderer);
+    }
+
+    mPipelineLayoutCache.destroy(renderer);
+    mDescriptorSetLayoutCache.destroy(renderer);
 
     ASSERT(mResourceUseLists.empty());
+}
+
+void ShareGroupVk::releaseResourceUseLists(const Serial &submitSerial)
+{
+    if (!mResourceUseLists.empty())
+    {
+        for (vk::ResourceUseList &it : mResourceUseLists)
+        {
+            it.releaseResourceUsesAndUpdateSerials(submitSerial);
+        }
+        mResourceUseLists.clear();
+    }
+}
+
+vk::BufferPool *ShareGroupVk::getDefaultBufferPool(RendererVk *renderer,
+                                                   VkDeviceSize size,
+                                                   uint32_t memoryTypeIndex)
+{
+    return vk::GetDefaultBufferPool(mSmallBufferPool, mDefaultBufferPools, renderer, size,
+                                    memoryTypeIndex);
+}
+
+void ShareGroupVk::pruneDefaultBufferPools(RendererVk *renderer)
+{
+    mLastPruneTime = angle::GetCurrentSystemTime();
+
+    vk::PruneDefaultBufferPools(renderer, mDefaultBufferPools, mSmallBufferPool);
+}
+
+bool ShareGroupVk::isDueForBufferPoolPrune()
+{
+    return vk::IsDueForBufferPoolPrune(mLastPruneTime);
 }
 }  // namespace rx

@@ -15,27 +15,34 @@ import {SDKModel} from './SDKModel.js';
 import {Events as TargetManagerEvents, TargetManager} from './TargetManager.js';
 
 export class ChildTargetManager extends SDKModel<EventTypes> implements ProtocolProxyApi.TargetDispatcher {
-  private readonly targetManager: TargetManager;
-  private parentTarget: Target;
-  private readonly targetAgent: ProtocolProxyApi.TargetApi;
-  private readonly targetInfosInternal: Map<Protocol.Target.TargetID, Protocol.Target.TargetInfo> = new Map();
-  private readonly childTargetsBySessionId: Map<Protocol.Target.SessionID, Target> = new Map();
-  private readonly childTargetsById: Map<Protocol.Target.TargetID|'main', Target> = new Map();
-  private readonly parallelConnections: Map<string, ProtocolClient.InspectorBackend.Connection> = new Map();
-  private parentTargetId: Protocol.Target.TargetID|null = null;
+  readonly #targetManager: TargetManager;
+  #parentTarget: Target;
+  readonly #targetAgent: ProtocolProxyApi.TargetApi;
+  readonly #targetInfosInternal: Map<Protocol.Target.TargetID, Protocol.Target.TargetInfo> = new Map();
+  readonly #childTargetsBySessionId: Map<Protocol.Target.SessionID, Target> = new Map();
+  readonly #childTargetsById: Map<Protocol.Target.TargetID|'main', Target> = new Map();
+  readonly #parallelConnections: Map<string, ProtocolClient.InspectorBackend.Connection> = new Map();
+  #parentTargetId: Protocol.Target.TargetID|null = null;
 
   constructor(parentTarget: Target) {
     super(parentTarget);
-    this.targetManager = parentTarget.targetManager();
-    this.parentTarget = parentTarget;
-    this.targetAgent = parentTarget.targetAgent();
-
+    this.#targetManager = parentTarget.targetManager();
+    this.#parentTarget = parentTarget;
+    this.#targetAgent = parentTarget.targetAgent();
     parentTarget.registerTargetDispatcher(this);
-    this.targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
+    const browserTarget = this.#targetManager.browserTarget();
+    if (browserTarget) {
+      if (browserTarget !== parentTarget) {
+        void browserTarget.targetAgent().invoke_autoAttachRelated(
+            {targetId: parentTarget.id() as Protocol.Target.TargetID, waitForDebuggerOnStart: true});
+      }
+    } else {
+      void this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
+    }
 
     if (!parentTarget.parentTarget() && !Host.InspectorFrontendHost.isUnderTest()) {
-      this.targetAgent.invoke_setDiscoverTargets({discover: true});
-      this.targetAgent.invoke_setRemoteLocations({locations: [{host: 'localhost', port: 9229}]});
+      void this.#targetAgent.invoke_setDiscoverTargets({discover: true});
+      void this.#targetAgent.invoke_setRemoteLocations({locations: [{host: 'localhost', port: 9229}]});
     }
   }
 
@@ -48,32 +55,32 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
   }
 
   childTargets(): Target[] {
-    return Array.from(this.childTargetsBySessionId.values());
+    return Array.from(this.#childTargetsBySessionId.values());
   }
 
   async suspendModel(): Promise<void> {
-    await this.targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: false, flatten: true});
+    await this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: false, flatten: true});
   }
 
   async resumeModel(): Promise<void> {
-    await this.targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
+    await this.#targetAgent.invoke_setAutoAttach({autoAttach: true, waitForDebuggerOnStart: true, flatten: true});
   }
 
   dispose(): void {
-    for (const sessionId of this.childTargetsBySessionId.keys()) {
+    for (const sessionId of this.#childTargetsBySessionId.keys()) {
       this.detachedFromTarget({sessionId, targetId: undefined});
     }
   }
 
   targetCreated({targetInfo}: Protocol.Target.TargetCreatedEvent): void {
-    this.targetInfosInternal.set(targetInfo.targetId, targetInfo);
+    this.#targetInfosInternal.set(targetInfo.targetId, targetInfo);
     this.fireAvailableTargetsChanged();
     this.dispatchEventToListeners(Events.TargetCreated, targetInfo);
   }
 
   targetInfoChanged({targetInfo}: Protocol.Target.TargetInfoChangedEvent): void {
-    this.targetInfosInternal.set(targetInfo.targetId, targetInfo);
-    const target = this.childTargetsById.get(targetInfo.targetId);
+    this.#targetInfosInternal.set(targetInfo.targetId, targetInfo);
+    const target = this.#childTargetsById.get(targetInfo.targetId);
     if (target) {
       target.updateTargetInfo(targetInfo);
     }
@@ -82,7 +89,7 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
   }
 
   targetDestroyed({targetId}: Protocol.Target.TargetDestroyedEvent): void {
-    this.targetInfosInternal.delete(targetId);
+    this.#targetInfosInternal.delete(targetId);
     this.fireAvailableTargetsChanged();
     this.dispatchEventToListeners(Events.TargetDestroyed, targetId);
   }
@@ -93,33 +100,32 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
 
   private fireAvailableTargetsChanged(): void {
     TargetManager.instance().dispatchEventToListeners(
-        TargetManagerEvents.AvailableTargetsChanged, [...this.targetInfosInternal.values()]);
+        TargetManagerEvents.AvailableTargetsChanged, [...this.#targetInfosInternal.values()]);
   }
 
   async getParentTargetId(): Promise<Protocol.Target.TargetID> {
-    if (!this.parentTargetId) {
-      this.parentTargetId = (await this.parentTarget.targetAgent().invoke_getTargetInfo({})).targetInfo.targetId;
+    if (!this.#parentTargetId) {
+      this.#parentTargetId = (await this.#parentTarget.targetAgent().invoke_getTargetInfo({})).targetInfo.targetId;
     }
-    return this.parentTargetId;
+    return this.#parentTargetId;
   }
 
   async attachedToTarget({sessionId, targetInfo, waitingForDebugger}: Protocol.Target.AttachedToTargetEvent):
       Promise<void> {
-    if (this.parentTargetId === targetInfo.targetId) {
+    if (this.#parentTargetId === targetInfo.targetId) {
       return;
     }
-
     let targetName = '';
     if (targetInfo.type === 'worker' && targetInfo.title && targetInfo.title !== targetInfo.url) {
       targetName = targetInfo.title;
-    } else if (targetInfo.type !== 'iframe') {
+    } else if (targetInfo.type !== 'iframe' && targetInfo.type !== 'webview') {
       const parsedURL = Common.ParsedURL.ParsedURL.fromString(targetInfo.url);
       targetName =
           parsedURL ? parsedURL.lastPathComponentWithFragment() : '#' + (++ChildTargetManager.lastAnonymousTargetId);
     }
 
     let type = Type.Browser;
-    if (targetInfo.type === 'iframe') {
+    if (targetInfo.type === 'iframe' || targetInfo.type === 'webview') {
       type = Type.Frame;
     }
     // TODO(lfg): ensure proper capabilities for child pages (e.g. portals).
@@ -127,30 +133,36 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
       type = Type.Frame;
     } else if (targetInfo.type === 'worker') {
       type = Type.Worker;
+    } else if (targetInfo.type === 'shared_worker') {
+      type = Type.SharedWorker;
     } else if (targetInfo.type === 'service_worker') {
       type = Type.ServiceWorker;
+    } else if (targetInfo.type === 'auction_worklet') {
+      type = Type.AuctionWorklet;
     }
-
-    const target = this.targetManager.createTarget(
-        targetInfo.targetId, targetName, type, this.parentTarget, sessionId, undefined, undefined, targetInfo);
-    this.childTargetsBySessionId.set(sessionId, target);
-    this.childTargetsById.set(target.id(), target);
+    const target = this.#targetManager.createTarget(
+        targetInfo.targetId, targetName, type, this.#parentTarget, sessionId, undefined, undefined, targetInfo);
+    if (type === Type.Worker || type === Type.ServiceWorker || type === Type.SharedWorker) {
+      target.setInspectedURL(this.#parentTarget.inspectedURL());
+    }
+    this.#childTargetsBySessionId.set(sessionId, target);
+    this.#childTargetsById.set(target.id(), target);
 
     if (ChildTargetManager.attachCallback) {
       await ChildTargetManager.attachCallback({target, waitingForDebugger});
     }
-    target.runtimeAgent().invoke_runIfWaitingForDebugger();
+    void target.runtimeAgent().invoke_runIfWaitingForDebugger();
   }
 
   detachedFromTarget({sessionId}: Protocol.Target.DetachedFromTargetEvent): void {
-    if (this.parallelConnections.has(sessionId)) {
-      this.parallelConnections.delete(sessionId);
+    if (this.#parallelConnections.has(sessionId)) {
+      this.#parallelConnections.delete(sessionId);
     } else {
-      const target = this.childTargetsBySessionId.get(sessionId);
+      const target = this.#childTargetsBySessionId.get(sessionId);
       if (target) {
         target.dispose('target terminated');
-        this.childTargetsBySessionId.delete(sessionId);
-        this.childTargetsById.delete(target.id());
+        this.#childTargetsBySessionId.delete(sessionId);
+        this.#childTargetsById.delete(target.id());
       }
     }
   }
@@ -160,14 +172,15 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
   }
 
   async createParallelConnection(onMessage: (arg0: (Object|string)) => void):
-      Promise<ProtocolClient.InspectorBackend.Connection> {
+      Promise<{connection: ProtocolClient.InspectorBackend.Connection, sessionId: string}> {
     // The main Target id is actually just `main`, instead of the real targetId.
     // Get the real id (requires an async operation) so that it can be used synchronously later.
     const targetId = await this.getParentTargetId();
-    const {connection, sessionId} = await this.createParallelConnectionAndSessionForTarget(this.parentTarget, targetId);
+    const {connection, sessionId} =
+        await this.createParallelConnectionAndSessionForTarget(this.#parentTarget, targetId);
     connection.setOnMessage(onMessage);
-    this.parallelConnections.set(sessionId, connection);
-    return connection;
+    this.#parallelConnections.set(sessionId, connection);
+    return {connection, sessionId};
   }
 
   private async createParallelConnectionAndSessionForTarget(target: Target, targetId: Protocol.Target.TargetID):
@@ -182,13 +195,13 @@ export class ChildTargetManager extends SDKModel<EventTypes> implements Protocol
     targetRouter.registerSession(target, sessionId, connection);
     connection.setOnDisconnect(() => {
       targetRouter.unregisterSession(sessionId);
-      targetAgent.invoke_detachFromTarget({sessionId});
+      void targetAgent.invoke_detachFromTarget({sessionId});
     });
     return {connection, sessionId};
   }
 
   targetInfos(): Protocol.Target.TargetInfo[] {
-    return Array.from(this.targetInfosInternal.values());
+    return Array.from(this.#targetInfosInternal.values());
   }
 
   private static lastAnonymousTargetId = 0;

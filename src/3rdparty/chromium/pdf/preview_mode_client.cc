@@ -146,7 +146,7 @@ void PreviewModeClient::DocumentHasUnsupportedFeature(
   NOTREACHED();
 }
 
-void PreviewModeClient::FormTextFieldFocusChange(bool in_focus) {
+void PreviewModeClient::FormFieldFocusChange(PDFEngine::FocusFieldType type) {
   NOTREACHED();
 }
 
@@ -171,14 +171,6 @@ void PreviewModeClient::SetLinkUnderCursor(
 bool PreviewModeClient::IsValidLink(const std::string& url) {
   NOTREACHED();
   return false;
-}
-
-void PreviewModeClient::ScheduleTaskOnMainThread(
-    const base::Location& from_here,
-    ResultCallback callback,
-    int32_t result,
-    base::TimeDelta delay) {
-  NOTREACHED();
 }
 
 }  // namespace chrome_pdf

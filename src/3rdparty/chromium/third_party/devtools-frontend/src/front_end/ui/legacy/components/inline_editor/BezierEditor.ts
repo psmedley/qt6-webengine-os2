@@ -2,12 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+import * as Common from '../../../../core/common/common.js';
 import * as Platform from '../../../../core/platform/platform.js';
 import * as UI from '../../legacy.js';
 
+import bezierEditorStyles from './bezierEditor.css.js';
 import {BezierUI} from './BezierUI.js';
 
-export class BezierEditor extends UI.Widget.VBox {
+export class BezierEditor extends Common.ObjectWrapper.eventMixin<EventTypes, typeof UI.Widget.VBox>(UI.Widget.VBox) {
   private bezierInternal: UI.Geometry.CubicBezier;
   private previewElement: HTMLElement;
   private readonly previewOnion: HTMLElement;
@@ -28,7 +30,6 @@ export class BezierEditor extends UI.Widget.VBox {
   constructor(bezier: UI.Geometry.CubicBezier) {
     super(true);
     this.bezierInternal = bezier;
-    this.registerRequiredCSS('ui/legacy/components/inline_editor/bezierEditor.css');
     this.contentElement.tabIndex = 0;
     this.setDefaultFocusedElement(this.contentElement);
 
@@ -78,6 +79,7 @@ export class BezierEditor extends UI.Widget.VBox {
   }
 
   wasShown(): void {
+    this.registerCSSFiles([bezierEditorStyles]);
     this.unselectPresets();
     // Check if bezier matches a preset
     for (const category of this.presetCategories) {
@@ -244,6 +246,10 @@ export class BezierEditor extends UI.Widget.VBox {
 export enum Events {
   BezierChanged = 'BezierChanged',
 }
+
+export type EventTypes = {
+  [Events.BezierChanged]: string,
+};
 
 export const Presets = [
   [

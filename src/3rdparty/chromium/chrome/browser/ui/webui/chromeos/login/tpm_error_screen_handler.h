@@ -29,13 +29,17 @@ class TpmErrorView {
 
   // Unbinds the screen from the view.
   virtual void Unbind() = 0;
+
+  // Sets corresponding error message when taking tpm ownership return an error.
+  virtual void SetTPMOwnedErrorStep() = 0;
+  virtual void SetTPMDbusErrorStep() = 0;
 };
 
 class TpmErrorScreenHandler : public TpmErrorView, public BaseScreenHandler {
  public:
   using TView = TpmErrorView;
 
-  explicit TpmErrorScreenHandler(JSCallsContainer* js_calls_container);
+  TpmErrorScreenHandler();
   TpmErrorScreenHandler(const TpmErrorScreenHandler&) = delete;
   TpmErrorScreenHandler& operator=(const TpmErrorScreenHandler&) = delete;
   ~TpmErrorScreenHandler() override;
@@ -44,11 +48,13 @@ class TpmErrorScreenHandler : public TpmErrorView, public BaseScreenHandler {
   void Show() override;
   void Bind(ash::TpmErrorScreen* screen) override;
   void Unbind() override;
+  void SetTPMOwnedErrorStep() override;
+  void SetTPMDbusErrorStep() override;
 
   // BaseScreenHandler:
   void DeclareLocalizedValues(
       ::login::LocalizedValuesBuilder* builder) override;
-  void Initialize() override;
+  void InitializeDeprecated() override;
 
   bool show_on_init_ = false;
 

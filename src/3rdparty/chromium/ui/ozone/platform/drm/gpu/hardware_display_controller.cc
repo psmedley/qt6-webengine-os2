@@ -7,14 +7,18 @@
 #include <drm.h>
 #include <string.h>
 #include <xf86drm.h>
+#include <ios>
 #include <memory>
+#include <type_traits>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/syslog_logging.h"
+#include "base/trace_event/trace_conversion_helper.h"
 #include "base/trace_event/trace_event.h"
+#include "base/trace_event/traced_value.h"
 #include "third_party/libdrm/src/include/drm/drm_fourcc.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
@@ -63,6 +67,16 @@ void DrawCursor(DrmDumbBuffer* cursor, const SkBitmap& image) {
   SkCanvas* canvas = cursor->GetCanvas();
   canvas->clear(SK_ColorTRANSPARENT);
   canvas->drawImageRect(image.asImage(), damage, SkSamplingOptions());
+}
+
+template <typename T>
+std::string NumberToHexString(const T value) {
+  static_assert(std::is_unsigned<T>::value,
+                "Can only convert unsigned ints to hex");
+
+  std::stringstream ss;
+  ss << "0x" << std::hex << std::uppercase << value;
+  return ss.str();
 }
 
 }  // namespace
@@ -310,12 +324,11 @@ void HardwareDisplayController::UpdatePreferredModiferForFormat(
     gfx::BufferFormat buffer_format,
     uint64_t modifier) {
   uint32_t fourcc_format = GetFourCCFormatFromBufferFormat(buffer_format);
-  base::InsertOrAssign(preferred_format_modifier_, fourcc_format, modifier);
+  preferred_format_modifier_[fourcc_format] = modifier;
 
   uint32_t opaque_fourcc_format =
       GetFourCCFormatForOpaqueFramebuffer(buffer_format);
-  base::InsertOrAssign(preferred_format_modifier_, opaque_fourcc_format,
-                       modifier);
+  preferred_format_modifier_[opaque_fourcc_format] = modifier;
 }
 
 void HardwareDisplayController::MoveCursor(const gfx::Point& location) {
@@ -421,8 +434,7 @@ gfx::Size HardwareDisplayController::GetModeSize() const {
 base::TimeDelta HardwareDisplayController::GetRefreshInterval() const {
   // If there are multiple CRTCs they should all have the same refresh rate.
   float vrefresh = ModeRefreshRate(crtc_controllers_[0]->mode());
-  return vrefresh ? base::TimeDelta::FromSeconds(1) / vrefresh
-                  : base::TimeDelta();
+  return vrefresh ? base::Seconds(1) / vrefresh : base::TimeDelta();
 }
 
 base::TimeTicks HardwareDisplayController::GetTimeOfLastFlip() const {
@@ -457,6 +469,37 @@ void HardwareDisplayController::OnPageFlipComplete(
   page_flip_request_ = nullptr;
 }
 
+void HardwareDisplayController::AsValueInto(
+    base::trace_event::TracedValue* value) const {
+  using base::trace_event::ValueToString;
+
+  value->SetString("origin", ValueToString(origin_));
+  value->SetString("cursor_location", ValueToString(cursor_location_));
+  value->SetInteger("failed_page_flip_counter", failed_page_flip_counter_);
+  value->SetBoolean("is_crash_timer_running", crash_gpu_timer_.IsRunning());
+  value->SetBoolean("has_page_flip_request", page_flip_request_ != nullptr);
+
+  {
+    auto scoped_dict = value->BeginDictionaryScoped("owned_hardware_planes");
+    owned_hardware_planes_.AsValueInto(value);
+  }
+  {
+    auto scoped_array = value->BeginArrayScoped("crtc_controllers");
+    for (const auto& crtc : crtc_controllers_) {
+      auto scoped_dict = value->AppendDictionaryScoped();
+      crtc->AsValueInto(value);
+    }
+  }
+  {
+    auto scoped_array = value->BeginArrayScoped("preferred_format_modifiers");
+    for (const auto& format_modifier : preferred_format_modifier_) {
+      auto scoped_dict = value->AppendDictionaryScoped();
+      value->SetString("format", NumberToHexString(format_modifier.first));
+      value->SetString("modifier", NumberToHexString(format_modifier.second));
+    }
+  }
+}
+
 void HardwareDisplayController::OnModesetComplete(
     const DrmOverlayPlaneList& modeset_planes) {
   // Modesetting is blocking so it has an immediate effect. We can assume that
@@ -474,7 +517,7 @@ void HardwareDisplayController::AllocateCursorBuffers() {
   gfx::Size max_cursor_size = GetMaximumCursorSize(GetDrmDevice()->get_fd());
   SkImageInfo info = SkImageInfo::MakeN32Premul(max_cursor_size.width(),
                                                 max_cursor_size.height());
-  for (size_t i = 0; i < base::size(cursor_buffers_); ++i) {
+  for (size_t i = 0; i < std::size(cursor_buffers_); ++i) {
     cursor_buffers_[i] = std::make_unique<DrmDumbBuffer>(GetDrmDevice());
     // Don't register a framebuffer for cursors since they are special (they
     // aren't modesetting buffers and drivers may fail to register them due to
@@ -488,7 +531,7 @@ void HardwareDisplayController::AllocateCursorBuffers() {
 
 DrmDumbBuffer* HardwareDisplayController::NextCursorBuffer() {
   ++cursor_frontbuffer_;
-  cursor_frontbuffer_ %= base::size(cursor_buffers_);
+  cursor_frontbuffer_ %= std::size(cursor_buffers_);
   return cursor_buffers_[cursor_frontbuffer_].get();
 }
 

@@ -16,10 +16,14 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_trusted_script.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_trusted_script_url.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_html.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_script.h"
+#include "third_party/blink/renderer/core/trustedtypes/trusted_script_url.h"
 #include "third_party/blink/renderer/core/trustedtypes/trusted_types_util.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_data_view.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/heap/heap_traits.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -28,7 +32,9 @@ class CallbackFunctionBase;
 class CallbackInterfaceBase;
 class EventListener;
 class FlexibleArrayBufferView;
-class IDLDictionaryBase;
+class GPUColorTargetState;
+class GPURenderPassColorAttachment;
+class GPUVertexBufferLayout;
 class ScriptWrappable;
 class XPathNSResolver;
 struct WrapperTypeInfo;
@@ -240,7 +246,7 @@ class CORE_EXPORT NativeValueTraitsStringAdapter {
 template <bindings::IDLStringConvMode mode>
 struct NativeValueTraits<IDLByteStringBase<mode>>
     : public NativeValueTraitsBase<IDLByteStringBase<mode>> {
-  // http://heycam.github.io/webidl/#es-ByteString
+  // https://webidl.spec.whatwg.org/#es-ByteString
   static bindings::NativeValueTraitsStringAdapter NativeValue(
       v8::Isolate* isolate,
       v8::Local<v8::Value> value,
@@ -300,7 +306,7 @@ struct CORE_EXPORT NativeValueTraits<IDLOptional<IDLByteString>>
 template <bindings::IDLStringConvMode mode>
 struct NativeValueTraits<IDLStringBase<mode>>
     : public NativeValueTraitsBase<IDLStringBase<mode>> {
-  // https://heycam.github.io/webidl/#es-DOMString
+  // https://webidl.spec.whatwg.org/#es-DOMString
   static bindings::NativeValueTraitsStringAdapter NativeValue(
       v8::Isolate* isolate,
       v8::Local<v8::Value> value,
@@ -359,7 +365,7 @@ struct CORE_EXPORT NativeValueTraits<IDLOptional<IDLString>>
 template <bindings::IDLStringConvMode mode>
 struct NativeValueTraits<IDLUSVStringBase<mode>>
     : public NativeValueTraitsBase<IDLUSVStringBase<mode>> {
-  // http://heycam.github.io/webidl/#es-USVString
+  // https://webidl.spec.whatwg.org/#es-USVString
   static bindings::NativeValueTraitsStringAdapter NativeValue(
       v8::Isolate* isolate,
       v8::Local<v8::Value> value,
@@ -786,84 +792,6 @@ struct NativeValueTraits<IDLNullable<IDLPromise>>;
 
 // Sequence types
 
-namespace bindings {
-
-// Fast case: we're iterating over an Array that adheres to
-// %ArrayIteratorPrototype%'s protocol.
-template <typename T>
-typename NativeValueTraits<IDLSequence<T>>::ImplType
-CreateIDLSequenceFromV8Array(v8::Isolate* isolate,
-                             v8::Local<v8::Array> v8_array,
-                             ExceptionState& exception_state) {
-  // https://heycam.github.io/webidl/#create-sequence-from-iterable
-  const uint32_t length = v8_array->Length();
-  if (length > NativeValueTraits<IDLSequence<T>>::ImplType::MaxCapacity()) {
-    exception_state.ThrowRangeError("Array length exceeds supported limit.");
-    return {};
-  }
-
-  typename NativeValueTraits<IDLSequence<T>>::ImplType result;
-  result.ReserveInitialCapacity(length);
-  v8::Local<v8::Context> current_context = isolate->GetCurrentContext();
-  v8::TryCatch try_block(isolate);
-  // Array length may change if array is mutated during iteration.
-  for (uint32_t i = 0; i < v8_array->Length(); ++i) {
-    v8::Local<v8::Value> v8_element;
-    if (!v8_array->Get(current_context, i).ToLocal(&v8_element)) {
-      exception_state.RethrowV8Exception(try_block.Exception());
-      return {};
-    }
-    // 3.4. Initialize Si to the result of converting nextItem to an IDL value
-    //   of type T.
-    auto&& element =
-        NativeValueTraits<T>::NativeValue(isolate, v8_element, exception_state);
-    if (exception_state.HadException())
-      return {};
-    result.push_back(std::move(element));
-  }
-  // 3.2. If next is false, then return an IDL sequence value of type
-  //   sequence<T> of length i, where the value of the element at index j is Sj.
-  return result;
-}
-
-// Slow case: follow WebIDL's "Creating a sequence from an iterable" steps to
-// iterate through each element.
-template <typename T>
-typename NativeValueTraits<IDLSequence<T>>::ImplType
-CreateIDLSequenceFromIterator(v8::Isolate* isolate,
-                              ScriptIterator script_iterator,
-                              ExceptionState& exception_state) {
-  // https://heycam.github.io/webidl/#create-sequence-from-iterable
-  ExecutionContext* execution_context =
-      ToExecutionContext(isolate->GetCurrentContext());
-  typename NativeValueTraits<IDLSequence<T>>::ImplType result;
-  // 3. Repeat:
-  while (script_iterator.Next(execution_context, exception_state)) {
-    // 3.1. Let next be ? IteratorStep(iter).
-    DCHECK(!exception_state.HadException());
-    // 3.3. Let nextItem be ? IteratorValue(next).
-    //
-    // The value should already be non-empty, as guaranteed by the call to
-    // Next() and the |exception_state| check above.
-    v8::Local<v8::Value> v8_element =
-        script_iterator.GetValue().ToLocalChecked();
-    // 3.4. Initialize Si to the result of converting nextItem to an IDL value
-    //   of type T.
-    auto&& element =
-        NativeValueTraits<T>::NativeValue(isolate, v8_element, exception_state);
-    if (exception_state.HadException())
-      return {};
-    result.push_back(std::move(element));
-  }
-  if (exception_state.HadException())
-    return {};
-  // 3.2. If next is false, then return an IDL sequence value of type
-  //   sequence<T> of length i, where the value of the element at index j is Sj.
-  return result;
-}
-
-}  // namespace bindings
-
 // IDLSequence's implementation is a little tricky due to a historical reason.
 // The following type mapping is used for IDLSequence and its variants.
 //
@@ -895,55 +823,147 @@ struct NativeValueTraits<IDLSequence<T>>
   // while absl::optional<Vector<T>> is used for IDLNullable<Vector<T>>.
   static constexpr bool has_null_value = WTF::IsTraceable<T>::value;
 
-  // https://heycam.github.io/webidl/#es-sequence
+  // https://webidl.spec.whatwg.org/#es-sequence
   static ImplType NativeValue(v8::Isolate* isolate,
                               v8::Local<v8::Value> value,
-                              ExceptionState& exception_state) {
-    // TODO(https://crbug.com/715122): Checking for IsArray() may not be
-    // enough. Other engines also prefer regular array iteration over a custom
-    // @@iterator when the latter is defined, but it is not clear if this is a
-    // valid optimization.
-    if (value->IsArray()) {
-      return bindings::CreateIDLSequenceFromV8Array<T>(
-          isolate, value.As<v8::Array>(), exception_state);
-    }
+                              ExceptionState& exception_state);
+};
 
-    // 1. If Type(V) is not Object, throw a TypeError.
-    if (!value->IsObject()) {
-      exception_state.ThrowTypeError(
-          "The provided value cannot be converted to a sequence.");
-      return ImplType();
-    }
+namespace bindings {
 
-    // 2. Let method be ? GetMethod(V, @@iterator).
-    // 3. If method is undefined, throw a TypeError.
-    // 4. Return the result of creating a sequence from V and method.
-    auto script_iterator = ScriptIterator::FromIterable(
-        isolate, value.As<v8::Object>(), exception_state);
-    if (exception_state.HadException())
-      return ImplType();
-    if (script_iterator.IsNull()) {
-      // A null ScriptIterator with an empty |exception_state| means the
-      // object is lacking a callable @@iterator property.
-      exception_state.ThrowTypeError(
-          "The object must have a callable @@iterator property.");
-      return ImplType();
-    }
-    return bindings::CreateIDLSequenceFromIterator<T>(
-        isolate, std::move(script_iterator), exception_state);
-  }
-
-  // https://heycam.github.io/webidl/#es-sequence
-  // This is a special case, used when converting an IDL union that contains a
-  // sequence or frozen array type.
-  static ImplType NativeValue(v8::Isolate* isolate,
+// Slow case: follow WebIDL's "Creating a sequence from an iterable" steps to
+// iterate through each element.
+template <typename T>
+typename NativeValueTraits<IDLSequence<T>>::ImplType
+CreateIDLSequenceFromIterator(v8::Isolate* isolate,
                               ScriptIterator script_iterator,
                               ExceptionState& exception_state) {
-    DCHECK(!script_iterator.IsNull());
-    return bindings::CreateIDLSequenceFromIterator<T>(
-        isolate, std::move(script_iterator), exception_state);
+  // https://webidl.spec.whatwg.org/#create-sequence-from-iterable
+  ExecutionContext* execution_context =
+      ToExecutionContext(isolate->GetCurrentContext());
+  typename NativeValueTraits<IDLSequence<T>>::ImplType result;
+  // 3. Repeat:
+  while (script_iterator.Next(execution_context, exception_state)) {
+    // 3.1. Let next be ? IteratorStep(iter).
+    DCHECK(!exception_state.HadException());
+    // 3.3. Let nextItem be ? IteratorValue(next).
+    //
+    // The value should already be non-empty, as guaranteed by the call to
+    // Next() and the |exception_state| check above.
+    v8::Local<v8::Value> v8_element =
+        script_iterator.GetValue().ToLocalChecked();
+    // 3.4. Initialize Si to the result of converting nextItem to an IDL value
+    //   of type T.
+    auto&& element =
+        NativeValueTraits<T>::NativeValue(isolate, v8_element, exception_state);
+    if (exception_state.HadException())
+      return {};
+    result.push_back(std::move(element));
   }
-};
+  if (exception_state.HadException())
+    return {};
+  // 3.2. If next is false, then return an IDL sequence value of type
+  //   sequence<T> of length i, where the value of the element at index j is Sj.
+  return result;
+}
+
+// Faster case: non template-specialized implementation that iterates over an
+// Array that adheres to %ArrayIteratorPrototype%'s protocol.
+template <typename T>
+typename NativeValueTraits<IDLSequence<T>>::ImplType
+CreateIDLSequenceFromV8ArraySlow(v8::Isolate* isolate,
+                                 v8::Local<v8::Array> v8_array,
+                                 ExceptionState& exception_state) {
+  // https://webidl.spec.whatwg.org/#create-sequence-from-iterable
+  const uint32_t length = v8_array->Length();
+  if (length > NativeValueTraits<IDLSequence<T>>::ImplType::MaxCapacity()) {
+    exception_state.ThrowRangeError("Array length exceeds supported limit.");
+    return {};
+  }
+
+  typename NativeValueTraits<IDLSequence<T>>::ImplType result;
+  result.ReserveInitialCapacity(length);
+  v8::Local<v8::Context> current_context = isolate->GetCurrentContext();
+  v8::TryCatch try_block(isolate);
+  // Array length may change if array is mutated during iteration.
+  for (uint32_t i = 0; i < v8_array->Length(); ++i) {
+    v8::Local<v8::Value> v8_element;
+    if (!v8_array->Get(current_context, i).ToLocal(&v8_element)) {
+      exception_state.RethrowV8Exception(try_block.Exception());
+      return {};
+    }
+    // 3.4. Initialize Si to the result of converting nextItem to an IDL value
+    //   of type T.
+    auto&& element =
+        NativeValueTraits<T>::NativeValue(isolate, v8_element, exception_state);
+    if (exception_state.HadException())
+      return {};
+    result.push_back(std::move(element));
+  }
+  // 3.2. If next is false, then return an IDL sequence value of type
+  //   sequence<T> of length i, where the value of the element at index j is Sj.
+  return result;
+}
+
+// Fastest case: template-specialized implementation that directly copies the
+// contents of this JavaScript array into a C++ buffer.
+template <typename T>
+typename NativeValueTraits<IDLSequence<T>>::ImplType
+CreateIDLSequenceFromV8Array(v8::Isolate* isolate,
+                             v8::Local<v8::Array> v8_array,
+                             ExceptionState& exception_state) {
+  return CreateIDLSequenceFromV8ArraySlow<T>(isolate, v8_array,
+                                             exception_state);
+}
+
+template <>
+CORE_EXTERN_TEMPLATE_EXPORT
+    typename NativeValueTraits<IDLSequence<IDLLong>>::ImplType
+    CreateIDLSequenceFromV8Array<IDLLong>(v8::Isolate* isolate,
+                                          v8::Local<v8::Array> v8_array,
+                                          ExceptionState& exception_state);
+
+}  // namespace bindings
+
+template <typename T>
+typename NativeValueTraits<IDLSequence<T>>::ImplType
+NativeValueTraits<IDLSequence<T>>::NativeValue(
+    v8::Isolate* isolate,
+    v8::Local<v8::Value> value,
+    ExceptionState& exception_state) {
+  // TODO(https://crbug.com/715122): Checking for IsArray() may not be
+  // enough. Other engines also prefer regular array iteration over a custom
+  // @@iterator when the latter is defined, but it is not clear if this is a
+  // valid optimization.
+  if (value->IsArray()) {
+    return bindings::CreateIDLSequenceFromV8Array<T>(
+        isolate, value.As<v8::Array>(), exception_state);
+  }
+
+  // 1. If Type(V) is not Object, throw a TypeError.
+  if (!value->IsObject()) {
+    exception_state.ThrowTypeError(
+        "The provided value cannot be converted to a sequence.");
+    return ImplType();
+  }
+
+  // 2. Let method be ? GetMethod(V, @@iterator).
+  // 3. If method is undefined, throw a TypeError.
+  // 4. Return the result of creating a sequence from V and method.
+  auto script_iterator = ScriptIterator::FromIterable(
+      isolate, value.As<v8::Object>(), exception_state);
+  if (exception_state.HadException())
+    return ImplType();
+  if (script_iterator.IsNull()) {
+    // A null ScriptIterator with an empty |exception_state| means the
+    // object is lacking a callable @@iterator property.
+    exception_state.ThrowTypeError(
+        "The object must have a callable @@iterator property.");
+    return ImplType();
+  }
+  return bindings::CreateIDLSequenceFromIterator<T>(
+      isolate, std::move(script_iterator), exception_state);
+}
 
 template <typename T>
 struct NativeValueTraits<IDLNullable<IDLSequence<T>>,
@@ -1029,7 +1049,7 @@ struct NativeValueTraits<IDLRecord<K, V>>
 
   // Converts a JavaScript value |O| to an IDL record<K, V> value. In C++, a
   // record is represented as a Vector<std::pair<k, v>> (or a HeapVector if
-  // necessary). See https://heycam.github.io/webidl/#es-record.
+  // necessary). See https://webidl.spec.whatwg.org/#es-record.
   static ImplType NativeValue(v8::Isolate* isolate,
                               v8::Local<v8::Value> v8_value,
                               ExceptionState& exception_state) {
@@ -1272,20 +1292,25 @@ struct NativeValueTraits<
   }
 };
 
-// We don't support nullable dictionary types for the time being since it's
-// quite confusing.
+// We don't support nullable dictionary types in general since it's quite
+// confusing and often misused.
 template <typename T>
 struct NativeValueTraits<
     IDLNullable<T>,
     typename std::enable_if_t<
-        std::is_base_of<bindings::DictionaryBase, T>::value>>;
-
-// Migration Adapters: Nullable dictionary types generated by the old bindings
-// generator.
-template <typename T>
-struct NativeValueTraits<
-    IDLNullable<T>,
-    typename std::enable_if_t<std::is_base_of<IDLDictionaryBase, T>::value>>;
+        std::is_base_of<bindings::DictionaryBase, T>::value &&
+        (std::is_same<T, GPUColorTargetState>::value ||
+         std::is_same<T, GPURenderPassColorAttachment>::value ||
+         std::is_same<T, GPUVertexBufferLayout>::value)>>
+    : public NativeValueTraitsBase<T*> {
+  static T* NativeValue(v8::Isolate* isolate,
+                        v8::Local<v8::Value> value,
+                        ExceptionState& exception_state) {
+    if (value->IsNullOrUndefined())
+      return nullptr;
+    return T::Create(isolate, value, exception_state);
+  }
+};
 
 // Enumeration types
 template <typename T>
@@ -1418,7 +1443,7 @@ struct NativeValueTraits<
     IDLNullable<InnerType>,
     typename std::enable_if_t<!NativeValueTraits<InnerType>::has_null_value>>
     : public NativeValueTraitsBase<IDLNullable<InnerType>> {
-  // https://heycam.github.io/webidl/#es-nullable-type
+  // https://webidl.spec.whatwg.org/#es-nullable-type
   using ImplType =
       absl::optional<typename NativeValueTraits<InnerType>::ImplType>;
 

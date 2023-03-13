@@ -50,7 +50,7 @@
 // platform.
 // Notifications from the Java side always arrive on the main thread. The
 // delegate then forwards these notifications to the threads of each observer
-// (network change notifier). The network change notifier than processes the
+// (network change notifier). The network change notifier then processes the
 // state change, and notifies each of its observers on their threads.
 //
 // This can also be seen as:
@@ -66,8 +66,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner.h"
-#include "base/task/post_task.h"
+#include "base/task/sequenced_task_runner.h"
 #include "base/task/task_traits.h"
 #include "base/task/thread_pool.h"
 #include "base/threading/thread.h"
@@ -124,6 +123,11 @@ NetworkChangeNotifierAndroid::GetCurrentConnectionType() const {
   return delegate_->GetCurrentConnectionType();
 }
 
+NetworkChangeNotifier::ConnectionCost
+NetworkChangeNotifierAndroid::GetCurrentConnectionCost() {
+  return delegate_->GetCurrentConnectionCost();
+}
+
 NetworkChangeNotifier::ConnectionSubtype
 NetworkChangeNotifierAndroid::GetCurrentConnectionSubtype() const {
   return delegate_->GetCurrentConnectionSubtype();
@@ -169,6 +173,10 @@ void NetworkChangeNotifierAndroid::OnConnectionTypeChanged() {
   BlockingThreadObjects::NotifyNetworkChangeNotifierObservers();
 }
 
+void NetworkChangeNotifierAndroid::OnConnectionCostChanged() {
+  NetworkChangeNotifier::NotifyObserversOfConnectionCostChange();
+}
+
 void NetworkChangeNotifierAndroid::OnMaxBandwidthChanged(
     double max_bandwidth_mbps,
     ConnectionType type) {
@@ -178,24 +186,28 @@ void NetworkChangeNotifierAndroid::OnMaxBandwidthChanged(
 
 void NetworkChangeNotifierAndroid::OnNetworkConnected(NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
-      NetworkChangeType::CONNECTED, network);
+      NetworkChangeType::kConnected, network);
 }
 
 void NetworkChangeNotifierAndroid::OnNetworkSoonToDisconnect(
     NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
-      NetworkChangeType::SOON_TO_DISCONNECT, network);
+      NetworkChangeType::kSoonToDisconnect, network);
 }
 
 void NetworkChangeNotifierAndroid::OnNetworkDisconnected(
     NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
-      NetworkChangeType::DISCONNECTED, network);
+      NetworkChangeType::kDisconnected, network);
 }
 
 void NetworkChangeNotifierAndroid::OnNetworkMadeDefault(NetworkHandle network) {
   NetworkChangeNotifier::NotifyObserversOfSpecificNetworkChange(
-      NetworkChangeType::MADE_DEFAULT, network);
+      NetworkChangeType::kMadeDefault, network);
+}
+
+void NetworkChangeNotifierAndroid::OnDefaultNetworkActive() {
+  NetworkChangeNotifier::NotifyObserversOfDefaultNetworkActive();
 }
 
 NetworkChangeNotifierAndroid::NetworkChangeNotifierAndroid(
@@ -238,11 +250,23 @@ NetworkChangeNotifierAndroid::NetworkChangeCalculatorParamsAndroid() {
   // IPAddressChanged is produced immediately prior to ConnectionTypeChanged
   // so delay IPAddressChanged so they get merged with the following
   // ConnectionTypeChanged signal.
-  params.ip_address_offline_delay_ = base::TimeDelta::FromSeconds(1);
-  params.ip_address_online_delay_ = base::TimeDelta::FromSeconds(1);
-  params.connection_type_offline_delay_ = base::TimeDelta::FromSeconds(0);
-  params.connection_type_online_delay_ = base::TimeDelta::FromSeconds(0);
+  params.ip_address_offline_delay_ = base::Seconds(1);
+  params.ip_address_online_delay_ = base::Seconds(1);
+  params.connection_type_offline_delay_ = base::Seconds(0);
+  params.connection_type_online_delay_ = base::Seconds(0);
   return params;
+}
+
+bool NetworkChangeNotifierAndroid::IsDefaultNetworkActiveInternal() {
+  return delegate_->IsDefaultNetworkActive();
+}
+
+void NetworkChangeNotifierAndroid::DefaultNetworkActiveObserverAdded() {
+  delegate_->DefaultNetworkActiveObserverAdded();
+}
+
+void NetworkChangeNotifierAndroid::DefaultNetworkActiveObserverRemoved() {
+  delegate_->DefaultNetworkActiveObserverRemoved();
 }
 
 }  // namespace net

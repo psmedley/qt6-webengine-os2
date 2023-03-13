@@ -24,7 +24,7 @@
 #include "third_party/blink/renderer/modules/webusb/usb_connection_event.h"
 #include "third_party/blink/renderer/modules/webusb/usb_device.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -209,9 +209,16 @@ USBDevice* USB::GetOrCreateDevice(UsbDeviceInfoPtr device_info) {
   mojo::PendingRemote<UsbDevice> pipe;
   service_->GetDevice(guid, pipe.InitWithNewPipeAndPassReceiver());
   USBDevice* device = MakeGarbageCollected<USBDevice>(
-      std::move(device_info), std::move(pipe), GetExecutionContext());
+      this, std::move(device_info), std::move(pipe), GetExecutionContext());
   device_cache_.insert(guid, device);
   return device;
+}
+
+void USB::ForgetDevice(
+    const String& device_guid,
+    mojom::blink::WebUsbService::ForgetDeviceCallback callback) {
+  EnsureServiceConnection();
+  service_->ForgetDevice(device_guid, std::move(callback));
 }
 
 void USB::OnGetDevices(ScriptPromiseResolver* resolver,
@@ -250,10 +257,14 @@ void USB::OnDeviceAdded(UsbDeviceInfoPtr device_info) {
 
 void USB::OnDeviceRemoved(UsbDeviceInfoPtr device_info) {
   String guid = device_info->guid;
-  USBDevice* device = device_cache_.DeprecatedAtOrEmptyValue(guid);
-  if (!device) {
-    device = MakeGarbageCollected<USBDevice>(
-        std::move(device_info), mojo::NullRemote(), GetExecutionContext());
+  USBDevice* device = nullptr;
+  const auto it = device_cache_.find(guid);
+  if (it != device_cache_.end()) {
+    device = it->value;
+  } else {
+    device = MakeGarbageCollected<USBDevice>(this, std::move(device_info),
+                                             mojo::NullRemote(),
+                                             GetExecutionContext());
   }
   DispatchEvent(
       *USBConnectionEvent::Create(event_type_names::kDisconnect, device));

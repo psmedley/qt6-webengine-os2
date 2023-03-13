@@ -403,6 +403,34 @@ const GetLineThrough = natives.GetLineThrough;
 /**
  * @param {string} axTreeID The id of the accessibility tree.
  * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+const GetIsButton = natives.GetIsButton;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+const GetIsCheckBox = natives.GetIsCheckBox;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+const GetIsComboBox = natives.GetIsComboBox;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {boolean}
+ */
+const GetIsImage = natives.GetIsImage;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
  * @return {?Array<automation.CustomAction>} List of custom actions of the
  *     node.
  */
@@ -435,6 +463,14 @@ const GetHasPopup = natives.GetHasPopup;
  * @return {automation.AriaCurrentState}
  */
 const GetAriaCurrentState = natives.GetAriaCurrentState;
+
+/**
+ * @param {string} axTreeID The id of the accessibility tree.
+ * @param {number} nodeID The id of a node.
+ * @return {automation.InvalidState}
+ */
+const GetInvalidState = natives.GetInvalidState;
+
 
 /**
  * @param {string} axTreeID The id of the accessibility tree.
@@ -656,6 +692,19 @@ AutomationNodeImpl.prototype = {
     return GetChecked(this.treeID, this.id);
   },
 
+  get caretBounds() {
+    const data = GetIntListAttribute(this.treeID, this.id, 'caretBounds');
+    if (!data) {
+      return;
+    }
+
+    if (data.length !== 4) {
+      throw 'Internal encoding error for caret bounds.';
+    }
+
+    return {left: data[0], top: data[1], width: data[2], height: data[3]};
+  },
+
   get location() {
     return GetLocation(this.treeID, this.id);
   },
@@ -742,7 +791,15 @@ AutomationNodeImpl.prototype = {
     }
     const info = GetChildIDAtIndex(this.treeID, this.id, 0);
     if (info) {
-      return AutomationRootNodeImpl.getNodeFromTree(info.treeId, info.nodeId);
+      const child =
+          AutomationRootNodeImpl.getNodeFromTree(info.treeId, info.nodeId);
+
+      // A child with an app id should always be in a different tree.
+      if (child.appId && this.treeID === info.treeId) {
+        return;
+      }
+
+      return child;
     }
   },
 
@@ -754,7 +811,15 @@ AutomationNodeImpl.prototype = {
 
     const info = GetChildIDAtIndex(this.treeID, this.id, count - 1);
     if (info) {
-      return AutomationRootNodeImpl.getNodeFromTree(info.treeId, info.nodeId);
+      const child =
+          AutomationRootNodeImpl.getNodeFromTree(info.treeId, info.nodeId);
+
+      // A child with an app id should always be in a different tree.
+      if (child.appId && this.treeID === info.treeId) {
+        return;
+      }
+
+      return child;
     }
   },
 
@@ -769,6 +834,12 @@ AutomationNodeImpl.prototype = {
       const childID = info.nodeIds[i];
       const child =
           AutomationRootNodeImpl.getNodeFromTree(info.treeId, childID);
+
+      // A child with an app id should always be in a different tree.
+      if (child.appId && this.treeID === info.treeId) {
+        continue;
+      }
+
       if (child) {
         $Array.push(children, child);
       }
@@ -834,6 +905,22 @@ AutomationNodeImpl.prototype = {
     return GetLineThrough(this.treeID, this.id);
   },
 
+  get isButton() {
+    return GetIsButton(this.treeID, this.id);
+  },
+
+  get isCheckBox() {
+    return GetIsCheckBox(this.treeID, this.id);
+  },
+
+  get isComboBox() {
+    return GetIsComboBox(this.treeID, this.id);
+  },
+
+  get isImage() {
+    return GetIsImage(this.treeID, this.id);
+  },
+
   get detectedLanguage() {
     return GetDetectedLanguage(this.treeID, this.id);
   },
@@ -861,6 +948,10 @@ AutomationNodeImpl.prototype = {
 
   get ariaCurrentState() {
     return GetAriaCurrentState(this.treeID, this.id);
+  },
+
+  get invalidState() {
+    return GetInvalidState(this.treeID, this.id);
   },
 
   get tableCellColumnHeaders() {
@@ -1408,7 +1499,6 @@ AutomationNodeImpl.prototype = {
 const stringAttributes = [
   'accessKey',
   'appId',
-  'ariaInvalidValue',
   'autoComplete',
   'checkedStateDescription',
   'className',
@@ -1966,6 +2056,16 @@ AutomationRootNodeImpl.prototype = {
         const appNode = findApp(result);
         if (appNode) {
           delete AutomationRootNodeImpl.actionRequestIDToCallback[requestID];
+
+          const relativeWindow = appNode.parent;
+          if (!relativeWindow) {
+            return false;
+          }
+
+          // The hit test needs to be relative to the container of the app node.
+          data.opt_args.x -= relativeWindow.location.left;
+          data.opt_args.y -= relativeWindow.location.top;
+
           privates(appNode).impl.performAction_(
               data.actionType, data.opt_args, data.callback);
           return true;
@@ -2049,6 +2149,7 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
       [
         'ariaCurrentState',
         'bold',
+        'caretBounds',
         'checked',
         'children',
         'customActions',
@@ -2060,6 +2161,11 @@ utils.expose(AutomationNode, AutomationNodeImpl, {
         'htmlAttributes',
         'imageAnnotation',
         'indexInParent',
+        'invalidState',
+        'isButton',
+        'isCheckBox',
+        'isComboBox',
+        'isImage',
         'isRootNode',
         'italic',
         'lastChild',

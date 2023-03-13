@@ -41,7 +41,8 @@ struct PopupBlockerTabHelper::BlockedRequest {
 };
 
 PopupBlockerTabHelper::PopupBlockerTabHelper(content::WebContents* web_contents)
-    : content::WebContentsObserver(web_contents) {
+    : content::WebContentsObserver(web_contents),
+      content::WebContentsUserData<PopupBlockerTabHelper>(*web_contents) {
   blocked_content::SafeBrowsingTriggeredPopupBlocker::MaybeCreate(web_contents);
 }
 
@@ -178,6 +179,6 @@ void PopupBlockerTabHelper::LogAction(Action action) {
   UMA_HISTOGRAM_ENUMERATION("ContentSettings.Popups.BlockerActions", action);
 }
 
-WEB_CONTENTS_USER_DATA_KEY_IMPL(PopupBlockerTabHelper)
+WEB_CONTENTS_USER_DATA_KEY_IMPL(PopupBlockerTabHelper);
 
 }  // namespace blocked_content

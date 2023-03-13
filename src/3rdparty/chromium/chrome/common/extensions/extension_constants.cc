@@ -4,7 +4,6 @@
 
 #include "chrome/common/extensions/extension_constants.h"
 
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "extensions/common/constants.h"
@@ -22,35 +21,29 @@ const char kLaunchSourceAppListInfoDialog[] = "chrome-app-launcher-info-dialog";
 namespace extension_misc {
 
 const char kCalendarAppId[] = "ejjicmeblgpmajnghnpcppodonldlgfn";
-const char kCloudPrintAppId[] = "mfehgcgbbipciphmccgaenjidiccnmng";
 const char kDataSaverExtensionId[] = "pfmgfdlgomnbgkofeojodiodmgpgmkac";
 const char kDocsOfflineExtensionId[] = "ghbmnnjooekpmoecnnnilnnbdlolhkhi";
-const char kDriveHostedAppId[] = "apdfllckaahabafndbhieahigkjlhalf";
 const char kEnterpriseWebStoreAppId[] = "afchcafgojfnemjkcbhfekplkmjaldaa";
-const char kGmailAppId[] = "pjkljhegncpnkpknbcohdijeoejaedia";
-const char kGoogleDocAppId[] = "aohghmighlieiainnegkcijnfilokake";
 const char kGoogleMapsAppId[] = "lneaknkopdijkpnocmklfnjbeapigfbh";
 const char kGooglePhotosAppId[] = "hcglmfcclpfgljeaiahehebeoaiicbko";
 const char kGooglePlayBooksAppId[] = "mmimngoggfoobjdlefbcabngfnmieonb";
 const char kGooglePlayMoviesAppId[] = "gdijeikdkaembjbdobgfkoidjkpbmlkd";
 const char kGooglePlayMusicAppId[] = "icppfcnhkcmnfdhfhphakoifcfokfdhg";
 const char kGooglePlusAppId[] = "dlppkpafhbajpcmmoheippocdidnckmm";
-const char kGoogleSheetsAppId[] = "felcaaldnbdncclmgdcncolpebgiejap";
-const char kGoogleSlidesAppId[] = "aapocclcgogkmnckokdopfmhonfmgoek";
 const char kIdentityApiUiAppId[] = "ahjaciijnoiaklcomgnblndopackapon";
 const char kTextEditorAppId[] = "mmfbcljfglbokpmkimbfghdkjmjhdgbg";
 const char kInAppPaymentsSupportAppId[] = "nmmhkkegccagdldgiimedpiccmgmieda";
+const char kKeyboardExtensionId[] = "mppnpdlheglhdfmldimlhpnegondlapf";
 
 const char* const kBuiltInFirstPartyExtensionIds[] = {
     kCalculatorAppId,
     kCalendarAppId,
-    kCloudPrintAppId,
     kDataSaverExtensionId,
     kDocsOfflineExtensionId,
-    kDriveHostedAppId,
+    kGoogleDriveAppId,
     kEnterpriseWebStoreAppId,
     kGmailAppId,
-    kGoogleDocAppId,
+    kGoogleDocsAppId,
     kGoogleMapsAppId,
     kGooglePhotosAppId,
     kGooglePlayBooksAppId,
@@ -62,8 +55,10 @@ const char* const kBuiltInFirstPartyExtensionIds[] = {
     kIdentityApiUiAppId,
     kTextEditorAppId,
     kInAppPaymentsSupportAppId,
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
     kAssessmentAssistantExtensionId,
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
     kAccessibilityCommonExtensionId,
     kSelectToSpeakExtensionId,
     kSwitchAccessExtensionId,
@@ -72,14 +67,18 @@ const char* const kBuiltInFirstPartyExtensionIds[] = {
     kEspeakSpeechSynthesisExtensionId,
     kGoogleSpeechSynthesisExtensionId,
     kWallpaperManagerId,
-    kZipArchiverExtensionId,
 #endif        // BUILDFLAG(IS_CHROMEOS_ASH)
     nullptr,  // Null-terminated array.
 };
 
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
 const char kAssessmentAssistantExtensionId[] =
     "gndmhdcefbhlchkhipcnnbkcmicncehk";
+const char kGnubbyAppId[] = "beknehfpfkghjoafdifaflglpjkojoco";
+const char kGnubbyV3ExtensionId[] = "lfboplenmmjcmpbkeemecobbadnmpfhi";
+const char kGCSEExtensionId[] = "cfmgaohenjcikllcgjpepfadgbflcjof";
+#endif
+#if BUILDFLAG(IS_CHROMEOS_ASH)
 const char kAccessibilityCommonExtensionId[] =
     "egfdjlfmgnehecnclamagfafdccgfndp";
 const char kAccessibilityCommonExtensionPath[] = "chromeos/accessibility";
@@ -118,10 +117,13 @@ const char kGoogleSpeechSynthesisExtensionPath[] =
 const char kGoogleSpeechSynthesisExtensionId[] =
     "gjjabgpgjpampikjhjpfhneeoapjbjaf";
 const char kWallpaperManagerId[] = "obklkkbkpaoaejdabbfldmcfplpdgolj";
-const char kZipArchiverExtensionId[] = "dmboannefpncccogfdikhmhpmdnddgoe";
-const char kZipArchiverExtensionPath[] = "chromeos/zip_archiver";
-const char kCameraAppPath[] = "chromeos/camera";
+const char kHelpAppExtensionId[] = "honijodknafkokifofgiaalefdiedpko";
+const char kEchoExtensionId[] = "kddnkjkcjddckihglkfcickdhbmaodcn";
 #endif  // BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(ENABLE_HANGOUT_SERVICES_EXTENSION)
+// The extension id of the Hangout Service extnsion.
+const char kHangoutServiceExtensionId[] = "nkeimhogjdpnpccoofpliimaahmaaome";
+#endif
 
 const char kAppStateNotInstalled[] = "not_installed";
 const char kAppStateInstalled[] = "installed";

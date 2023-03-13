@@ -34,7 +34,7 @@ namespace xla {
 namespace {
 class HloInputOutputAliasConfigTest : public HloTestBase {
  protected:
-  void expect_aliased(const ShapeIndex& output_index, int64 param_number,
+  void expect_aliased(const ShapeIndex& output_index, int64_t param_number,
                       const ShapeIndex& param_index,
                       const HloInputOutputAliasConfig& config) {
     absl::optional<ShapeIndex> aliased_output =
@@ -51,7 +51,7 @@ class HloInputOutputAliasConfigTest : public HloTestBase {
     EXPECT_EQ(aliased_param->parameter_index, param_index);
   }
 
-  void expect_not_aliased(const ShapeIndex& output_index, int64 param_number,
+  void expect_not_aliased(const ShapeIndex& output_index, int64_t param_number,
                           const ShapeIndex& param_index,
                           const HloInputOutputAliasConfig& config) {
     absl::optional<ShapeIndex> aliased_output =
@@ -69,7 +69,7 @@ class HloInputOutputAliasConfigTest : public HloTestBase {
 };
 
 TEST_F(HloInputOutputAliasConfigTest, SimpleAliasing) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TEST
 
 ENTRY main {
@@ -86,8 +86,7 @@ ENTRY main {
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{0}, /*param_number=*/1,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 
   expect_aliased(/*output_index=*/{0}, /*param_number=*/1,
                  /*param_index=*/{}, config);
@@ -100,7 +99,7 @@ ENTRY main {
 }
 
 TEST_F(HloInputOutputAliasConfigTest, SimpleAliasingWithTupleInput) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TEST
 
 ENTRY main {
@@ -118,13 +117,11 @@ ENTRY main {
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{0}, /*param_number=*/0,
-      /*param_index=*/{0},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{0}));
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{1}, /*param_number=*/0,
-      /*param_index=*/{1},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{1}));
 
   expect_aliased(/*output_index=*/{0}, /*param_number=*/0,
                  /*param_index=*/{0}, config);
@@ -140,7 +137,7 @@ ENTRY main {
 }
 
 TEST_F(HloInputOutputAliasConfigTest, InputDoNotAliasTwice) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TEST
 
 ENTRY main {
@@ -157,13 +154,11 @@ ENTRY main {
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{0}, /*param_number=*/0,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{1}, /*param_number=*/0,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 
   ASSERT_IS_NOT_OK(config.Verify(*module, [](const Shape& shape) {
     return ShapeUtil::ByteSizeOf(shape);
@@ -171,7 +166,7 @@ ENTRY main {
 }
 
 TEST_F(HloInputOutputAliasConfigTest, SizesMustMatch) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TEST
 
 ENTRY main {
@@ -188,8 +183,7 @@ ENTRY main {
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{1}, /*param_number=*/0,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 
   ASSERT_IS_NOT_OK(config.Verify(*module, [](const Shape& shape) {
     return ShapeUtil::ByteSizeOf(shape);
@@ -197,7 +191,7 @@ ENTRY main {
 }
 
 TEST_F(HloInputOutputAliasConfigTest, OutputDoNotAliasTwice) {
-  const string module_str = R"(
+  const std::string module_str = R"(
 HloModule TEST
 
 ENTRY main {
@@ -214,13 +208,11 @@ ENTRY main {
 
   TF_ASSERT_OK(config.SetUpAlias(
       /*output_index=*/{0}, /*param_number=*/0,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 
   ASSERT_IS_NOT_OK(config.SetUpAlias(
       /*output_index=*/{0}, /*param_number=*/1,
-      /*param_index=*/{},
-      /*kind=*/HloInputOutputAliasConfig::AliasKind::kUserAlias));
+      /*param_index=*/{}));
 }
 }  // namespace
 }  // namespace xla

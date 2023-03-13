@@ -23,6 +23,9 @@ class V4L2VP9Picture : public VP9Picture {
   explicit V4L2VP9Picture(scoped_refptr<V4L2DecodeSurface> dec_surface)
       : dec_surface_(std::move(dec_surface)) {}
 
+  V4L2VP9Picture(const V4L2VP9Picture&) = delete;
+  V4L2VP9Picture& operator=(const V4L2VP9Picture&) = delete;
+
   V4L2VP9Picture* AsV4L2VP9Picture() override { return this; }
   scoped_refptr<V4L2DecodeSurface> dec_surface() { return dec_surface_; }
 
@@ -34,8 +37,6 @@ class V4L2VP9Picture : public VP9Picture {
   }
 
   scoped_refptr<V4L2DecodeSurface> dec_surface_;
-
-  DISALLOW_COPY_AND_ASSIGN(V4L2VP9Picture);
 };
 
 namespace {
@@ -172,12 +173,11 @@ void GetVP9ProbsParams(const struct v4l2_vp9_probabilities* v4l2_probs,
 V4L2VideoDecoderDelegateVP9Chromium::V4L2VideoDecoderDelegateVP9Chromium(
     V4L2DecodeSurfaceHandler* surface_handler,
     V4L2Device* device)
-    : surface_handler_(surface_handler), device_(device) {
+    : surface_handler_(surface_handler),
+      device_(device),
+      device_needs_compressed_header_parsed_(
+          device->IsCtrlExposed(V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(0))) {
   DCHECK(surface_handler_);
-  DCHECK(device_);
-
-  device_needs_frame_context_ =
-      device_->IsCtrlExposed(V4L2_CID_MPEG_VIDEO_VP9_FRAME_CONTEXT(0));
 }
 
 V4L2VideoDecoderDelegateVP9Chromium::~V4L2VideoDecoderDelegateVP9Chromium() =
@@ -265,7 +265,7 @@ DecodeStatus V4L2VideoDecoderDelegateVP9Chromium::SubmitDecode(
   v4l2_frame_params.render_height_minus_1 = frame_hdr->render_height - 1;
 
   // Reference frames
-  for (size_t i = 0; i < base::size(frame_hdr->ref_frame_idx); i++) {
+  for (size_t i = 0; i < std::size(frame_hdr->ref_frame_idx); i++) {
     uint8_t idx = frame_hdr->ref_frame_idx[i];
     if (idx >= kVp9NumRefFrames) {
       VLOGF(1) << "Invalid reference frame index!";
@@ -332,10 +332,9 @@ DecodeStatus V4L2VideoDecoderDelegateVP9Chromium::SubmitDecode(
 
 bool V4L2VideoDecoderDelegateVP9Chromium::OutputPicture(
     scoped_refptr<VP9Picture> pic) {
-  // TODO(crbug.com/647725): Insert correct color space.
   surface_handler_->SurfaceReady(VP9PictureToV4L2DecodeSurface(pic.get()),
                                  pic->bitstream_id(), pic->visible_rect(),
-                                 VideoColorSpace());
+                                 pic->get_colorspace());
   return true;
 }
 
@@ -366,8 +365,13 @@ bool V4L2VideoDecoderDelegateVP9Chromium::GetFrameContext(
   return true;
 }
 
-bool V4L2VideoDecoderDelegateVP9Chromium::IsFrameContextRequired() const {
-  return device_needs_frame_context_;
+bool V4L2VideoDecoderDelegateVP9Chromium::NeedsCompressedHeaderParsed() const {
+  return device_needs_compressed_header_parsed_;
+}
+
+bool V4L2VideoDecoderDelegateVP9Chromium::SupportsContextProbabilityReadback()
+    const {
+  return true;
 }
 
 }  // namespace media

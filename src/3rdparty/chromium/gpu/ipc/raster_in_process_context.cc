@@ -13,7 +13,6 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "gpu/command_buffer/client/gles2_cmd_helper.h"
 #include "gpu/command_buffer/client/raster_cmd_helper.h"
-#include "gpu/command_buffer/client/raster_implementation.h"
 #include "gpu/command_buffer/client/raster_implementation_gles.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/client/transfer_buffer.h"
@@ -79,11 +78,6 @@ ContextResult RasterInProcessContext::Initialize(
   DCHECK(!attribs.bind_generates_resource);
   constexpr bool bind_generates_resource = false;
 
-  // TODO(https://crbug.com/829469): Remove check once we fuzz RasterDecoder.
-  // enable_oop_rasterization is currently necessary to create RasterDecoder
-  // in InProcessCommandBuffer.
-  DCHECK(attribs.enable_oop_rasterization);
-
   // Create the RasterCmdHelper, which writes the command buffer protocol.
   auto raster_helper =
       std::make_unique<raster::RasterCmdHelper>(command_buffer_.get());
@@ -113,7 +107,7 @@ const GpuFeatureInfo& RasterInProcessContext::GetGpuFeatureInfo() const {
   return command_buffer_->GetGpuFeatureInfo();
 }
 
-raster::RasterInterface* RasterInProcessContext::GetImplementation() {
+raster::RasterImplementation* RasterInProcessContext::GetImplementation() {
   return raster_implementation_.get();
 }
 

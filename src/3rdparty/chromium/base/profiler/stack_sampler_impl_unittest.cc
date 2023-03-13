@@ -11,11 +11,13 @@
 
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/profiler/module_cache.h"
 #include "base/profiler/profile_builder.h"
 #include "base/profiler/stack_buffer.h"
 #include "base/profiler/stack_copier.h"
 #include "base/profiler/stack_sampler_impl.h"
+#include "base/profiler/stack_sampling_profiler_test_util.h"
 #include "base/profiler/suspendable_thread_delegate.h"
 #include "base/profiler/unwinder.h"
 #include "build/build_config.h"
@@ -51,7 +53,7 @@ class TestProfileBuilder : public ProfileBuilder {
   TimeTicks last_timestamp() { return last_timestamp_; }
 
  private:
-  ModuleCache* module_cache_;
+  raw_ptr<ModuleCache> module_cache_;
   TimeTicks last_timestamp_;
 };
 
@@ -129,13 +131,13 @@ class TestUnwinder : public Unwinder {
     }
     if (stack_copy_bottom_)
       *stack_copy_bottom_ = RegisterContextStackPointer(thread_context);
-    return UnwindResult::COMPLETED;
+    return UnwindResult::kCompleted;
   }
 
  private:
   size_t stack_size_;
-  std::vector<uintptr_t>* stack_copy_;
-  uintptr_t* stack_copy_bottom_;
+  raw_ptr<std::vector<uintptr_t>> stack_copy_;
+  raw_ptr<uintptr_t> stack_copy_bottom_;
 };
 
 // Records invocations of calls to OnStackCapture()/UpdateModules().
@@ -150,7 +152,7 @@ class CallRecordingUnwinder : public Unwinder {
   UnwindResult TryUnwind(RegisterContext* thread_context,
                          uintptr_t stack_top,
                          std::vector<Frame>* stack) const override {
-    return UnwindResult::UNRECOGNIZED_FRAME;
+    return UnwindResult::kUnrecognizedFrame;
   }
 
   bool on_stack_capture_was_invoked() const {
@@ -164,23 +166,6 @@ class CallRecordingUnwinder : public Unwinder {
  private:
   bool on_stack_capture_was_invoked_ = false;
   bool update_modules_was_invoked_ = false;
-};
-
-class TestModule : public ModuleCache::Module {
- public:
-  TestModule(uintptr_t base_address, size_t size, bool is_native = true)
-      : base_address_(base_address), size_(size), is_native_(is_native) {}
-
-  uintptr_t GetBaseAddress() const override { return base_address_; }
-  std::string GetId() const override { return ""; }
-  FilePath GetDebugBasename() const override { return FilePath(); }
-  size_t GetSize() const override { return size_; }
-  bool IsNative() const override { return is_native_; }
-
- private:
-  const uintptr_t base_address_;
-  const size_t size_;
-  const bool is_native_;
 };
 
 // Utility function to form a vector from a single module.
@@ -212,7 +197,7 @@ class FakeTestUnwinder : public Unwinder {
  public:
   struct Result {
     Result(bool can_unwind)
-        : can_unwind(can_unwind), result(UnwindResult::UNRECOGNIZED_FRAME) {}
+        : can_unwind(can_unwind), result(UnwindResult::kUnrecognizedFrame) {}
 
     Result(UnwindResult result, std::vector<uintptr_t> instruction_pointers)
         : can_unwind(true),
@@ -288,7 +273,7 @@ base::circular_deque<std::unique_ptr<Unwinder>> MakeUnwinderCircularDeque(
 }  // namespace
 
 // TODO(crbug.com/1001923): Fails on Linux MSan.
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
 #define MAYBE_CopyStack DISABLED_MAYBE_CopyStack
 #else
 #define MAYBE_CopyStack CopyStack
@@ -309,7 +294,8 @@ TEST(StackSamplerImplTest, MAYBE_CopyStack) {
   std::unique_ptr<StackBuffer> stack_buffer =
       std::make_unique<StackBuffer>(stack.size() * sizeof(uintptr_t));
   TestProfileBuilder profile_builder(&module_cache);
-  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder);
+  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder,
+                                       PlatformThread::CurrentId());
 
   EXPECT_EQ(stack, stack_copy);
 }
@@ -331,7 +317,8 @@ TEST(StackSamplerImplTest, CopyStackTimestamp) {
   std::unique_ptr<StackBuffer> stack_buffer =
       std::make_unique<StackBuffer>(stack.size() * sizeof(uintptr_t));
   TestProfileBuilder profile_builder(&module_cache);
-  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder);
+  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder,
+                                       PlatformThread::CurrentId());
 
   EXPECT_EQ(timestamp, profile_builder.last_timestamp());
 }
@@ -348,7 +335,8 @@ TEST(StackSamplerImplTest, UnwinderInvokedWhileRecordingStackFrames) {
 
   stack_sampler_impl.Initialize();
 
-  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder);
+  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder,
+                                       PlatformThread::CurrentId());
 
   EXPECT_TRUE(unwinder->on_stack_capture_was_invoked());
   EXPECT_TRUE(unwinder->update_modules_was_invoked());
@@ -369,7 +357,8 @@ TEST(StackSamplerImplTest, AuxUnwinderInvokedWhileRecordingStackFrames) {
   CallRecordingUnwinder* aux_unwinder = owned_aux_unwinder.get();
   stack_sampler_impl.AddAuxUnwinder(std::move(owned_aux_unwinder));
 
-  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder);
+  stack_sampler_impl.RecordStackFrames(stack_buffer.get(), &profile_builder,
+                                       PlatformThread::CurrentId());
 
   EXPECT_TRUE(aux_unwinder->on_stack_capture_was_invoked());
   EXPECT_TRUE(aux_unwinder->update_modules_was_invoked());
@@ -382,7 +371,7 @@ TEST(StackSamplerImplTest, WalkStack_Completed) {
       GetTestInstructionPointer();
   module_cache.AddCustomNativeModule(std::make_unique<TestModule>(1u, 1u));
   auto native_unwinder =
-      WrapUnique(new FakeTestUnwinder({{UnwindResult::COMPLETED, {1u}}}));
+      WrapUnique(new FakeTestUnwinder({{UnwindResult::kCompleted, {1u}}}));
   native_unwinder->Initialize(&module_cache);
 
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(
@@ -400,7 +389,7 @@ TEST(StackSamplerImplTest, WalkStack_Aborted) {
       GetTestInstructionPointer();
   module_cache.AddCustomNativeModule(std::make_unique<TestModule>(1u, 1u));
   auto native_unwinder =
-      WrapUnique(new FakeTestUnwinder({{UnwindResult::ABORTED, {1u}}}));
+      WrapUnique(new FakeTestUnwinder({{UnwindResult::kAborted, {1u}}}));
   native_unwinder->Initialize(&module_cache);
 
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(
@@ -417,7 +406,7 @@ TEST(StackSamplerImplTest, WalkStack_NotUnwound) {
   RegisterContextInstructionPointer(&thread_context) =
       GetTestInstructionPointer();
   auto native_unwinder = WrapUnique(
-      new FakeTestUnwinder({{UnwindResult::UNRECOGNIZED_FRAME, {}}}));
+      new FakeTestUnwinder({{UnwindResult::kUnrecognizedFrame, {}}}));
   native_unwinder->Initialize(&module_cache);
 
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(
@@ -440,7 +429,7 @@ TEST(StackSamplerImplTest, WalkStack_AuxUnwind) {
               GetTestInstructionPointer(), 1u, false)));
 
   auto aux_unwinder =
-      WrapUnique(new FakeTestUnwinder({{UnwindResult::ABORTED, {1u}}}));
+      WrapUnique(new FakeTestUnwinder({{UnwindResult::kAborted, {1u}}}));
   aux_unwinder->Initialize(&module_cache);
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(
       &module_cache, &thread_context, 0u,
@@ -464,10 +453,10 @@ TEST(StackSamplerImplTest, WalkStack_AuxThenNative) {
   module_cache.AddCustomNativeModule(std::make_unique<TestModule>(1u, 1u));
 
   auto aux_unwinder = WrapUnique(
-      new FakeTestUnwinder({{UnwindResult::UNRECOGNIZED_FRAME, {1u}}, false}));
+      new FakeTestUnwinder({{UnwindResult::kUnrecognizedFrame, {1u}}, false}));
   aux_unwinder->Initialize(&module_cache);
   auto native_unwinder =
-      WrapUnique(new FakeTestUnwinder({{UnwindResult::COMPLETED, {2u}}}));
+      WrapUnique(new FakeTestUnwinder({{UnwindResult::kCompleted, {2u}}}));
   native_unwinder->Initialize(&module_cache);
 
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(
@@ -496,11 +485,11 @@ TEST(StackSamplerImplTest, WalkStack_NativeThenAux) {
       {}, ToModuleVector(std::make_unique<TestModule>(1u, 1u, false)));
 
   auto aux_unwinder = WrapUnique(new FakeTestUnwinder(
-      {{false}, {UnwindResult::UNRECOGNIZED_FRAME, {2u}}, {false}}));
+      {{false}, {UnwindResult::kUnrecognizedFrame, {2u}}, {false}}));
   aux_unwinder->Initialize(&module_cache);
   auto native_unwinder =
-      WrapUnique(new FakeTestUnwinder({{UnwindResult::UNRECOGNIZED_FRAME, {1u}},
-                                       {UnwindResult::COMPLETED, {3u}}}));
+      WrapUnique(new FakeTestUnwinder({{UnwindResult::kUnrecognizedFrame, {1u}},
+                                       {UnwindResult::kCompleted, {3u}}}));
   native_unwinder->Initialize(&module_cache);
 
   std::vector<Frame> stack = StackSamplerImpl::WalkStackForTesting(

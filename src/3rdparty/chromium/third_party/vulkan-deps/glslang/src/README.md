@@ -19,8 +19,8 @@ See issue #1964.
 
 If people are only using this location to get spirv.hpp, I recommend they get that from [SPIRV-Headers](https://github.com/KhronosGroup/SPIRV-Headers) instead.
 
-[![Build Status](https://travis-ci.org/KhronosGroup/glslang.svg?branch=master)](https://travis-ci.org/KhronosGroup/glslang)
-[![Build status](https://ci.appveyor.com/api/projects/status/q6fi9cb0qnhkla68/branch/master?svg=true)](https://ci.appveyor.com/project/Khronoswebmaster/glslang/branch/master)
+[![appveyor status](https://ci.appveyor.com/api/projects/status/q6fi9cb0qnhkla68/branch/master?svg=true)](https://ci.appveyor.com/project/Khronoswebmaster/glslang/branch/master)
+![Continuous Deployment](https://github.com/KhronosGroup/glslang/actions/workflows/continuous_deployment.yml/badge.svg)
 
 # Glslang Components and Status
 
@@ -85,7 +85,15 @@ The applied stage-specific rules are based on the file extension:
 * `.frag` for a fragment shader
 * `.comp` for a compute shader
 
-There is also a non-shader extension
+For ray tracing pipeline shaders:
+* `.rgen` for a ray generation shader
+* `.rint` for a ray intersection shader
+* `.rahit` for a ray any-hit shader
+* `.rchit` for a ray closest-hit shader
+* `.rmiss` for a ray miss shader
+* `.rcall` for a callable shader
+
+There is also a non-shader extension:
 * `.conf` for a configuration file of limits, see usage statement for example
 
 ## Building (CMake)

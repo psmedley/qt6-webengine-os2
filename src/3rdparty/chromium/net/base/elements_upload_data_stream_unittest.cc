@@ -11,14 +11,13 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "net/base/completion_once_callback.h"
@@ -48,7 +47,7 @@ namespace net {
 namespace {
 
 const char kTestData[] = "0123456789";
-const size_t kTestDataSize = base::size(kTestData) - 1;
+const size_t kTestDataSize = std::size(kTestData) - 1;
 const size_t kTestBufferSize = 1 << 14;  // 16KB.
 
 // Reads data from the upload data stream, and returns the data as string.
@@ -583,8 +582,7 @@ TEST_F(ElementsUploadDataStreamTest, FileChanged) {
   FileChangedHelper(temp_file_path, file_info.last_modified, false);
 
   // Test file changed.
-  FileChangedHelper(temp_file_path,
-                    file_info.last_modified - base::TimeDelta::FromSeconds(1),
+  FileChangedHelper(temp_file_path, file_info.last_modified - base::Seconds(1),
                     true);
 }
 

@@ -22,6 +22,7 @@
 #include "avdevice.h"
 #include "internal.h"
 #include "config.h"
+#include "version.h"
 
 #include "libavutil/ffversion.h"
 const char av_device_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
@@ -157,6 +158,7 @@ void avdevice_free_list_devices(AVDeviceInfoList **device_list)
         if (dev) {
             av_freep(&dev->device_name);
             av_freep(&dev->device_description);
+            av_freep(&dev->media_types);
             av_free(dev);
         }
     }

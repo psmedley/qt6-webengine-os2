@@ -22,7 +22,7 @@ namespace {
 // or make it dynamic that throttles framerate if device is overheating.
 base::TimeDelta GetVSyncInterval() {
   if (chromecast::IsFeatureEnabled(chromecast::kTripleBuffer720)) {
-    return base::TimeDelta::FromSeconds(1) / 59.94;
+    return base::Seconds(1) / 59.94;
   }
 
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -31,11 +31,11 @@ base::TimeDelta GetVSyncInterval() {
         command_line->GetSwitchValueASCII(switches::kVSyncInterval);
     double interval = 0;
     if (base::StringToDouble(interval_str, &interval) && interval > 0) {
-      return base::TimeDelta::FromSeconds(1) / interval;
+      return base::Seconds(1) / interval;
     }
   }
 
-  return base::TimeDelta::FromSeconds(2) / 59.94;
+  return base::Seconds(2) / 59.94;
 }
 
 }  // namespace
@@ -90,24 +90,6 @@ bool GLSurfaceCast::Resize(const gfx::Size& size,
                                         has_alpha);
 }
 
-bool GLSurfaceCast::ScheduleOverlayPlane(
-    int z_order,
-    gfx::OverlayTransform transform,
-    gl::GLImage* image,
-    const gfx::Rect& bounds_rect,
-    const gfx::RectF& crop_rect,
-    bool enable_blend,
-    const gfx::Rect& damage_rect,
-    std::unique_ptr<gfx::GpuFence> gpu_fence) {
-  // Currently the Ozone-Cast platform doesn't use the gpu_fence, so we don't
-  // propagate it further. If this changes we will need to store the gpu fence
-  // to ensure it stays valid for as long as the operation needs it, and pass a
-  // pointer to the fence in the call below.
-  return image->ScheduleOverlayPlane(widget_, z_order, transform, bounds_rect,
-                                     crop_rect, enable_blend,
-                                     /* gpu_fence */ nullptr);
-}
-
 EGLConfig GLSurfaceCast::GetConfig() {
   if (!config_) {
     EGLint config_attribs[] = {EGL_BUFFER_SIZE,
@@ -125,7 +107,7 @@ EGLConfig GLSurfaceCast::GetConfig() {
                                EGL_SURFACE_TYPE,
                                EGL_WINDOW_BIT,
                                EGL_NONE};
-    config_ = ChooseEGLConfig(GetDisplay(), config_attribs);
+    config_ = ChooseEGLConfig(GetEGLDisplay(), config_attribs);
   }
   return config_;
 }

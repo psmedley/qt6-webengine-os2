@@ -12,10 +12,15 @@
 #include <vector>
 
 #include "base/check.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/views/layout/layout_manager.h"
 
+// DEPRECATED - Prefer other solutions as follows:
+// * For true table- and grid-like layouts, use TableLayout.
+// * For aligning a few objects and other cases, use nested FlexLayouts and/or
+//   BoxLayouts.
+//
 // GridLayout is a LayoutManager that positions child Views in a grid. You
 // define the structure of the Grid first, then add the Views.
 // The following creates a trivial grid with two columns separated by
@@ -114,6 +119,10 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   };
 
   GridLayout();
+
+  GridLayout(const GridLayout&) = delete;
+  GridLayout& operator=(const GridLayout&) = delete;
+
   ~GridLayout() override;
 
   // See class description for what this does.
@@ -264,7 +273,7 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   ColumnSet* GetLastValidColumnSet();
 
   // The View this is installed on.
-  View* host_ = nullptr;
+  raw_ptr<View> host_ = nullptr;
 
   // Whether or not we've calculated the primary/linked columns.
   mutable bool calculated_primary_columns_ = false;
@@ -280,7 +289,7 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   int next_column_ = 0;
 
   // Column set for the current row. This is null for padding rows.
-  ColumnSet* current_row_col_set_ = nullptr;
+  raw_ptr<ColumnSet> current_row_col_set_ = nullptr;
 
   // Set to true when adding a View.
   bool adding_view_ = false;
@@ -298,8 +307,6 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
   gfx::Size minimum_size_;
 
   bool honors_min_width_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(GridLayout);
 };
 
 // ColumnSet is used to define a set of columns. GridLayout may have any
@@ -307,6 +314,9 @@ class VIEWS_EXPORT GridLayout : public LayoutManager {
 // use the AddColumnSet method of GridLayout.
 class VIEWS_EXPORT ColumnSet {
  public:
+  ColumnSet(const ColumnSet&) = delete;
+  ColumnSet& operator=(const ColumnSet&) = delete;
+
   ~ColumnSet();
 
   // Adds a column for padding. When adding views, padding columns are
@@ -433,8 +443,6 @@ class VIEWS_EXPORT ColumnSet {
 #if DCHECK_IS_ON()
   SizeCalculationType last_calculation_type_ = SizeCalculationType::kPreferred;
 #endif
-
-  DISALLOW_COPY_AND_ASSIGN(ColumnSet);
 };
 
 }  // namespace views

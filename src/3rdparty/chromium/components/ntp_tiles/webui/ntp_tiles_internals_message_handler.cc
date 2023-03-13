@@ -15,7 +15,7 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
-#include "base/task_runner_util.h"
+#include "base/task/task_runner_util.h"
 #include "base/values.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/ntp_tiles/constants.h"
@@ -67,18 +67,18 @@ void NTPTilesInternalsMessageHandler::RegisterMessages(
     NTPTilesInternalsMessageHandlerClient* client) {
   client_ = client;
 
-  client_->RegisterMessageCallback(
+  client_->RegisterDeprecatedMessageCallback(
       "registerForEvents",
       base::BindRepeating(
           &NTPTilesInternalsMessageHandler::HandleRegisterForEvents,
           base::Unretained(this)));
 
-  client_->RegisterMessageCallback(
+  client_->RegisterDeprecatedMessageCallback(
       "update",
       base::BindRepeating(&NTPTilesInternalsMessageHandler::HandleUpdate,
                           base::Unretained(this)));
 
-  client_->RegisterMessageCallback(
+  client_->RegisterDeprecatedMessageCallback(
       "viewPopularSitesJson",
       base::BindRepeating(
           &NTPTilesInternalsMessageHandler::HandleViewPopularSitesJson,
@@ -92,14 +92,13 @@ void NTPTilesInternalsMessageHandler::HandleRegisterForEvents(
     disabled.SetBoolKey("topSites", false);
     disabled.SetBoolKey("popular", false);
     disabled.SetBoolKey("customLinks", false);
-    disabled.SetBoolKey("allowlist", false);
     client_->CallJavascriptFunction("cr.webUIListenerCallback",
                                     base::Value("receive-source-info"),
                                     disabled);
     SendTiles(NTPTilesVector(), FaviconResultMap());
     return;
   }
-  DCHECK_EQ(0u, args->GetSize());
+  DCHECK_EQ(0u, args->GetListDeprecated().size());
 
   popular_sites_json_.clear();
   most_visited_sites_ = client_->MakeMostVisitedSites();
@@ -113,10 +112,9 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
     return;
   }
 
-  const base::Value* dict = nullptr;
-  DCHECK_EQ(1u, args->GetSize());
-  args->Get(0, &dict);
-  DCHECK(dict && dict->is_dict());
+  DCHECK_EQ(1u, args->GetListDeprecated().size());
+  const base::Value& dict = args->GetListDeprecated()[0];
+  DCHECK(dict.is_dict());
 
   PrefService* prefs = client_->GetPrefs();
 
@@ -124,7 +122,7 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
       most_visited_sites_->DoesSourceExist(ntp_tiles::TileSource::POPULAR)) {
     popular_sites_json_.clear();
 
-    const std::string* url = dict->FindStringPath("popular.overrideURL");
+    const std::string* url = dict.FindStringPath("popular.overrideURL");
     if (url->empty()) {
       prefs->ClearPref(ntp_tiles::prefs::kPopularSitesOverrideURL);
     } else {
@@ -133,7 +131,7 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
     }
 
     const std::string* directory =
-        dict->FindStringPath("popular.overrideDirectory");
+        dict.FindStringPath("popular.overrideDirectory");
     if (directory->empty()) {
       prefs->ClearPref(ntp_tiles::prefs::kPopularSitesOverrideDirectory);
     } else {
@@ -141,8 +139,7 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
                        *directory);
     }
 
-    const std::string* country =
-        dict->FindStringPath("popular.overrideCountry");
+    const std::string* country = dict.FindStringPath("popular.overrideCountry");
     if (country->empty()) {
       prefs->ClearPref(ntp_tiles::prefs::kPopularSitesOverrideCountry);
     } else {
@@ -150,8 +147,7 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
                        *country);
     }
 
-    const std::string* version =
-        dict->FindStringPath("popular.overrideVersion");
+    const std::string* version = dict.FindStringPath("popular.overrideVersion");
     if (version->empty()) {
       prefs->ClearPref(ntp_tiles::prefs::kPopularSitesOverrideVersion);
     } else {
@@ -170,7 +166,7 @@ void NTPTilesInternalsMessageHandler::HandleUpdate(
 
 void NTPTilesInternalsMessageHandler::HandleViewPopularSitesJson(
     const base::ListValue* args) {
-  DCHECK_EQ(0u, args->GetSize());
+  DCHECK_EQ(0u, args->GetListDeprecated().size());
   if (!most_visited_sites_ ||
       !most_visited_sites_->DoesSourceExist(ntp_tiles::TileSource::POPULAR)) {
     return;
@@ -189,8 +185,6 @@ void NTPTilesInternalsMessageHandler::SendSourceInfo() {
                    most_visited_sites_->DoesSourceExist(TileSource::TOP_SITES));
   value.SetBoolKey("customLinks", most_visited_sites_->DoesSourceExist(
                                       TileSource::CUSTOM_LINKS));
-  value.SetBoolKey("allowlist",
-                   most_visited_sites_->DoesSourceExist(TileSource::ALLOWLIST));
 
   if (most_visited_sites_->DoesSourceExist(TileSource::POPULAR)) {
     auto* popular_sites = most_visited_sites_->popular_sites();
@@ -231,22 +225,20 @@ void NTPTilesInternalsMessageHandler::SendTiles(
     entry.SetStringKey("title", tile.title);
     entry.SetStringKey("url", tile.url.spec());
     entry.SetIntKey("source", static_cast<int>(tile.source));
-    entry.SetStringKey("allowlistIconPath",
-                       tile.allowlist_icon_path.LossyDisplayName());
     if (tile.source == TileSource::CUSTOM_LINKS) {
       entry.SetBoolKey("fromMostVisited", tile.from_most_visited);
     }
 
     base::Value icon_list(base::Value::Type::LIST);
-    for (const auto& entry : kIconTypesAndNames) {
+    for (const auto& type_and_name : kIconTypesAndNames) {
       auto it = result_map.find(
-          FaviconResultMap::key_type(tile.url, entry.type_enum));
+          FaviconResultMap::key_type(tile.url, type_and_name.type_enum));
 
       if (it != result_map.end()) {
         const favicon_base::FaviconRawBitmapResult& result = it->second;
         base::Value icon(base::Value::Type::DICTIONARY);
         icon.SetStringKey("url", result.icon_url.spec());
-        icon.SetStringKey("type", entry.type_name);
+        icon.SetStringKey("type", type_and_name.type_name);
         icon.SetBoolKey("onDemand", !result.fetched_because_of_page_visit);
         icon.SetIntKey("width", result.pixel_size.width());
         icon.SetIntKey("height", result.pixel_size.height());

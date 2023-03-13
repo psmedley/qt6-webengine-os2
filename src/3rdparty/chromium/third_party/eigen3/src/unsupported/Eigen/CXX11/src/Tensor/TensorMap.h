@@ -10,6 +10,8 @@
 #ifndef EIGEN_CXX11_TENSOR_TENSOR_MAP_H
 #define EIGEN_CXX11_TENSOR_TENSOR_MAP_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 // FIXME use proper doxygen documentation (e.g. \tparam MakePointer_)
@@ -30,7 +32,7 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
 {
   public:
     typedef TensorMap<PlainObjectType, Options_, MakePointer_> Self;
-    typedef typename PlainObjectType::Base Base;
+    typedef TensorBase<TensorMap<PlainObjectType, Options_, MakePointer_> > Base;
   #ifdef EIGEN_USE_SYCL
     typedef  typename Eigen::internal::remove_reference<typename Eigen::internal::nested<Self>::type>::type Nested;
   #else
@@ -40,7 +42,7 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
     typedef typename internal::traits<PlainObjectType>::Index Index;
     typedef typename internal::traits<PlainObjectType>::Scalar Scalar;
     typedef typename NumTraits<Scalar>::Real RealScalar;
-    typedef typename Base::CoeffReturnType CoeffReturnType;
+    typedef typename PlainObjectType::Base::CoeffReturnType CoeffReturnType;
 
     typedef typename MakePointer_<Scalar>::Type PointerType;
     typedef typename MakePointer_<Scalar>::ConstType PointerConstType;
@@ -82,35 +84,11 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
       EIGEN_STATIC_ASSERT((0 == NumIndices || NumIndices == Dynamic), YOU_MADE_A_PROGRAMMING_MISTAKE)
     }
 
-#if EIGEN_HAS_VARIADIC_TEMPLATES
     template<typename... IndexTypes> EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index firstDimension, IndexTypes... otherDimensions) : m_data(dataPtr), m_dimensions(firstDimension, otherDimensions...) {
       // The number of dimensions used to construct a tensor must be equal to the rank of the tensor.
       EIGEN_STATIC_ASSERT((sizeof...(otherDimensions) + 1 == NumIndices || NumIndices == Dynamic), YOU_MADE_A_PROGRAMMING_MISTAKE)
     }
-#else
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index firstDimension) : m_data(dataPtr), m_dimensions(firstDimension) {
-      // The number of dimensions used to construct a tensor must be equal to the rank of the tensor.
-      EIGEN_STATIC_ASSERT((1 == NumIndices || NumIndices == Dynamic), YOU_MADE_A_PROGRAMMING_MISTAKE)
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index dim1, Index dim2) : m_data(dataPtr), m_dimensions(dim1, dim2) {
-      EIGEN_STATIC_ASSERT(2 == NumIndices || NumIndices == Dynamic, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index dim1, Index dim2, Index dim3) : m_data(dataPtr), m_dimensions(dim1, dim2, dim3) {
-      EIGEN_STATIC_ASSERT(3 == NumIndices || NumIndices == Dynamic, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index dim1, Index dim2, Index dim3, Index dim4) : m_data(dataPtr), m_dimensions(dim1, dim2, dim3, dim4) {
-      EIGEN_STATIC_ASSERT(4 == NumIndices || NumIndices == Dynamic, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, Index dim1, Index dim2, Index dim3, Index dim4, Index dim5) : m_data(dataPtr), m_dimensions(dim1, dim2, dim3, dim4, dim5) {
-      EIGEN_STATIC_ASSERT(5 == NumIndices || NumIndices == Dynamic, YOU_MADE_A_PROGRAMMING_MISTAKE)
-    }
-#endif
 
    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorMap(StoragePointerType dataPtr, const array<Index, NumIndices>& dimensions)
       : m_data(dataPtr), m_dimensions(dimensions)
@@ -165,7 +143,6 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
       return m_data[index];
     }
 
-#if EIGEN_HAS_VARIADIC_TEMPLATES
     template<typename... IndexTypes> EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE StorageRefType operator()(Index firstIndex, Index secondIndex, IndexTypes... otherIndices) const
     {
@@ -179,52 +156,6 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
         return m_data[index];
       }
     }
-#else
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1) const
-    {
-      if (PlainObjectType::Options&RowMajor) {
-        const Index index = i1 + i0 * m_dimensions[1];
-        return m_data[index];
-      } else {
-        const Index index = i0 + i1 * m_dimensions[0];
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2) const
-    {
-      if (PlainObjectType::Options&RowMajor) {
-         const Index index = i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0);
-         return m_data[index];
-      } else {
-         const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * i2);
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2, Index i3) const
-    {
-      if (PlainObjectType::Options&RowMajor) {
-        const Index index = i3 + m_dimensions[3] * (i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0));
-        return m_data[index];
-      } else {
-        const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * (i2 + m_dimensions[2] * i3));
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2, Index i3, Index i4) const
-    {
-      if (PlainObjectType::Options&RowMajor) {
-        const Index index = i4 + m_dimensions[4] * (i3 + m_dimensions[3] * (i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0)));
-        return m_data[index];
-      } else {
-        const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * (i2 + m_dimensions[2] * (i3 + m_dimensions[3] * i4)));
-        return m_data[index];
-      }
-    }
-#endif
 
     EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE StorageRefType operator()(const array<Index, NumIndices>& indices)
@@ -253,7 +184,6 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
       return m_data[index];
     }
 
-#if EIGEN_HAS_VARIADIC_TEMPLATES
     template<typename... IndexTypes> EIGEN_DEVICE_FUNC
     EIGEN_STRONG_INLINE StorageRefType operator()(Index firstIndex, Index secondIndex, IndexTypes... otherIndices)
     {
@@ -268,70 +198,8 @@ template<typename PlainObjectType, int Options_, template <class> class MakePoin
         return m_data[index];
       }
     }
-#else
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1)
-    {
-       if (PlainObjectType::Options&RowMajor) {
-         const Index index = i1 + i0 * m_dimensions[1];
-        return m_data[index];
-      } else {
-        const Index index = i0 + i1 * m_dimensions[0];
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2)
-    {
-       if (PlainObjectType::Options&RowMajor) {
-         const Index index = i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0);
-        return m_data[index];
-      } else {
-         const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * i2);
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2, Index i3)
-    {
-      if (PlainObjectType::Options&RowMajor) {
-        const Index index = i3 + m_dimensions[3] * (i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0));
-        return m_data[index];
-      } else {
-        const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * (i2 + m_dimensions[2] * i3));
-        return m_data[index];
-      }
-    }
-    EIGEN_DEVICE_FUNC
-    EIGEN_STRONG_INLINE StorageRefType operator()(Index i0, Index i1, Index i2, Index i3, Index i4)
-    {
-      if (PlainObjectType::Options&RowMajor) {
-        const Index index = i4 + m_dimensions[4] * (i3 + m_dimensions[3] * (i2 + m_dimensions[2] * (i1 + m_dimensions[1] * i0)));
-        return m_data[index];
-      } else {
-        const Index index = i0 + m_dimensions[0] * (i1 + m_dimensions[1] * (i2 + m_dimensions[2] * (i3 + m_dimensions[3] * i4)));
-        return m_data[index];
-      }
-    }
-#endif
 
-    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Self& operator=(const Self& other)
-    {
-      typedef TensorAssignOp<Self, const Self> Assign;
-      Assign assign(*this, other);
-      internal::TensorExecutor<const Assign, DefaultDevice>::run(assign, DefaultDevice());
-      return *this;
-    }
-
-    template<typename OtherDerived>
-    EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE
-    Self& operator=(const OtherDerived& other)
-    {
-      typedef TensorAssignOp<Self, const OtherDerived> Assign;
-      Assign assign(*this, other);
-      internal::TensorExecutor<const Assign, DefaultDevice>::run(assign, DefaultDevice());
-      return *this;
-    }
+    EIGEN_TENSOR_INHERIT_ASSIGNMENT_OPERATORS(TensorMap)
 
   private:
     StoragePointerType m_data;

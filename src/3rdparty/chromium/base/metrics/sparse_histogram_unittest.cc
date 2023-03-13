@@ -8,8 +8,8 @@
 #include <string>
 #include <vector>
 
-#include "base/cxx17_backports.h"
 #include "base/logging.h"
+#include "base/memory/raw_ptr.h"
 #include "base/metrics/histogram_base.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_samples.h"
@@ -93,7 +93,7 @@ class SparseHistogramTest : public testing::TestWithParam<bool> {
   const bool use_persistent_histogram_allocator_;
 
   std::unique_ptr<StatisticsRecorder> statistics_recorder_;
-  PersistentMemoryAllocator* allocator_ = nullptr;
+  raw_ptr<PersistentMemoryAllocator> allocator_ = nullptr;
 };
 
 // Run all HistogramTest cases with both heap and persistent memory.
@@ -365,7 +365,7 @@ TEST_P(SparseHistogramTest, ExtremeValues) {
       {2147483647, 2147483648LL},
   };
 
-  for (size_t i = 0; i < base::size(cases); ++i) {
+  for (size_t i = 0; i < std::size(cases); ++i) {
     HistogramBase* histogram =
         SparseHistogram::FactoryGet(StringPrintf("ExtremeValues_%zu", i),
                                     HistogramBase::kUmaTargetedHistogramFlag);
@@ -410,7 +410,7 @@ TEST_P(SparseHistogramTest, CheckGetCountAndBucketData) {
   EXPECT_EQ(4000, count_and_data_bucket.sum);
 
   const base::Value::ConstListView buckets_list =
-      count_and_data_bucket.buckets.GetList();
+      count_and_data_bucket.buckets.GetListDeprecated();
   ASSERT_EQ(2u, buckets_list.size());
 
   // Check the first bucket.

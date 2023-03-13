@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
-#include "base/macros.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "content/public/app/content_main_delegate.h"
@@ -25,6 +24,10 @@ namespace extensions {
 class ShellMainDelegate : public content::ContentMainDelegate {
  public:
   ShellMainDelegate();
+
+  ShellMainDelegate(const ShellMainDelegate&) = delete;
+  ShellMainDelegate& operator=(const ShellMainDelegate&) = delete;
+
   ~ShellMainDelegate() override;
 
   // ContentMainDelegate implementation:
@@ -34,18 +37,15 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   content::ContentBrowserClient* CreateContentBrowserClient() override;
   content::ContentRendererClient* CreateContentRendererClient() override;
   void ProcessExiting(const std::string& process_type) override;
-#if defined(OS_POSIX) && !defined(OS_MAC) && !defined(OS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
   void ZygoteStarting(std::vector<std::unique_ptr<content::ZygoteForkDelegate>>*
                           delegates) override;
 #endif
-// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
-// of lacros-chrome is complete.
-#if defined(OS_LINUX) || BUILDFLAG(IS_CHROMEOS_LACROS)
-  void ZygoteForked() override;
-#endif
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   void PreBrowserMain() override;
 #endif
+// TODO(crbug.com/1052397): Revisit the macro expression once build flag switch
+// of lacros-chrome is complete.
 #if BUILDFLAG(IS_CHROMEOS_LACROS)
   void PostEarlyInitialization(bool is_running_tests) override;
 #endif
@@ -58,8 +58,6 @@ class ShellMainDelegate : public content::ContentMainDelegate {
   std::unique_ptr<content::ContentClient> content_client_;
   std::unique_ptr<content::ContentBrowserClient> browser_client_;
   std::unique_ptr<content::ContentRendererClient> renderer_client_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShellMainDelegate);
 };
 
 }  // namespace extensions

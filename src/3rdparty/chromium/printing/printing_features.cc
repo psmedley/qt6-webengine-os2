@@ -4,22 +4,37 @@
 
 #include "printing/printing_features.h"
 
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
+#include "printing/buildflags/buildflags.h"
+
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+    BUILDFLAG(IS_CHROMEOS)
+#include "base/metrics/field_trial_params.h"
+#endif
 
 namespace printing {
 namespace features {
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 // Use the CUPS IPP printing backend instead of the original CUPS backend that
 // calls the deprecated PPD API.
 const base::Feature kCupsIppPrintingBackend{"CupsIppPrintingBackend",
                                             base::FEATURE_ENABLED_BY_DEFAULT};
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
+// When using PostScript level 3 printing, render text with Type 42 fonts if
+// possible.
+const base::Feature kPrintWithPostScriptType42Fonts{
+    "PrintWithPostScriptType42Fonts", base::FEATURE_DISABLED_BY_DEFAULT};
+
 // When using GDI printing, avoid rasterization if possible.
 const base::Feature kPrintWithReducedRasterization{
     "PrintWithReducedRasterization", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Read printer capabilities with XPS when use XPS for printing.
+const base::Feature kReadPrinterCapabilitiesWithXps{
+    "ReadPrinterCapabilitiesWithXps", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Use XPS for printing instead of GDI.
 const base::Feature kUseXpsForPrinting{"UseXpsForPrinting",
@@ -41,16 +56,24 @@ bool ShouldPrintUsingXps(bool source_is_pdf) {
                                           ? features::kUseXpsForPrintingFromPdf
                                           : features::kUseXpsForPrinting);
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
-#if defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) || \
-    defined(OS_CHROMEOS)
+#if BUILDFLAG(ENABLE_OOP_PRINTING)
 // Enables printing interactions with the operating system to be performed
 // out-of-process.
 const base::Feature kEnableOopPrintDrivers{"EnableOopPrintDrivers",
                                            base::FEATURE_DISABLED_BY_DEFAULT};
-#endif  // defined(OS_WIN) || defined(OS_MAC) || defined(OS_LINUX) ||
-        // defined(OS_CHROMEOS)
+
+const base::FeatureParam<bool> kEnableOopPrintDriversJobPrint{
+    &kEnableOopPrintDrivers, "JobPrint", false};
+#endif  // BUILDFLAG(ENABLE_OOP_PRINTING)
+
+#if BUILDFLAG(ENABLE_PRINT_CONTENT_ANALYSIS)
+// Enables scanning of to-be-printed pages and documents for sensitive data if
+// the OnPrintEnterpriseConnector policy is enabled.
+const base::Feature kEnablePrintContentAnalysis{
+    "EnablePrintContentAnalysis", base::FEATURE_DISABLED_BY_DEFAULT};
+#endif  // BUILDFLAG(ENABLE_PRINT_CONTENT_ANALYSIS)
 
 }  // namespace features
 }  // namespace printing

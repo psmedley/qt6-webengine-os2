@@ -5,16 +5,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_STICKY_POSITION_SCROLLING_CONSTRAINTS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAGE_SCROLLING_STICKY_POSITION_SCROLLING_CONSTRAINTS_H_
 
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/geometry/physical_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_unit.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_hash_map.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 
 namespace blink {
 
 class PaintLayer;
 struct StickyPositionScrollingConstraints;
 
-typedef WTF::HashMap<PaintLayer*, StickyPositionScrollingConstraints>
+typedef HeapHashMap<Member<PaintLayer>,
+                    Member<StickyPositionScrollingConstraints>>
     StickyConstraintsMap;
 
 // Encapsulates the constraint information for a position: sticky element and
@@ -71,7 +74,8 @@ typedef WTF::HashMap<PaintLayer*, StickyPositionScrollingConstraints>
 // already being shifted by its ancestor. To correctly handle such situations we
 // apply more complicated logic which is explained in the implementation of
 // |ComputeStickyOffset|.
-struct StickyPositionScrollingConstraints final {
+struct CORE_EXPORT StickyPositionScrollingConstraints final
+    : public GarbageCollected<StickyPositionScrollingConstraints> {
  public:
   StickyPositionScrollingConstraints()
       : is_anchored_left(false),
@@ -94,9 +98,10 @@ struct StickyPositionScrollingConstraints final {
   // position before scroll.
   //
   // This method exists for performance (to avoid recomputing the sticky offset)
-  // and must only be called when compositing inputs are clean for the sticky
-  // element. (Or after prepaint for CompositeAfterPaint).
+  // and must only be called after prepaint.
   PhysicalOffset GetOffsetForStickyPosition(const StickyConstraintsMap&) const;
+
+  void Trace(Visitor* visitor) const;
 
   bool is_anchored_left : 1;
   bool is_anchored_right : 1;
@@ -137,8 +142,8 @@ struct StickyPositionScrollingConstraints final {
   //
   // See the implementation of |ComputeStickyOffset| for documentation on how
   // these ancestors are used to correct the offset calculation.
-  PaintLayer* nearest_sticky_layer_shifting_sticky_box = nullptr;
-  PaintLayer* nearest_sticky_layer_shifting_containing_block = nullptr;
+  Member<PaintLayer> nearest_sticky_layer_shifting_sticky_box = nullptr;
+  Member<PaintLayer> nearest_sticky_layer_shifting_containing_block = nullptr;
 
  private:
   // For performance we cache our accumulated sticky offset to allow descendant

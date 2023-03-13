@@ -7,8 +7,9 @@ import * as Platform from '../../../../core/platform/platform.js';
 import * as UI from '../../legacy.js';
 
 import {ColorSwatch} from './ColorSwatch.js';
+import swatchPopoverStyles from './swatchPopover.css.js';
 
-export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper {
+export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper<EventTypes> {
   private readonly popover: UI.GlassPane.GlassPane;
   private readonly hideProxy: () => void;
   private readonly boundOnKeyDown: (event: KeyboardEvent) => void;
@@ -22,7 +23,6 @@ export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper {
   constructor() {
     super();
     this.popover = new UI.GlassPane.GlassPane();
-    this.popover.registerRequiredCSS('ui/legacy/components/inline_editor/swatchPopover.css');
     this.popover.setSizeBehavior(UI.GlassPane.SizeBehavior.MeasureContent);
     this.popover.setMarginBehavior(UI.GlassPane.MarginBehavior.Arrow);
     this.popover.element.addEventListener('mousedown', e => e.consume(), false);
@@ -42,8 +42,12 @@ export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper {
     this.hideProxy();
   }
 
-  isShowing(): boolean {
-    return this.popover.isShowing();
+  setAnchorElement(anchorElement: Element): void {
+    this.anchorElement = anchorElement;
+  }
+
+  isShowing(view?: UI.Widget.Widget): boolean {
+    return this.popover.isShowing() && ((view && this.view === view) || !view);
   }
 
   show(view: UI.Widget.Widget, anchorElement: Element, hiddenCallback?: ((arg0: boolean) => void)): void {
@@ -56,6 +60,7 @@ export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper {
       this.hide(true);
     }
 
+    this.popover.registerCSSFiles([swatchPopoverStyles]);
     this.dispatchEventToListeners(Events.WillShowPopover);
 
     this.isHidden = false;
@@ -147,3 +152,7 @@ export class SwatchPopoverHelper extends Common.ObjectWrapper.ObjectWrapper {
 export enum Events {
   WillShowPopover = 'WillShowPopover',
 }
+
+export type EventTypes = {
+  [Events.WillShowPopover]: void,
+};

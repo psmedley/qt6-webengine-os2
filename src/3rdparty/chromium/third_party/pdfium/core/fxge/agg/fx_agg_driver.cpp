@@ -151,7 +151,7 @@ void RgbByteOrderTransferBitmap(const RetainPtr<CFX_DIBitmap>& pBitmap,
     for (int row = 0; row < height; row++) {
       uint8_t* dest_scan = buffer + (dest_top + row) * pitch + dest_left * Bpp;
       const uint8_t* src_scan =
-          pSrcBitmap->GetScanline(src_top + row) + src_left * Bpp;
+          pSrcBitmap->GetScanline(src_top + row).subspan(src_left * Bpp).data();
       if (Bpp == 4) {
         for (int col = 0; col < width; col++) {
           FXARGB_SETRGBORDERDIB(dest_scan,
@@ -177,7 +177,7 @@ void RgbByteOrderTransferBitmap(const RetainPtr<CFX_DIBitmap>& pBitmap,
     for (int row = 0; row < height; row++) {
       uint8_t* dest_scan = dest_buf + row * pitch;
       const uint8_t* src_scan =
-          pSrcBitmap->GetScanline(src_top + row) + src_left * 4;
+          pSrcBitmap->GetScanline(src_top + row).subspan(src_left * 4).data();
       for (int col = 0; col < width; col++) {
         *dest_scan++ = src_scan[2];
         *dest_scan++ = src_scan[1];
@@ -194,7 +194,7 @@ void RgbByteOrderTransferBitmap(const RetainPtr<CFX_DIBitmap>& pBitmap,
     for (int row = 0; row < height; row++) {
       uint8_t* dest_scan = dest_buf + row * pitch;
       const uint8_t* src_scan =
-          pSrcBitmap->GetScanline(src_top + row) + src_left * 3;
+          pSrcBitmap->GetScanline(src_top + row).subspan(src_left * 3).data();
       for (int col = 0; col < width; col++) {
         FXARGB_SETDIB(dest_scan,
                       ArgbEncode(0xff, src_scan[0], src_scan[1], src_scan[2]));
@@ -210,7 +210,7 @@ void RgbByteOrderTransferBitmap(const RetainPtr<CFX_DIBitmap>& pBitmap,
   for (int row = 0; row < height; row++) {
     uint8_t* dest_scan = dest_buf + row * pitch;
     const uint8_t* src_scan =
-        pSrcBitmap->GetScanline(src_top + row) + src_left * 4;
+        pSrcBitmap->GetScanline(src_top + row).subspan(src_left * 4).data();
     for (int col = 0; col < width; col++) {
       FXARGB_SETDIB(dest_scan,
                     ArgbEncode(0xff, src_scan[0], src_scan[1], src_scan[2]));
@@ -228,10 +228,10 @@ void RasterizeStroke(agg::rasterizer_scanline_aa* rasterizer,
                      bool bTextMode) {
   agg::line_cap_e cap;
   switch (pGraphState->m_LineCap) {
-    case CFX_GraphStateData::LineCapRound:
+    case CFX_GraphStateData::LineCap::kRound:
       cap = agg::round_cap;
       break;
-    case CFX_GraphStateData::LineCapSquare:
+    case CFX_GraphStateData::LineCap::kSquare:
       cap = agg::square_cap;
       break;
     default:
@@ -240,10 +240,10 @@ void RasterizeStroke(agg::rasterizer_scanline_aa* rasterizer,
   }
   agg::line_join_e join;
   switch (pGraphState->m_LineJoin) {
-    case CFX_GraphStateData::LineJoinRound:
+    case CFX_GraphStateData::LineJoin::kRound:
       join = agg::round_join;
       break;
-    case CFX_GraphStateData::LineJoinBevel:
+    case CFX_GraphStateData::LineJoin::kBevel:
       join = agg::bevel_join;
       break;
     default:
@@ -322,15 +322,15 @@ class CFX_Renderer {
   void render(const Scanline& sl);
 
  private:
-  typedef void (CFX_Renderer::*CompositeSpanFunc)(uint8_t*,
-                                                  int,
-                                                  int,
-                                                  int,
-                                                  uint8_t*,
-                                                  int,
-                                                  int,
-                                                  uint8_t*,
-                                                  uint8_t*);
+  using CompositeSpanFunc = void (CFX_Renderer::*)(uint8_t*,
+                                                   int,
+                                                   int,
+                                                   int,
+                                                   uint8_t*,
+                                                   int,
+                                                   int,
+                                                   uint8_t*,
+                                                   uint8_t*);
 
   void CompositeSpan(uint8_t* dest_scan,
                      uint8_t* backdrop_scan,
@@ -860,7 +860,7 @@ void CFX_Renderer::render(const Scanline& sl) {
   bool bDestAlpha = m_pDevice->IsAlphaFormat() || m_pDevice->IsMaskFormat();
   unsigned num_spans = sl.num_spans();
   typename Scanline::const_iterator span = sl.begin();
-  while (1) {
+  while (true) {
     if (span->len <= 0)
       break;
 
@@ -941,7 +941,7 @@ class RendererScanLineAaOffset {
     int y = sl.y();
     unsigned num_spans = sl.num_spans();
     typename Scanline::const_iterator span = sl.begin();
-    while (1) {
+    while (true) {
       int x = span->x;
       if (span->len > 0) {
         m_ren->blend_solid_hspan(x - m_left, y - m_top, (unsigned)span->len,
@@ -964,12 +964,10 @@ class RendererScanLineAaOffset {
   unsigned m_top;
 };
 
-// Note: BuildAggPath() has to take |agg_path| as an out-parameter. If it
-// returns the agg::path_storage instead, tests will fail with MSVC builds.
-void BuildAggPath(const CFX_Path* pPath,
-                  const CFX_Matrix* pObject2Device,
-                  agg::path_storage& agg_path) {
-  pdfium::span<const CFX_Path::Point> points = pPath->GetPoints();
+agg::path_storage BuildAggPath(const CFX_Path& path,
+                               const CFX_Matrix* pObject2Device) {
+  agg::path_storage agg_path;
+  pdfium::span<const CFX_Path::Point> points = path.GetPoints();
   for (size_t i = 0; i < points.size(); ++i) {
     CFX_PointF pos = points[i].m_Point;
     if (pObject2Device)
@@ -1009,6 +1007,7 @@ void BuildAggPath(const CFX_Path* pPath,
     if (points[i].m_CloseFigure)
       agg_path.end_poly();
   }
+  return agg_path;
 }
 
 }  // namespace
@@ -1030,21 +1029,21 @@ CFX_AggDeviceDriver::~CFX_AggDeviceDriver() {
   DestroyPlatform();
 }
 
-#if !defined(OS_APPLE)
+#if !BUILDFLAG(IS_APPLE)
 void CFX_AggDeviceDriver::InitPlatform() {}
 
 void CFX_AggDeviceDriver::DestroyPlatform() {}
 
-bool CFX_AggDeviceDriver::DrawDeviceText(int nChars,
-                                         const TextCharPos* pCharPos,
-                                         CFX_Font* pFont,
-                                         const CFX_Matrix& mtObject2Device,
-                                         float font_size,
-                                         uint32_t color,
-                                         const CFX_TextRenderOptions& options) {
+bool CFX_AggDeviceDriver::DrawDeviceText(
+    pdfium::span<const TextCharPos> pCharPos,
+    CFX_Font* pFont,
+    const CFX_Matrix& mtObject2Device,
+    float font_size,
+    uint32_t color,
+    const CFX_TextRenderOptions& options) {
   return false;
 }
-#endif  // !defined(OS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE)
 
 DeviceType CFX_AggDeviceDriver::GetDeviceType() const {
   return DeviceType::kDisplay;
@@ -1125,7 +1124,7 @@ void CFX_AggDeviceDriver::SetClipMask(agg::rasterizer_scanline_aa& rasterizer) {
 }
 
 bool CFX_AggDeviceDriver::SetClip_PathFill(
-    const CFX_Path* pPath,
+    const CFX_Path& path,
     const CFX_Matrix* pObject2Device,
     const CFX_FillRenderOptions& fill_options) {
   DCHECK(fill_options.fill_type != CFX_FillRenderOptions::FillType::kNoFill);
@@ -1135,7 +1134,7 @@ bool CFX_AggDeviceDriver::SetClip_PathFill(
     m_pClipRgn = std::make_unique<CFX_ClipRgn>(
         GetDeviceCaps(FXDC_PIXEL_WIDTH), GetDeviceCaps(FXDC_PIXEL_HEIGHT));
   }
-  Optional<CFX_FloatRect> maybe_rectf = pPath->GetRect(pObject2Device);
+  absl::optional<CFX_FloatRect> maybe_rectf = path.GetRect(pObject2Device);
   if (maybe_rectf.has_value()) {
     CFX_FloatRect& rectf = maybe_rectf.value();
     rectf.Intersect(
@@ -1145,8 +1144,7 @@ bool CFX_AggDeviceDriver::SetClip_PathFill(
     m_pClipRgn->IntersectRect(rect);
     return true;
   }
-  agg::path_storage path_data;
-  BuildAggPath(pPath, pObject2Device, path_data);
+  agg::path_storage path_data = BuildAggPath(path, pObject2Device);
   path_data.end_poly();
   agg::rasterizer_scanline_aa rasterizer;
   rasterizer.clip_box(0.0f, 0.0f,
@@ -1159,15 +1157,14 @@ bool CFX_AggDeviceDriver::SetClip_PathFill(
 }
 
 bool CFX_AggDeviceDriver::SetClip_PathStroke(
-    const CFX_Path* pPath,
+    const CFX_Path& path,
     const CFX_Matrix* pObject2Device,
     const CFX_GraphStateData* pGraphState) {
   if (!m_pClipRgn) {
     m_pClipRgn = std::make_unique<CFX_ClipRgn>(
         GetDeviceCaps(FXDC_PIXEL_WIDTH), GetDeviceCaps(FXDC_PIXEL_HEIGHT));
   }
-  agg::path_storage path_data;
-  BuildAggPath(pPath, nullptr, path_data);
+  agg::path_storage path_data = BuildAggPath(path, nullptr);
   agg::rasterizer_scanline_aa rasterizer;
   rasterizer.clip_box(0.0f, 0.0f,
                       static_cast<float>(GetDeviceCaps(FXDC_PIXEL_WIDTH)),
@@ -1196,7 +1193,7 @@ void CFX_AggDeviceDriver::RenderRasterizer(
                         m_FillOptions.aliased_path);
 }
 
-bool CFX_AggDeviceDriver::DrawPath(const CFX_Path* pPath,
+bool CFX_AggDeviceDriver::DrawPath(const CFX_Path& path,
                                    const CFX_Matrix* pObject2Device,
                                    const CFX_GraphStateData* pGraphState,
                                    uint32_t fill_color,
@@ -1212,8 +1209,7 @@ bool CFX_AggDeviceDriver::DrawPath(const CFX_Path* pPath,
   m_FillOptions = fill_options;
   if (fill_options.fill_type != CFX_FillRenderOptions::FillType::kNoFill &&
       fill_color) {
-    agg::path_storage path_data;
-    BuildAggPath(pPath, pObject2Device, path_data);
+    agg::path_storage path_data = BuildAggPath(path, pObject2Device);
     agg::rasterizer_scanline_aa rasterizer;
     rasterizer.clip_box(0.0f, 0.0f,
                         static_cast<float>(GetDeviceCaps(FXDC_PIXEL_WIDTH)),
@@ -1228,8 +1224,7 @@ bool CFX_AggDeviceDriver::DrawPath(const CFX_Path* pPath,
     return true;
 
   if (fill_options.zero_area) {
-    agg::path_storage path_data;
-    BuildAggPath(pPath, pObject2Device, path_data);
+    agg::path_storage path_data = BuildAggPath(path, pObject2Device);
     agg::rasterizer_scanline_aa rasterizer;
     rasterizer.clip_box(0.0f, 0.0f,
                         static_cast<float>(GetDeviceCaps(FXDC_PIXEL_WIDTH)),
@@ -1252,8 +1247,7 @@ bool CFX_AggDeviceDriver::DrawPath(const CFX_Path* pPath,
     matrix1 = *pObject2Device * matrix2.GetInverse();
   }
 
-  agg::path_storage path_data;
-  BuildAggPath(pPath, &matrix1, path_data);
+  agg::path_storage path_data = BuildAggPath(path, &matrix1);
   agg::rasterizer_scanline_aa rasterizer;
   rasterizer.clip_box(0.0f, 0.0f,
                       static_cast<float>(GetDeviceCaps(FXDC_PIXEL_WIDTH)),
@@ -1321,14 +1315,14 @@ bool CFX_AggDeviceDriver::GetDIBits(const RetainPtr<CFX_DIBitmap>& pBitmap,
                top + pBitmap->GetHeight());
   RetainPtr<CFX_DIBitmap> pBack;
   if (m_pBackdropBitmap) {
-    pBack = m_pBackdropBitmap->Clone(&rect);
+    pBack = m_pBackdropBitmap->ClipTo(rect);
     if (!pBack)
       return true;
 
     pBack->CompositeBitmap(0, 0, pBack->GetWidth(), pBack->GetHeight(),
                            m_pBitmap, 0, 0, BlendMode::kNormal, nullptr, false);
   } else {
-    pBack = m_pBitmap->Clone(&rect);
+    pBack = m_pBitmap->ClipTo(rect);
     if (!pBack)
       return true;
   }

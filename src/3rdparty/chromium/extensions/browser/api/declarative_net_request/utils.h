@@ -12,7 +12,6 @@
 
 #include "base/auto_reset.h"
 #include "base/containers/span.h"
-#include "base/macros.h"
 #include "extensions/browser/api/declarative_net_request/file_backed_ruleset_source.h"
 #include "extensions/browser/api/declarative_net_request/flat/extension_ruleset_generated.h"
 #include "extensions/common/api/declarative_net_request.h"
@@ -143,6 +142,9 @@ size_t GetEnabledStaticRuleCount(const CompositeMatcher* composite_matcher);
 // permissions are checked.
 bool HasDNRFeedbackPermission(const Extension* extension,
                               const absl::optional<int>& tab_id);
+
+// Returns the appropriate error string for an unsuccessful rule parsing result.
+std::string GetParseError(ParseResult error_reason, int rule_id);
 
 }  // namespace declarative_net_request
 }  // namespace extensions

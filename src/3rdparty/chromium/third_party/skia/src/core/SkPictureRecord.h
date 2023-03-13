@@ -47,6 +47,12 @@ public:
         return fTextBlobs;
     }
 
+#if SK_SUPPORT_GPU
+    const SkTArray<sk_sp<const GrSlug>>& getSlugs() const {
+        return fSlugs;
+    }
+#endif
+
     const SkTArray<sk_sp<const SkVertices>>& getVertices() const {
         return fVertices;
     }
@@ -102,7 +108,7 @@ private:
     size_t addDraw(DrawType drawType, size_t* size) {
         size_t offset = fWriter.bytesWritten();
 
-        this->predrawNotify();
+        SkASSERT_RELEASE(this->predrawNotify());
 
         SkASSERT(0 != *size);
         SkASSERT(((uint8_t) drawType) == drawType);
@@ -144,6 +150,7 @@ private:
     void addSampling(const SkSamplingOptions&);
     void addText(const void* text, size_t byteLength);
     void addTextBlob(const SkTextBlob* blob);
+    void addSlug(const GrSlug* slug);
     void addVertices(const SkVertices*);
 
     int find(const SkBitmap& bitmap);
@@ -163,7 +170,6 @@ protected:
     bool onDoSaveBehind(const SkRect*) override;
     void willRestore() override;
 
-    void onMarkCTM(const char*) override;
     void didConcat44(const SkM44&) override;
     void didSetM44(const SkM44&) override;
     void didScale(SkScalar, SkScalar) override;
@@ -173,7 +179,9 @@ protected:
 
     void onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
                                 const SkPaint& paint) override;
-
+#if SK_SUPPORT_GPU
+    void onDrawSlug(const GrSlug* slug) override;
+#endif
     void onDrawPatch(const SkPoint cubics[12], const SkColor colors[4],
                      const SkPoint texCoords[4], SkBlendMode, const SkPaint& paint) override;
 
@@ -247,6 +255,9 @@ private:
     SkTArray<sk_sp<SkDrawable>>       fDrawables;
     SkTArray<sk_sp<const SkTextBlob>> fTextBlobs;
     SkTArray<sk_sp<const SkVertices>> fVertices;
+#if SK_SUPPORT_GPU
+    SkTArray<sk_sp<const GrSlug>>     fSlugs;
+#endif
 
     uint32_t fRecordFlags;
     int      fInitialSaveCount;

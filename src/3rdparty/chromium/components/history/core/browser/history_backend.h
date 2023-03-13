@@ -18,15 +18,15 @@
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
 #include "base/containers/flat_set.h"
-#include "base/containers/mru_cache.h"
+#include "base/containers/lru_cache.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/memory/memory_pressure_listener.h"
 #include "base/observer_list.h"
-#include "base/single_thread_task_runner.h"
 #include "base/supports_user_data.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "base/task/single_thread_task_runner.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/favicon/core/favicon_backend_delegate.h"
 #include "components/favicon/core/favicon_database.h"
@@ -87,6 +87,10 @@ class QueuedHistoryDBTask {
       std::unique_ptr<HistoryDBTask> task,
       scoped_refptr<base::SingleThreadTaskRunner> origin_loop,
       const base::CancelableTaskTracker::IsCanceledCallback& is_canceled);
+
+  QueuedHistoryDBTask(const QueuedHistoryDBTask&) = delete;
+  QueuedHistoryDBTask& operator=(const QueuedHistoryDBTask&) = delete;
+
   ~QueuedHistoryDBTask();
 
   bool is_canceled();
@@ -97,8 +101,6 @@ class QueuedHistoryDBTask {
   std::unique_ptr<HistoryDBTask> task_;
   scoped_refptr<base::SingleThreadTaskRunner> origin_loop_;
   base::CancelableTaskTracker::IsCanceledCallback is_canceled_;
-
-  DISALLOW_COPY_AND_ASSIGN(QueuedHistoryDBTask);
 };
 
 // *See the .cc file for more information on the design.*
@@ -148,7 +150,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     virtual void NotifyFaviconsChanged(const std::set<GURL>& page_urls,
                                        const GURL& icon_url) = 0;
 
-    // Notify HistoryService that the user is visiting an URL. The event will
+    // Notify HistoryService that the user is visiting a URL. The event will
     // be forwarded to the HistoryServiceObservers in the correct thread.
     virtual void NotifyURLVisited(ui::PageTransition transition,
                                   const URLRow& row,
@@ -176,6 +178,14 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
     // thread.
     virtual void NotifyKeywordSearchTermDeleted(URLID url_id) = 0;
 
+    // Notify HistoryService that content model annotation associated with
+    // the URL for `row` has been modified. Changes to the floc and related
+    // searches annotations will not trigger this. The event will be forwarded
+    // to the HistoryServiceObservers in the correct thread.
+    virtual void NotifyContentModelAnnotationModified(
+        const URLRow& row,
+        const VisitContentModelAnnotations& model_annotations) = 0;
+
     // Invoked when the backend has finished loading the db.
     virtual void DBLoaded() = 0;
   };
@@ -199,6 +209,9 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                  std::unique_ptr<HistoryBackendClient> backend_client,
                  scoped_refptr<base::SequencedTaskRunner> task_runner);
 
+  HistoryBackend(const HistoryBackend&) = delete;
+  HistoryBackend& operator=(const HistoryBackend&) = delete;
+
   // Must be called after creation but before any objects are created. If this
   // fails, all other functions will fail as well. (Since this runs on another
   // thread, we don't bother returning failure.)
@@ -208,11 +221,11 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
             const HistoryDatabaseParams& history_database_params);
 
   // Notification that the history system is shutting down. This will break
-  // the refs owned by the delegate and any pending transaction so it will
+  // the refs owned by the delegate and any pending transaction, so it will
   // actually be deleted.
   void Closing();
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // Persists any in-flight state, without actually shutting down the history
   // system. This is intended for use when the application is backgrounded.
   void PersistState();
@@ -223,7 +236,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Clears all on-demand favicons.
   void ClearAllOnDemandFavicons();
 
-  // Gets the counts and last last time of URLs that belong to `origins` in the
+  // Gets the counts and last time of URLs that belong to `origins` in the
   // history database. Origins that are not in the history database will be in
   // the map with a count and time of 0.
   // Returns an empty map if db_ is not initialized.
@@ -240,13 +253,18 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
                              int nav_entry_id,
                              const GURL& url,
                              base::Time end_ts);
-  void SetFlocAllowed(ContextID context_id, int nav_entry_id, const GURL& url);
+  void SetBrowsingTopicsAllowed(ContextID context_id,
+                                int nav_entry_id,
+                                const GURL& url);
   void AddContentModelAnnotationsForVisit(
       VisitID visit_id,
       const VisitContentModelAnnotations& model_annotations);
   void AddRelatedSearchesForVisit(
       VisitID visit_id,
       const std::vector<std::string>& related_searches);
+  void AddSearchMetadataForVisit(VisitID visit_id,
+                                 const GURL& search_normalized_url,
+                                 const std::u16string& search_terms);
 
   // Querying ------------------------------------------------------------------
 
@@ -438,13 +456,27 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       VisitID visit_id,
       const VisitContextAnnotations& visit_context_annotations);
 
-  std::vector<AnnotatedVisit> GetAnnotatedVisits(const QueryOptions& options);
+  std::vector<AnnotatedVisit> GetAnnotatedVisits(
+      const QueryOptions& options,
+      bool* limited_by_max_count = nullptr);
 
-  ClusterIdsAndAnnotatedVisitsResult GetRecentClusterIdsAndAnnotatedVisits(
-      base::Time minimum_time,
-      int max_results);
+  // Utility method to Construct `AnnotatedVisit`s.
+  std::vector<AnnotatedVisit> ToAnnotatedVisits(const VisitVector& visit_rows);
 
-  std::vector<Cluster> GetClusters(int max_results);
+  // Like above, but will first construct `visit_rows` from each `VisitID`
+  // before delegating to the overloaded `ToAnnotatedVisits()` above.
+  std::vector<AnnotatedVisit> ToAnnotatedVisits(
+      const std::vector<VisitID>& visit_ids);
+
+  void ReplaceClusters(const std::vector<int64_t>& ids_to_delete,
+                       const std::vector<Cluster>& clusters_to_add);
+
+  std::vector<Cluster> GetMostRecentClusters(base::Time inclusive_min_time,
+                                             base::Time exclusive_max_time,
+                                             int max_clusters);
+
+  // Get a `Cluster`.
+  Cluster GetCluster(int64_t cluster_id);
 
   // Finds the 1st visit in the redirect chain containing `visit`. Similar to
   // `GetRedirectsToSpecificVisit()`, except 1) only returns the 1st visit of
@@ -487,10 +519,13 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   virtual bool RemoveVisits(const VisitVector& visits);
 
-  // Returns the VisitSource associated with each one of the passed visits.
+  // Returns the `VisitSource` associated with each one of the passed visits.
   // If there is no entry in the map for a given visit, that means the visit
-  // was SOURCE_BROWSED. Returns false if there is no HistoryDatabase..
+  // was `SOURCE_BROWSED`. Returns false if there is no `HistoryDatabase`.
   bool GetVisitsSource(const VisitVector& visits, VisitSourceMap* sources);
+
+  // Like `GetVisitsSource`, but for a single visit.
+  bool GetVisitSource(const VisitID visit_id, VisitSource* source);
 
   virtual bool GetURL(const GURL& url, URLRow* url_row);
 
@@ -530,7 +565,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
 
   // Calls ExpireHistoryBetween() once for each element in the vector.
   // The fields of `ExpireHistoryArgs` map directly to the arguments of
-  // of ExpireHistoryBetween().
+  // ExpireHistoryBetween().
   void ExpireHistory(const std::vector<ExpireHistoryArgs>& expire_list);
 
   // Expires all visits before and including the given time, updating the URLs
@@ -637,7 +672,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
       bool hidden,
       VisitSource visit_source,
       bool should_increment_typed_count,
-      bool floc_allowed,
+      VisitID opener_visit,
       absl::optional<std::u16string> title = absl::nullopt);
 
   // Returns a redirect chain in `redirects` for the VisitID
@@ -673,13 +708,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // Performs a brute force search over the database to find any host names that
   // match the `host_name` string. Returns any matches.
   URLRows GetMatchesForHost(const std::u16string& host_name);
-
-  // Clusters ------------------------------------------------------------------
-
-  // Convert `AnnotatedVisitRow`s to `AnnotatedVisit`s. Drops rows without
-  // associated URL or visit rows, though this shouldn't happen usually.
-  std::vector<AnnotatedVisit> AnnotatedVisitsFromRows(
-      const std::vector<AnnotatedVisitRow>& rows);
 
   // Committing ----------------------------------------------------------------
 
@@ -816,7 +844,7 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   //
   // As with AddPage, the last item in the redirect chain will be the
   // destination of the redirect (i.e., the key into recent_redirects_);
-  typedef base::MRUCache<GURL, RedirectList> RedirectCache;
+  typedef base::LRUCache<GURL, RedirectList> RedirectCache;
   RedirectCache recent_redirects_;
 
   // Timestamp of the first entry in our database.
@@ -858,8 +886,6 @@ class HistoryBackend : public base::RefCountedThreadSafe<HistoryBackend>,
   // it unregisters itself as observer during destruction.
   std::unique_ptr<TypedURLSyncBridge> typed_url_sync_bridge_;
 #endif // !defined(TOOLKIT_QT)
-
-  DISALLOW_COPY_AND_ASSIGN(HistoryBackend);
 };
 
 }  // namespace history

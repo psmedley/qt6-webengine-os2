@@ -7,10 +7,10 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/time/time.h"
 #include "media/capture/video/video_capture_device_info.h"
 #include "third_party/decklink/mac/include/DeckLinkAPI.h"
 
@@ -51,6 +51,9 @@ class DeckLinkCaptureDelegate
   DeckLinkCaptureDelegate(
       const media::VideoCaptureDeviceDescriptor& device_descriptor,
       media::VideoCaptureDeviceDeckLinkMac* frame_receiver);
+
+  DeckLinkCaptureDelegate(const DeckLinkCaptureDelegate&) = delete;
+  DeckLinkCaptureDelegate& operator=(const DeckLinkCaptureDelegate&) = delete;
 
   void AllocateAndStart(const media::VideoCaptureParams& params);
   void StopAndDeAllocate();
@@ -104,8 +107,6 @@ class DeckLinkCaptureDelegate
   friend class base::RefCountedThreadSafe<DeckLinkCaptureDelegate>;
 
   ~DeckLinkCaptureDelegate() override;
-
-  DISALLOW_COPY_AND_ASSIGN(DeckLinkCaptureDelegate);
 };
 
 static float GetDisplayModeFrameRate(
@@ -289,7 +290,7 @@ HRESULT DeckLinkCaptureDelegate::VideoInputFrameArrived(
     base::TimeDelta timestamp;
     if (SUCCEEDED(video_frame->GetStreamTime(&frame_time, &frame_duration,
                                              micros_time_scale))) {
-      timestamp = base::TimeDelta::FromMicroseconds(frame_time);
+      timestamp = base::Microseconds(frame_time);
     } else {
       timestamp = now - first_ref_time_;
     }
@@ -378,7 +379,8 @@ void VideoCaptureDeviceDeckLinkMac::EnumerateDevices(
     decklink_local.swap(decklink);
 
     CFStringRef device_model_name = NULL;
-    HRESULT hr = decklink_local->GetModelName(&device_model_name);
+    [[maybe_unused]] HRESULT hr =
+        decklink_local->GetModelName(&device_model_name);
     DVLOG_IF(1, hr != S_OK) << "Error reading Blackmagic device model name";
     CFStringRef device_display_name = NULL;
     hr = decklink_local->GetDisplayName(&device_display_name);

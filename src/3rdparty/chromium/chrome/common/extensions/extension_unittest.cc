@@ -4,7 +4,6 @@
 
 #include <stddef.h>
 
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/path_service.h"
@@ -187,13 +186,13 @@ TEST(ExtensionTest, RTLNameInLTRLocale) {
   run_rtl_test(L"google\x202e.com", L"google\x202e.com\x202c");
 
   run_rtl_test(L"كبير Google التطبيق",
-#if !defined(OS_WIN)
+#if !BUILDFLAG(IS_WIN)
                L"\x200e\x202bكبير Google التطبيق\x202c\x200e");
 #else
                // On Windows for an LTR locale, no changes to the string are
                // made.
                L"كبير Google التطبيق");
-#endif  // !OS_WIN
+#endif  // !BUILDFLAG(IS_WIN)
 }
 
 TEST(ExtensionTest, GetResourceURLAndPath) {
@@ -274,9 +273,9 @@ TEST(ExtensionTest, GetResource) {
   scoped_refptr<Extension> extension = LoadManifestStrict("empty_manifest",
       "empty.json");
   EXPECT_TRUE(extension.get());
-  for (size_t i = 0; i < base::size(valid_path_test_cases); ++i)
+  for (size_t i = 0; i < std::size(valid_path_test_cases); ++i)
     EXPECT_TRUE(!extension->GetResource(valid_path_test_cases[i]).empty());
-  for (size_t i = 0; i < base::size(invalid_path_test_cases); ++i)
+  for (size_t i = 0; i < std::size(invalid_path_test_cases); ++i)
     EXPECT_TRUE(extension->GetResource(invalid_path_test_cases[i]).empty());
 }
 
@@ -439,11 +438,7 @@ TEST(ExtensionTest, ExtraFlags) {
       LoadManifest("app", "manifest.json", Extension::FROM_WEBSTORE);
   EXPECT_TRUE(extension->from_webstore());
 
-  extension = LoadManifest("app", "manifest.json", Extension::FROM_BOOKMARK);
-  EXPECT_TRUE(extension->from_bookmark());
-
   extension = LoadManifest("app", "manifest.json", Extension::NO_FLAGS);
-  EXPECT_FALSE(extension->from_bookmark());
   EXPECT_FALSE(extension->from_webstore());
 }
 

@@ -415,20 +415,6 @@ static int overlay_cuda_activate(AVFilterContext *avctx)
 }
 
 /**
- * Query formats
- */
-static int overlay_cuda_query_formats(AVFilterContext *avctx)
-{
-    static const enum AVPixelFormat pixel_formats[] = {
-        AV_PIX_FMT_CUDA, AV_PIX_FMT_NONE,
-    };
-
-    AVFilterFormats *pix_fmts = ff_make_format_list(pixel_formats);
-
-    return ff_set_common_formats(avctx, pix_fmts);
-}
-
-/**
  * Configure output
  */
 static int overlay_cuda_config_output(AVFilterLink *outlink)
@@ -567,7 +553,6 @@ static const AVFilterPad overlay_cuda_inputs[] = {
         .type         = AVMEDIA_TYPE_VIDEO,
         .config_props = config_input_overlay,
     },
-    { NULL }
 };
 
 static const AVFilterPad overlay_cuda_outputs[] = {
@@ -576,7 +561,6 @@ static const AVFilterPad overlay_cuda_outputs[] = {
         .type          = AVMEDIA_TYPE_VIDEO,
         .config_props  = &overlay_cuda_config_output,
     },
-    { NULL }
 };
 
 const AVFilter ff_vf_overlay_cuda = {
@@ -587,9 +571,9 @@ const AVFilter ff_vf_overlay_cuda = {
     .init            = &overlay_cuda_init,
     .uninit          = &overlay_cuda_uninit,
     .activate        = &overlay_cuda_activate,
-    .query_formats   = &overlay_cuda_query_formats,
-    .inputs          = overlay_cuda_inputs,
-    .outputs         = overlay_cuda_outputs,
+    FILTER_INPUTS(overlay_cuda_inputs),
+    FILTER_OUTPUTS(overlay_cuda_outputs),
+    FILTER_SINGLE_PIXFMT(AV_PIX_FMT_CUDA),
     .preinit         = overlay_cuda_framesync_preinit,
     .flags_internal  = FF_FILTER_FLAG_HWFRAME_AWARE,
 };

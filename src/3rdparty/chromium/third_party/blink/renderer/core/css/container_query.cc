@@ -4,40 +4,49 @@
 
 #include "third_party/blink/renderer/core/css/container_query.h"
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
+#include "third_party/blink/renderer/core/style/computed_style_constants.h"
 
 namespace blink {
 
-namespace {
+ContainerSelector::ContainerSelector(AtomicString name,
+                                     const MediaQueryExpNode& query)
+    : name_(std::move(name)), feature_flags_(query.CollectFeatureFlags()) {}
 
-PhysicalAxes ComputeQueriedAxes(const MediaQuerySet& media_queries) {
-  PhysicalAxes axes(kPhysicalAxisNone);
+unsigned ContainerSelector::Type(WritingMode writing_mode) const {
+  unsigned type = kContainerTypeNone;
 
-  for (const auto& media_query : media_queries.QueryVector()) {
-    for (const auto& expression : media_query->Expressions()) {
-      if (expression.IsWidthDependent())
-        axes |= PhysicalAxes(kPhysicalAxisHorizontal);
-      if (expression.IsHeightDependent())
-        axes |= PhysicalAxes(kPhysicalAxisVertical);
-    }
+  if (feature_flags_ & MediaQueryExpNode::kFeatureInlineSize)
+    type |= kContainerTypeInlineSize;
+  if (feature_flags_ & MediaQueryExpNode::kFeatureBlockSize)
+    type |= kContainerTypeBlockSize;
+  if (feature_flags_ & MediaQueryExpNode::kFeatureWidth) {
+    type |= (IsHorizontalWritingMode(writing_mode) ? kContainerTypeInlineSize
+                                                   : kContainerTypeBlockSize);
+  }
+  if (feature_flags_ & MediaQueryExpNode::kFeatureHeight) {
+    type |= (IsHorizontalWritingMode(writing_mode) ? kContainerTypeBlockSize
+                                                   : kContainerTypeInlineSize);
   }
 
-  return axes;
+  return type;
 }
 
-}  // namespace
-
-ContainerQuery::ContainerQuery(const AtomicString& name,
-                               scoped_refptr<MediaQuerySet> media_queries)
-    : name_(name),
-      media_queries_(media_queries),
-      queried_axes_(ComputeQueriedAxes(*media_queries)) {}
+ContainerQuery::ContainerQuery(ContainerSelector selector,
+                               std::unique_ptr<MediaQueryExpNode> query)
+    : selector_(std::move(selector)), query_(std::move(query)) {}
 
 ContainerQuery::ContainerQuery(const ContainerQuery& other)
-    : media_queries_(other.media_queries_->Copy()),
-      queried_axes_(other.queried_axes_) {}
+    : selector_(other.selector_), query_(other.query_->Copy()) {}
 
 String ContainerQuery::ToString() const {
-  return media_queries_->MediaText();
+  return query_->Serialize();
+}
+
+ContainerQuery* ContainerQuery::CopyWithParent(
+    const ContainerQuery* parent) const {
+  ContainerQuery* copy = MakeGarbageCollected<ContainerQuery>(*this);
+  copy->parent_ = parent;
+  return copy;
 }
 
 }  // namespace blink

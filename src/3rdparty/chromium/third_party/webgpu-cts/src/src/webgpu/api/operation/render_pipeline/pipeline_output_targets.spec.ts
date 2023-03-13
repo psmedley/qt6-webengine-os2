@@ -27,6 +27,7 @@ class F extends GPUTest {
         suffix = 'u';
         break;
       case 'float':
+      case 'unfilterable-float':
         fragColorType = 'f32';
         suffix = '';
         fractionDigits = 4;
@@ -61,7 +62,7 @@ class F extends GPUTest {
     }
 
     return `
-    [[stage(fragment)]] fn main() -> [[location(0)]] ${outputType} {
+    @stage(fragment) fn main() -> @location(0) ${outputType} {
         return ${result};
     }`;
   }
@@ -99,9 +100,9 @@ g.test('color,component_count')
       vertex: {
         module: t.device.createShaderModule({
           code: `
-            [[stage(vertex)]] fn main(
-              [[builtin(vertex_index)]] VertexIndex : u32
-              ) -> [[builtin(position)]] vec4<f32> {
+            @stage(vertex) fn main(
+              @builtin(vertex_index) VertexIndex : u32
+              ) -> @builtin(position) vec4<f32> {
                 var pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
                     vec2<f32>(-1.0, -3.0),
                     vec2<f32>(3.0, 1.0),
@@ -128,13 +129,14 @@ g.test('color,component_count')
         {
           view: renderTarget.createView(),
           storeOp: 'store',
-          loadValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
         },
       ],
     });
     pass.setPipeline(pipeline);
     pass.draw(3);
-    pass.endPass();
+    pass.end();
     t.device.queue.submit([encoder.finish()]);
 
     t.expectSingleColor(renderTarget, format, {
@@ -309,9 +311,9 @@ The attachment has a load value of [1, 0, 0, 1]
       vertex: {
         module: t.device.createShaderModule({
           code: `
-            [[stage(vertex)]] fn main(
-              [[builtin(vertex_index)]] VertexIndex : u32
-              ) -> [[builtin(position)]] vec4<f32> {
+            @stage(vertex) fn main(
+              @builtin(vertex_index) VertexIndex : u32
+              ) -> @builtin(position) vec4<f32> {
                 var pos : array<vec2<f32>, 3> = array<vec2<f32>, 3>(
                     vec2<f32>(-1.0, -3.0),
                     vec2<f32>(3.0, 1.0),
@@ -354,13 +356,14 @@ The attachment has a load value of [1, 0, 0, 1]
         {
           view: renderTarget.createView(),
           storeOp: 'store',
-          loadValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          clearValue: { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
+          loadOp: 'clear',
         },
       ],
     });
     pass.setPipeline(pipeline);
     pass.draw(3);
-    pass.endPass();
+    pass.end();
     t.device.queue.submit([encoder.finish()]);
 
     t.expectSingleColor(renderTarget, format, {

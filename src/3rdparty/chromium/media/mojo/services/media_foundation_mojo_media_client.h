@@ -6,8 +6,7 @@
 #define MEDIA_MOJO_SERVICES_MEDIA_FOUNDATION_MOJO_MEDIA_CLIENT_H_
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
 #include "media/mojo/services/mojo_media_client.h"
 
 namespace media {
@@ -17,21 +16,26 @@ namespace media {
 // process hosting MediaFoundationRenderer and MediaFoundationCdm.
 class MediaFoundationMojoMediaClient final : public MojoMediaClient {
  public:
-  explicit MediaFoundationMojoMediaClient(const base::FilePath& user_data_dir);
+  MediaFoundationMojoMediaClient();
+
+  MediaFoundationMojoMediaClient(const MediaFoundationMojoMediaClient&) =
+      delete;
+  MediaFoundationMojoMediaClient& operator=(
+      const MediaFoundationMojoMediaClient&) = delete;
+
   ~MediaFoundationMojoMediaClient() override;
 
   // MojoMediaClient implementation.
   std::unique_ptr<Renderer> CreateMediaFoundationRenderer(
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       mojom::FrameInterfaceFactory* frame_interfaces,
+      mojo::PendingRemote<mojom::MediaLog> media_log_remote,
       mojo::PendingReceiver<mojom::MediaFoundationRendererExtension>
-          renderer_extension_receiver) override;
+          renderer_extension_receiver,
+      mojo::PendingRemote<media::mojom::MediaFoundationRendererClientExtension>
+          client_extension_remote) override;
   std::unique_ptr<CdmFactory> CreateCdmFactory(
       mojom::FrameInterfaceFactory* frame_interfaces) override;
-
- private:
-  base::FilePath user_data_dir_;
-  DISALLOW_COPY_AND_ASSIGN(MediaFoundationMojoMediaClient);
 };
 
 }  // namespace media

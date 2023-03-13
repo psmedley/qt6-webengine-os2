@@ -298,7 +298,7 @@ gfx::NativeViewAccessible AXVirtualView::ChildAtIndex(int index) {
   return nullptr;
 }
 
-#if !defined(OS_MAC)
+#if !BUILDFLAG(IS_MAC)
 gfx::NativeViewAccessible AXVirtualView::GetNSWindow() {
   NOTREACHED();
   return nullptr;
@@ -309,7 +309,7 @@ gfx::NativeViewAccessible AXVirtualView::GetNativeViewAccessible() {
   return GetNativeObject();
 }
 
-gfx::NativeViewAccessible AXVirtualView::GetParent() {
+gfx::NativeViewAccessible AXVirtualView::GetParent() const {
   if (parent_view_) {
     if (!parent_view_->IsIgnored())
       return parent_view_->GetNativeObject();
@@ -435,7 +435,7 @@ const ui::AXUniqueId& AXVirtualView::GetUniqueId() const {
 // Virtual views need to implement this function in order for accessibility
 // events to be routed correctly.
 gfx::AcceleratedWidget AXVirtualView::GetTargetForNativeAccessibilityEvent() {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   if (GetOwnerView())
     return HWNDForView(GetOwnerView());
 #endif
@@ -492,6 +492,15 @@ bool AXVirtualView::HandleAccessibleActionInOwnerView(
   ui::AXActionData forwarded_action_data = action_data;
   forwarded_action_data.target_node_id = GetData().id;
   return GetOwnerView()->HandleAccessibleAction(forwarded_action_data);
+}
+
+void AXVirtualView::set_cache(AXAuraObjCache* cache) {
+#if defined(USE_AURA)
+  if (ax_aura_obj_cache_ && cache)
+    ax_aura_obj_cache_->Remove(this);
+#endif
+
+  ax_aura_obj_cache_ = cache;
 }
 
 View* AXVirtualView::GetOwnerView() const {

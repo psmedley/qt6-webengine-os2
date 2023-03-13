@@ -10,7 +10,6 @@
 
 package org.webrtc;
 
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.SurfaceTexture;
@@ -20,16 +19,16 @@ import android.hardware.camera2.CameraMetadata;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.os.Build;
 import android.os.SystemClock;
-import android.support.annotation.Nullable;
 import android.util.AndroidException;
 import android.util.Range;
+import androidx.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.webrtc.CameraEnumerationAndroid.CaptureFormat;
 
-@TargetApi(21)
 public class Camera2Enumerator implements CameraEnumerator {
   private final static String TAG = "Camera2Enumerator";
   private final static double NANO_SECONDS_PER_SECOND = 1.0e9;
@@ -106,10 +105,6 @@ public class Camera2Enumerator implements CameraEnumerator {
    * Checks if API is supported and all cameras have better than legacy support.
    */
   public static boolean isSupported(Context context) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
-      return false;
-    }
-
     CameraManager cameraManager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
     try {
       String[] cameraIds = cameraManager.getCameraIdList();
@@ -230,7 +225,10 @@ public class Camera2Enumerator implements CameraEnumerator {
 
   // Convert from android.util.Size to Size.
   private static List<Size> convertSizes(android.util.Size[] cameraSizes) {
-    final List<Size> sizes = new ArrayList<Size>();
+    if (cameraSizes == null || cameraSizes.length == 0) {
+      return Collections.emptyList();
+    }
+    final List<Size> sizes = new ArrayList<>(cameraSizes.length);
     for (android.util.Size size : cameraSizes) {
       sizes.add(new Size(size.getWidth(), size.getHeight()));
     }

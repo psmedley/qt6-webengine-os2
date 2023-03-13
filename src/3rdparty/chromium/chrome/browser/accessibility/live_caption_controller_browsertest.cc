@@ -2,29 +2,29 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "chrome/browser/accessibility/live_caption_controller.h"
-
+#include "base/callback_forward.h"
 #include "base/feature_list.h"
 #include "base/files/file_path.h"
 #include "base/ranges/ranges.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
+#include "chrome/browser/accessibility/caption_bubble_context_browser.h"
 #include "chrome/browser/accessibility/live_caption_controller_factory.h"
-#include "chrome/browser/accessibility/live_caption_speech_recognition_host.h"
 #include "chrome/browser/browser_features.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_keep_alive_types.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
-#include "chrome/browser/profiles/scoped_profile_keep_alive.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/caption_bubble_controller.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/live_caption/caption_bubble_controller.h"
+#include "components/live_caption/live_caption_controller.h"
 #include "components/live_caption/pref_names.h"
 #include "components/soda/pref_names.h"
 #include "components/sync_preferences/pref_service_syncable.h"
@@ -38,15 +38,24 @@
 namespace captions {
 
 namespace {
+
 // Chrome OS requires an additional feature flag to enable Live Caption.
 std::vector<base::Feature> RequiredFeatureFlags() {
-  std::vector<base::Feature> features = {media::kLiveCaption,
-                                         media::kUseSodaForLiveCaption};
+  std::vector<base::Feature> features = {media::kLiveCaption};
 #if BUILDFLAG(IS_CHROMEOS_ASH)
   features.push_back(ash::features::kOnDeviceSpeechRecognition);
 #endif
   return features;
 }
+
+speech::LanguageCode en_us() {
+  return speech::LanguageCode::kEnUs;
+}
+
+speech::LanguageCode fr_fr() {
+  return speech::LanguageCode::kFrFr;
+}
+
 }  // namespace
 
 // Blocks until a new profile is created.
@@ -85,14 +94,20 @@ class LiveCaptionControllerTest : public InProcessBrowserTest {
   void SetLiveCaptionEnabled(bool enabled) {
     browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
                                                  enabled);
-    if (enabled)
+    if (enabled) {
+      speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting(
+          en_us());
       speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting();
+    }
   }
 
   void SetLiveCaptionEnabledOnProfile(bool enabled, Profile* profile) {
     profile->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled, enabled);
-    if (enabled)
+    if (enabled) {
+      speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting(
+          en_us());
       speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting();
+    }
   }
 
   LiveCaptionController* GetController() {
@@ -111,13 +126,12 @@ class LiveCaptionControllerTest : public InProcessBrowserTest {
     return GetControllerForProfile(profile)->caption_bubble_controller_.get();
   }
 
-  LiveCaptionSpeechRecognitionHost* GetLiveCaptionSpeechRecognitionHost() {
-    if (!live_caption_speech_recognition_host_) {
-      live_caption_speech_recognition_host_ = std::make_unique<
-          LiveCaptionSpeechRecognitionHost>(
-          browser()->tab_strip_model()->GetActiveWebContents()->GetMainFrame());
+  CaptionBubbleContextBrowser* GetCaptionBubbleContextBrowser() {
+    if (!caption_bubble_context_) {
+      caption_bubble_context_ = CaptionBubbleContextBrowser::Create(
+          browser()->tab_strip_model()->GetActiveWebContents());
     }
-    return live_caption_speech_recognition_host_.get();
+    return caption_bubble_context_.get();
   }
 
   bool DispatchTranscription(std::string text) {
@@ -126,7 +140,7 @@ class LiveCaptionControllerTest : public InProcessBrowserTest {
 
   bool DispatchTranscriptionToProfile(std::string text, Profile* profile) {
     return GetControllerForProfile(profile)->DispatchTranscription(
-        GetLiveCaptionSpeechRecognitionHost(),
+        GetCaptionBubbleContextBrowser(),
         media::SpeechRecognitionResult(text, /* is_final */ false));
   }
 
@@ -134,20 +148,23 @@ class LiveCaptionControllerTest : public InProcessBrowserTest {
 
   void OnErrorOnProfile(Profile* profile) {
     GetControllerForProfile(profile)->OnError(
-        GetLiveCaptionSpeechRecognitionHost());
+        GetCaptionBubbleContextBrowser(), CaptionBubbleErrorType::GENERIC,
+        base::RepeatingClosure(),
+        base::BindRepeating(
+            [](CaptionBubbleErrorType error_type, bool checked) {}));
   }
 
   void OnAudioStreamEnd() { OnAudioStreamEndOnProfile(browser()->profile()); }
 
   void OnAudioStreamEndOnProfile(Profile* profile) {
     GetControllerForProfile(profile)->OnAudioStreamEnd(
-        GetLiveCaptionSpeechRecognitionHost());
+        GetCaptionBubbleContextBrowser());
   }
 
-#if defined(OS_MAC) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
   void OnToggleFullscreen() {
     GetControllerForProfile(browser()->profile())
-        ->OnToggleFullscreen(GetLiveCaptionSpeechRecognitionHost());
+        ->OnToggleFullscreen(GetCaptionBubbleContextBrowser());
   }
 #endif
 
@@ -187,23 +204,21 @@ class LiveCaptionControllerTest : public InProcessBrowserTest {
 
  private:
   base::test::ScopedFeatureList scoped_feature_list_;
-
-  std::unique_ptr<LiveCaptionSpeechRecognitionHost>
-      live_caption_speech_recognition_host_;
+  std::unique_ptr<CaptionBubbleContextBrowser> caption_bubble_context_;
 };
 
 IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, ProfilePrefsAreRegistered) {
   EXPECT_FALSE(
       browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
 
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS)
   // These prefs are used for the component updater, but SODA does not use the
   // component updater on Chrome OS.
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaBinaryPath));
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaEnUsConfigPath));
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 }
 
 IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest,
@@ -212,28 +227,28 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest,
   SetLiveCaptionEnabled(true);
   EXPECT_TRUE(
       browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS)
   // These prefs are used for the component updater, but SODA does not use the
   // component updater on Chrome OS.
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaBinaryPath));
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaEnUsConfigPath));
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 
   // Ensure that live caption is also enabled in the incognito profile.
   Profile* incognito_profile =
       browser()->profile()->GetPrimaryOTRProfile(/*create_if_needed=*/true);
   EXPECT_TRUE(
       incognito_profile->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
-#if !defined(OS_CHROMEOS)
+#if !BUILDFLAG(IS_CHROMEOS)
   // These prefs are used for the component updater, but SODA does not use the
   // component updater on Chrome OS.
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaBinaryPath));
   EXPECT_EQ(base::FilePath(), g_browser_process->local_state()->GetFilePath(
                                   prefs::kSodaEnUsConfigPath));
-#endif  // !defined(OS_CHROMEOS)
+#endif  // !BUILDFLAG(IS_CHROMEOS)
 }
 
 IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, LiveCaptionEnabledChanged) {
@@ -269,8 +284,41 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, OnSodaInstalled) {
   EXPECT_FALSE(HasBubbleController());
 
   // The UI is only created after SODA is installed.
+  speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting(en_us());
   speech::SodaInstaller::GetInstance()->NotifySodaInstalledForTesting();
   EXPECT_TRUE(HasBubbleController());
+}
+
+IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, OnSodaError) {
+  // Live Caption is disabled when there is an error in the SODA download for
+  // the language belonging to Live Caption.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
+                                               true);
+  EXPECT_TRUE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
+  speech::SodaInstaller::GetInstance()->NotifySodaErrorForTesting(en_us());
+  EXPECT_FALSE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
+
+  // Live Caption is disabled when there is an error in the SODA binary
+  // download.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
+                                               true);
+  EXPECT_TRUE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
+  speech::SodaInstaller::GetInstance()->NotifySodaErrorForTesting();
+  EXPECT_FALSE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
+
+  // Live Caption is not disabled when there is an error in the SODA download
+  // for a language not belonging to Live Caption.
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kLiveCaptionEnabled,
+                                               true);
+  EXPECT_TRUE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
+  speech::SodaInstaller::GetInstance()->NotifySodaErrorForTesting(fr_fr());
+  EXPECT_TRUE(
+      browser()->profile()->GetPrefs()->GetBoolean(prefs::kLiveCaptionEnabled));
 }
 
 IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, DispatchTranscription) {
@@ -323,7 +371,7 @@ IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, OnAudioStreamEnd) {
   EXPECT_FALSE(HasBubbleController());
 }
 
-#if defined(OS_MAC) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(LiveCaptionControllerTest, OnToggleFullscreen) {
   OnToggleFullscreen();
   EXPECT_FALSE(HasBubbleController());

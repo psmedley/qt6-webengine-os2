@@ -204,7 +204,7 @@ SysInternalsMessageHandler::SysInternalsMessageHandler() {}
 SysInternalsMessageHandler::~SysInternalsMessageHandler() {}
 
 void SysInternalsMessageHandler::RegisterMessages() {
-  web_ui()->RegisterMessageCallback(
+  web_ui()->RegisterDeprecatedMessageCallback(
       "getSysInfo",
       base::BindRepeating(&SysInternalsMessageHandler::HandleGetSysInfo,
                           base::Unretained(this)));
@@ -215,7 +215,7 @@ void SysInternalsMessageHandler::HandleGetSysInfo(const base::ListValue* args) {
   DCHECK(args);
 
   AllowJavascript();
-  base::Value::ConstListView list = args->GetList();
+  base::Value::ConstListView list = args->GetListDeprecated();
   if (list.size() != 1 || !list[0].is_string()) {
     NOTREACHED();
     return;

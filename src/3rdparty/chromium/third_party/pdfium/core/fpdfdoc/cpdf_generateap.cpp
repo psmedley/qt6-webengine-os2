@@ -7,12 +7,12 @@
 #include "core/fpdfdoc/cpdf_generateap.h"
 
 #include <algorithm>
-#include <memory>
 #include <sstream>
 #include <utility>
 
 #include "constants/annotation_common.h"
 #include "constants/appearance.h"
+#include "constants/font_encodings.h"
 #include "constants/form_fields.h"
 #include "core/fpdfapi/font/cpdf_font.h"
 #include "core/fpdfapi/page/cpdf_docpagedata.h"
@@ -34,6 +34,7 @@
 #include "core/fpdfdoc/cpvt_fontmap.h"
 #include "core/fpdfdoc/cpvt_variabletext.h"
 #include "core/fpdfdoc/cpvt_word.h"
+#include "core/fxcrt/fx_string_wrappers.h"
 #include "core/fxge/cfx_renderdevice.h"
 
 namespace {
@@ -76,16 +77,16 @@ ByteString GetPDFWordString(IPVT_FontMap* pFontMap,
   return sWord;
 }
 
-ByteString GetWordRenderString(const ByteString& strWords) {
-  if (strWords.GetLength() > 0)
-    return PDF_EncodeString(strWords) + " Tj\n";
-  return ByteString();
+ByteString GetWordRenderString(ByteStringView strWords) {
+  if (strWords.IsEmpty())
+    return ByteString();
+  return PDF_EncodeString(strWords) + " Tj\n";
 }
 
 ByteString GetFontSetString(IPVT_FontMap* pFontMap,
                             int32_t nFontIndex,
                             float fFontSize) {
-  std::ostringstream sRet;
+  fxcrt::ostringstream sRet;
   if (pFontMap) {
     ByteString sFontAlias = pFontMap->GetPDFFontAlias(nFontIndex);
     if (sFontAlias.GetLength() > 0 && fFontSize > 0)
@@ -99,24 +100,23 @@ ByteString GenerateEditAP(IPVT_FontMap* pFontMap,
                           const CFX_PointF& ptOffset,
                           bool bContinuous,
                           uint16_t SubWord) {
-  std::ostringstream sEditStream;
-  std::ostringstream sLineStream;
-  std::ostringstream sWords;
+  fxcrt::ostringstream sEditStream;
+  fxcrt::ostringstream sLineStream;
   CFX_PointF ptOld;
   CFX_PointF ptNew;
   int32_t nCurFontIndex = -1;
   CPVT_WordPlace oldplace;
-
+  ByteString sWords;
   pIterator->SetAt(0);
   while (pIterator->NextWord()) {
     CPVT_WordPlace place = pIterator->GetWordPlace();
     if (bContinuous) {
       if (place.LineCmp(oldplace) != 0) {
-        if (sWords.tellp() > 0) {
-          sLineStream << GetWordRenderString(ByteString(sWords));
+        if (!sWords.IsEmpty()) {
+          sLineStream << GetWordRenderString(sWords.AsStringView());
           sEditStream << sLineStream.str();
           sLineStream.str("");
-          sWords.str("");
+          sWords.clear();
         }
         CPVT_Word word;
         if (pIterator->GetWord(word)) {
@@ -137,15 +137,15 @@ ByteString GenerateEditAP(IPVT_FontMap* pFontMap,
       CPVT_Word word;
       if (pIterator->GetWord(word)) {
         if (word.nFontIndex != nCurFontIndex) {
-          if (sWords.tellp() > 0) {
-            sLineStream << GetWordRenderString(ByteString(sWords));
-            sWords.str("");
+          if (!sWords.IsEmpty()) {
+            sLineStream << GetWordRenderString(sWords.AsStringView());
+            sWords.clear();
           }
           sLineStream << GetFontSetString(pFontMap, word.nFontIndex,
                                           word.fFontSize);
           nCurFontIndex = word.nFontIndex;
         }
-        sWords << GetPDFWordString(pFontMap, nCurFontIndex, word.Word, SubWord);
+        sWords += GetPDFWordString(pFontMap, nCurFontIndex, word.Word, SubWord);
       }
       oldplace = place;
     } else {
@@ -164,20 +164,20 @@ ByteString GenerateEditAP(IPVT_FontMap* pFontMap,
           nCurFontIndex = word.nFontIndex;
         }
         sEditStream << GetWordRenderString(
-            GetPDFWordString(pFontMap, nCurFontIndex, word.Word, SubWord));
+            GetPDFWordString(pFontMap, nCurFontIndex, word.Word, SubWord)
+                .AsStringView());
       }
     }
   }
-  if (sWords.tellp() > 0) {
-    sLineStream << GetWordRenderString(ByteString(sWords));
+  if (!sWords.IsEmpty()) {
+    sLineStream << GetWordRenderString(sWords.AsStringView());
     sEditStream << sLineStream.str();
-    sWords.str("");
   }
   return ByteString(sEditStream);
 }
 
 ByteString GenerateColorAP(const CFX_Color& color, PaintOperation nOperation) {
-  std::ostringstream sColorStream;
+  fxcrt::ostringstream sColorStream;
   switch (color.nColorType) {
     case CFX_Color::Type::kRGB:
       sColorStream << color.fColor1 << " " << color.fColor2 << " "
@@ -209,7 +209,7 @@ ByteString GenerateBorderAP(const CFX_FloatRect& rect,
                             const CFX_Color& crRightBottom,
                             BorderStyle nStyle,
                             const CPVT_Dash& dash) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sColor;
   float fLeft = rect.left;
   float fRight = rect.right;
@@ -356,7 +356,7 @@ ByteString GetDashPatternString(const CPDF_Dictionary& pAnnotDict) {
 
   // Support maximum of ten elements in the dash array.
   size_t pDashArrayCount = std::min<size_t>(pDashArray->size(), 10);
-  std::ostringstream sDashStream;
+  fxcrt::ostringstream sDashStream;
 
   sDashStream << "[";
   for (size_t i = 0; i < pDashArrayCount; ++i)
@@ -373,8 +373,8 @@ ByteString GetPopupContentsString(CPDF_Document* pDoc,
   WideString swValue(pAnnotDict.GetUnicodeTextFor(pdfium::form_fields::kT));
   swValue += L'\n';
   swValue += pAnnotDict.GetUnicodeTextFor(pdfium::annotation::kContents);
-  CPVT_FontMap map(pDoc, nullptr, pDefFont, sFontName);
 
+  CPVT_FontMap map(pDoc, nullptr, pDefFont, sFontName);
   CPVT_VariableText::Provider prd(&map);
   CPVT_VariableText vt;
   vt.SetProvider(&prd);
@@ -382,10 +382,10 @@ ByteString GetPopupContentsString(CPDF_Document* pDoc,
   vt.SetFontSize(12);
   vt.SetAutoReturn(true);
   vt.SetMultiLine(true);
-
   vt.Initialize();
   vt.SetText(swValue);
   vt.RearrangeAll();
+
   CFX_PointF ptOffset(3.0f, -3.0f);
   ByteString sContent =
       GenerateEditAP(&map, vt.GetIterator(), ptOffset, false, 0);
@@ -393,13 +393,11 @@ ByteString GetPopupContentsString(CPDF_Document* pDoc,
   if (sContent.IsEmpty())
     return ByteString();
 
-  std::ostringstream sAppStream;
-  sAppStream << "BT\n"
-             << GenerateColorAP(CFX_Color(CFX_Color::Type::kRGB, 0, 0, 0),
-                                PaintOperation::kFill)
-             << sContent << "ET\n"
-             << "Q\n";
-  return ByteString(sAppStream);
+  ByteString sColorAP = GenerateColorAP(
+      CFX_Color(CFX_Color::Type::kRGB, 0, 0, 0), PaintOperation::kFill);
+
+  return ByteString{"BT\n", sColorAP.AsStringView(), sContent.AsStringView(),
+                    "ET\n", "Q\n"};
 }
 
 RetainPtr<CPDF_Dictionary> GenerateResourceFontDict(
@@ -409,7 +407,8 @@ RetainPtr<CPDF_Dictionary> GenerateResourceFontDict(
   pFontDict->SetNewFor<CPDF_Name>("Type", "Font");
   pFontDict->SetNewFor<CPDF_Name>("Subtype", "Type1");
   pFontDict->SetNewFor<CPDF_Name>("BaseFont", CFX_Font::kDefaultAnsiFontName);
-  pFontDict->SetNewFor<CPDF_Name>("Encoding", "WinAnsiEncoding");
+  pFontDict->SetNewFor<CPDF_Name>("Encoding",
+                                  pdfium::font_encodings::kWinAnsiEncoding);
 
   auto pResourceFontDict = pDoc->New<CPDF_Dictionary>();
   pResourceFontDict->SetNewFor<CPDF_Reference>(sFontDictName, pDoc,
@@ -424,7 +423,7 @@ ByteString GetPaintOperatorString(bool bIsStrokeRect, bool bIsFillRect) {
 }
 
 ByteString GenerateTextSymbolAP(const CFX_FloatRect& rect) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   sAppStream << GenerateColorAP(CFX_Color(CFX_Color::Type::kRGB, 1, 1, 0),
                                 PaintOperation::kFill);
   sAppStream << GenerateColorAP(CFX_Color(CFX_Color::Type::kRGB, 0, 0, 0),
@@ -508,16 +507,14 @@ RetainPtr<CPDF_Dictionary> GenerateResourceDict(
 
 void GenerateAndSetAPDict(CPDF_Document* pDoc,
                           CPDF_Dictionary* pAnnotDict,
-                          std::ostringstream* psAppStream,
+                          fxcrt::ostringstream* psAppStream,
                           RetainPtr<CPDF_Dictionary> pResourceDict,
                           bool bIsTextMarkupAnnotation) {
   CPDF_Stream* pNormalStream = pDoc->NewIndirect<CPDF_Stream>();
   pNormalStream->SetDataFromStringstream(psAppStream);
 
-  CPDF_Dictionary* pAPDict = pAnnotDict->GetDictFor(pdfium::annotation::kAP);
-  if (!pAPDict)
-    pAPDict = pAnnotDict->SetNewFor<CPDF_Dictionary>(pdfium::annotation::kAP);
-
+  CPDF_Dictionary* pAPDict =
+      GetOrCreateDict(pAnnotDict, pdfium::annotation::kAP);
   pAPDict->SetNewFor<CPDF_Reference>("N", pDoc, pNormalStream->GetObjNum());
 
   CPDF_Dictionary* pStreamDict = pNormalStream->GetDict();
@@ -534,7 +531,7 @@ void GenerateAndSetAPDict(CPDF_Document* pDoc,
 }
 
 bool GenerateCircleAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -607,7 +604,7 @@ bool GenerateCircleAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateHighlightAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -649,7 +646,7 @@ bool GenerateInkAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
   if (!pInkList || pInkList->IsEmpty())
     return false;
 
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -692,7 +689,7 @@ bool GenerateInkAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateTextAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -714,7 +711,7 @@ bool GenerateTextAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateUnderlineAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -745,7 +742,7 @@ bool GenerateUnderlineAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GeneratePopupAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs\n";
 
@@ -785,7 +782,7 @@ bool GeneratePopupAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateSquareAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -832,7 +829,7 @@ bool GenerateSquareAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateSquigglyAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -882,7 +879,7 @@ bool GenerateSquigglyAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
 }
 
 bool GenerateStrikeOutAP(CPDF_Document* pDoc, CPDF_Dictionary* pAnnotDict) {
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sExtGSDictName = "GS";
   sAppStream << "/" << sExtGSDictName << " gs ";
 
@@ -938,13 +935,11 @@ void CPDF_GenerateAP::GenerateFormAP(CPDF_Document* pDoc,
   CPDF_DefaultAppearance appearance(DA);
 
   float fFontSize = 0;
-  Optional<ByteString> font = appearance.GetFont(&fFontSize);
+  absl::optional<ByteString> font = appearance.GetFont(&fFontSize);
   if (!font.has_value())
     return;
 
   ByteString font_name = font.value();
-  if (!CPDF_Dictionary::IsValidKey(font_name))
-    return;
 
   CFX_Color crText = fpdfdoc::CFXColorFromString(DA);
   CPDF_Dictionary* pDRDict = pFormDict->GetDictFor("DR");
@@ -961,7 +956,8 @@ void CPDF_GenerateAP::GenerateFormAP(CPDF_Document* pDoc,
     pFontDict->SetNewFor<CPDF_Name>("Type", "Font");
     pFontDict->SetNewFor<CPDF_Name>("Subtype", "Type1");
     pFontDict->SetNewFor<CPDF_Name>("BaseFont", CFX_Font::kDefaultAnsiFontName);
-    pFontDict->SetNewFor<CPDF_Name>("Encoding", "WinAnsiEncoding");
+    pFontDict->SetNewFor<CPDF_Name>("Encoding",
+                                    pdfium::font_encodings::kWinAnsiEncoding);
     pDRFontDict->SetNewFor<CPDF_Reference>(font_name, pDoc,
                                            pFontDict->GetObjNum());
   }
@@ -1049,7 +1045,7 @@ void CPDF_GenerateAP::GenerateFormAP(CPDF_Document* pDoc,
     if (pArray)
       crBG = fpdfdoc::CFXColorFromArray(*pArray);
   }
-  std::ostringstream sAppStream;
+  fxcrt::ostringstream sAppStream;
   ByteString sBG = GenerateColorAP(crBG, PaintOperation::kFill);
   if (sBG.GetLength() > 0) {
     sAppStream << "q\n"
@@ -1068,10 +1064,8 @@ void CPDF_GenerateAP::GenerateFormAP(CPDF_Document* pDoc,
                     rcBBox.right - fBorderWidth, rcBBox.top - fBorderWidth);
   rcBody.Normalize();
 
-  CPDF_Dictionary* pAPDict = pAnnotDict->GetDictFor(pdfium::annotation::kAP);
-  if (!pAPDict)
-    pAPDict = pAnnotDict->SetNewFor<CPDF_Dictionary>(pdfium::annotation::kAP);
-
+  CPDF_Dictionary* pAPDict =
+      GetOrCreateDict(pAnnotDict, pdfium::annotation::kAP);
   CPDF_Stream* pNormalStream = pAPDict->GetStreamFor("N");
   if (!pNormalStream) {
     pNormalStream = pDoc->NewIndirect<CPDF_Stream>();
@@ -1250,7 +1244,7 @@ void CPDF_GenerateAP::GenerateFormAP(CPDF_Document* pDoc,
           ToArray(CPDF_FormField::GetFieldAttr(pAnnotDict, "I"));
       CPDF_Object* pTi = CPDF_FormField::GetFieldAttr(pAnnotDict, "TI");
       int32_t nTop = pTi ? pTi->GetInteger() : 0;
-      std::ostringstream sBody;
+      fxcrt::ostringstream sBody;
       if (pOpts) {
         float fy = rcBody.top;
         for (size_t i = nTop, sz = pOpts->size(); i < sz; i++) {
@@ -1361,7 +1355,7 @@ void CPDF_GenerateAP::GenerateEmptyAP(CPDF_Document* pDoc,
   auto pResourceDict =
       GenerateResourceDict(pDoc, std::move(pExtGStateDict), nullptr);
 
-  std::ostringstream sStream;
+  fxcrt::ostringstream sStream;
   GenerateAndSetAPDict(pDoc, pAnnotDict, &sStream, std::move(pResourceDict),
                        false);
 }

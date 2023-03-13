@@ -13,8 +13,6 @@
 // limitations under the License.
 
 #include "Debug.hpp"
-#include "EmulatedIntrinsics.hpp"
-#include "OptimalIntrinsics.hpp"
 #include "Print.hpp"
 #include "Reactor.hpp"
 #include "ReactorDebugInfo.hpp"
@@ -52,6 +50,7 @@
 #endif
 
 #include <array>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <mutex>
@@ -309,7 +308,7 @@ private:
 #endif
 	}
 
-	static bool detectARM()
+	constexpr static bool detectARM()
 	{
 #if defined(__arm__) || defined(__aarch64__)
 		return true;
@@ -334,10 +333,10 @@ private:
 	}
 };
 
-const bool CPUID::ARM = CPUID::detectARM();
+constexpr bool CPUID::ARM = CPUID::detectARM();
 const bool CPUID::SSE4_1 = CPUID::detectSSE4_1();
-const bool emulateIntrinsics = false;
-const bool emulateMismatchedBitCast = CPUID::ARM;
+constexpr bool emulateIntrinsics = false;
+constexpr bool emulateMismatchedBitCast = CPUID::ARM;
 
 constexpr bool subzeroDumpEnabled = false;
 constexpr bool subzeroEmitTextAsm = false;
@@ -351,14 +350,21 @@ static_assert(!subzeroEmitTextAsm, "Compile Subzero with ALLOW_DUMP=1 for subzer
 
 namespace rr {
 
-std::string BackendName()
+std::string Caps::backendName()
 {
 	return "Subzero";
 }
 
-const Capabilities Caps = {
-	true,  // CoroutinesSupported
-};
+bool Caps::coroutinesSupported()
+{
+	return true;
+}
+
+bool Caps::fmaIsFast()
+{
+	// TODO(b/214591655): Subzero currently never emits FMA instructions. std::fma() is called instead.
+	return false;
+}
 
 enum EmulatedType
 {
@@ -780,9 +786,15 @@ public:
 		position += Bytes.size();
 	}
 
-	uint64_t tell() const override { return position; }
+	uint64_t tell() const override
+	{
+		return position;
+	}
 
-	void seek(uint64_t Off) override { position = Off; }
+	void seek(uint64_t Off) override
+	{
+		position = Off;
+	}
 
 	std::vector<EntryPoint> loadImageAndGetEntryPoints(const std::vector<const char *> &functionNames)
 	{
@@ -986,7 +998,7 @@ Config Nucleus::getDefaultConfig()
 // This function lowers and produces executable binary code in memory for the input functions,
 // and returns a Routine with the entry points to these functions.
 template<size_t Count>
-static std::shared_ptr<Routine> acquireRoutine(Ice::Cfg *const (&functions)[Count], const char *const (&names)[Count], const Config::Edit &cfgEdit)
+static std::shared_ptr<Routine> acquireRoutine(Ice::Cfg *const (&functions)[Count], const char *const (&names)[Count], const Config::Edit *cfgEdit)
 {
 	// This logic is modeled after the IceCompiler, as well as GlobalContext::translateFunctions
 	// and GlobalContext::emitItems.
@@ -1089,7 +1101,7 @@ static std::shared_ptr<Routine> acquireRoutine(Ice::Cfg *const (&functions)[Coun
 	return std::shared_ptr<Routine>(handoffRoutine);
 }
 
-std::shared_ptr<Routine> Nucleus::acquireRoutine(const char *name, const Config::Edit &cfgEdit /* = Config::Edit::None */)
+std::shared_ptr<Routine> Nucleus::acquireRoutine(const char *name, const Config::Edit *cfgEdit /* = nullptr */)
 {
 	finalizeFunction();
 	return rr::acquireRoutine({ ::function }, { name }, cfgEdit);
@@ -1299,11 +1311,6 @@ Value *Nucleus::createFRem(Value *lhs, Value *rhs)
 	// createArithmetic(Ice::InstArithmetic::Frem, lhs, rhs);
 	UNIMPLEMENTED("b/148139679 Nucleus::createFRem");
 	return nullptr;
-}
-
-RValue<Float4> operator%(RValue<Float4> lhs, RValue<Float4> rhs)
-{
-	return emulated::FRem(lhs, rhs);
 }
 
 Value *Nucleus::createShl(Value *lhs, Value *rhs)
@@ -2838,11 +2845,6 @@ RValue<UShort> Extract(RValue<UShort4> val, int i)
 	return RValue<UShort>(Nucleus::createExtractElement(val.value(), UShort::type(), i));
 }
 
-RValue<UShort4> Insert(RValue<UShort4> val, RValue<UShort> element, int i)
-{
-	return RValue<UShort4>(Nucleus::createInsertElement(val.value(), element.value(), i));
-}
-
 RValue<UShort4> operator<<(RValue<UShort4> lhs, unsigned char rhs)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
@@ -3554,6 +3556,13 @@ RValue<Int4> CmpNLE(RValue<Int4> x, RValue<Int4> y)
 	return RValue<Int4>(Nucleus::createICmpSGT(x.value(), y.value()));
 }
 
+RValue<Int4> Abs(RValue<Int4> x)
+{
+	// TODO: Optimize.
+	auto negative = x >> 31;
+	return (x ^ negative) - negative;
+}
+
 RValue<Int4> Max(RValue<Int4> x, RValue<Int4> y)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
@@ -3927,6 +3936,69 @@ Float4::Float4(RValue<Float> rhs)
 	storeValue(replicate);
 }
 
+// Call single arg function on a vector type
+template<typename Func, typename T>
+static RValue<T> call4(Func func, const RValue<T> &x)
+{
+	T result;
+	result = Insert(result, Call(func, Extract(x, 0)), 0);
+	result = Insert(result, Call(func, Extract(x, 1)), 1);
+	result = Insert(result, Call(func, Extract(x, 2)), 2);
+	result = Insert(result, Call(func, Extract(x, 3)), 3);
+	return result;
+}
+
+// Call two arg function on a vector type
+template<typename Func, typename T>
+static RValue<T> call4(Func func, const RValue<T> &x, const RValue<T> &y)
+{
+	T result;
+	result = Insert(result, Call(func, Extract(x, 0), Extract(y, 0)), 0);
+	result = Insert(result, Call(func, Extract(x, 1), Extract(y, 1)), 1);
+	result = Insert(result, Call(func, Extract(x, 2), Extract(y, 2)), 2);
+	result = Insert(result, Call(func, Extract(x, 3), Extract(y, 3)), 3);
+	return result;
+}
+
+// Call three arg function on a vector type
+template<typename Func, typename T>
+static RValue<T> call4(Func func, const RValue<T> &x, const RValue<T> &y, const RValue<T> &z)
+{
+	T result;
+	result = Insert(result, Call(func, Extract(x, 0), Extract(y, 0), Extract(z, 0)), 0);
+	result = Insert(result, Call(func, Extract(x, 1), Extract(y, 1), Extract(z, 1)), 1);
+	result = Insert(result, Call(func, Extract(x, 2), Extract(y, 2), Extract(z, 2)), 2);
+	result = Insert(result, Call(func, Extract(x, 3), Extract(y, 3), Extract(z, 3)), 3);
+	return result;
+}
+
+RValue<Float4> operator%(RValue<Float4> lhs, RValue<Float4> rhs)
+{
+	return call4(fmodf, lhs, rhs);
+}
+
+RValue<Float4> MulAdd(RValue<Float4> x, RValue<Float4> y, RValue<Float4> z)
+{
+	// TODO(b/214591655): Use FMA when available.
+	return x * y + z;
+}
+
+RValue<Float4> FMA(RValue<Float4> x, RValue<Float4> y, RValue<Float4> z)
+{
+	// TODO(b/214591655): Use FMA instructions when available.
+	return call4(fmaf, x, y, z);
+}
+
+RValue<Float4> Abs(RValue<Float4> x)
+{
+	// TODO: Optimize.
+	Value *vector = Nucleus::createBitCast(x.value(), Int4::type());
+	int64_t constantVector[4] = { 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF, 0x7FFFFFFF };
+	Value *result = Nucleus::createAnd(vector, Nucleus::createConstantVector(constantVector, Int4::type()));
+
+	return As<Float4>(result);
+}
+
 RValue<Float4> Max(RValue<Float4> x, RValue<Float4> y)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
@@ -4290,154 +4362,203 @@ void Nucleus::createMaskedStore(Value *ptr, Value *val, Value *mask, unsigned in
 	UNIMPLEMENTED("b/155867273 Subzero createMaskedStore()");
 }
 
+template<typename T>
+struct UnderlyingType
+{
+	using Type = typename decltype(rr::Extract(std::declval<RValue<T>>(), 0))::rvalue_underlying_type;
+};
+
+template<typename T>
+using UnderlyingTypeT = typename UnderlyingType<T>::Type;
+
+template<typename T, typename EL = UnderlyingTypeT<T>>
+static void gather(T &out, RValue<Pointer<EL>> base, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment, bool zeroMaskedLanes)
+{
+	constexpr bool atomic = false;
+	constexpr std::memory_order order = std::memory_order_relaxed;
+
+	Pointer<Byte> baseBytePtr = base;
+
+	out = T(0);
+	for(int i = 0; i < 4; i++)
+	{
+		If(Extract(mask, i) != 0)
+		{
+			auto offset = Extract(offsets, i);
+			auto el = Load(Pointer<EL>(&baseBytePtr[offset]), alignment, atomic, order);
+			out = Insert(out, el, i);
+		}
+		Else If(zeroMaskedLanes)
+		{
+			out = Insert(out, EL(0), i);
+		}
+	}
+}
+
+template<typename T, typename EL = UnderlyingTypeT<T>>
+static void scatter(RValue<Pointer<EL>> base, RValue<T> val, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment)
+{
+	constexpr bool atomic = false;
+	constexpr std::memory_order order = std::memory_order_relaxed;
+
+	Pointer<Byte> baseBytePtr = base;
+
+	for(int i = 0; i < 4; i++)
+	{
+		If(Extract(mask, i) != 0)
+		{
+			auto offset = Extract(offsets, i);
+			Store(Extract(val, i), Pointer<EL>(&baseBytePtr[offset]), alignment, atomic, order);
+		}
+	}
+}
+
 RValue<Float4> Gather(RValue<Pointer<Float>> base, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment, bool zeroMaskedLanes /* = false */)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Gather(base, offsets, mask, alignment, zeroMaskedLanes);
+	Float4 result{};
+	gather(result, base, offsets, mask, alignment, zeroMaskedLanes);
+	return result;
 }
 
 RValue<Int4> Gather(RValue<Pointer<Int>> base, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment, bool zeroMaskedLanes /* = false */)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Gather(base, offsets, mask, alignment, zeroMaskedLanes);
+	Int4 result{};
+	gather(result, base, offsets, mask, alignment, zeroMaskedLanes);
+	return result;
 }
 
 void Scatter(RValue<Pointer<Float>> base, RValue<Float4> val, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Scatter(base, val, offsets, mask, alignment);
+	scatter(base, val, offsets, mask, alignment);
 }
 
 void Scatter(RValue<Pointer<Int>> base, RValue<Int4> val, RValue<Int4> offsets, RValue<Int4> mask, unsigned int alignment)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Scatter(base, val, offsets, mask, alignment);
+	scatter<Int4>(base, val, offsets, mask, alignment);
 }
 
 RValue<Float> Exp2(RValue<Float> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Exp2(x);
+	return Call(exp2f, x);
 }
 
 RValue<Float> Log2(RValue<Float> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::Log2(x);
+	return Call(log2f, x);
 }
 
 RValue<Float4> Sin(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Sin(x);
+	return call4(sinf, x);
 }
 
 RValue<Float4> Cos(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Cos(x);
+	return call4(cosf, x);
 }
 
 RValue<Float4> Tan(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Tan(x);
+	return call4(tanf, x);
 }
 
-RValue<Float4> Asin(RValue<Float4> x, Precision p)
+RValue<Float4> Asin(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	if(p == Precision::Full)
-	{
-		return emulated::Asin(x);
-	}
-	return optimal::Asin_8_terms(x);
+	return call4(asinf, x);
 }
 
-RValue<Float4> Acos(RValue<Float4> x, Precision p)
+RValue<Float4> Acos(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	// Surprisingly, deqp-vk's precision.acos.highp/mediump tests pass when using the 4-term polynomial approximation
-	// version of acos, unlike for Asin, which requires higher precision algorithms.
-	return optimal::Acos_4_terms(x);
+	return call4(acosf, x);
 }
 
 RValue<Float4> Atan(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Atan(x);
+	return call4(atanf, x);
 }
 
 RValue<Float4> Sinh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Sinh(x);
+	return call4(sinhf, x);
 }
 
 RValue<Float4> Cosh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Cosh(x);
+	return call4(coshf, x);
 }
 
 RValue<Float4> Tanh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Tanh(x);
+	return call4(tanhf, x);
 }
 
 RValue<Float4> Asinh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Asinh(x);
+	return call4(asinhf, x);
 }
 
 RValue<Float4> Acosh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Acosh(x);
+	return call4(acoshf, x);
 }
 
 RValue<Float4> Atanh(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Atanh(x);
+	return call4(atanhf, x);
 }
 
 RValue<Float4> Atan2(RValue<Float4> x, RValue<Float4> y)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Atan2(x, y);
+	return call4(atan2f, x, y);
 }
 
 RValue<Float4> Pow(RValue<Float4> x, RValue<Float4> y)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Pow(x, y);
+	return call4(powf, x, y);
 }
 
 RValue<Float4> Exp(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Exp(x);
+	return call4(expf, x);
 }
 
 RValue<Float4> Log(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Log(x);
+	return call4(logf, x);
 }
 
 RValue<Float4> Exp2(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Exp2(x);
+	return call4(exp2f, x);
 }
 
 RValue<Float4> Log2(RValue<Float4> x)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return optimal::Log2(x);
+	return call4(log2f, x);
 }
 
 RValue<UInt> Ctlz(RValue<UInt> x, bool isZeroUndef)
@@ -4520,28 +4641,54 @@ RValue<UInt4> Cttz(RValue<UInt4> x, bool isZeroUndef)
 	}
 }
 
+// TODO(b/148276653): Both atomicMin and atomicMax use a static (global) mutex that makes all min
+// operations for a given T mutually exclusive, rather than only the ones on the value pointed to
+// by ptr. Use a CAS loop, as is done for LLVMReactor's min/max atomic for Android.
+// TODO(b/148207274): Or, move this down into Subzero as a CAS-based operation.
+template<typename T>
+static T atomicMin(T *ptr, T value)
+{
+	static std::mutex m;
+
+	std::lock_guard<std::mutex> lock(m);
+	T origValue = *ptr;
+	*ptr = std::min(origValue, value);
+	return origValue;
+}
+
+template<typename T>
+static T atomicMax(T *ptr, T value)
+{
+	static std::mutex m;
+
+	std::lock_guard<std::mutex> lock(m);
+	T origValue = *ptr;
+	*ptr = std::max(origValue, value);
+	return origValue;
+}
+
 RValue<Int> MinAtomic(RValue<Pointer<Int>> x, RValue<Int> y, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::MinAtomic(x, y, memoryOrder);
+	return Call(atomicMin<int32_t>, x, y);
 }
 
 RValue<UInt> MinAtomic(RValue<Pointer<UInt>> x, RValue<UInt> y, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::MinAtomic(x, y, memoryOrder);
+	return Call(atomicMin<uint32_t>, x, y);
 }
 
 RValue<Int> MaxAtomic(RValue<Pointer<Int>> x, RValue<Int> y, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::MaxAtomic(x, y, memoryOrder);
+	return Call(atomicMax<int32_t>, x, y);
 }
 
 RValue<UInt> MaxAtomic(RValue<Pointer<UInt>> x, RValue<UInt> y, std::memory_order memoryOrder)
 {
 	RR_DEBUG_INFO_UPDATE_LOC();
-	return emulated::MaxAtomic(x, y, memoryOrder);
+	return Call(atomicMax<uint32_t>, x, y);
 }
 
 void EmitDebugLocation()
@@ -4930,7 +5077,7 @@ static void coroutineEntryDestroyStub(Nucleus::CoroutineHandle handle)
 {
 }
 
-std::shared_ptr<Routine> Nucleus::acquireCoroutine(const char *name, const Config::Edit &cfgEdit /* = Config::Edit::None */)
+std::shared_ptr<Routine> Nucleus::acquireCoroutine(const char *name, const Config::Edit *cfgEdit /* = nullptr */)
 {
 	if(::coroGen)
 	{

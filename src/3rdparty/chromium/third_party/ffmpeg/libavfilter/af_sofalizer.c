@@ -187,25 +187,18 @@ static int preload_sofa(AVFilterContext *ctx, char *filename, int *samplingrate)
 
 static int parse_channel_name(AVFilterContext *ctx, char **arg, int *rchannel)
 {
-    int len, i, channel_id = 0;
-    int64_t layout, layout0;
+    int len;
+    enum AVChannel channel_id = 0;
     char buf[8] = {0};
 
     /* try to parse a channel name, e.g. "FL" */
     if (av_sscanf(*arg, "%7[A-Z]%n", buf, &len)) {
-        layout0 = layout = av_get_channel_layout(buf);
-        /* channel_id <- first set bit in layout */
-        for (i = 32; i > 0; i >>= 1) {
-            if (layout >= 1LL << i) {
-                channel_id += i;
-                layout >>= i;
-            }
-        }
-        /* reject layouts that are not a single channel */
-        if (channel_id >= 64 || layout0 != 1LL << channel_id) {
+        channel_id = av_channel_from_string(buf);
+        if (channel_id < 0 || channel_id >= 64) {
             av_log(ctx, AV_LOG_WARNING, "Failed to parse \'%s\' as channel name.\n", buf);
             return AVERROR(EINVAL);
         }
+
         *rchannel = channel_id;
         *arg += len;
         return 0;
@@ -221,7 +214,7 @@ static int parse_channel_name(AVFilterContext *ctx, char **arg, int *rchannel)
     return AVERROR(EINVAL);
 }
 
-static void parse_speaker_pos(AVFilterContext *ctx, int64_t in_channel_layout)
+static void parse_speaker_pos(AVFilterContext *ctx)
 {
     SOFAlizerContext *s = ctx->priv;
     char *arg, *tokenizer, *p, *args = av_strdup(s->speakers_pos);
@@ -256,10 +249,10 @@ static int get_speaker_pos(AVFilterContext *ctx,
                            float *speaker_azim, float *speaker_elev)
 {
     struct SOFAlizerContext *s = ctx->priv;
-    uint64_t channels_layout = ctx->inputs[0]->channel_layout;
+    AVChannelLayout *channel_layout = &ctx->inputs[0]->ch_layout;
     float azim[64] = { 0 };
     float elev[64] = { 0 };
-    int m, ch, n_conv = ctx->inputs[0]->channels; /* get no. input channels */
+    int ch, n_conv = ctx->inputs[0]->ch_layout.nb_channels; /* get no. input channels */
 
     if (n_conv < 0 || n_conv > 64)
         return AVERROR(EINVAL);
@@ -267,57 +260,53 @@ static int get_speaker_pos(AVFilterContext *ctx,
     s->lfe_channel = -1;
 
     if (s->speakers_pos)
-        parse_speaker_pos(ctx, channels_layout);
+        parse_speaker_pos(ctx);
 
     /* set speaker positions according to input channel configuration: */
-    for (m = 0, ch = 0; ch < n_conv && m < 64; m++) {
-        uint64_t mask = channels_layout & (1ULL << m);
+    for (ch = 0; ch < n_conv; ch++) {
+        int chan = av_channel_layout_channel_from_index(channel_layout, ch);
 
-        switch (mask) {
-        case AV_CH_FRONT_LEFT:            azim[ch] =  30;      break;
-        case AV_CH_FRONT_RIGHT:           azim[ch] = 330;      break;
-        case AV_CH_FRONT_CENTER:          azim[ch] =   0;      break;
-        case AV_CH_LOW_FREQUENCY:
-        case AV_CH_LOW_FREQUENCY_2:       s->lfe_channel = ch; break;
-        case AV_CH_BACK_LEFT:             azim[ch] = 150;      break;
-        case AV_CH_BACK_RIGHT:            azim[ch] = 210;      break;
-        case AV_CH_BACK_CENTER:           azim[ch] = 180;      break;
-        case AV_CH_SIDE_LEFT:             azim[ch] =  90;      break;
-        case AV_CH_SIDE_RIGHT:            azim[ch] = 270;      break;
-        case AV_CH_FRONT_LEFT_OF_CENTER:  azim[ch] =  15;      break;
-        case AV_CH_FRONT_RIGHT_OF_CENTER: azim[ch] = 345;      break;
-        case AV_CH_TOP_CENTER:            azim[ch] =   0;
+        switch (chan) {
+        case AV_CHAN_FRONT_LEFT:          azim[ch] =  30;      break;
+        case AV_CHAN_FRONT_RIGHT:         azim[ch] = 330;      break;
+        case AV_CHAN_FRONT_CENTER:        azim[ch] =   0;      break;
+        case AV_CHAN_LOW_FREQUENCY:
+        case AV_CHAN_LOW_FREQUENCY_2:     s->lfe_channel = ch; break;
+        case AV_CHAN_BACK_LEFT:           azim[ch] = 150;      break;
+        case AV_CHAN_BACK_RIGHT:          azim[ch] = 210;      break;
+        case AV_CHAN_BACK_CENTER:         azim[ch] = 180;      break;
+        case AV_CHAN_SIDE_LEFT:           azim[ch] =  90;      break;
+        case AV_CHAN_SIDE_RIGHT:          azim[ch] = 270;      break;
+        case AV_CHAN_FRONT_LEFT_OF_CENTER:  azim[ch] =  15;    break;
+        case AV_CHAN_FRONT_RIGHT_OF_CENTER: azim[ch] = 345;    break;
+        case AV_CHAN_TOP_CENTER:          azim[ch] =   0;
                                           elev[ch] =  90;      break;
-        case AV_CH_TOP_FRONT_LEFT:        azim[ch] =  30;
+        case AV_CHAN_TOP_FRONT_LEFT:      azim[ch] =  30;
                                           elev[ch] =  45;      break;
-        case AV_CH_TOP_FRONT_CENTER:      azim[ch] =   0;
+        case AV_CHAN_TOP_FRONT_CENTER:    azim[ch] =   0;
                                           elev[ch] =  45;      break;
-        case AV_CH_TOP_FRONT_RIGHT:       azim[ch] = 330;
+        case AV_CHAN_TOP_FRONT_RIGHT:     azim[ch] = 330;
                                           elev[ch] =  45;      break;
-        case AV_CH_TOP_BACK_LEFT:         azim[ch] = 150;
+        case AV_CHAN_TOP_BACK_LEFT:       azim[ch] = 150;
                                           elev[ch] =  45;      break;
-        case AV_CH_TOP_BACK_RIGHT:        azim[ch] = 210;
+        case AV_CHAN_TOP_BACK_RIGHT:      azim[ch] = 210;
                                           elev[ch] =  45;      break;
-        case AV_CH_TOP_BACK_CENTER:       azim[ch] = 180;
+        case AV_CHAN_TOP_BACK_CENTER:     azim[ch] = 180;
                                           elev[ch] =  45;      break;
-        case AV_CH_WIDE_LEFT:             azim[ch] =  90;      break;
-        case AV_CH_WIDE_RIGHT:            azim[ch] = 270;      break;
-        case AV_CH_SURROUND_DIRECT_LEFT:  azim[ch] =  90;      break;
-        case AV_CH_SURROUND_DIRECT_RIGHT: azim[ch] = 270;      break;
-        case AV_CH_STEREO_LEFT:           azim[ch] =  90;      break;
-        case AV_CH_STEREO_RIGHT:          azim[ch] = 270;      break;
-        case 0:                                                break;
+        case AV_CHAN_WIDE_LEFT:           azim[ch] =  90;      break;
+        case AV_CHAN_WIDE_RIGHT:          azim[ch] = 270;      break;
+        case AV_CHAN_SURROUND_DIRECT_LEFT:  azim[ch] =  90;    break;
+        case AV_CHAN_SURROUND_DIRECT_RIGHT: azim[ch] = 270;    break;
+        case AV_CHAN_STEREO_LEFT:         azim[ch] =  90;      break;
+        case AV_CHAN_STEREO_RIGHT:        azim[ch] = 270;      break;
         default:
             return AVERROR(EINVAL);
         }
 
-        if (s->vspkrpos[m].set) {
-            azim[ch] = s->vspkrpos[m].azim;
-            elev[ch] = s->vspkrpos[m].elev;
+        if (s->vspkrpos[ch].set) {
+            azim[ch] = s->vspkrpos[ch].azim;
+            elev[ch] = s->vspkrpos[ch].elev;
         }
-
-        if (mask)
-            ch++;
     }
 
     memcpy(speaker_azim, azim, n_conv * sizeof(float));
@@ -604,9 +593,9 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *in)
     td.temp_afft = s->temp_afft;
 
     if (s->type == TIME_DOMAIN) {
-        ctx->internal->execute(ctx, sofalizer_convolute, &td, NULL, 2);
+        ff_filter_execute(ctx, sofalizer_convolute, &td, NULL, 2);
     } else if (s->type == FREQUENCY_DOMAIN) {
-        ctx->internal->execute(ctx, sofalizer_fast_convolute, &td, NULL, 2);
+        ff_filter_execute(ctx, sofalizer_fast_convolute, &td, NULL, 2);
     }
     emms_c();
 
@@ -648,7 +637,6 @@ static int activate(AVFilterContext *ctx)
 static int query_formats(AVFilterContext *ctx)
 {
     struct SOFAlizerContext *s = ctx->priv;
-    AVFilterFormats *formats = NULL;
     AVFilterChannelLayouts *layouts = NULL;
     int ret, sample_rates[] = { 48000, -1 };
     static const enum AVSampleFormat sample_fmts[] = {
@@ -656,10 +644,7 @@ static int query_formats(AVFilterContext *ctx)
         AV_SAMPLE_FMT_NONE
     };
 
-    formats = ff_make_format_list(sample_fmts);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    ret = ff_set_common_formats(ctx, formats);
+    ret = ff_set_common_formats_from_list(ctx, sample_fmts);
     if (ret)
         return ret;
 
@@ -672,7 +657,7 @@ static int query_formats(AVFilterContext *ctx)
         return ret;
 
     layouts = NULL;
-    ret = ff_add_channel_layout(&layouts, AV_CH_LAYOUT_STEREO);
+    ret = ff_add_channel_layout(&layouts, &(AVChannelLayout)AV_CHANNEL_LAYOUT_STEREO);
     if (ret)
         return ret;
 
@@ -681,10 +666,7 @@ static int query_formats(AVFilterContext *ctx)
         return ret;
 
     sample_rates[0] = s->sample_rate;
-    formats = ff_make_format_list(sample_rates);
-    if (!formats)
-        return AVERROR(ENOMEM);
-    return ff_set_common_samplerates(ctx, formats);
+    return ff_set_common_samplerates_from_list(ctx, sample_rates);
 }
 
 static int getfilter_float(AVFilterContext *ctx, float x, float y, float z,
@@ -740,7 +722,7 @@ static int load_data(AVFilterContext *ctx, int azim, int elev, float radius, int
     int n_fft;
     float delay_l; /* broadband delay for each IR */
     float delay_r;
-    int nb_input_channels = ctx->inputs[0]->channels; /* no. input channels */
+    int nb_input_channels = ctx->inputs[0]->ch_layout.nb_channels; /* no. input channels */
     float gain_lin = expf((s->gain - 3 * nb_input_channels) / 20 * M_LN10); /* gain - 3dB/channel */
     AVComplexFloat *data_hrtf_l = NULL;
     AVComplexFloat *data_hrtf_r = NULL;
@@ -1023,16 +1005,16 @@ static int config_input(AVFilterLink *inlink)
         s->nb_samples = s->framesize;
 
     /* gain -3 dB per channel */
-    s->gain_lfe = expf((s->gain - 3 * inlink->channels + s->lfe_gain) / 20 * M_LN10);
+    s->gain_lfe = expf((s->gain - 3 * inlink->ch_layout.nb_channels + s->lfe_gain) / 20 * M_LN10);
 
-    s->n_conv = inlink->channels;
+    s->n_conv = inlink->ch_layout.nb_channels;
 
     /* load IRs to data_ir[0] and data_ir[1] for required directions */
     if ((ret = load_data(ctx, s->rotation, s->elevation, s->radius, inlink->sample_rate)) < 0)
         return ret;
 
     av_log(ctx, AV_LOG_DEBUG, "Samplerate: %d Channels to convolute: %d, Length of ringbuffer: %d x %d\n",
-        inlink->sample_rate, s->n_conv, inlink->channels, s->buffer_length);
+        inlink->sample_rate, s->n_conv, inlink->ch_layout.nb_channels, s->buffer_length);
 
     return 0;
 }
@@ -1102,7 +1084,6 @@ static const AVFilterPad inputs[] = {
         .type         = AVMEDIA_TYPE_AUDIO,
         .config_props = config_input,
     },
-    { NULL }
 };
 
 static const AVFilterPad outputs[] = {
@@ -1110,7 +1091,6 @@ static const AVFilterPad outputs[] = {
         .name = "default",
         .type = AVMEDIA_TYPE_AUDIO,
     },
-    { NULL }
 };
 
 const AVFilter ff_af_sofalizer = {
@@ -1121,8 +1101,8 @@ const AVFilter ff_af_sofalizer = {
     .init          = init,
     .activate      = activate,
     .uninit        = uninit,
-    .query_formats = query_formats,
-    .inputs        = inputs,
-    .outputs       = outputs,
+    FILTER_INPUTS(inputs),
+    FILTER_OUTPUTS(outputs),
+    FILTER_QUERY_FUNC(query_formats),
     .flags         = AVFILTER_FLAG_SLICE_THREADS,
 };

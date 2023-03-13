@@ -16,7 +16,7 @@ interface PromiseInfo<T> {
   * promises by using the `clear` method on this class.
   */
 export abstract class ResolverBase<Id, T> {
-  private unresolvedIds: Map<Id, PromiseInfo<T>> = new Map();
+  #unresolvedIds: Map<Id, PromiseInfo<T>> = new Map();
 
   protected abstract getForId(id: Id): T|null;
   protected abstract startListening(): void;
@@ -25,12 +25,12 @@ export abstract class ResolverBase<Id, T> {
   /**
    * Returns a promise that resolves once the `id` can be resolved to an object.
    */
-  waitFor(id: Id): Promise<T> {
+  async waitFor(id: Id): Promise<T> {
     const obj = this.getForId(id);
     if (!obj) {
       return this.getOrCreatePromise(id);
     }
-    return Promise.resolve(obj);
+    return obj;
   }
 
   /**
@@ -42,7 +42,7 @@ export abstract class ResolverBase<Id, T> {
     const obj = this.getForId(id);
     if (!obj) {
       const swallowTheError = (): void => {};
-      this.getOrCreatePromise(id).catch(swallowTheError).then(obj => {
+      void this.getOrCreatePromise(id).catch(swallowTheError).then(obj => {
         if (obj) {
           callback(obj);
         }
@@ -57,14 +57,14 @@ export abstract class ResolverBase<Id, T> {
    */
   clear(): void {
     this.stopListening();
-    for (const [id, {reject}] of this.unresolvedIds.entries()) {
+    for (const [id, {reject}] of this.#unresolvedIds.entries()) {
       reject(new Error(`Object with ${id} never resolved.`));
     }
-    this.unresolvedIds.clear();
+    this.#unresolvedIds.clear();
   }
 
   private getOrCreatePromise(id: Id): Promise<T> {
-    const promiseInfo = this.unresolvedIds.get(id);
+    const promiseInfo = this.#unresolvedIds.get(id);
     if (promiseInfo) {
       return promiseInfo.promise;
     }
@@ -74,15 +74,15 @@ export abstract class ResolverBase<Id, T> {
       resolve = res;
       reject = rej;
     });
-    this.unresolvedIds.set(id, {promise, resolve, reject});
+    this.#unresolvedIds.set(id, {promise, resolve, reject});
     this.startListening();
     return promise;
   }
 
   protected onResolve(id: Id, t: T): void {
-    const promiseInfo = this.unresolvedIds.get(id);
-    this.unresolvedIds.delete(id);
-    if (this.unresolvedIds.size === 0) {
+    const promiseInfo = this.#unresolvedIds.get(id);
+    this.#unresolvedIds.delete(id);
+    if (this.#unresolvedIds.size === 0) {
       this.stopListening();
     }
     promiseInfo?.resolve(t);

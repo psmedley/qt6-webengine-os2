@@ -54,6 +54,32 @@ class ZWPTextInputWrapperClient {
   // for normal text input operations, which should be done with
   // commit_string, delete_surrounding_text, etc.
   virtual void OnKeysym(uint32_t key, uint32_t state, uint32_t modifiers) = 0;
+
+  // Called when a new preedit region is specified. The region is specified
+  // by |index| and |length| on the surrounding text sent do wayland compositor
+  // in advance. |index| is relative to the current caret position, and |length|
+  // is the preedit length. Both are measured in UTF-8 bytes.
+  // |spans| are representing the text spanning for the new preedit. All its
+  // indices and length are relative to the beginning of the new preedit,
+  // and measured in UTF-8 bytes.
+  virtual void OnSetPreeditRegion(int32_t index,
+                                  uint32_t length,
+                                  const std::vector<SpanStyle>& spans) = 0;
+
+  // Called when the visibility state of the input panel changed.
+  // There's no detailed spec of |state|, and no actual implementor except
+  // components/exo is found in the world at this moment.
+  // Thus, in ozone/wayland use the lowest bit as boolean
+  // (visible=1/invisible=0), and ignore other bits for future compatibility.
+  // This behavior must be consistent with components/exo.
+  virtual void OnInputPanelState(uint32_t state) = 0;
+
+  // Called when the modifiers map is updated.
+  // Each element holds the XKB name represents a modifier, such as "Shift".
+  // The position of the element represents the bit position of modifiers
+  // on OnKeysym. E.g., if LSB of modifiers is set, modifiers_map[0] is
+  // set, if (1 << 1) of modifiers is set, modifiers_map[1] is set, and so on.
+  virtual void OnModifiersMap(std::vector<std::string> modifiers_map) = 0;
 };
 
 // A wrapper around different versions of wayland text input protocols.
@@ -75,6 +101,8 @@ class ZWPTextInputWrapper {
   virtual void SetCursorRect(const gfx::Rect& rect) = 0;
   virtual void SetSurroundingText(const std::string& text,
                                   const gfx::Range& selection_range) = 0;
+  virtual void SetContentType(uint32_t content_hint,
+                              uint32_t content_purpose) = 0;
 };
 
 }  // namespace ui

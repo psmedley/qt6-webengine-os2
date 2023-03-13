@@ -5,13 +5,16 @@
 #include "third_party/blink/renderer/modules/mediasource/media_source.h"
 
 #include <memory>
+#include <tuple>
 
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_functions.h"
+#include "build/chromeos_buildflags.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/logging_override_if_enabled.h"
 #include "media/base/media_switches.h"
+#include "media/base/media_types.h"
 #include "media/base/mime_util.h"
 #include "media/base/supported_types.h"
 #include "media/base/video_decoder_config.h"
@@ -26,7 +29,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_video_decoder_config.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
-#include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/frame/deprecation/deprecation.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/track/audio_track_list.h"
 #include "third_party/blink/renderer/core/html/track/video_track_list.h"
@@ -35,11 +38,10 @@
 #include "third_party/blink/renderer/modules/mediasource/same_thread_media_source_tracer.h"
 #include "third_party/blink/renderer/modules/mediasource/source_buffer_track_base_supplement.h"
 #include "third_party/blink/renderer/modules/webcodecs/audio_decoder.h"
-#include "third_party/blink/renderer/modules/webcodecs/codec_config_eval.h"
 #include "third_party/blink/renderer/modules/webcodecs/video_decoder.h"
 #include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/exception_state.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
@@ -142,7 +144,8 @@ MediaSource::MediaSource(ExecutionContext* context)
       live_seekable_range_end_(0.0) {
   DVLOG(1) << __func__ << " this=" << this;
 
-  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled() ||
+  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled(
+             GetExecutionContext()) ||
          IsMainThread());
 
   MseExecutionContext type = MseExecutionContext::kWindow;
@@ -237,9 +240,14 @@ SourceBuffer* MediaSource::addSourceBuffer(const String& type,
 }
 
 SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
+    ExecutionContext* execution_context,
     const SourceBufferConfig* config,
     ExceptionState& exception_state) {
   DVLOG(2) << __func__ << " this=" << this;
+
+  UseCounter::Count(execution_context,
+                    WebFeature::kMediaSourceExtensionsForWebCodecs);
+
   DCHECK(config);
 
   // Precisely one of the multiple keys in SourceBufferConfig must be set.
@@ -266,7 +274,6 @@ SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
   std::unique_ptr<media::AudioDecoderConfig> audio_config;
   std::unique_ptr<media::VideoDecoderConfig> video_config;
   String console_message;
-  CodecConfigEval eval;
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
   // TODO(crbug.com/1144908): The SourceBuffer needs these for converting h264
@@ -282,44 +289,60 @@ SourceBuffer* MediaSource::AddSourceBufferUsingConfig(
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
   if (config->hasAudioConfig()) {
-    audio_config = std::make_unique<media::AudioDecoderConfig>();
-    eval = AudioDecoder::MakeMediaAudioDecoderConfig(*(config->audioConfig()),
-                                                     *audio_config /* out */,
-                                                     console_message /* out */);
-  } else {
-    DCHECK(config->hasVideoConfig());
-    video_config = std::make_unique<media::VideoDecoderConfig>();
-    eval = VideoDecoder::MakeMediaVideoDecoderConfig(
-        *(config->videoConfig()), *video_config /* out */,
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-        h264_converter /* out */, h264_avcc /* out */,
-#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
-        console_message /* out */);
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-    // TODO(crbug.com/1144908): Initial prototype does not support h264
-    // buffering. See above.
-    if (eval == CodecConfigEval::kSupported && (h264_converter || h264_avcc)) {
-      eval = CodecConfigEval::kUnsupported;
-      console_message =
-          "H.264 EncodedVideoChunk buffering is not yet supported in MSE. See "
-          "https://crbug.com/1144908.";
-      video_config.reset();
-    }
-#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
-  }
-
-  switch (eval) {
-    case CodecConfigEval::kInvalid:
+    if (!AudioDecoder::IsValidAudioDecoderConfig(*(config->audioConfig()),
+                                                 &console_message /* out */)) {
       LogAndThrowTypeError(exception_state, console_message);
       return nullptr;
-    case CodecConfigEval::kUnsupported:
+    }
+
+    absl::optional<media::AudioDecoderConfig> out_audio_config =
+        AudioDecoder::MakeMediaAudioDecoderConfig(*(config->audioConfig()),
+                                                  &console_message /* out */);
+
+    if (out_audio_config) {
+      audio_config =
+          std::make_unique<media::AudioDecoderConfig>(*out_audio_config);
+    } else {
       LogAndThrowDOMException(exception_state,
                               DOMExceptionCode::kNotSupportedError,
                               console_message);
       return nullptr;
-    case CodecConfigEval::kSupported:
-      // Good, let's proceed.
-      break;
+    }
+  } else {
+    DCHECK(config->hasVideoConfig());
+    if (!VideoDecoder::IsValidVideoDecoderConfig(*(config->videoConfig()),
+                                                 &console_message /* out */)) {
+      LogAndThrowTypeError(exception_state, console_message);
+      return nullptr;
+    }
+
+    absl::optional<media::VideoDecoderConfig> out_video_config =
+        VideoDecoder::MakeMediaVideoDecoderConfig(*(config->videoConfig()),
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+                                                  h264_converter /* out */,
+                                                  h264_avcc /* out */,
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+                                                  &console_message /* out */);
+#if BUILDFLAG(USE_PROPRIETARY_CODECS)
+    // TODO(crbug.com/1144908): Initial prototype does not support h264
+    // buffering. See above.
+    if (out_video_config && (h264_converter || h264_avcc)) {
+      out_video_config = absl::nullopt;
+      console_message =
+          "H.264 EncodedVideoChunk buffering is not yet supported in MSE. See "
+          "https://crbug.com/1144908.";
+    }
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+
+    if (out_video_config) {
+      video_config =
+          std::make_unique<media::VideoDecoderConfig>(*out_video_config);
+    } else {
+      LogAndThrowDOMException(exception_state,
+                              DOMExceptionCode::kNotSupportedError,
+                              console_message);
+      return nullptr;
+    }
   }
 
   // If the readyState attribute is not in the "open" state then throw an
@@ -465,6 +488,8 @@ void MediaSource::RemoveSourceBuffer_Locked(
   // 11. Destroy all resources for sourceBuffer.
   //     This should have been done already by
   //     SourceBuffer::removedFromMediaSource (steps 2-8) above.
+
+  SendUpdatedInfoToMainThreadCache();
 }
 
 void MediaSource::OnReadyStateChange(const ReadyState old_state,
@@ -520,6 +545,17 @@ bool MediaSource::isTypeSupported(ExecutionContext* context,
 bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
                                           const String& type,
                                           bool enforce_codec_specificity) {
+  // Even after ExecutionContext teardown notification, bindings may still call
+  // code-behinds for a short while. If |context| is null, this is likely
+  // happening. To prevent possible null deref of |context| in this path, claim
+  // lack of support immediately without proceeding.
+  if (!context) {
+    DVLOG(1) << __func__ << "(" << type << ", "
+             << (enforce_codec_specificity ? "true" : "false")
+             << ") -> false (context is null)";
+    return false;
+  }
+
   // Section 2.2 isTypeSupported() method steps.
   // https://dvcs.w3.org/hg/html-media/raw-file/tip/media-source/media-source.html#widl-MediaSource-isTypeSupported-boolean-DOMString-type
   // 1. If type is an empty string, then return false.
@@ -569,14 +605,14 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
     bool first = true;
     for (const auto& codec_id : parsed_codec_ids) {
       bool is_codec_ambiguous;
-      media::VideoCodec video_codec = media::kUnknownVideoCodec;
+      media::VideoCodec video_codec = media::VideoCodec::kUnknown;
       media::VideoCodecProfile profile;
       uint8_t level = 0;
       media::VideoColorSpace color_space;
       if (media::ParseVideoCodecString(mime_type.Ascii(), codec_id,
                                        &is_codec_ambiguous, &video_codec,
                                        &profile, &level, &color_space) &&
-          !is_codec_ambiguous && video_codec == media::VideoCodec::kCodecHEVC) {
+          !is_codec_ambiguous && video_codec == media::VideoCodec::kHEVC) {
         continue;
       }
       if (first)
@@ -637,22 +673,22 @@ bool MediaSource::IsTypeSupportedInternal(ExecutionContext* context,
 }
 
 // static
-bool MediaSource::canConstructInDedicatedWorker() {
+bool MediaSource::canConstructInDedicatedWorker(ExecutionContext* context) {
   // This method's visibility in IDL is restricted to MSE-in-Workers feature
   // being enabled.
-  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled());
+  DCHECK(RuntimeEnabledFeatures::MediaSourceInWorkersEnabled(context));
   return true;
 }
 
 void MediaSource::RecordIdentifiabilityMetric(ExecutionContext* context,
                                               const String& type,
                                               bool result) {
-  if (!IdentifiabilityStudySettings::Get()->ShouldSample(
+  if (!IdentifiabilityStudySettings::Get()->ShouldSampleType(
           blink::IdentifiableSurface::Type::kMediaSource_IsTypeSupported)) {
     return;
   }
   blink::IdentifiabilityMetricBuilder(context->UkmSourceID())
-      .Set(blink::IdentifiableSurface::FromTypeAndToken(
+      .Add(blink::IdentifiableSurface::FromTypeAndToken(
                blink::IdentifiableSurface::Type::kMediaSource_IsTypeSupported,
                IdentifiabilityBenignStringToken(type)),
            result)
@@ -672,9 +708,7 @@ ExecutionContext* MediaSource::GetExecutionContext() const {
 // method directly.
 bool MediaSource::RunUnlessElementGoneOrClosingUs(
     MediaSourceAttachmentSupplement::RunExclusivelyCB cb) {
-  scoped_refptr<MediaSourceAttachmentSupplement> attachment;
-  MediaSourceTracer* tracer;
-  std::tie(attachment, tracer) = AttachmentAndTracer();
+  auto [attachment, tracer] = AttachmentAndTracer();
   DCHECK(IsMainThread() ||
          !tracer);  // Cross-thread attachments do not use a tracer.
 
@@ -704,6 +738,13 @@ void MediaSource::AssertAttachmentsMutexHeldIfCrossThreadForDebugging() const {
     media_source_attachment_->AssertCrossThreadMutexIsAcquiredForDebugging();
   }
 #endif  // DCHECK_IS_ON()
+}
+
+void MediaSource::SendUpdatedInfoToMainThreadCache() {
+  AssertAttachmentsMutexHeldIfCrossThreadForDebugging();
+  scoped_refptr<MediaSourceAttachmentSupplement> attachment;
+  std::tie(attachment, std::ignore) = AttachmentAndTracer();
+  attachment->SendUpdatedInfoToMainThreadCache();
 }
 
 void MediaSource::Trace(Visitor* visitor) const {
@@ -827,9 +868,6 @@ WebTimeRanges MediaSource::SeekableInternal(
     DCHECK(media_source_attachment_)
         << "Seekable should only be used when attached to HTMLMediaElement";
   }
-  // Even if we are attached with a CrossThreadMediaSourceAttachment and owned
-  // by a worker thread, the attachment will call this on the main thread.
-  DCHECK(IsMainThread());
 
   // Implements MediaSource algorithm for HTMLMediaElement.seekable.
   // http://w3c.github.io/media-source/#htmlmediaelement-extensions
@@ -845,30 +883,23 @@ WebTimeRanges MediaSource::SeekableInternal(
   if (source_duration == std::numeric_limits<double>::infinity()) {
     WebTimeRanges buffered = BufferedInternal(pass_key);
 
-    {
-      // If cross-thread, protect against concurrent usage of
-      // |*live_seekable_range*|, since those are updated without taking the
-      // attachment's internal |attachment_state_lock_|.
-      MutexLocker lock(attachment_link_lock_);
-
-      // 1. If live seekable range is not empty:
-      if (has_live_seekable_range_) {
-        // 1.1. Let union ranges be the union of live seekable range and the
-        //      HTMLMediaElement.buffered attribute.
-        // 1.2. Return a single range with a start time equal to the
-        //      earliest start time in union ranges and an end time equal to
-        //      the highest end time in union ranges and abort these steps.
-        if (buffered.empty()) {
-          ranges.emplace_back(live_seekable_range_start_,
-                              live_seekable_range_end_);
-          return ranges;
-        }
-
-        ranges.emplace_back(
-            std::min(live_seekable_range_start_, buffered.front().start),
-            std::max(live_seekable_range_end_, buffered.back().end));
+    // 1. If live seekable range is not empty:
+    if (has_live_seekable_range_) {
+      // 1.1. Let union ranges be the union of live seekable range and the
+      //      HTMLMediaElement.buffered attribute.
+      // 1.2. Return a single range with a start time equal to the
+      //      earliest start time in union ranges and an end time equal to
+      //      the highest end time in union ranges and abort these steps.
+      if (buffered.empty()) {
+        ranges.emplace_back(live_seekable_range_start_,
+                            live_seekable_range_end_);
         return ranges;
       }
+
+      ranges.emplace_back(
+          std::min(live_seekable_range_start_, buffered.front().start),
+          std::max(live_seekable_range_end_, buffered.back().end));
+      return ranges;
     }
 
     // 2. If the HTMLMediaElement.buffered attribute returns an empty TimeRanges
@@ -892,7 +923,10 @@ WebTimeRanges MediaSource::SeekableInternal(
 void MediaSource::OnTrackChanged(TrackBase* track) {
   // TODO(https://crbug.com/878133): Support this in MSE-in-Worker once
   // TrackBase and TrackListBase are usable on worker and do not explicitly
-  // require an HTMLMediaElement.
+  // require an HTMLMediaElement. The update to |active_source_buffers_| will
+  // also require sending updated buffered and seekable information to the main
+  // thread, though the CTMSA itself would best know when to do that since it is
+  // this method should only be called by an attachment.
   DCHECK(IsMainThread());
 
   DCHECK(HTMLMediaElement::MediaTracksEnabledInternally());
@@ -1036,8 +1070,8 @@ void MediaSource::DurationChangeAlgorithm(
     // then call remove(new duration, old duration) on all all objects in
     // sourceBuffers.
     for (unsigned i = 0; i < source_buffers_->length(); ++i) {
-      source_buffers_->item(i)->remove(new_duration, old_duration,
-                                       ASSERT_NO_EXCEPTION);
+      source_buffers_->item(i)->Remove_Locked(new_duration, old_duration,
+                                              &ASSERT_NO_EXCEPTION, pass_key);
     }
   }
 
@@ -1050,9 +1084,7 @@ void MediaSource::DurationChangeAlgorithm(
 
   // 6. Update the media controller duration to new duration and run the
   //    HTMLMediaElement duration change algorithm.
-  scoped_refptr<MediaSourceAttachmentSupplement> attachment;
-  MediaSourceTracer* tracer;
-  std::tie(attachment, tracer) = AttachmentAndTracer();
+  auto [attachment, tracer] = AttachmentAndTracer();
   attachment->NotifyDurationChanged(tracer, new_duration);
 }
 
@@ -1148,21 +1180,32 @@ void MediaSource::setLiveSeekableRange(double start,
     return;
   }
 
+  // Note, here we must be open, therefore we must have an attachment.
+  if (!RunUnlessElementGoneOrClosingUs(
+          WTF::Bind(&MediaSource::SetLiveSeekableRange_Locked,
+                    WrapPersistent(this), start, end))) {
+    // TODO(https://crbug.com/878133): Determine in specification what the
+    // specific, app-visible, exception should be for this case.
+    LogAndThrowDOMException(exception_state,
+                            DOMExceptionCode::kInvalidStateError,
+                            "Worker MediaSource attachment is closing");
+  }
+}
+
+void MediaSource::SetLiveSeekableRange_Locked(
+    double start,
+    double end,
+    MediaSourceAttachmentSupplement::ExclusiveKey /* passkey */) {
+  AssertAttachmentsMutexHeldIfCrossThreadForDebugging();
+
   // 4. Set live seekable range to be a new normalized TimeRanges object
   //    containing a single range whose start position is start and end
   //    position is end.
-  {
-    // If we are cross-thread, then main thread could be running
-    // SeekableInternal simultaneously, if attached fully. Here, for simplicity,
-    // we don't need to take the full attachment exclusive
-    // |attachment_state_lock_| so long as we
-    // fully protect access to |*live_seekable_range*| read/write with
-    // |attachment_link_lock_|.
-    MutexLocker lock(attachment_link_lock_);
-    has_live_seekable_range_ = true;
-    live_seekable_range_start_ = start;
-    live_seekable_range_end_ = end;
-  }
+  has_live_seekable_range_ = true;
+  live_seekable_range_start_ = start;
+  live_seekable_range_end_ = end;
+
+  SendUpdatedInfoToMainThreadCache();
 }
 
 void MediaSource::clearLiveSeekableRange(ExceptionState& exception_state) {
@@ -1179,22 +1222,31 @@ void MediaSource::clearLiveSeekableRange(ExceptionState& exception_state) {
   if (ThrowExceptionIfClosed(IsOpen(), exception_state))
     return;
 
+  // Note, here we must be open, therefore we must have an attachment.
+  if (!RunUnlessElementGoneOrClosingUs(WTF::Bind(
+          &MediaSource::ClearLiveSeekableRange_Locked, WrapPersistent(this)))) {
+    // TODO(https://crbug.com/878133): Determine in specification what the
+    // specific, app-visible, exception should be for this case.
+    LogAndThrowDOMException(exception_state,
+                            DOMExceptionCode::kInvalidStateError,
+                            "Worker MediaSource attachment is closing");
+  }
+}
+
+void MediaSource::ClearLiveSeekableRange_Locked(
+    MediaSourceAttachmentSupplement::ExclusiveKey /* passkey */) {
+  AssertAttachmentsMutexHeldIfCrossThreadForDebugging();
+
   // 3. If live seekable range contains a range, then set live seekable range
   //    to be a new empty TimeRanges object.
-  {
-    // If we are cross-thread, then main thread could be running
-    // SeekableInternal simultaneously, if attached fully. Here, for simplicity,
-    // we don't need to take the full attachment exclusive
-    // |attachment_state_lock_| so long as we
-    // fully protect access to |*live_seekable_range*| read/write with
-    // |attachment_link_lock_|.
-    MutexLocker lock(attachment_link_lock_);
-    if (has_live_seekable_range_) {
-      has_live_seekable_range_ = false;
-      live_seekable_range_start_ = 0.0;
-      live_seekable_range_end_ = 0.0;
-    }
-  }
+  if (!has_live_seekable_range_)
+    return;
+
+  has_live_seekable_range_ = false;
+  live_seekable_range_start_ = 0.0;
+  live_seekable_range_end_ = 0.0;
+
+  SendUpdatedInfoToMainThreadCache();
 }
 
 bool MediaSource::IsOpen() const {
@@ -1270,10 +1322,13 @@ void MediaSource::EndOfStreamAlgorithm(
     // to just mark end of stream, and move the duration reduction logic to here
     // so we can just run DurationChangeAlgorithm(...) here.
     double new_duration = GetDuration_Locked(pass_key);
-    scoped_refptr<MediaSourceAttachmentSupplement> attachment;
-    MediaSourceTracer* tracer;
-    std::tie(attachment, tracer) = AttachmentAndTracer();
+    auto [attachment, tracer] = AttachmentAndTracer();
     attachment->NotifyDurationChanged(tracer, new_duration);
+  } else {
+    // Even though error didn't change duration, the transition to kEnded
+    // impacts the buffered ranges calculation, so let the attachment know that
+    // a cross-thread media element needs to be sent updated information.
+    SendUpdatedInfoToMainThreadCache();
   }
 }
 
@@ -1351,6 +1406,10 @@ void MediaSource::OpenIfInEndedState() {
 
   SetReadyState(ReadyState::kOpen);
   web_media_source_->UnmarkEndOfStream();
+
+  // This change impacts buffered and seekable calculations, so let the
+  // attachment know to update if cross-thread.
+  SendUpdatedInfoToMainThreadCache();
 }
 
 bool MediaSource::HasPendingActivity() const {

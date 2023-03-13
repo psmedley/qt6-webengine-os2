@@ -77,7 +77,8 @@ class ExpectedOutput {
 
 class SurfaceAggregatorPerfTest : public VizPerfTest {
  public:
-  SurfaceAggregatorPerfTest() : manager_(&shared_bitmap_manager_) {
+  SurfaceAggregatorPerfTest()
+      : manager_(FrameSinkManagerImpl::InitParams(&shared_bitmap_manager_)) {
     resource_provider_ = std::make_unique<DisplayResourceProviderSoftware>(
         &shared_bitmap_manager_);
   }
@@ -157,7 +158,7 @@ class SurfaceAggregatorPerfTest : public VizPerfTest {
         nullptr, &manager_, FrameSinkId(1, num_surfaces + 1), /*is_root=*/true);
     auto root_token = base::UnguessableToken::Create();
     base::TimeTicks next_fake_display_time =
-        base::TimeTicks() + base::TimeDelta::FromSeconds(1);
+        base::TimeTicks() + base::Seconds(1);
 
     bool first_lap = true;
     timer_.Reset();
@@ -287,7 +288,7 @@ class SurfaceAggregatorPerfTest : public VizPerfTest {
         nullptr, &manager_, root_frame_sink_id, /*is_root=*/true);
 
     base::TimeTicks next_fake_display_time =
-        base::TimeTicks() + base::TimeDelta::FromSeconds(1);
+        base::TimeTicks() + base::Seconds(1);
 
     timer_.Reset();
     do {
@@ -396,7 +397,7 @@ class SurfaceAggregatorPerfTest : public VizPerfTest {
             base::Histogram::kNoFlags);
 
     base::TimeTicks next_fake_display_time =
-        base::TimeTicks() + base::TimeDelta::FromSeconds(1);
+        base::TimeTicks() + base::Seconds(1);
     timer_.Reset();
     int laps = 0;
     do {

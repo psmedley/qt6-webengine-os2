@@ -13,19 +13,19 @@
 // limitations under the License.
 
 import {Actions} from '../common/actions';
-import {Area} from '../common/state';
 import {featureFlags} from '../common/feature_flags';
+import {DEFAULT_PIVOT_TABLE_ID} from '../common/pivot_table_common';
+import {Area} from '../common/state';
 
 import {Flow, globals} from './globals';
 import {toggleHelp} from './help_modal';
 import {
-  findUiTrackId,
   horizontalScrollAndZoomToRange,
   verticalScrollToTrack
 } from './scroll_helper';
 import {executeSearch} from './search_handler';
 
-const PIVOT_TABLE_FLAG = featureFlags.register({
+export const PIVOT_TABLE_FLAG = featureFlags.register({
   id: 'pivotTables',
   name: 'Pivot tables',
   description: 'Show experimental pivot table details tab.',
@@ -40,23 +40,28 @@ type Direction = 'Forward'|'Backward';
 export function handleKey(e: KeyboardEvent, down: boolean) {
   const key = e.key.toLowerCase();
   const selection = globals.state.currentSelection;
-  if (down && 'm' === key) {
+  const noModifiers = !(e.ctrlKey || e.metaKey || e.altKey || e.shiftKey);
+  const ctrlOrMeta = (e.ctrlKey || e.metaKey) && !(e.altKey || e.shiftKey);
+  // No other modifiers other than possibly Shift.
+  const maybeShift = !(e.ctrlKey || e.metaKey || e.altKey);
+
+  if (down && 'm' === key && maybeShift) {
     if (selection && selection.kind === 'AREA') {
       globals.dispatch(Actions.toggleMarkCurrentArea({persistent: e.shiftKey}));
     } else if (selection) {
       lockSliceSpan(e.shiftKey);
     }
   }
-  if (down && 'f' === key) {
+  if (down && 'f' === key && noModifiers) {
     findCurrentSelection();
   }
-  if (down && 'b' === key && (e.ctrlKey || e.metaKey)) {
+  if (down && 'b' === key && ctrlOrMeta) {
     globals.dispatch(Actions.toggleSidebar({}));
   }
-  if (down && '?' === key) {
+  if (down && '?' === key && maybeShift) {
     toggleHelp();
   }
-  if (down && 'enter' === key) {
+  if (down && 'enter' === key && maybeShift) {
     e.preventDefault();
     executeSearch(e.shiftKey);
   }
@@ -65,24 +70,22 @@ export function handleKey(e: KeyboardEvent, down: boolean) {
     globals.makeSelection(Actions.deselect({}));
     globals.dispatch(Actions.removeNote({id: '0'}));
   }
-  if (down && ']' === key) {
-    if (e.ctrlKey) {
-      focusOtherFlow('Forward');
-    } else {
-      moveByFocusedFlow('Forward');
-    }
+  if (down && ']' === key && ctrlOrMeta) {
+    focusOtherFlow('Forward');
   }
-  if (down && '[' === key) {
-    if (e.ctrlKey) {
-      focusOtherFlow('Backward');
-    } else {
-      moveByFocusedFlow('Backward');
-    }
+  if (down && ']' === key && noModifiers) {
+    moveByFocusedFlow('Forward');
   }
-  if (down && 'p' === key && e.ctrlKey && PIVOT_TABLE_FLAG.get()) {
+  if (down && '[' === key && ctrlOrMeta) {
+    focusOtherFlow('Backward');
+  }
+  if (down && '[' === key && noModifiers) {
+    moveByFocusedFlow('Backward');
+  }
+  if (down && 'p' === key && noModifiers && PIVOT_TABLE_FLAG.get()) {
     e.preventDefault();
     globals.frontendLocalState.togglePivotTable();
-    const pivotTableId = 'pivot-table';
+    const pivotTableId = DEFAULT_PIVOT_TABLE_ID;
     if (globals.state.pivotTable[pivotTableId] === undefined) {
       globals.dispatch(Actions.addNewPivotTable({
         name: 'Pivot Table',
@@ -143,7 +146,7 @@ function focusOtherFlow(direction: Direction) {
 }
 
 // Select the slice connected to the flow in focus
-function moveByFocusedFlow(direction: Direction) {
+function moveByFocusedFlow(direction: Direction): void {
   if (!globals.state.currentSelection ||
       globals.state.currentSelection.kind !== 'CHROME_SLICE') {
     return;
@@ -162,10 +165,15 @@ function moveByFocusedFlow(direction: Direction) {
   for (const flow of globals.connectedFlows) {
     if (flow.id === flowId) {
       const flowPoint = (direction === 'Backward' ? flow.begin : flow.end);
-      const uiTrackId = findUiTrackId(flowPoint.trackId);
+      const uiTrackId =
+          globals.state.uiTrackIdByTraceTrackId[flowPoint.trackId];
       if (uiTrackId) {
-        globals.makeSelection(Actions.selectChromeSlice(
-            {id: flowPoint.sliceId, trackId: uiTrackId, table: 'slice'}));
+        globals.makeSelection(Actions.selectChromeSlice({
+          id: flowPoint.sliceId,
+          trackId: uiTrackId,
+          table: 'slice',
+          scroll: true
+        }));
       }
     }
   }
@@ -184,7 +192,11 @@ function findTimeRangeOfSelection(): {startTs: number, endTs: number} {
       endTs = startTs + slice.dur;
     } else if (slice.ts) {
       startTs = slice.ts + globals.state.traceTime.startSec;
-      endTs = startTs + INSTANT_FOCUS_DURATION_S;
+      // This will handle either:
+      // a)slice.dur === -1 -> unfinished slice
+      // b)slice.dur === 0  -> instant event
+      endTs = slice.dur === -1 ? globals.state.traceTime.endSec :
+                                 startTs + INSTANT_FOCUS_DURATION_S;
     }
   } else if (selection.kind === 'THREAD_STATE') {
     const threadState = globals.threadStateDetails;
@@ -227,7 +239,7 @@ function lockSliceSpan(persistent = false) {
   }
 }
 
-function findCurrentSelection() {
+export function findCurrentSelection() {
   const selection = globals.state.currentSelection;
   if (selection === null) return;
 

@@ -7,10 +7,10 @@
 #include <string.h>
 
 #include <algorithm>
-#include <utility>
 
+#include "base/debug/crash_logging.h"
+#include "base/debug/dump_without_crashing.h"
 #include "base/no_destructor.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,13 +25,15 @@
 #include "ui/accessibility/ax_tree_manager.h"
 #include "ui/accessibility/ax_tree_manager_map.h"
 #include "ui/gfx/color_utils.h"
-#include "ui/gfx/transform.h"
+#include "ui/gfx/geometry/transform.h"
 
 namespace ui {
 
 // Definition of static class members.
-constexpr char16_t AXNode::kEmbeddedCharacter[];
-constexpr int AXNode::kEmbeddedCharacterLength;
+constexpr char AXNode::kEmbeddedObjectCharacterUTF8[];
+constexpr char16_t AXNode::kEmbeddedObjectCharacterUTF16[];
+constexpr int AXNode::kEmbeddedObjectCharacterLengthUTF8;
+constexpr int AXNode::kEmbeddedObjectCharacterLengthUTF16;
 
 AXNode::AXNode(AXNode::OwnerTree* tree,
                AXNode* parent,
@@ -48,6 +50,7 @@ AXNode::AXNode(AXNode::OwnerTree* tree,
 AXNode::~AXNode() = default;
 
 AXNodeData&& AXNode::TakeData() {
+  has_data_been_taken_ = true;
   return std::move(data_);
 }
 
@@ -164,7 +167,24 @@ AXNode* AXNode::GetParentCrossingTreeBoundary() const {
 }
 
 AXNode* AXNode::GetUnignoredParent() const {
-  DCHECK(!tree_->GetTreeUpdateInProgressState());
+  // TODO(crbug.com/1237353): The following bailout is to test a hypothesis that
+  // this function is sometimes called while a tree update is in progress or
+  // when data_ isn't valid, which may be the cause of the crash detailed in
+  // crbug.com/1237353. Once this hypothesis has been verified, replace the
+  // bailout with a fix, which ideally should not call this function under
+  // the circumstances hypothesized. Also, add back in the following line:
+  // DCHECK(!tree_->GetTreeUpdateInProgressState());
+  if (tree_->GetTreeUpdateInProgressState() || !IsDataValid()) {
+    static auto* const crash_key = base::debug::AllocateCrashKeyString(
+        "ax_node_err", base::debug::CrashKeySize::Size64);
+    std::ostringstream error;
+    error << "dataUninitialized=" << is_data_still_uninitialized_
+          << " dataTaken=" << has_data_been_taken_
+          << " treeUpdating=" << tree_->GetTreeUpdateInProgressState();
+    base::debug::SetCrashKeyString(crash_key, error.str());
+    base::debug::DumpWithoutCrashing();
+    return nullptr;
+  }
   AXNode* unignored_parent = GetParent();
   while (unignored_parent && unignored_parent->IsIgnored())
     unignored_parent = unignored_parent->GetParent();
@@ -182,6 +202,16 @@ AXNode* AXNode::GetUnignoredParentCrossingTreeBoundary() const {
       unignored_parent = manager->GetParentNodeFromParentTreeAsAXNode();
   }
   return unignored_parent;
+}
+
+base::stack<AXNode*> AXNode::GetAncestorsCrossingTreeBoundary() const {
+  base::stack<AXNode*> ancestors;
+  AXNode* ancestor = const_cast<AXNode*>(this);
+  while (ancestor) {
+    ancestors.push(ancestor);
+    ancestor = ancestor->GetParentCrossingTreeBoundary();
+  }
+  return ancestors;
 }
 
 size_t AXNode::GetIndexInParent() const {
@@ -572,26 +602,69 @@ AXNode::UnignoredChildrenCrossingTreeBoundaryEnd() const {
   return UnignoredChildCrossingTreeBoundaryIterator(this, nullptr);
 }
 
+absl::optional<int> AXNode::CompareTo(const AXNode& other) const {
+  if (this == &other)
+    return 0;
+
+  AXNode* common_ancestor = nullptr;
+  base::stack<AXNode*> our_ancestors = GetAncestorsCrossingTreeBoundary();
+  base::stack<AXNode*> other_ancestors =
+      other.GetAncestorsCrossingTreeBoundary();
+  while (!our_ancestors.empty() && !other_ancestors.empty() &&
+         our_ancestors.top() == other_ancestors.top()) {
+    common_ancestor = our_ancestors.top();
+    our_ancestors.pop();
+    other_ancestors.pop();
+  }
+
+  if (!common_ancestor)
+    return absl::nullopt;
+  if (common_ancestor == this)
+    return -1;
+  if (common_ancestor == &other)
+    return 1;
+
+  if (our_ancestors.empty() || other_ancestors.empty()) {
+    NOTREACHED() << "The common ancestor should be followed by two uncommon "
+                    "children in the two corresponding lists of ancestors.";
+    return absl::nullopt;
+  }
+
+  size_t this_uncommon_ancestor_index = our_ancestors.top()->GetIndexInParent();
+  size_t other_uncommon_ancestor_index =
+      other_ancestors.top()->GetIndexInParent();
+  DCHECK_NE(this_uncommon_ancestor_index, other_uncommon_ancestor_index)
+      << "Deepest uncommon ancestors should truly be uncommon, i.e. not be the "
+         "same node.";
+  return this_uncommon_ancestor_index - other_uncommon_ancestor_index;
+}
+
 bool AXNode::IsText() const {
-  // In Legacy Layout, a list marker has no children and is thus represented on
-  // all platforms as a leaf node that exposes the marker itself, i.e., it forms
-  // part of the AX tree's text representation. In contrast, in Layout NG, a
-  // list marker has a static text child.
-  if (data().role == ax::mojom::Role::kListMarker)
-    return !GetChildCount();
-  return ui::IsText(data().role);
+  // Regular list markers only expose their alternative text, but do not expose
+  // their descendants; and the descendants should be ignored. This is because
+  // the alternative text depends on the counter style and can be different from
+  // the actual (visual) marker text, and hence, inconsistent with the
+  // descendants. We treat a list marker as non-text only if it still has
+  // non-ignored descendants, which happens only when:
+  // - The list marker itself is ignored but the descendants are not
+  // - Or the list marker contains images
+  if (GetRole() == ax::mojom::Role::kListMarker)
+    return !GetUnignoredChildCount();
+  return ui::IsText(GetRole());
 }
 
 bool AXNode::IsLineBreak() const {
   // The last condition captures inline text nodes whose only content is an '\n'
   // character.
-  return data().role == ax::mojom::Role::kLineBreak ||
-         (data().role == ax::mojom::Role::kInlineTextBox &&
+  return GetRole() == ax::mojom::Role::kLineBreak ||
+         (GetRole() == ax::mojom::Role::kInlineTextBox &&
           GetBoolAttribute(ax::mojom::BoolAttribute::kIsLineBreakingObject));
 }
 
 void AXNode::SetData(const AXNodeData& src) {
   data_ = src;
+  is_data_still_uninitialized_ = false;
+  has_data_been_taken_ = false;
 }
 
 void AXNode::SetLocation(AXNodeID offset_container_id,
@@ -621,62 +694,24 @@ void AXNode::SwapChildren(std::vector<AXNode*>* children) {
   children->swap(children_);
 }
 
-void AXNode::Destroy() {
-  delete this;
-}
-
 bool AXNode::IsDescendantOf(const AXNode* ancestor) const {
   if (!ancestor)
     return false;
-
   if (this == ancestor)
     return true;
-  if (GetParent())
-    return GetParent()->IsDescendantOf(ancestor);
-
+  if (const AXNode* parent = GetParent())
+    return parent->IsDescendantOf(ancestor);
   return false;
 }
 
-std::vector<int> AXNode::GetOrComputeLineStartOffsets() {
-  DCHECK(!tree_->GetTreeUpdateInProgressState());
-  std::vector<int> line_offsets;
-  if (GetIntListAttribute(ax::mojom::IntListAttribute::kCachedLineStarts,
-                          &line_offsets)) {
-    return line_offsets;
-  }
-
-  int start_offset = 0;
-  ComputeLineStartOffsets(&line_offsets, &start_offset);
-  data_.AddIntListAttribute(ax::mojom::IntListAttribute::kCachedLineStarts,
-                            line_offsets);
-  return line_offsets;
-}
-
-void AXNode::ComputeLineStartOffsets(std::vector<int>* line_offsets,
-                                     int* start_offset) const {
-  DCHECK(!tree_->GetTreeUpdateInProgressState());
-  DCHECK(line_offsets);
-  DCHECK(start_offset);
-  for (auto iter = AllChildrenCrossingTreeBoundaryBegin();
-       iter != AllChildrenCrossingTreeBoundaryEnd(); ++iter) {
-    if (iter->GetChildCountCrossingTreeBoundary()) {
-      iter->ComputeLineStartOffsets(line_offsets, start_offset);
-      continue;
-    }
-
-    // Don't report if the first piece of text starts a new line or not.
-    if (*start_offset &&
-        !iter->HasIntAttribute(ax::mojom::IntAttribute::kPreviousOnLineId)) {
-      // If there are multiple objects with an empty accessible label at the
-      // start of a line, only include a single line start offset.
-      if (line_offsets->empty() || line_offsets->back() != *start_offset)
-        line_offsets->push_back(*start_offset);
-    }
-
-    std::u16string text =
-        iter->GetString16Attribute(ax::mojom::StringAttribute::kName);
-    *start_offset += static_cast<int>(text.length());
-  }
+bool AXNode::IsDescendantOfCrossingTreeBoundary(const AXNode* ancestor) const {
+  if (!ancestor)
+    return false;
+  if (this == ancestor)
+    return true;
+  if (const AXNode* parent = GetParentCrossingTreeBoundary())
+    return parent->IsDescendantOfCrossingTreeBoundary(ancestor);
+  return false;
 }
 
 SkColor AXNode::ComputeColor() const {
@@ -734,20 +769,47 @@ bool AXNode::GetString16Attribute(ax::mojom::StringAttribute attribute,
   return false;
 }
 
+bool AXNode::HasInheritedStringAttribute(
+    ax::mojom::StringAttribute attribute) const {
+  for (const AXNode* current_node = this; current_node;
+       current_node = current_node->GetParent()) {
+    if (current_node->HasStringAttribute(attribute))
+      return true;
+  }
+  return false;
+}
+
 const std::string& AXNode::GetInheritedStringAttribute(
     ax::mojom::StringAttribute attribute) const {
-  const AXNode* current_node = this;
-  do {
+  for (const AXNode* current_node = this; current_node;
+       current_node = current_node->GetParent()) {
     if (current_node->HasStringAttribute(attribute))
       return current_node->GetStringAttribute(attribute);
-    current_node = current_node->GetParent();
-  } while (current_node);
+  }
   return base::EmptyString();
 }
 
 std::u16string AXNode::GetInheritedString16Attribute(
     ax::mojom::StringAttribute attribute) const {
   return base::UTF8ToUTF16(GetInheritedStringAttribute(attribute));
+}
+
+bool AXNode::HasIntListAttribute(ax::mojom::IntListAttribute attribute) const {
+  return GetComputedNodeData().HasOrCanComputeAttribute(attribute);
+}
+
+const std::vector<int32_t>& AXNode::GetIntListAttribute(
+    ax::mojom::IntListAttribute attribute) const {
+  return GetComputedNodeData().GetOrComputeAttribute(attribute);
+}
+
+bool AXNode::GetIntListAttribute(ax::mojom::IntListAttribute attribute,
+                                 std::vector<int32_t>* value) const {
+  if (GetComputedNodeData().HasOrCanComputeAttribute(attribute)) {
+    *value = GetComputedNodeData().GetOrComputeAttribute(attribute);
+    return true;
+  }
+  return false;
 }
 
 AXLanguageInfo* AXNode::GetLanguageInfo() const {
@@ -772,6 +834,26 @@ void AXNode::ClearComputedNodeData() {
   computed_node_data_.reset();
 }
 
+const std::string& AXNode::GetNameUTF8() const {
+  DCHECK(!tree_->GetTreeUpdateInProgressState());
+  const AXNode* node = this;
+  if (GetRole() == ax::mojom::Role::kPortal &&
+      GetNameFrom() == ax::mojom::NameFrom::kNone) {
+    const AXTreeManager* child_tree_manager =
+        AXTreeManagerMap::GetInstance().GetManagerForChildTree(*this);
+    if (child_tree_manager)
+      node = child_tree_manager->GetRootAsAXNode();
+  }
+
+  return node->GetStringAttribute(ax::mojom::StringAttribute::kName);
+}
+
+std::u16string AXNode::GetNameUTF16() const {
+  // Storing a copy of the name in UTF16 would probably not be helpful because
+  // it could potentially double the memory usage of AXTree.
+  return base::UTF8ToUTF16(GetNameUTF8());
+}
+
 const std::u16string& AXNode::GetHypertext() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
   // TODO(nektar): Introduce proper caching of hypertext via
@@ -779,16 +861,16 @@ const std::u16string& AXNode::GetHypertext() const {
   hypertext_ = AXHypertext();
 
   // Hypertext is not exposed for descendants of leaf nodes. For such nodes,
-  // their inner text is equivalent to their hypertext. Otherwise, we would
+  // their text content is equivalent to their hypertext. Otherwise, we would
   // never be able to compute equivalent ancestor positions in atomic text
   // fields given an AXPosition on an inline text box descendant, because there
   // is often an ignored generic container between the text descendants and the
   // text field node.
   //
   // For example, look at the following accessibility tree and the text
-  // positions indicated using "<>" symbols in the inner text of every node, and
-  // then imagine what would happen if the generic container was represented by
-  // an "embedded object replacement character" in the text of its text field
+  // positions indicated using "<>" symbols in the text content of every node,
+  // and then imagine what would happen if the generic container was represented
+  // by an "embedded object replacement character" in the text of its text field
   // parent.
   // ++kTextField "Hell<o>" IsLeaf=true
   // ++++kGenericContainer "Hell<o>" ignored IsChildOfLeaf=true
@@ -796,16 +878,16 @@ const std::u16string& AXNode::GetHypertext() const {
   // ++++++++kInlineTextBox "Hell<o>" IsChildOfLeaf=true
 
   if (IsLeaf() || IsChildOfLeaf()) {
-    hypertext_.hypertext = base::UTF8ToUTF16(GetInnerText());
+    hypertext_.hypertext = GetTextContentUTF16();
   } else {
     // Construct the hypertext for this node, which contains the concatenation
-    // of the inner text of this node's textual children, and an "object
+    // of the text content of this node's textual children, and an "object
     // replacement character" for all the other children.
     //
     // Note that the word "hypertext" comes from the IAccessible2 Standard and
     // has nothing to do with HTML.
     static const base::NoDestructor<std::u16string> embedded_character_str(
-        AXNode::kEmbeddedCharacter);
+        AXNode::kEmbeddedObjectCharacterUTF16);
     auto first = UnignoredChildrenCrossingTreeBoundaryBegin();
     for (auto iter = first; iter != UnignoredChildrenCrossingTreeBoundaryEnd();
          ++iter) {
@@ -813,7 +895,7 @@ const std::u16string& AXNode::GetHypertext() const {
       // hypertext with the embedded object character. We copy all of their text
       // instead.
       if (iter->IsText()) {
-        hypertext_.hypertext += iter->GetInnerTextUTF16();
+        hypertext_.hypertext += iter->GetTextContentUTF16();
       } else {
         int character_offset = static_cast<int>(hypertext_.hypertext.size());
         auto inserted =
@@ -853,24 +935,24 @@ const AXHypertext& AXNode::GetOldHypertext() const {
   return old_hypertext_;
 }
 
-const std::string& AXNode::GetInnerText() const {
+const std::string& AXNode::GetTextContentUTF8() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
-  return GetComputedNodeData().GetOrComputeInnerTextUTF8();
+  return GetComputedNodeData().GetOrComputeTextContentUTF8();
 }
 
-const std::u16string& AXNode::GetInnerTextUTF16() const {
+const std::u16string& AXNode::GetTextContentUTF16() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
-  return GetComputedNodeData().GetOrComputeInnerTextUTF16();
+  return GetComputedNodeData().GetOrComputeTextContentUTF16();
 }
 
-int AXNode::GetInnerTextLength() const {
+int AXNode::GetTextContentLengthUTF8() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
-  return GetComputedNodeData().GetOrComputeInnerTextLengthUTF8();
+  return GetComputedNodeData().GetOrComputeTextContentLengthUTF8();
 }
 
-int AXNode::GetInnerTextLengthUTF16() const {
+int AXNode::GetTextContentLengthUTF16() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
-  return GetComputedNodeData().GetOrComputeInnerTextLengthUTF16();
+  return GetComputedNodeData().GetOrComputeTextContentLengthUTF16();
 }
 
 std::string AXNode::GetLanguage() const {
@@ -892,14 +974,21 @@ std::string AXNode::GetLanguage() const {
 
 std::string AXNode::GetValueForControl() const {
   DCHECK(!tree_->GetTreeUpdateInProgressState());
-  if (data().IsTextField())
-    return GetValueForTextField();
+  if (data().IsTextField()) {
+    // Returns the value of a text field. If necessary, computes the value from
+    // the field's internal representation in the accessibility tree, in order
+    // to minimize cross-process communication between the renderer and the
+    // browser processes.
+    return GetStringAttribute(ax::mojom::StringAttribute::kValue);
+  }
+
   if (data().IsRangeValueSupported())
     return GetTextForRangeValue();
-  if (data().role == ax::mojom::Role::kColorWell)
+  if (GetRole() == ax::mojom::Role::kColorWell)
     return GetValueForColorWell();
-  if (!IsControl(data().role))
+  if (!IsControl(GetRole()))
     return std::string();
+
   return GetStringAttribute(ax::mojom::StringAttribute::kValue);
 }
 
@@ -908,7 +997,7 @@ std::ostream& operator<<(std::ostream& stream, const AXNode& node) {
 }
 
 bool AXNode::IsTable() const {
-  return IsTableLike(data().role);
+  return IsTableLike(GetRole());
 }
 
 absl::optional<int> AXNode::GetTableColCount() const {
@@ -1070,7 +1159,7 @@ const std::vector<AXNode*>* AXNode::GetExtraMacNodes() const {
 //
 
 bool AXNode::IsTableRow() const {
-  return ui::IsTableRow(data().role);
+  return ui::IsTableRow(GetRole());
 }
 
 absl::optional<int> AXNode::GetTableRowRowIndex() const {
@@ -1094,19 +1183,19 @@ std::vector<AXNodeID> AXNode::GetTableRowNodeIds() const {
     return row_node_ids;
 
   for (AXNode* node : table_info->row_nodes)
-    row_node_ids.push_back(node->data().id);
+    row_node_ids.push_back(node->id());
 
   return row_node_ids;
 }
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 
 //
 // Table column-like nodes. These nodes are only present on macOS.
 //
 
 bool AXNode::IsTableColumn() const {
-  return ui::IsTableColumn(data().role);
+  return ui::IsTableColumn(GetRole());
 }
 
 absl::optional<int> AXNode::GetTableColColIndex() const {
@@ -1126,14 +1215,14 @@ absl::optional<int> AXNode::GetTableColColIndex() const {
   return index;
 }
 
-#endif  // defined(OS_APPLE)
+#endif  // BUILDFLAG(IS_APPLE)
 
 //
 // Table cell-like nodes.
 //
 
 bool AXNode::IsTableCellOrHeader() const {
-  return IsCellOrTableHeader(data().role);
+  return IsCellOrTableHeader(GetRole());
 }
 
 absl::optional<int> AXNode::GetTableCellIndex() const {
@@ -1270,7 +1359,7 @@ void AXNode::GetTableCellRowHeaders(std::vector<AXNode*>* row_headers) const {
   IdVectorToNodeVector(row_header_ids, row_headers);
 }
 
-bool AXNode::IsCellOrHeaderOfARIATable() const {
+bool AXNode::IsCellOrHeaderOfAriaGrid() const {
   if (!IsTableCellOrHeader())
     return false;
 
@@ -1280,21 +1369,8 @@ bool AXNode::IsCellOrHeaderOfARIATable() const {
   if (!node)
     return false;
 
-  return node->data().role == ax::mojom::Role::kTable;
-}
-
-bool AXNode::IsCellOrHeaderOfARIAGrid() const {
-  if (!IsTableCellOrHeader())
-    return false;
-
-  const AXNode* node = this;
-  while (node && !node->IsTable())
-    node = node->GetParent();
-  if (!node)
-    return false;
-
-  return node->data().role == ax::mojom::Role::kGrid ||
-         node->data().role == ax::mojom::Role::kTreeGrid;
+  return node->GetRole() == ax::mojom::Role::kGrid ||
+         node->GetRole() == ax::mojom::Role::kTreeGrid;
 }
 
 AXTableInfo* AXNode::GetAncestorTableInfo() const {
@@ -1329,11 +1405,24 @@ absl::optional<int> AXNode::GetHierarchicalLevel() const {
 }
 
 bool AXNode::IsOrderedSetItem() const {
-  return ui::IsItemLike(data().role);
+  // Tree grid rows should be treated as ordered set items. Since we don't have
+  // a separate row role for tree grid rows, we can't just add the Role::kRow to
+  // IsItemLike. We need to validate that the row is indeed part of a tree grid.
+  if (IsRowInTreeGrid(GetOrderedSet()))
+    return true;
+
+  return ui::IsItemLike(GetRole());
 }
 
 bool AXNode::IsOrderedSet() const {
-  return ui::IsSetLike(data().role);
+  // Tree grid rows should be considered like ordered set items and a tree grid
+  // like an ordered set. Continuing that logic, in order to compute the right
+  // PosInSet and SetSize, row groups inside of a tree grid should also be
+  // ordered sets.
+  if (IsRowGroupInTreeGrid())
+    return true;
+
+  return ui::IsSetLike(GetRole());
 }
 
 // Uses AXTree's cache to calculate node's PosInSet.
@@ -1349,9 +1438,14 @@ absl::optional<int> AXNode::GetSetSize() {
 // Returns true if the role of ordered set matches the role of item.
 // Returns false otherwise.
 bool AXNode::SetRoleMatchesItemRole(const AXNode* ordered_set) const {
-  ax::mojom::Role item_role = data().role;
+  ax::mojom::Role item_role = GetRole();
+
+  // Tree grid rows should be treated as ordered set items.
+  if (IsRowInTreeGrid(ordered_set))
+    return true;
+
   // Switch on role of ordered set
-  switch (ordered_set->data().role) {
+  switch (ordered_set->GetRole()) {
     case ax::mojom::Role::kFeed:
       return item_role == ax::mojom::Role::kArticle;
     case ax::mojom::Role::kList:
@@ -1399,9 +1493,39 @@ bool AXNode::SetRoleMatchesItemRole(const AXNode* ordered_set) const {
 
 bool AXNode::IsIgnoredContainerForOrderedSet() const {
   return IsIgnored() || IsEmbeddedGroup() ||
-         data().role == ax::mojom::Role::kListItem ||
-         data().role == ax::mojom::Role::kGenericContainer ||
-         data().role == ax::mojom::Role::kUnknown;
+         GetRole() == ax::mojom::Role::kLabelText ||
+         GetRole() == ax::mojom::Role::kListItem ||
+         GetRole() == ax::mojom::Role::kGenericContainer ||
+         GetRole() == ax::mojom::Role::kUnknown;
+}
+
+bool AXNode::IsRowInTreeGrid(const AXNode* ordered_set) const {
+  // Tree grid rows have the requirement of being focusable, so we use it to
+  // avoid iterating over rows that clearly aren't part of a tree grid.
+  if (GetRole() != ax::mojom::Role::kRow ||
+      !HasState(ax::mojom::State::kFocusable) || !ordered_set) {
+    return false;
+  }
+
+  if (ordered_set->GetRole() == ax::mojom::Role::kTreeGrid)
+    return true;
+
+  return ordered_set->IsRowGroupInTreeGrid();
+}
+
+bool AXNode::IsRowGroupInTreeGrid() const {
+  // To the best of our understanding, row groups can't be nested.
+  //
+  // According to https://www.w3.org/TR/wai-aria-1.1/#rowgroup, a row group is a
+  // "structural equivalent to the thead, tfoot, and tbody elements in an HTML
+  // table". It is specified in the spec of the thead, tfoot and tbody elements
+  // that they need to be children of a table element, meaning that there can
+  // only be one level of such elements. We assume the same for row groups.
+  if (GetRole() != ax::mojom::Role::kRowGroup)
+    return false;
+
+  AXNode* ordered_set = GetOrderedSet();
+  return ordered_set && ordered_set->GetRole() == ax::mojom::Role::kTreeGrid;
 }
 
 int AXNode::UpdateUnignoredCachedValuesRecursive(int startIndex) {
@@ -1429,6 +1553,10 @@ AXNode* AXNode::GetOrderedSet() const {
   }
 
   return result;
+}
+
+bool AXNode::IsDataValid() const {
+  return !is_data_still_uninitialized_ && !has_data_been_taken_;
 }
 
 AXNode* AXNode::ComputeLastUnignoredChildRecursive() const {
@@ -1470,13 +1598,16 @@ std::string AXNode::GetTextForRangeValue() const {
   if (range_value.empty() &&
       GetFloatAttribute(ax::mojom::FloatAttribute::kValueForRange,
                         &numeric_value)) {
-    range_value = base::NumberToString(numeric_value);
+    // This method of number to string conversion creates a localized string
+    // and avoids padding with extra zeros after the decimal point.
+    // For example, 3.5 is converted to "3.5" rather than "3.50000".
+    return base::StringPrintf("%g", numeric_value);
   }
   return range_value;
 }
 
 std::string AXNode::GetValueForColorWell() const {
-  DCHECK_EQ(data().role, ax::mojom::Role::kColorWell);
+  DCHECK_EQ(GetRole(), ax::mojom::Role::kColorWell);
   // static cast because SkColor is a 4-byte unsigned int
   unsigned int color = static_cast<unsigned int>(
       GetIntAttribute(ax::mojom::IntAttribute::kColorValue));
@@ -1488,32 +1619,26 @@ std::string AXNode::GetValueForColorWell() const {
                             green * 100 / 255, blue * 100 / 255);
 }
 
-std::string AXNode::GetValueForTextField() const {
-  DCHECK(data().IsTextField());
-  std::string value = GetStringAttribute(ax::mojom::StringAttribute::kValue);
-  // Some screen readers like Jaws and VoiceOver require a value to be set in
-  // text fields with rich content, even though the same information is
-  // available on the children.
-  if (value.empty() && data().IsNonAtomicTextField())
-    return GetInnerText();
-  return value;
-}
-
 bool AXNode::IsIgnored() const {
-  return data().IsIgnored();
+  // If the focus has moved, then it could make a previously ignored node
+  // unignored or vice versa. We never ignore focused nodes otherwise users of
+  // assistive software might be unable to interact with the webpage.
+  return AXTree::ComputeNodeIsIgnored(&tree_->data(), data());
 }
 
 bool AXNode::IsIgnoredForTextNavigation() const {
-  if (data().role == ax::mojom::Role::kSplitter)
+  // Splitters do not contribute anything to the tree's text representation, so
+  // stopping on a splitter would erroniously appear to a screen reader user
+  // that the cursor has stopped on the next unignored object.
+  if (GetRole() == ax::mojom::Role::kSplitter)
     return true;
 
   // A generic container without any unignored children that is not editable
   // should not be used for text-based navigation. Such nodes don't make sense
-  // for screen readers to land on, since no text will be announced and no
-  // action is possible.
-  if (data().role == ax::mojom::Role::kGenericContainer &&
-      !GetUnignoredChildCount() &&
-      !data().HasState(ax::mojom::State::kEditable)) {
+  // for screen readers to land on, since no role / text will be announced and
+  // no action is possible.
+  if (GetRole() == ax::mojom::Role::kGenericContainer &&
+      !GetUnignoredChildCount() && !HasState(ax::mojom::State::kEditable)) {
     return true;
   }
 
@@ -1521,14 +1646,7 @@ bool AXNode::IsIgnoredForTextNavigation() const {
 }
 
 bool AXNode::IsInvisibleOrIgnored() const {
-  if (!data().IsInvisibleOrIgnored())
-    return false;
-
-  return !IsFocusedWithinThisTree();
-}
-
-bool AXNode::IsFocusedWithinThisTree() const {
-  return id() == tree_->data().focus_id;
+  return id() != tree_->data().focus_id && (IsIgnored() || data_.IsInvisible());
 }
 
 bool AXNode::IsChildOfLeaf() const {
@@ -1544,10 +1662,10 @@ bool AXNode::IsEmptyLeaf() const {
   if (!IsLeaf())
     return false;
   if (GetUnignoredChildCountCrossingTreeBoundary())
-    return !GetInnerTextLength();
+    return !GetTextContentLengthUTF8();
   // Text exposed by ignored leaf (text) nodes is not exposed to the platforms'
   // accessibility layer, hence such leaf nodes are in effect empty.
-  return IsIgnored() || !GetInnerTextLength();
+  return IsIgnored() || !GetTextContentLengthUTF8();
 }
 
 bool AXNode::IsLeaf() const {
@@ -1559,7 +1677,8 @@ bool AXNode::IsLeaf() const {
   // Ignored nodes with any kind of descendants, (ignored or unignored), cannot
   // be leaves because: A) If some of their descendants are unignored then those
   // descendants need to be exposed to the platform layer, and B) If all of
-  // their descendants are ignored they are still not at the bottom of the tree.
+  // their descendants are ignored they cannot be at the bottom of the platform
+  // tree since that tree does not expose any ignored objects.
   if (IsIgnored())
     return false;
 
@@ -1568,7 +1687,7 @@ bool AXNode::IsLeaf() const {
   if (!child_count)
     return true;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // On Windows, we want to hide the subtree of a collapsed <select> element.
   // Otherwise, ATs are always going to announce its options whether it's
   // collapsed or expanded. In the AXTree, this element corresponds to a node
@@ -1576,7 +1695,7 @@ bool AXNode::IsLeaf() const {
   // role ax::mojom::Role::kMenuListPopup.
   if (IsCollapsedMenuListPopUpButton())
     return true;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
   // These types of objects may have children that we use as internal
   // implementation details, but we want to expose them as leaves to platform
@@ -1591,7 +1710,7 @@ bool AXNode::IsLeaf() const {
 
   // Roles whose children are only presentational according to the ARIA and
   // HTML5 Specs should be hidden from screen readers.
-  switch (data().role) {
+  switch (GetRole()) {
     // According to the ARIA and Core-AAM specs:
     // https://w3c.github.io/aria/#button,
     // https://www.w3.org/TR/core-aam-1.1/#exclude_elements
@@ -1605,9 +1724,12 @@ bool AXNode::IsLeaf() const {
     case ax::mojom::Role::kButton:
       return false;
     case ax::mojom::Role::kImage: {
-      // Images are not leaves when they are image maps. Therefore, do not
-      // truncate descendants except in the case where ARIA role=img.
-      std::string role = GetStringAttribute(ax::mojom::StringAttribute::kRole);
+      // HTML images (i.e. <img> elements) are not leaves when they are image
+      // maps. Therefore, do not truncate descendants except in the case where
+      // ARIA role=img or role=image because that's how we want to treat
+      // ARIA-based images.
+      const std::string role =
+          GetStringAttribute(ax::mojom::StringAttribute::kRole);
       return role == "img" || role == "image";
     }
     case ax::mojom::Role::kDocCover:
@@ -1621,7 +1743,9 @@ bool AXNode::IsLeaf() const {
       return true;
     case ax::mojom::Role::kCheckBox:
     case ax::mojom::Role::kListBoxOption:
-    case ax::mojom::Role::kMath:  // role="math" is flat, unlike <math>.
+    // role="math" is flat. But always return false for kMathMLMath since the
+    // children of a <math> tag should be exposed to make MathML accessible.
+    case ax::mojom::Role::kMath:
     case ax::mojom::Role::kMenuListOption:
     case ax::mojom::Role::kMenuItem:
     case ax::mojom::Role::kMenuItemCheckBox:
@@ -1648,11 +1772,11 @@ bool AXNode::IsLeaf() const {
       // Allow up to 2 text nodes so that list items with bullets are leaves.
       if (child_count > 2 || HasState(ax::mojom::State::kEditable))
         return false;
-      AXNode* child1 = GetFirstUnignoredChildCrossingTreeBoundary();
-      if (!child1 || child1->GetRole() != ax::mojom::Role::kStaticText)
+      const AXNode* child1 = GetFirstUnignoredChildCrossingTreeBoundary();
+      if (!child1 || !child1->IsText())
         return false;
-      AXNode* child2 = child1->GetNextSibling();
-      return !child2 || child2->GetRole() == ax::mojom::Role::kStaticText;
+      const AXNode* child2 = child1->GetNextSibling();
+      return !child2 || child2->IsText();
     }
     default:
       return false;
@@ -1660,7 +1784,7 @@ bool AXNode::IsLeaf() const {
 }
 
 bool AXNode::IsInListMarker() const {
-  if (data().role == ax::mojom::Role::kListMarker)
+  if (GetRole() == ax::mojom::Role::kListMarker)
     return true;
 
   // The children of a list marker node can only be text nodes.
@@ -1673,17 +1797,20 @@ bool AXNode::IsInListMarker() const {
   // ++StaticText
   // ++++InlineTextBox
   AXNode* parent_node = GetUnignoredParent();
-  if (parent_node && parent_node->data().role == ax::mojom::Role::kListMarker)
+  if (!parent_node)
+    return false;
+
+  if (parent_node->GetRole() == ax::mojom::Role::kListMarker)
     return true;
 
   AXNode* grandparent_node = parent_node->GetUnignoredParent();
   return grandparent_node &&
-         grandparent_node->data().role == ax::mojom::Role::kListMarker;
+         grandparent_node->GetRole() == ax::mojom::Role::kListMarker;
 }
 
 bool AXNode::IsCollapsedMenuListPopUpButton() const {
-  if (data().role != ax::mojom::Role::kPopUpButton ||
-      !data().HasState(ax::mojom::State::kCollapsed)) {
+  if (GetRole() != ax::mojom::Role::kPopUpButton ||
+      !HasState(ax::mojom::State::kCollapsed)) {
     return false;
   }
 
@@ -1693,7 +1820,7 @@ bool AXNode::IsCollapsedMenuListPopUpButton() const {
   if (!node)
     return false;
 
-  return node->data().role == ax::mojom::Role::kMenuListPopup;
+  return node->GetRole() == ax::mojom::Role::kMenuListPopup;
 }
 
 AXNode* AXNode::GetCollapsedMenuListPopUpButtonAncestor() const {
@@ -1705,7 +1832,7 @@ AXNode* AXNode::GetCollapsedMenuListPopUpButtonAncestor() const {
   // The ordered set returned is either the popup element child of the popup
   // button (e.g., the AXMenuListPopup) or the popup button itself. We need
   // |node| to point to the popup button itself.
-  if (node->data().role != ax::mojom::Role::kPopUpButton) {
+  if (node->GetRole() != ax::mojom::Role::kPopUpButton) {
     node = node->GetParent();
     if (!node)
       return nullptr;
@@ -1715,10 +1842,10 @@ AXNode* AXNode::GetCollapsedMenuListPopUpButtonAncestor() const {
 }
 
 bool AXNode::IsEmbeddedGroup() const {
-  if (data().role != ax::mojom::Role::kGroup || !GetParent())
+  if (GetRole() != ax::mojom::Role::kGroup || !GetParent())
     return false;
 
-  return ui::IsSetLike(GetParent()->data().role);
+  return ui::IsSetLike(GetParent()->GetRole());
 }
 
 AXNode* AXNode::GetLowestPlatformAncestor() const {
@@ -1751,13 +1878,31 @@ AXNode* AXNode::GetTextFieldAncestor() const {
   // ancestor, its immediate descendant can have Role::kGenericContainer without
   // State::kEditable. Same with inline text boxes and placeholder text.
   // TODO(nektar): Fix all such inconsistencies in Blink.
-  for (AXNode* ancestor = const_cast<AXNode*>(this);
-       ancestor &&
-       (ancestor->data().HasState(ax::mojom::State::kEditable) ||
-        ancestor->data().role == ax::mojom::Role::kGenericContainer ||
-        ancestor->IsText());
+  //
+  // Also, ARIA text and search boxes may not have the contenteditable attribute
+  // set, but they should still be treated the same as all other text fields.
+  // (See `AXNodeData::IsAtomicTextField()` for more details.)
+  for (AXNode* ancestor = const_cast<AXNode*>(this); ancestor;
        ancestor = ancestor->GetUnignoredParent()) {
     if (ancestor->data().IsTextField())
+      return ancestor;
+  }
+  return nullptr;
+}
+
+AXNode* AXNode::GetSelectionContainer() const {
+  for (AXNode* ancestor = const_cast<AXNode*>(this); ancestor;
+       ancestor = ancestor->GetUnignoredParent()) {
+    if (IsContainerWithSelectableChildren(ancestor->GetRole()))
+      return ancestor;
+  }
+  return nullptr;
+}
+
+AXNode* AXNode::GetTableAncestor() const {
+  for (AXNode* ancestor = const_cast<AXNode*>(this); ancestor;
+       ancestor = ancestor->GetUnignoredParent()) {
+    if (ancestor->IsTable())
       return ancestor;
   }
   return nullptr;

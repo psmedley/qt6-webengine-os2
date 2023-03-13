@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "content/browser/download/save_package.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
 #include <string>
 
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
@@ -15,7 +16,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "content/browser/download/save_file_manager.h"
-#include "content/browser/download/save_package.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/common/url_constants.h"
 #include "content/test/test_render_view_host.h"
@@ -28,19 +28,19 @@ namespace content {
 
 #define FPL FILE_PATH_LITERAL
 #define HTML_EXTENSION ".html"
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define FPL_HTML_EXTENSION L".html"
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 #define FPL_HTML_EXTENSION ".html"
 #endif
 
 namespace {
 
 // This constant copied from save_package.cc.
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 const uint32_t kMaxFilePathLength = MAX_PATH - 1;
 const uint32_t kMaxFileNameLength = MAX_PATH - 1;
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 const uint32_t kMaxFilePathLength = PATH_MAX - 1;
 const uint32_t kMaxFileNameLength = NAME_MAX;
 #endif
@@ -187,7 +187,7 @@ static const struct {
 };
 
 TEST_F(SavePackageTest, TestSuccessfullyGenerateSavePackageFilename) {
-  for (size_t i = 0; i < base::size(kGeneratedFiles); ++i) {
+  for (size_t i = 0; i < std::size(kGeneratedFiles); ++i) {
     base::FilePath::StringType file_name;
     bool ok = GetGeneratedFilename(true,
                                    kGeneratedFiles[i].disposition,
@@ -200,7 +200,7 @@ TEST_F(SavePackageTest, TestSuccessfullyGenerateSavePackageFilename) {
 }
 
 TEST_F(SavePackageTest, TestUnSuccessfullyGenerateSavePackageFilename) {
-  for (size_t i = 0; i < base::size(kGeneratedFiles); ++i) {
+  for (size_t i = 0; i < std::size(kGeneratedFiles); ++i) {
     base::FilePath::StringType file_name;
     bool ok = GetGeneratedFilename(false,
                                    kGeneratedFiles[i].disposition,
@@ -212,7 +212,7 @@ TEST_F(SavePackageTest, TestUnSuccessfullyGenerateSavePackageFilename) {
 }
 
 // Crashing on Windows, see http://crbug.com/79365
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_TestLongSavePackageFilename DISABLED_TestLongSavePackageFilename
 #else
 #define MAYBE_TestLongSavePackageFilename TestLongSavePackageFilename
@@ -247,7 +247,7 @@ TEST_F(SavePackageTest, MAYBE_TestLongSavePackageFilename) {
 }
 
 // Crashing on Windows, see http://crbug.com/79365
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #define MAYBE_TestLongSafePureFilename DISABLED_TestLongSafePureFilename
 #else
 #define MAYBE_TestLongSafePureFilename TestLongSafePureFilename

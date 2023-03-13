@@ -30,6 +30,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_ruby_run.h"
 
+#include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
 #include "third_party/blink/renderer/core/layout/layout_object_inlines.h"
 #include "third_party/blink/renderer/core/layout/layout_ruby_base.h"
 #include "third_party/blink/renderer/core/layout/layout_ruby_text.h"
@@ -38,8 +39,8 @@
 
 namespace blink {
 
-LayoutRubyRun::LayoutRubyRun(Element* element) : LayoutBlockFlow(nullptr) {
-  DCHECK(!element);
+LayoutRubyRun::LayoutRubyRun(ContainerNode* node) : LayoutBlockFlow(nullptr) {
+  DCHECK(!node);
   SetInline(true);
   SetIsAtomicInlineLevel(true);
 }
@@ -210,9 +211,9 @@ LayoutRubyRun* LayoutRubyRun::StaticCreateRubyRun(
   DCHECK(parent_ruby->IsRuby());
   LayoutRubyRun* rr;
   if (containing_block.IsLayoutNGObject()) {
-    rr = new LayoutNGRubyRun();
+    rr = MakeGarbageCollected<LayoutNGRubyRun>();
   } else {
-    rr = new LayoutRubyRun(nullptr);
+    rr = MakeGarbageCollected<LayoutRubyRun>(nullptr);
   }
   rr->SetDocumentForAnonymous(&parent_ruby->GetDocument());
   scoped_refptr<ComputedStyle> new_style =

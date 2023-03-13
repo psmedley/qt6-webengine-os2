@@ -11,7 +11,6 @@
 #include <utility>
 
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
@@ -38,6 +37,7 @@
 #include "components/autofill/core/common/autofill_util.h"
 #include "components/autofill/core/common/form_field_data.h"
 #include "components/os_crypt/os_crypt_mocker.h"
+#include "components/sync/model/metadata_batch.h"
 #include "components/sync/protocol/entity_metadata.pb.h"
 #include "components/sync/protocol/model_type_state.pb.h"
 #include "components/webdata/common/web_database.h"
@@ -46,7 +46,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using base::Time;
-using base::TimeDelta;
 using sync_pb::EntityMetadata;
 using sync_pb::ModelTypeState;
 using syncer::EntityMetadataMap;
@@ -174,7 +173,7 @@ TEST_F(AutofillTableTest, Autofill) {
   field.name = u"Name";
   field.value = u"Superman";
   base::Time now = AutofillClock::Now();
-  base::TimeDelta two_seconds = base::TimeDelta::FromSeconds(2);
+  base::TimeDelta two_seconds = base::Seconds(2);
   EXPECT_TRUE(table_->AddFormFieldValue(field, &changes));
   std::vector<AutofillEntry> v;
   for (int i = 0; i < 5; ++i) {
@@ -248,8 +247,8 @@ TEST_F(AutofillTableTest, Autofill) {
       AutofillChange(AutofillChange::REMOVE,
                      AutofillKey(u"Favorite Color", u"Green")),
   };
-  EXPECT_EQ(base::size(kExpectedChanges), changes.size());
-  for (size_t i = 0; i < base::size(kExpectedChanges); ++i) {
+  EXPECT_EQ(std::size(kExpectedChanges), changes.size());
+  for (size_t i = 0; i < std::size(kExpectedChanges); ++i) {
     EXPECT_EQ(kExpectedChanges[i], changes[i]);
   }
 
@@ -305,7 +304,7 @@ TEST_F(AutofillTableTest, Autofill_GetEntry_Populated) {
   EXPECT_THAT(no_prefix_v, ElementsAre(expected_entry));
 
   // Update date_last_used.
-  base::Time new_time = now + base::TimeDelta::FromSeconds(1000);
+  base::Time new_time = now + base::Seconds(1000);
   EXPECT_TRUE(table_->AddFormFieldValueTime(field, &changes, new_time));
   EXPECT_TRUE(
       table_->GetFormValuesForElementName(field.name, u"Super", &prefix_v, 10));
@@ -326,7 +325,7 @@ TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
   // Make sure we use timestamps rounded to a second.
   Time begin = Time::FromTimeT(AutofillClock::Now().ToTimeT());
   Time now = begin;
-  TimeDelta second = TimeDelta::FromSeconds(1);
+  base::TimeDelta second = base::Seconds(1);
 
   struct Entry {
     const char16_t* name;
@@ -385,7 +384,7 @@ TEST_F(AutofillTableTest, Autofill_GetCountOfValuesContainedBetween) {
 }
 
 TEST_F(AutofillTableTest, Autofill_RemoveBetweenChanges) {
-  TimeDelta one_day(TimeDelta::FromDays(1));
+  base::TimeDelta one_day(base::Days(1));
   Time t1 = AutofillClock::Now();
   Time t2 = t1 + one_day;
 
@@ -413,7 +412,7 @@ TEST_F(AutofillTableTest, Autofill_RemoveBetweenChanges) {
 }
 
 TEST_F(AutofillTableTest, Autofill_AddChanges) {
-  TimeDelta one_day(TimeDelta::FromDays(1));
+  base::TimeDelta one_day(base::Days(1));
   Time t1 = AutofillClock::Now();
   Time t2 = t1 + one_day;
 
@@ -492,7 +491,7 @@ TEST_F(AutofillTableTest, Autofill_UpdateNullTerminated) {
   const char16_t kName[] = u"foo";
   const char16_t kValue[] = u"bar";
   // A value which contains terminating character.
-  std::u16string value(kValue, base::size(kValue));
+  std::u16string value(kValue, std::size(kValue));
 
   AutofillEntry entry0(MakeAutofillEntry(kName, kValue, 1, -1));
   AutofillEntry entry1(MakeAutofillEntry(kName, value, 2, 3));
@@ -750,9 +749,9 @@ TEST_F(AutofillTableTest,
 TEST_F(AutofillTableTest,
        Autofill_RemoveFormElementsAddedBetween_OlderThan30Days) {
   const base::Time kNow = AutofillClock::Now();
-  const base::Time k29DaysOld = kNow - base::TimeDelta::FromDays(29);
-  const base::Time k30DaysOld = kNow - base::TimeDelta::FromDays(30);
-  const base::Time k31DaysOld = kNow - base::TimeDelta::FromDays(31);
+  const base::Time k29DaysOld = kNow - base::Days(29);
+  const base::Time k30DaysOld = kNow - base::Days(30);
+  const base::Time k31DaysOld = kNow - base::Days(31);
 
   // Add some form field entries.
   AutofillChangeList changes;
@@ -784,8 +783,7 @@ TEST_F(AutofillTableTest,
 // delete an old entry.
 TEST_F(AutofillTableTest, RemoveExpiredFormElements_Expires_DeleteEntry) {
   auto kNow = AutofillClock::Now();
-  auto k2YearsOld = kNow - base::TimeDelta::FromDays(
-                               2 * kAutocompleteRetentionPolicyPeriodInDays);
+  auto k2YearsOld = kNow - 2 * kAutocompleteRetentionPolicyPeriod;
 
   AutofillChangeList changes;
   FormFieldData field;
@@ -805,7 +803,7 @@ TEST_F(AutofillTableTest, RemoveExpiredFormElements_Expires_DeleteEntry) {
 // delete non-expired entries' data from the SQLite table.
 TEST_F(AutofillTableTest, RemoveExpiredFormElements_NotOldEnough) {
   auto kNow = AutofillClock::Now();
-  auto k2DaysOld = kNow - base::TimeDelta::FromDays(2);
+  auto k2DaysOld = kNow - base::Days(2);
 
   AutofillChangeList changes;
   FormFieldData field;
@@ -878,10 +876,6 @@ TEST_F(AutofillTableTest,
   structured_name_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
 
   structured_name_profile.set_language_code("en");
-
-  structured_name_profile.SetClientValidityFromBitfieldValue(6);
-
-  structured_name_profile.set_is_client_validity_states_updated(true);
 
   // Add the profile to the table.
   EXPECT_TRUE(table_->AddAutofillProfile(structured_name_profile));
@@ -1000,10 +994,7 @@ TEST_F(AutofillTableTest,
 TEST_F(AutofillTableTest, AutofillProfile_StructuredAddresses) {
   // Enable the structured addresses features.
   scoped_feature_list_.InitWithFeatures(
-      {features::kAutofillAddressEnhancementVotes,
-       features::kAutofillEnableSupportForMoreStructureInAddresses},
-      {});
-  ;
+      {features::kAutofillEnableSupportForMoreStructureInAddresses}, {});
 
   AutofillProfile profile;
   profile.set_origin(std::string());
@@ -1121,10 +1112,7 @@ TEST_F(AutofillTableTest,
        AutofillProfile_StructuredAddresses_Eventual_Deletion) {
   // Enable the structured addresses.
   scoped_feature_list_.InitWithFeatures(
-      {features::kAutofillAddressEnhancementVotes,
-       features::kAutofillEnableSupportForMoreStructureInAddresses},
-      {});
-  ;
+      {features::kAutofillEnableSupportForMoreStructureInAddresses}, {});
 
   AutofillProfile profile;
   profile.set_origin(std::string());
@@ -1166,8 +1154,7 @@ TEST_F(AutofillTableTest,
   // Deactivate the features.
   scoped_feature_list_.Reset();
   scoped_feature_list_.InitWithFeatures(
-      {}, {features::kAutofillAddressEnhancementVotes,
-           features::kAutofillEnableSupportForMoreStructureInAddresses});
+      {}, {features::kAutofillEnableSupportForMoreStructureInAddresses});
 
   // Retrieve the address and verify that the structured tokens are not written.
   std::unique_ptr<AutofillProfile> legacy_db_profile =
@@ -1218,11 +1205,8 @@ TEST_F(AutofillTableTest,
 
   // Enable the feature again and load the profile.
   scoped_feature_list_.Reset();
-  scoped_feature_list_.InitWithFeatures(
-      {features::kAutofillAddressEnhancementVotes,
-       features::kAutofillEnableSupportForMoreStructureInAddresses},
-      {});
-  ;
+  scoped_feature_list_.InitAndEnableFeature(
+      features::kAutofillEnableSupportForMoreStructureInAddresses);
 
   // Retrieve the address and manually query the data base to verify that the
   // structured address was deleted.
@@ -1241,11 +1225,13 @@ TEST_F(AutofillTableTest,
 }
 
 // This test is an adaption of |AutofillTableTest.AutofillProfile| to structured
-// names.
+// names. Like |AutofillTableTest.AutofillProfile|, it tests reading/writing
+// name, email, company, address, phone number and birthdate information.
 TEST_F(AutofillTableTest, AutofillProfile_StructuredNames) {
-  // Enable the structured names.
+  // Enable the structured names and birthdates.
   scoped_feature_list_.InitWithFeatures(
-      {features::kAutofillEnableSupportForMoreStructureInNames},
+      {features::kAutofillEnableSupportForMoreStructureInNames,
+       features::kAutofillEnableCompatibilitySupportForBirthdates},
       {features::kAutofillEnableSupportForMoreStructureInAddresses});
 
   AutofillProfile home_profile;
@@ -1295,10 +1281,11 @@ TEST_F(AutofillTableTest, AutofillProfile_StructuredNames) {
   home_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"MAGIC ###");
   home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
   home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  home_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, 1997);
   home_profile.set_disallow_settings_visible_updates(true);
   home_profile.set_language_code("en");
-  home_profile.SetClientValidityFromBitfieldValue(6);
-  home_profile.set_is_client_validity_states_updated(true);
   Time pre_creation_time = AutofillClock::Now();
 
   // Add the profile to the table.
@@ -1391,8 +1378,9 @@ TEST_F(AutofillTableTest, AutofillProfile_StructuredNames) {
   billing_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"123456");
   billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
   billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181230000");
-  billing_profile.SetClientValidityFromBitfieldValue(54);
-  billing_profile.set_is_client_validity_states_updated(true);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 4);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 5);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, 1977);
 
   Time pre_modification_time_2 = AutofillClock::Now();
   EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
@@ -1424,8 +1412,9 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   // Disable the structured names since this test is only applicable if
   // structured names are not used.
   scoped_feature_list_.InitWithFeatures(
-      {}, {features::kAutofillEnableSupportForMoreStructureInAddresses,
-           features::kAutofillEnableSupportForMoreStructureInNames});
+      {features::kAutofillEnableCompatibilitySupportForBirthdates},
+      {features::kAutofillEnableSupportForMoreStructureInAddresses,
+       features::kAutofillEnableSupportForMoreStructureInNames});
 
   // Add a 'Home' profile with non-default data. The specific values are not
   // important.
@@ -1445,9 +1434,10 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   home_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"MAGIC ###");
   home_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
   home_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  home_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  home_profile.SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, 1997);
   home_profile.set_language_code("en");
-  home_profile.SetClientValidityFromBitfieldValue(6);
-  home_profile.set_is_client_validity_states_updated(true);
 
   Time pre_creation_time = AutofillClock::Now();
   EXPECT_TRUE(table_->AddAutofillProfile(home_profile));
@@ -1526,8 +1516,9 @@ TEST_F(AutofillTableTest, AutofillProfile) {
   billing_profile.SetRawInfo(ADDRESS_HOME_SORTING_CODE, u"123456");
   billing_profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
   billing_profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181230000");
-  billing_profile.SetClientValidityFromBitfieldValue(54);
-  billing_profile.set_is_client_validity_states_updated(true);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_DAY, 4);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 5);
+  billing_profile.SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, 1977);
 
   Time pre_modification_time_2 = AutofillClock::Now();
   EXPECT_TRUE(table_->UpdateAutofillProfile(billing_profile));
@@ -1655,6 +1646,9 @@ TEST_F(AutofillTableTest, AddFullServerCreditCard) {
 }
 
 TEST_F(AutofillTableTest, UpdateAutofillProfile) {
+  scoped_feature_list_.InitWithFeatures(
+      {features::kAutofillEnableCompatibilitySupportForBirthdates}, {});
+
   // Add a profile to the db.
   AutofillProfile profile;
   profile.SetRawInfo(NAME_FIRST, u"John");
@@ -1669,6 +1663,9 @@ TEST_F(AutofillTableTest, UpdateAutofillProfile) {
   profile.SetRawInfo(ADDRESS_HOME_ZIP, u"90025");
   profile.SetRawInfo(ADDRESS_HOME_COUNTRY, u"US");
   profile.SetRawInfo(PHONE_HOME_WHOLE_NUMBER, u"18181234567");
+  profile.SetRawInfoAsInt(BIRTHDATE_DAY, 14);
+  profile.SetRawInfoAsInt(BIRTHDATE_MONTH, 3);
+  profile.SetRawInfoAsInt(BIRTHDATE_YEAR_4_DIGITS, 1997);
   profile.set_language_code("en");
   profile.FinalizeAfterImport();
   table_->AddAutofillProfile(profile);
@@ -2382,75 +2379,6 @@ TEST_F(AutofillTableTest, Autofill_GetAllAutofillEntries_TwoSame) {
   CompareAutofillEntrySets(entry_set, expected_entries);
 }
 
-TEST_F(AutofillTableTest, AutofillProfileValidityBitfield) {
-  // Add an autofill profile with a non default validity state. The value itself
-  // is insignificant for this test since only the serialization and
-  // deserialization are tested.
-  const int kValidityBitfieldValue = 1984;
-  AutofillProfile profile;
-  profile.set_origin(std::string());
-  profile.SetRawInfo(NAME_FIRST, u"John");
-  profile.SetRawInfo(NAME_LAST, u"Smith");
-  profile.SetClientValidityFromBitfieldValue(kValidityBitfieldValue);
-
-  // Add the profile to the table.
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-
-  // Get the profile from the table and make sure the validity was set.
-  std::unique_ptr<AutofillProfile> db_profile =
-      table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_EQ(kValidityBitfieldValue,
-            db_profile->GetClientValidityBitfieldValue());
-
-  // Modify the validity of the profile.
-  const int kOtherValidityBitfieldValue = 1999;
-  profile.SetClientValidityFromBitfieldValue(kOtherValidityBitfieldValue);
-
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_EQ(kOtherValidityBitfieldValue,
-            db_profile->GetClientValidityBitfieldValue());
-}
-
-TEST_F(AutofillTableTest, AutofillProfileIsClientValidityStatesUpdatedFlag) {
-  AutofillProfile profile;
-  profile.set_origin(std::string());
-  profile.SetRawInfo(NAME_FIRST, u"John");
-  profile.SetRawInfo(NAME_LAST, u"Smith");
-  profile.set_is_client_validity_states_updated(true);
-
-  // Add the profile to the table.
-  EXPECT_TRUE(table_->AddAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was set.
-  std::unique_ptr<AutofillProfile> db_profile =
-      table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_TRUE(db_profile->is_client_validity_states_updated());
-
-  // Test if turning off the validity updated flag works.
-  profile.set_is_client_validity_states_updated(false);
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_FALSE(db_profile->is_client_validity_states_updated());
-
-  // Test if turning on the validity updated flag works.
-  profile.set_is_client_validity_states_updated(true);
-  // Update the profile in the table.
-  EXPECT_TRUE(table_->UpdateAutofillProfile(profile));
-  // Get the profile from the table and make sure the validity was updated.
-  db_profile = table_->GetAutofillProfile(profile.guid());
-  ASSERT_TRUE(db_profile);
-  EXPECT_TRUE(db_profile->is_client_validity_states_updated());
-}
-
 TEST_F(AutofillTableTest, SetGetServerCards) {
   std::vector<CreditCard> inputs;
   inputs.push_back(CreditCard(CreditCard::FULL_SERVER_CARD, "a123"));
@@ -2461,6 +2389,7 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   inputs[0].set_instrument_id(321);
   inputs[0].set_virtual_card_enrollment_state(
       CreditCard::VirtualCardEnrollmentState::UNENROLLED);
+  inputs[0].set_product_description(u"Fake description");
 
   inputs.push_back(CreditCard(CreditCard::MASKED_SERVER_CARD, "b456"));
   inputs[1].SetRawInfo(CREDIT_CARD_NAME_FULL, u"Rick Roman");
@@ -2468,7 +2397,6 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   inputs[1].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"1997");
   inputs[1].SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   inputs[1].SetNetworkForMaskedCard(kVisaCard);
-  inputs[1].SetServerStatus(CreditCard::EXPIRED);
   std::u16string nickname = u"Grocery card";
   inputs[1].SetNickname(nickname);
   inputs[1].set_card_issuer(CreditCard::Issuer::GOOGLE);
@@ -2498,9 +2426,6 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
   EXPECT_EQ(inputs[0], *outputs[0]);
   EXPECT_EQ(inputs[1], *outputs[1]);
 
-  EXPECT_EQ(CreditCard::OK, outputs[0]->GetServerStatus());
-  EXPECT_EQ(CreditCard::EXPIRED, outputs[1]->GetServerStatus());
-
   EXPECT_TRUE(outputs[0]->nickname().empty());
   EXPECT_EQ(nickname, outputs[1]->nickname());
 
@@ -2517,6 +2442,8 @@ TEST_F(AutofillTableTest, SetGetServerCards) {
 
   EXPECT_EQ(GURL(), outputs[0]->card_art_url());
   EXPECT_EQ(GURL("https://www.example.com"), outputs[1]->card_art_url());
+
+  EXPECT_EQ(u"Fake description", outputs[0]->product_description());
 }
 
 TEST_F(AutofillTableTest, SetGetRemoveServerCardMetadata) {
@@ -2724,12 +2651,13 @@ TEST_F(AutofillTableTest, SetServerCardsData) {
   inputs[0].SetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR, u"1997");
   inputs[0].SetRawInfo(CREDIT_CARD_NUMBER, u"1111");
   inputs[0].SetNetworkForMaskedCard(kVisaCard);
-  inputs[0].SetServerStatus(CreditCard::EXPIRED);
   inputs[0].SetNickname(u"Grocery card");
   inputs[0].set_instrument_id(1);
   inputs[0].set_virtual_card_enrollment_state(
       CreditCard::VirtualCardEnrollmentState::ENROLLED);
   inputs[0].set_card_art_url(GURL("https://www.example.com"));
+  inputs[0].set_product_description(u"Fake description");
+
   table_->SetServerCardsData(inputs);
 
   // Make sure the card was added correctly.
@@ -2744,12 +2672,12 @@ TEST_F(AutofillTableTest, SetServerCardsData) {
   outputs[0]->set_guid(std::string());
 
   EXPECT_EQ(inputs[0], *outputs[0]);
-  EXPECT_EQ(CreditCard::EXPIRED, outputs[0]->GetServerStatus());
 
   EXPECT_EQ(CreditCard::VirtualCardEnrollmentState::ENROLLED,
             outputs[0]->virtual_card_enrollment_state());
 
   EXPECT_EQ(GURL("https://www.example.com"), outputs[0]->card_art_url());
+  EXPECT_EQ(u"Fake description", outputs[0]->product_description());
 
   // Make sure no metadata was added.
   std::map<std::string, AutofillMetadata> metadata_map;
@@ -3140,9 +3068,8 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles;
   std::vector<std::unique_ptr<CreditCard>> credit_cards;
   ASSERT_TRUE(table_->RemoveAutofillDataModifiedBetween(
-      unmasked_time + base::TimeDelta::FromDays(365),
-      unmasked_time + base::TimeDelta::FromDays(530), &profiles,
-      &credit_cards));
+      unmasked_time + base::Days(365), unmasked_time + base::Days(530),
+      &profiles, &credit_cards));
 
   // This should not affect the unmasked card (should be unmasked).
   std::vector<std::unique_ptr<CreditCard>> outputs;
@@ -3155,9 +3082,9 @@ TEST_F(AutofillTableTest, DeleteUnmaskedCard) {
   // Delete data in the range of the last 24 hours.
   // Fudge |now| to make sure it's strictly greater than the |now| that
   // the database uses.
-  base::Time now = AutofillClock::Now() + base::TimeDelta::FromSeconds(1);
+  base::Time now = AutofillClock::Now() + base::Seconds(1);
   ASSERT_TRUE(table_->RemoveAutofillDataModifiedBetween(
-      now - base::TimeDelta::FromDays(1), now, &profiles, &credit_cards));
+      now - base::Days(1), now, &profiles, &credit_cards));
 
   // This should re-mask.
   ASSERT_TRUE(table_->GetServerCreditCards(&outputs));

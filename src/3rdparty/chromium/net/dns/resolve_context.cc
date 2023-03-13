@@ -18,6 +18,7 @@
 #include "base/metrics/sample_vector.h"
 #include "base/no_destructor.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "net/base/features.h"
 #include "net/base/ip_address.h"
@@ -26,8 +27,9 @@
 #include "net/dns/dns_session.h"
 #include "net/dns/dns_util.h"
 #include "net/dns/host_cache.h"
-#include "net/dns/public/dns_over_https_server_config.h"
+#include "net/dns/public/dns_over_https_config.h"
 #include "net/dns/public/doh_provider_entry.h"
+#include "net/url_request/url_request_context.h"
 
 namespace net {
 
@@ -35,16 +37,14 @@ namespace {
 
 // Min fallback period between queries, in case we are talking to a local DNS
 // proxy.
-const base::TimeDelta kMinFallbackPeriod =
-    base::TimeDelta::FromMilliseconds(10);
+const base::TimeDelta kMinFallbackPeriod = base::Milliseconds(10);
 
 // Default maximum fallback period between queries, even with exponential
 // backoff. (Can be overridden by field trial.)
-const base::TimeDelta kDefaultMaxFallbackPeriod =
-    base::TimeDelta::FromSeconds(5);
+const base::TimeDelta kDefaultMaxFallbackPeriod = base::Seconds(5);
 
 // Maximum RTT that will fit in the RTT histograms.
-const base::TimeDelta kRttMax = base::TimeDelta::FromSeconds(30);
+const base::TimeDelta kRttMax = base::Seconds(30);
 // Number of buckets in the histogram of observed RTTs.
 const size_t kRttBucketCount = 350;
 // Target percentile in the RTT histogram used for fallback period.
@@ -56,7 +56,7 @@ DohProviderEntry::List FindDohProvidersMatchingServerConfig(
     DnsOverHttpsServerConfig server_config) {
   DohProviderEntry::List matching_entries;
   for (const DohProviderEntry* entry : DohProviderEntry::GetList()) {
-    if (entry->dns_over_https_template == server_config.server_template)
+    if (entry->doh_server_config == server_config)
       matching_entries.push_back(entry);
   }
 
@@ -255,7 +255,7 @@ void ResolveContext::RecordRtt(size_t server_index,
 
   // RTT values shouldn't be less than 0, but it shouldn't cause a crash if
   // they are anyway, so clip to 0. See https://crbug.com/753568.
-  if (rtt < base::TimeDelta())
+  if (rtt.is_negative())
     rtt = base::TimeDelta();
 
   // Histogram-based method.
@@ -333,6 +333,7 @@ void ResolveContext::UnregisterDohStatusObserver(
 void ResolveContext::InvalidateCachesAndPerSessionData(
     const DnsSession* new_session,
     bool network_change) {
+  DCHECK(MustRegisterForInvalidations());
   if (host_cache_)
     host_cache_->Invalidate();
 
@@ -362,20 +363,33 @@ void ResolveContext::InvalidateCachesAndPerSessionData(
     classic_server_stats_.emplace_back(
         GetRttHistogram(initial_fallback_period_));
   }
-  for (size_t i = 0; i < new_session->config().dns_over_https_servers.size();
+  for (size_t i = 0; i < new_session->config().doh_config.servers().size();
        ++i) {
     doh_server_stats_.emplace_back(GetRttHistogram(initial_fallback_period_));
   }
 
   CHECK_EQ(new_session->config().nameservers.size(),
            classic_server_stats_.size());
-  CHECK_EQ(new_session->config().dns_over_https_servers.size(),
+  CHECK_EQ(new_session->config().doh_config.servers().size(),
            doh_server_stats_.size());
 
   NotifyDohStatusObserversOfSessionChanged();
 
   if (!doh_server_stats_.empty())
     NotifyDohStatusObserversOfUnavailable(network_change);
+}
+
+NetworkChangeNotifier::NetworkHandle ResolveContext::GetTargetNetwork() const {
+  if (!url_request_context())
+    return NetworkChangeNotifier::kInvalidNetworkHandle;
+
+  return url_request_context()->bound_network();
+}
+
+bool ResolveContext::MustRegisterForInvalidations() const {
+  // Resolve contexts targeting a network shouldn't have their cache invalidated
+  // when an network (or DNS) change occurs. More context at crbug.com/1292548.
+  return GetTargetNetwork() == NetworkChangeNotifier::kInvalidNetworkHandle;
 }
 
 size_t ResolveContext::FirstServerIndex(bool doh_server,
@@ -400,7 +414,7 @@ bool ResolveContext::IsCurrentSession(const DnsSession* session) const {
   if (session == current_session_.get()) {
     CHECK_EQ(current_session_->config().nameservers.size(),
              classic_server_stats_.size());
-    CHECK_EQ(current_session_->config().dns_over_https_servers.size(),
+    CHECK_EQ(current_session_->config().doh_config.servers().size(),
              doh_server_stats_.size());
     return true;
   }
@@ -443,7 +457,7 @@ base::TimeDelta ResolveContext::NextFallbackPeriodHelper(
   }
 
   base::TimeDelta fallback_period =
-      base::TimeDelta::FromMilliseconds(GetRttBuckets()->range(index));
+      base::Milliseconds(GetRttBuckets()->range(index));
 
   fallback_period = std::max(fallback_period, kMinFallbackPeriod);
 
@@ -531,8 +545,8 @@ std::string ResolveContext::GetDohProviderIdForUma(size_t server_index,
   DCHECK(IsCurrentSession(session));
 
   if (is_doh_server) {
-    return GetDohProviderIdForHistogramFromDohConfig(
-        session->config().dns_over_https_servers[server_index]);
+    return GetDohProviderIdForHistogramFromServerConfig(
+        session->config().doh_config.servers()[server_index]);
   }
 
   return GetDohProviderIdForHistogramFromNameserver(
@@ -546,8 +560,8 @@ bool ResolveContext::GetProviderUseExtraLogging(size_t server_index,
 
   DohProviderEntry::List matching_entries;
   if (is_doh_server) {
-    DnsOverHttpsServerConfig server_config =
-        session->config().dns_over_https_servers[server_index];
+    const DnsOverHttpsServerConfig& server_config =
+        session->config().doh_config.servers()[server_index];
     matching_entries = FindDohProvidersMatchingServerConfig(server_config);
   } else {
     IPAddress server_address =

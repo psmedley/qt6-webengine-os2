@@ -4,6 +4,7 @@
 
 import * as i18n from '../../../core/i18n/i18n.js';
 import * as ComponentHelpers from '../../../ui/components/helpers/helpers.js';
+import * as Input from '../../../ui/components/input/input.js';
 import * as LitHtml from '../../../ui/lit-html/lit-html.js';
 import adornerSettingsPaneStyles from './adornerSettingsPane.css.js';
 
@@ -25,6 +26,7 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 const {render, html} = LitHtml;
 
 export class AdornerSettingUpdatedEvent extends Event {
+  static readonly eventName = 'adornersettingupdated';
   data: {
     adornerName: string,
     isEnabledNow: boolean,
@@ -32,7 +34,7 @@ export class AdornerSettingUpdatedEvent extends Event {
   };
 
   constructor(adornerName: string, isEnabledNow: boolean, newSettings: AdornerSettingsMap) {
-    super('adornersettingupdated', {});
+    super(AdornerSettingUpdatedEvent.eventName, {});
     this.data = {adornerName, isEnabledNow, newSettings};
   }
 }
@@ -43,21 +45,21 @@ export interface AdornerSettingsPaneData {
 
 export class AdornerSettingsPane extends HTMLElement {
   static readonly litTagName = LitHtml.literal`devtools-adorner-settings-pane`;
-  private readonly shadow = this.attachShadow({mode: 'open'});
-  private settings: AdornerSettingsMap = new Map();
+  readonly #shadow = this.attachShadow({mode: 'open'});
+  #settings: AdornerSettingsMap = new Map();
 
   connectedCallback(): void {
-    this.shadow.adoptedStyleSheets = [adornerSettingsPaneStyles];
+    this.#shadow.adoptedStyleSheets = [Input.checkboxStyles, adornerSettingsPaneStyles];
   }
 
   set data(data: AdornerSettingsPaneData) {
-    this.settings = new Map(data.settings.entries());
-    this.render();
+    this.#settings = new Map(data.settings.entries());
+    this.#render();
   }
 
   show(): void {
     this.classList.remove('hidden');
-    const settingsPane = this.shadow.querySelector<HTMLElement>('.adorner-settings-pane');
+    const settingsPane = this.#shadow.querySelector<HTMLElement>('.adorner-settings-pane');
     if (settingsPane) {
       settingsPane.focus();
     }
@@ -67,21 +69,21 @@ export class AdornerSettingsPane extends HTMLElement {
     this.classList.add('hidden');
   }
 
-  private onChange(ev: Event): void {
+  #onChange(ev: Event): void {
     const inputEl = ev.target as HTMLInputElement;
     const adorner = inputEl.dataset.adorner;
     if (adorner === undefined) {
       return;
     }
     const isEnabledNow = inputEl.checked;
-    this.settings.set(adorner, isEnabledNow);
-    this.dispatchEvent(new AdornerSettingUpdatedEvent(adorner, isEnabledNow, this.settings));
-    this.render();
+    this.#settings.set(adorner, isEnabledNow);
+    this.dispatchEvent(new AdornerSettingUpdatedEvent(adorner, isEnabledNow, this.#settings));
+    this.#render();
   }
 
-  private render(): void {
+  #render(): void {
     const settingTemplates = [];
-    for (const [adorner, isEnabled] of this.settings) {
+    for (const [adorner, isEnabled] of this.#settings) {
       // Disabled until https://crbug.com/1079231 is fixed.
       // clang-format off
       settingTemplates.push(html`
@@ -102,12 +104,12 @@ export class AdornerSettingsPane extends HTMLElement {
     render(html`
       <div class="adorner-settings-pane" tabindex="-1">
         <div class="settings-title">${i18nString(UIStrings.settingsTitle)}</div>
-        <div class="setting-list" @change=${this.onChange}>
+        <div class="setting-list" @change=${this.#onChange}>
           ${settingTemplates}
         </div>
         <button class="close" @click=${this.hide} aria-label=${i18nString(UIStrings.closeButton)}></button>
       </div>
-    `, this.shadow, {
+    `, this.#shadow, {
       host: this,
     });
     // clang-format on

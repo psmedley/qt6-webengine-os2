@@ -11,7 +11,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
@@ -37,31 +36,34 @@
 
 #if !defined(TOOLKIT_QT)
 #include "components/browser_sync/browser_sync_switches.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/safe_browsing/core/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/core/common/safebrowsing_switches.h"
-#include "components/sync/base/pref_names.h"
 #endif
 
 #if BUILDFLAG(IS_CHROMEOS_ASH)
 #include "ash/constants/ash_switches.h"
+#include "chrome/browser/ash/borealis/borealis_prefs.h"
+#include "chrome/browser/ash/borealis/borealis_switches.h"
 #endif
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
     ChromeCommandLinePrefStore::string_switch_map_[] = {
 #if BUILDFLAG(ENABLE_SPELLCHECK)
         {switches::kLang, language::prefs::kApplicationLocale},
+        {switches::kAcceptLang, language::prefs::kSelectedLanguages},
 #endif
         {switches::kAuthServerAllowlist, prefs::kAuthServerAllowlist},
         {switches::kSSLVersionMin, prefs::kSSLVersionMin},
         {switches::kSSLVersionMax, prefs::kSSLVersionMax},
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
 #endif
 #if BUILDFLAG(IS_CHROMEOS_ASH)
         {switches::kSchedulerConfiguration, prefs::kSchedulerConfiguration},
+        {borealis::switches::kLaunchOptions,
+         borealis::prefs::kExtraLaunchOptions},
 #endif
 };
 
@@ -89,18 +91,17 @@ const CommandLinePrefStore::BooleanSwitchToPreferenceMapEntry
          prefs::kSafeBrowsingEnhanced, true},
 #endif
 #if BUILDFLAG(IS_CHROMEOS_ASH)
-        {chromeos::switches::kEnableTouchpadThreeFingerClick,
+        {ash::switches::kEnableTouchpadThreeFingerClick,
          prefs::kEnableTouchpadThreeFingerClick, true},
         {switches::kEnableUnifiedDesktop,
          prefs::kUnifiedDesktopEnabledByDefault, true},
-        {chromeos::switches::kEnableCastReceiver, prefs::kCastReceiverEnabled,
-         true},
+        {ash::switches::kEnableCastReceiver, prefs::kCastReceiverEnabled, true},
 #endif
 #if !defined(TOOLKIT_QT)
         {switches::kEnableLocalSyncBackend,
          syncer::prefs::kEnableLocalSyncBackend, true},
 #endif
-#if !BUILDFLAG(IS_CHROMEOS_ASH) && !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_CHROMEOS_ASH) && !BUILDFLAG(IS_ANDROID)
         {switches::kUseSystemDefaultPrinter,
          prefs::kPrintPreviewUseSystemDefaultPrinter, true},
 #endif
@@ -139,10 +140,10 @@ bool ChromeCommandLinePrefStore::ValidateProxySwitches() {
 
 void ChromeCommandLinePrefStore::ApplySimpleSwitches() {
   // Look for each switch we know about and set its preference accordingly.
-  ApplyStringSwitches(string_switch_map_, base::size(string_switch_map_));
-  ApplyPathSwitches(path_switch_map_, base::size(path_switch_map_));
-  ApplyIntegerSwitches(integer_switch_map_, base::size(integer_switch_map_));
-  ApplyBooleanSwitches(boolean_switch_map_, base::size(boolean_switch_map_));
+  ApplyStringSwitches(string_switch_map_, std::size(string_switch_map_));
+  ApplyPathSwitches(path_switch_map_, std::size(path_switch_map_));
+  ApplyIntegerSwitches(integer_switch_map_, std::size(integer_switch_map_));
+  ApplyBooleanSwitches(boolean_switch_map_, std::size(boolean_switch_map_));
 }
 
 void ChromeCommandLinePrefStore::ApplyProxyMode() {

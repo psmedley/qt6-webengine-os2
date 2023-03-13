@@ -8,7 +8,6 @@
 #include <memory>
 
 #include "base/component_export.h"
-#include "base/macros.h"
 #include "base/metrics/histogram.h"
 #include "base/time/time.h"
 
@@ -37,6 +36,10 @@ class TaskDurationMetricReporter {
             1000 * 1000,
             base::HistogramBase::kUmaTargetedHistogramFlag)) {}
 
+  TaskDurationMetricReporter(const TaskDurationMetricReporter&) = delete;
+  TaskDurationMetricReporter& operator=(const TaskDurationMetricReporter&) =
+      delete;
+
   void RecordTask(TaskClass task_class, base::TimeDelta duration) {
     DCHECK_LT(static_cast<int>(task_class),
               static_cast<int>(TaskClass::kMaxValue) + 1);
@@ -54,8 +57,6 @@ class TaskDurationMetricReporter {
 
  private:
   std::unique_ptr<base::ScaledLinearHistogram> value_per_type_histogram_;
-
-  DISALLOW_COPY_AND_ASSIGN(TaskDurationMetricReporter);
 };
 
 }  // namespace scheduling_metrics

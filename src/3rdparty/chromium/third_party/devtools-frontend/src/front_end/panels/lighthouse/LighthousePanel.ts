@@ -5,15 +5,17 @@
 import * as Common from '../../core/common/common.js';
 import * as Host from '../../core/host/host.js';
 import * as i18n from '../../core/i18n/i18n.js';
+import type * as Platform from '../../core/platform/platform.js';
+import * as Root from '../../core/root/root.js';
 import * as SDK from '../../core/sdk/sdk.js';
 import * as EmulationModel from '../../models/emulation/emulation.js';
-/* eslint-disable rulesdir/es_modules_import */
-import reportStyles from '../../third_party/lighthouse/report-assets/report.css.js';
 import * as UI from '../../ui/legacy/legacy.js';
 import * as Emulation from '../emulation/emulation.js';
 
+import type {AuditProgressChangedEvent, PageAuditabilityChangedEvent, PageWarningsChangedEvent} from './LighthouseController.js';
 import {Events, LighthouseController} from './LighthouseController.js';
 import lighthousePanelStyles from './lighthousePanel.css.js';
+import type {LighthouseRun} from './LighthouseProtocolService.js';
 import {ProtocolService} from './LighthouseProtocolService.js';
 
 import type {ReportJSON, RunnerResultArtifacts} from './LighthouseReporterTypes.js';
@@ -21,7 +23,9 @@ import * as LighthouseReport from '../../third_party/lighthouse/report/report.js
 import {LighthouseReportRenderer, LighthouseReportUIFeatures} from './LighthouseReportRenderer.js';
 import {Item, ReportSelector} from './LighthouseReportSelector.js';
 import {StartView} from './LighthouseStartView.js';
+import {StartViewFR} from './LighthouseStartViewFR.js';
 import {StatusView} from './LighthouseStatusView.js';
+import {TimespanView} from './LighthouseTimespanView.js';
 
 const UIStrings = {
   /**
@@ -57,14 +61,16 @@ const str_ = i18n.i18n.registerUIStrings('panels/lighthouse/LighthousePanel.ts',
 const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 
 let lighthousePanelInstace: LighthousePanel;
+type Nullable<T> = T|null;
 
 export class LighthousePanel extends UI.Panel.Panel {
   private readonly protocolService: ProtocolService;
   private readonly controller: LighthouseController;
   private readonly startView: StartView;
   private readonly statusView: StatusView;
-  private warningText: null;
-  private unauditableExplanation: null;
+  private readonly timespanView: TimespanView|null;
+  private warningText: Nullable<string>;
+  private unauditableExplanation: Nullable<string>;
   private readonly cachedRenderedReports: Map<ReportJSON, HTMLElement>;
   private readonly dropTarget: UI.DropTarget.DropTarget;
   private readonly auditResultsElement: HTMLElement;
@@ -79,13 +85,20 @@ export class LighthousePanel extends UI.Panel.Panel {
     network: {conditions: SDK.NetworkManager.Conditions},
   };
   private isLHAttached?: boolean;
+  private currentLighthouseRun?: LighthouseRun;
 
   private constructor() {
     super('lighthouse');
 
     this.protocolService = new ProtocolService();
     this.controller = new LighthouseController(this.protocolService);
-    this.startView = new StartView(this.controller);
+    if (Root.Runtime.experiments.isEnabled('lighthousePanelFR')) {
+      this.startView = new StartViewFR(this.controller);
+      this.timespanView = new TimespanView(this.controller);
+    } else {
+      this.startView = new StartView(this.controller);
+      this.timespanView = null;
+    }
     this.statusView = new StatusView(this.controller);
 
     this.warningText = null;
@@ -99,12 +112,10 @@ export class LighthousePanel extends UI.Panel.Panel {
     this.controller.addEventListener(Events.PageAuditabilityChanged, this.refreshStartAuditUI.bind(this));
     this.controller.addEventListener(Events.PageWarningsChanged, this.refreshWarningsUI.bind(this));
     this.controller.addEventListener(Events.AuditProgressChanged, this.refreshStatusUI.bind(this));
-    this.controller.addEventListener(Events.RequestLighthouseStart, event => {
-      this.startLighthouse(event);
-    });
-    this.controller.addEventListener(Events.RequestLighthouseCancel, _event => {
-      this.cancelLighthouse();
-    });
+    this.controller.addEventListener(Events.RequestLighthouseTimespanStart, this.onLighthouseTimespanStart.bind(this));
+    this.controller.addEventListener(Events.RequestLighthouseTimespanEnd, this.onLighthouseTimespanEnd.bind(this));
+    this.controller.addEventListener(Events.RequestLighthouseStart, this.onLighthouseStart.bind(this));
+    this.controller.addEventListener(Events.RequestLighthouseCancel, this.onLighthouseCancel.bind(this));
 
     this.renderToolbar();
     this.auditResultsElement = this.contentElement.createChild('div', 'lighthouse-results-container');
@@ -126,7 +137,28 @@ export class LighthousePanel extends UI.Panel.Panel {
     return Events;
   }
 
-  private refreshWarningsUI(evt: Common.EventTarget.EventTargetEvent): void {
+  private async onLighthouseTimespanStart(): Promise<void> {
+    this.timespanView?.show(this.contentElement);
+    await this.startLighthouse();
+    this.timespanView?.ready();
+  }
+
+  private async onLighthouseTimespanEnd(): Promise<void> {
+    this.timespanView?.hide();
+    await this.collectLighthouseResults();
+  }
+
+  private async onLighthouseStart(): Promise<void> {
+    await this.startLighthouse();
+    await this.collectLighthouseResults();
+  }
+
+  private async onLighthouseCancel(): Promise<void> {
+    this.timespanView?.hide();
+    void this.cancelLighthouse();
+  }
+
+  private refreshWarningsUI(evt: Common.EventTarget.EventTargetEvent<PageWarningsChangedEvent>): void {
     // PageWarningsChanged fires multiple times during an audit, which we want to ignore.
     if (this.isLHAttached) {
       return;
@@ -136,18 +168,20 @@ export class LighthousePanel extends UI.Panel.Panel {
     this.startView.setWarningText(evt.data.warning);
   }
 
-  private refreshStartAuditUI(evt: Common.EventTarget.EventTargetEvent): void {
+  private refreshStartAuditUI(evt: Common.EventTarget.EventTargetEvent<PageAuditabilityChangedEvent>): void {
     // PageAuditabilityChanged fires multiple times during an audit, which we want to ignore.
     if (this.isLHAttached) {
       return;
     }
+
+    this.startView.updateStartButton();
 
     this.unauditableExplanation = evt.data.helpText;
     this.startView.setUnauditableExplanation(evt.data.helpText);
     this.startView.setStartButtonEnabled(!evt.data.helpText);
   }
 
-  private refreshStatusUI(evt: Common.EventTarget.EventTargetEvent): void {
+  private refreshStatusUI(evt: Common.EventTarget.EventTargetEvent<AuditProgressChangedEvent>): void {
     this.statusView.updateStatus(evt.data.message);
   }
 
@@ -183,8 +217,8 @@ export class LighthousePanel extends UI.Panel.Panel {
     this.settingsPane.show(this.contentElement);
     this.settingsPane.element.classList.add('lighthouse-settings-pane');
     this.settingsPane.element.appendChild(this.startView.settingsToolbar().element);
-    this.showSettingsPaneSetting =
-        Common.Settings.Settings.instance().createSetting('lighthouseShowSettingsToolbar', false);
+    this.showSettingsPaneSetting = Common.Settings.Settings.instance().createSetting(
+        'lighthouseShowSettingsToolbar', false, Common.Settings.SettingStorageType.Synced);
 
     this.rightToolbar = new UI.Toolbar.Toolbar('', lighthouseToolbarContainer);
     this.rightToolbar.appendSeparator();
@@ -261,16 +295,16 @@ export class LighthousePanel extends UI.Panel.Panel {
 
     const reportContainer = this.auditResultsElement.createChild('div', 'lh-vars lh-root lh-devtools');
 
-    const dom = new LighthouseReport.DOM(this.auditResultsElement.ownerDocument as Document);
+    const dom = new LighthouseReport.DOM(this.auditResultsElement.ownerDocument as Document, reportContainer);
     const renderer = new LighthouseReportRenderer(dom) as LighthouseReport.ReportRenderer;
 
     const el = renderer.renderReport(lighthouseResult, reportContainer);
     // Linkifying requires the target be loaded. Do not block the report
     // from rendering, as this is just an embellishment and the main target
     // could take awhile to load.
-    this.waitForMainTargetLoad().then(() => {
-      LighthouseReportRenderer.linkifyNodeDetails(el);
-      LighthouseReportRenderer.linkifySourceLocationDetails(el);
+    void this.waitForMainTargetLoad().then(() => {
+      void LighthouseReportRenderer.linkifyNodeDetails(el);
+      void LighthouseReportRenderer.linkifySourceLocationDetails(el);
     });
     LighthouseReportRenderer.handleDarkMode(el);
 
@@ -315,15 +349,14 @@ export class LighthousePanel extends UI.Panel.Panel {
     }
     const item = items[0];
     if (item.kind === 'file') {
-      const entry = items[0].webkitGetAsEntry();
-      if (!entry.isFile) {
+      const file = items[0].getAsFile();
+      if (!file) {
         return;
       }
-      entry.file((file: Blob) => {
-        const reader = new FileReader();
-        reader.onload = (): void => this.loadedFromFile(reader.result as string);
-        reader.readAsText(file);
-      });
+
+      const reader = new FileReader();
+      reader.onload = (): void => this.loadedFromFile(reader.result as string);
+      reader.readAsText(file);
     }
   }
 
@@ -335,7 +368,7 @@ export class LighthousePanel extends UI.Panel.Panel {
     this.buildReportUI(data as ReportJSON);
   }
 
-  private async startLighthouse(_event: Common.EventTarget.EventTargetEvent): Promise<void> {
+  private async startLighthouse(): Promise<void> {
     Host.userMetrics.actionTaken(Host.UserMetrics.Action.LighthouseStarted);
 
     try {
@@ -343,11 +376,30 @@ export class LighthousePanel extends UI.Panel.Panel {
       const categoryIDs = this.controller.getCategoryIDs();
       const flags = this.controller.getFlags();
 
+      this.currentLighthouseRun = {inspectedURL, categoryIDs, flags};
+
       await this.setupEmulationAndProtocolConnection();
 
-      this.renderStatusView(inspectedURL);
+      if (flags.mode === 'timespan') {
+        await this.protocolService.startTimespan(this.currentLighthouseRun);
+      }
 
-      const lighthouseResponse = await this.protocolService.startLighthouse(inspectedURL, categoryIDs, flags);
+    } catch (err) {
+      await this.resetEmulationAndProtocolConnection();
+      if (err instanceof Error) {
+        this.statusView.renderBugReport(err);
+      }
+    }
+  }
+
+  private async collectLighthouseResults(): Promise<void> {
+    try {
+      if (!this.currentLighthouseRun) {
+        throw new Error('Lighthouse is not started');
+      }
+      this.renderStatusView(this.currentLighthouseRun.inspectedURL);
+
+      const lighthouseResponse = await this.protocolService.collectLighthouseResults(this.currentLighthouseRun);
 
       if (lighthouseResponse && lighthouseResponse.fatal) {
         const error = new Error(lighthouseResponse.message);
@@ -370,10 +422,13 @@ export class LighthousePanel extends UI.Panel.Panel {
       if (err instanceof Error) {
         this.statusView.renderBugReport(err);
       }
+    } finally {
+      this.currentLighthouseRun = undefined;
     }
   }
 
   private async cancelLighthouse(): Promise<void> {
+    this.currentLighthouseRun = undefined;
     this.statusView.updateStatus(i18nString(UIStrings.cancelling));
     await this.resetEmulationAndProtocolConnection();
     this.renderStartView();
@@ -447,10 +502,12 @@ export class LighthousePanel extends UI.Panel.Panel {
     }
     // reload to reset the page state
     const inspectedURL = await this.controller.getInspectedURL();
-    await resourceTreeModel.navigate(inspectedURL);
+    // TODO(crbug.com/1253323): Cast to UrlString will be removed when migration to branded types is complete.
+    await resourceTreeModel.navigate(inspectedURL as Platform.DevToolsPath.UrlString);
   }
+
   wasShown(): void {
     super.wasShown();
-    this.registerCSSFiles([lighthousePanelStyles, reportStyles]);
+    this.registerCSSFiles([lighthousePanelStyles]);
   }
 }

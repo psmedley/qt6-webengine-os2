@@ -7,8 +7,9 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -17,12 +18,11 @@
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_api.h"
-#include "chrome/browser/extensions/api/content_settings/content_settings_api_constants.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
+#include "chrome/browser/profiles/keep_alive/profile_keep_alive_types.h"
+#include "chrome/browser/profiles/keep_alive/scoped_profile_keep_alive.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_keep_alive_types.h"
-#include "chrome/browser/profiles/scoped_profile_keep_alive.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
@@ -36,7 +36,6 @@
 #include "components/permissions/permission_result.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/notification_service.h"
-#include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/webplugininfo.h"
 #include "content/public/test/browser_test.h"
@@ -44,13 +43,19 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 
+#if BUILDFLAG(ENABLE_PLUGINS)
+#include "content/public/browser/plugin_service.h"
+#endif
+
 namespace extensions {
 
 using ContextType = ExtensionApiTest::ContextType;
 
 class ExtensionContentSettingsApiTest : public ExtensionApiTest {
  public:
-  ExtensionContentSettingsApiTest() = default;
+  explicit ExtensionContentSettingsApiTest(
+      ContextType context_type = ContextType::kNone)
+      : ExtensionApiTest(context_type) {}
   ~ExtensionContentSettingsApiTest() override = default;
   ExtensionContentSettingsApiTest(const ExtensionContentSettingsApiTest&) =
       delete;
@@ -224,7 +229,7 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
   }
 
  private:
-  Profile* profile_ = nullptr;
+  raw_ptr<Profile> profile_ = nullptr;
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
   std::unique_ptr<ScopedProfileKeepAlive> profile_keep_alive_;
 };
@@ -233,19 +238,13 @@ class ExtensionContentSettingsApiTestWithContextType
     : public ExtensionContentSettingsApiTest,
       public testing::WithParamInterface<ContextType> {
  public:
-  ExtensionContentSettingsApiTestWithContextType() = default;
+  ExtensionContentSettingsApiTestWithContextType()
+      : ExtensionContentSettingsApiTest(GetParam()) {}
   ~ExtensionContentSettingsApiTestWithContextType() override = default;
   ExtensionContentSettingsApiTestWithContextType(
       const ExtensionContentSettingsApiTestWithContextType&) = delete;
   ExtensionContentSettingsApiTestWithContextType& operator=(
       const ExtensionContentSettingsApiTestWithContextType&) = delete;
-
- protected:
-  bool RunLazyTest(const char* extension_name) {
-    return RunExtensionTest(
-        extension_name, {},
-        {.load_as_service_worker = GetParam() == ContextType::kServiceWorker});
-  }
 };
 
 INSTANTIATE_TEST_SUITE_P(PersistentBackground,
@@ -255,8 +254,7 @@ INSTANTIATE_TEST_SUITE_P(ServiceWorker,
                          ExtensionContentSettingsApiTestWithContextType,
                          ::testing::Values(ContextType::kServiceWorker));
 
-IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
-                       Standard) {
+IN_PROC_BROWSER_TEST_F(ExtensionContentSettingsApiTest, Standard) {
   CheckContentSettingsDefault();
 
   static constexpr char kExtensionPath[] = "content_settings/standard";
@@ -292,7 +290,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
 IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
                        ClearProperlyGranular) {
   const char kExtensionPath[] = "content_settings/clearproperlygranular";
-  EXPECT_TRUE(RunLazyTest(kExtensionPath)) << message_;
+  EXPECT_TRUE(RunExtensionTest(kExtensionPath)) << message_;
 }
 
 // Tests if changing permissions in incognito mode keeps the previous state of
@@ -341,7 +339,7 @@ IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
                        EmbeddedSettingsMetric) {
   base::HistogramTester histogram_tester;
   const char kExtensionPath[] = "content_settings/embeddedsettingsmetric";
-  EXPECT_TRUE(RunLazyTest(kExtensionPath)) << message_;
+  EXPECT_TRUE(RunExtensionTest(kExtensionPath)) << message_;
 
   size_t num_values = 0;
   int images_type = ContentSettingTypeToHistogramValue(
@@ -366,8 +364,8 @@ IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
       "ContentSettings.ExtensionNonEmbeddedSettingSet", 2);
 }
 
-IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
-                       ConsoleErrorTest) {
+#if BUILDFLAG(ENABLE_PLUGINS)
+IN_PROC_BROWSER_TEST_F(ExtensionContentSettingsApiTest, ConsoleErrorTest) {
   constexpr char kExtensionPath[] = "content_settings/disablepluginsapi";
   const extensions::Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII(kExtensionPath));
@@ -382,5 +380,6 @@ IN_PROC_BROWSER_TEST_P(ExtensionContentSettingsApiTestWithContextType,
   console_observer.Wait();
   EXPECT_EQ(1u, console_observer.messages().size());
 }
+#endif  // BUILDFLAG(ENABLE_PLUGINS)
 
 }  // namespace extensions

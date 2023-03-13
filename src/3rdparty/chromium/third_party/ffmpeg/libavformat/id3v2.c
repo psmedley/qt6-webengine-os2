@@ -69,6 +69,7 @@ const AVMetadataConv ff_id3v2_4_metadata_conv[] = {
     { "TSOA", "album-sort"    },
     { "TSOP", "artist-sort"   },
     { "TSOT", "title-sort"    },
+    { "TIT1", "grouping"      },
     { 0 }
 };
 
@@ -827,7 +828,7 @@ static void id3v2_parse(AVIOContext *pb, AVDictionary **metadata,
     int64_t next, end = avio_tell(pb);
     int taghdrlen;
     const char *reason = NULL;
-    AVIOContext pb_local;
+    FFIOContext pb_local;
     AVIOContext *pbx;
     unsigned char *buffer = NULL;
     int buffer_size       = 0;
@@ -999,7 +1000,7 @@ static void id3v2_parse(AVIOContext *pb, AVDictionary **metadata,
                 ffio_init_context(&pb_local, buffer, b - buffer, 0, NULL, NULL, NULL,
                                   NULL);
                 tlen = b - buffer;
-                pbx  = &pb_local; // read from sync buffer
+                pbx  = &pb_local.pub; // read from sync buffer
             }
 
 #if CONFIG_ZLIB
@@ -1035,7 +1036,7 @@ static void id3v2_parse(AVIOContext *pb, AVDictionary **metadata,
                     }
                     ffio_init_context(&pb_local, uncompressed_buffer, dlen, 0, NULL, NULL, NULL, NULL);
                     tlen = dlen;
-                    pbx = &pb_local; // read from sync buffer
+                    pbx = &pb_local.pub; // read from sync buffer
                 }
 #endif
             if (tag[0] == 'T')

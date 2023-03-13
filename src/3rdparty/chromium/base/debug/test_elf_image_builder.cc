@@ -148,15 +148,12 @@ TestElfImageBuilder::ImageMeasures TestElfImageBuilder::MeasureSizesAndOffsets()
 
   // Add space for the load segments.
   for (auto it = load_segments_.begin(); it != load_segments_.end(); ++it) {
-    size_t size = 0;
     // The first non PT_PHDR program header is expected to be a PT_LOAD and
     // start at the already-aligned start of the ELF header.
     if (it == load_segments_.begin()) {
-      size = offset + it->size;
       measures.load_segment_start.push_back(0);
     } else {
       offset = bits::AlignUp(offset, kLoadAlign);
-      size = it->size;
       measures.load_segment_start.push_back(offset);
     }
     offset += it->size;
@@ -259,7 +256,7 @@ TestElfImage TestElfImageBuilder::Build() {
 
   Dyn* strtab_dyn = reinterpret_cast<Dyn*>(loc);
   strtab_dyn->d_tag = DT_STRTAB;
-#if defined(OS_FUCHSIA) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ANDROID)
   // Fuchsia and Android do not alter the symtab pointer on ELF load -- it's
   // expected to remain a 'virutal address'.
   strtab_dyn->d_un.d_ptr =

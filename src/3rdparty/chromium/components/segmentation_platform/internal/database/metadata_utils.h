@@ -6,11 +6,15 @@
 #define COMPONENTS_SEGMENTATION_PLATFORM_INTERNAL_DATABASE_METADATA_UTILS_H_
 
 #include "base/time/time.h"
+#include "components/optimization_guide/proto/models.pb.h"
 #include "components/segmentation_platform/internal/database/signal_key.h"
+#include "components/segmentation_platform/internal/execution/query_processor.h"
 #include "components/segmentation_platform/internal/proto/model_metadata.pb.h"
 #include "components/segmentation_platform/internal/proto/model_prediction.pb.h"
 #include "components/segmentation_platform/internal/proto/types.pb.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
+
+using optimization_guide::proto::OptimizationTarget;
 
 namespace segmentation_platform {
 namespace metadata_utils {
@@ -28,7 +32,13 @@ enum class ValidationResult {
   kFeatureAggregationNotFound = 7,
   kFeatureTensorLengthInvalid = 8,
   kFeatureNameHashDoesNotMatchName = 9,
-  kMaxValue = kFeatureNameHashDoesNotMatchName,
+  kVersionNotSupported = 10,
+  kFeatureListInvalid = 11,
+  kCustomInputInvalid = 12,
+  kFeatureSqlQueryEmpty = 13,
+  kFeatureBindValuesInvalid = 14,
+  kIndexedTensorsInvalid = 15,
+  kMaxValue = kIndexedTensorsInvalid,
 };
 
 // Whether the given SegmentInfo and its metadata is valid to be used for the
@@ -40,14 +50,29 @@ ValidationResult ValidateSegmentInfo(const proto::SegmentInfo& segment_info);
 ValidationResult ValidateMetadata(
     const proto::SegmentationModelMetadata& model_metadata);
 
-// Whether the given feature metadata is valid to be used for the current
+// Whether the given UMA feature metadata is valid to be used for the current
 // segmentation platform.
-ValidationResult ValidateMetadataFeature(const proto::Feature& feature);
+ValidationResult ValidateMetadataUmaFeature(const proto::UMAFeature& feature);
+
+// Whether the given SQL feature metadata is valid to be used for the current
+// segmentation platform.
+ValidationResult ValidateMetadataSqlFeature(const proto::SqlFeature& feature);
+
+// Whether the given custom input metadata is valid to be used for the current
+// segmentation platform.
+ValidationResult ValidateMetadataCustomInput(
+    const proto::CustomInput& custom_input);
 
 // Whether the given metadata and feature metadata is valid to be used for the
 // current segmentation platform.
 ValidationResult ValidateMetadataAndFeatures(
     const proto::SegmentationModelMetadata& model_metadata);
+
+// Whether the given indexed tensor is valid to be used for the current
+// segmentation platform.
+ValidationResult ValidateIndexedTensors(
+    const QueryProcessor::IndexedTensors& tensor,
+    size_t expected_size);
 
 // Whether the given SegmentInfo, metadata and feature metadata is valid to be
 // used for the current segmentation platform.
@@ -75,6 +100,21 @@ base::TimeDelta GetTimeUnit(
 
 // Conversion methods between SignalKey::Kind and proto::SignalType.
 SignalKey::Kind SignalTypeToSignalKind(proto::SignalType signal_type);
+
+// Helper method to convert continuous to discrete score.
+int ConvertToDiscreteScore(const std::string& mapping_key,
+                           float input_score,
+                           const proto::SegmentationModelMetadata& metadata);
+
+std::string SegmetationModelMetadataToString(
+    const proto::SegmentationModelMetadata& model_metadata);
+
+// Helper method to get all UMAFeatures from a segmentation model's metadata.
+// When |include_outputs| is true, the UMA features for training outputs will be
+// included. Otherwise only input UMA features are included.
+std::vector<proto::UMAFeature> GetAllUmaFeatures(
+    const proto::SegmentationModelMetadata& model_metadata,
+    bool include_outputs);
 
 }  // namespace metadata_utils
 }  // namespace segmentation_platform

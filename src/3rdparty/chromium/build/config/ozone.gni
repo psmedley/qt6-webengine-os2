@@ -4,8 +4,14 @@
 
 import("//build/config/chromecast_build.gni")
 import("//build/config/chromeos/ui_mode.gni")
-import("//build/config/ui.gni")
 import("//build/toolchain/toolchain.gni")
+
+declare_args() {
+  # Indicates if Ozone is enabled. Ozone is a low-level library layer for Linux
+  # that does not require X11.
+  use_ozone =
+      is_chromeos || (is_chromecast && !is_android) || is_fuchsia || is_linux
+}
 
 declare_args() {
   # Ozone extra platforms file path. Can be overridden to build out of

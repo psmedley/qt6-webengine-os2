@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "base/containers/contains.h"
+#include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
@@ -35,17 +36,16 @@
 namespace ui {
 namespace {
 
-display::Display::Rotation WaylandTransformToRotation(
-    wl_output_transform transform) {
+display::Display::Rotation WaylandTransformToRotation(int32_t transform) {
   switch (transform) {
     case WL_OUTPUT_TRANSFORM_NORMAL:
       return display::Display::ROTATE_0;
     case WL_OUTPUT_TRANSFORM_90:
-      return display::Display::ROTATE_90;
+      return display::Display::ROTATE_270;
     case WL_OUTPUT_TRANSFORM_180:
       return display::Display::ROTATE_180;
     case WL_OUTPUT_TRANSFORM_270:
-      return display::Display::ROTATE_270;
+      return display::Display::ROTATE_90;
     // ui::display::Display does not support flipped rotation.
     // see ui::display::Display::Rotation comment.
     case WL_OUTPUT_TRANSFORM_FLIPPED:
@@ -57,22 +57,6 @@ display::Display::Rotation WaylandTransformToRotation(
   }
   NOTREACHED();
   return display::Display::ROTATE_0;
-}
-
-wl_output_transform RotationToWaylandTransform(
-    display::Display::Rotation rotation) {
-  switch (rotation) {
-    case display::Display::ROTATE_0:
-      return WL_OUTPUT_TRANSFORM_NORMAL;
-    case display::Display::ROTATE_90:
-      return WL_OUTPUT_TRANSFORM_90;
-    case display::Display::ROTATE_180:
-      return WL_OUTPUT_TRANSFORM_180;
-    case display::Display::ROTATE_270:
-      return WL_OUTPUT_TRANSFORM_270;
-  }
-  NOTREACHED();
-  return WL_OUTPUT_TRANSFORM_NORMAL;
 }
 
 }  // namespace
@@ -125,7 +109,7 @@ WaylandScreen::~WaylandScreen() = default;
 
 void WaylandScreen::OnOutputAddedOrUpdated(uint32_t output_id,
                                            const gfx::Rect& bounds,
-                                           int32_t scale,
+                                           float scale,
                                            int32_t transform) {
   AddOrUpdateDisplay(output_id, bounds, scale, transform);
 }
@@ -145,17 +129,24 @@ void WaylandScreen::OnOutputRemoved(uint32_t output_id) {
       }
     }
   }
-  display_list_.RemoveDisplay(output_id);
+  // TODO(https://crbug.com/1299403): Work around the symptoms of a common
+  // crash. Unclear if this is the proper long term solution.
+  auto it = display_list_.FindDisplayById(output_id);
+  DCHECK(it != display_list_.displays().end());
+  if (it != display_list_.displays().end()) {
+    display_list_.RemoveDisplay(output_id);
+  } else {
+    LOG(ERROR) << "output_id is not associated with a Display.";
+  }
 }
 
 void WaylandScreen::AddOrUpdateDisplay(uint32_t output_id,
                                        const gfx::Rect& new_bounds,
-                                       int32_t scale_factor,
+                                       float scale_factor,
                                        int32_t transform) {
   display::Display changed_display(output_id);
   if (!display::Display::HasForceDeviceScaleFactor()) {
-    changed_display.SetScaleAndBounds(scale_factor + additional_scale_,
-                                      new_bounds);
+    changed_display.SetScaleAndBounds(scale_factor, new_bounds);
   } else {
     changed_display.set_bounds(new_bounds);
     changed_display.set_work_area(new_bounds);
@@ -163,8 +154,7 @@ void WaylandScreen::AddOrUpdateDisplay(uint32_t output_id,
 
   DCHECK_GE(transform, WL_OUTPUT_TRANSFORM_NORMAL);
   DCHECK_LE(transform, WL_OUTPUT_TRANSFORM_FLIPPED_270);
-  display::Display::Rotation rotation =
-      WaylandTransformToRotation(static_cast<wl_output_transform>(transform));
+  display::Display::Rotation rotation = WaylandTransformToRotation(transform);
   changed_display.set_rotation(rotation);
   changed_display.set_panel_rotation(rotation);
 
@@ -243,9 +233,9 @@ display::Display WaylandScreen::GetDisplayForAcceleratedWidget(
 }
 
 gfx::Point WaylandScreen::GetCursorScreenPoint() const {
-  // Wayland does not provide either location of surfaces in global space
-  // coordinate system or location of a pointer. Instead, only locations of
-  // mouse/touch events are known. Given that Chromium assumes top-level
+  // wl_shell/xdg-shell do not provide either location of surfaces in global
+  // space coordinate system or location of a pointer. Instead, only locations
+  // of mouse/touch events are known. Given that Chromium assumes top-level
   // windows are located at origin, always provide a cursor point in regards
   // to surfaces' location.
   //
@@ -253,7 +243,8 @@ gfx::Point WaylandScreen::GetCursorScreenPoint() const {
   // the last known cursor position. Otherwise, return such a point, which is
   // not contained by any of the windows.
   auto* cursor_position = connection_->wayland_cursor_position();
-  if (connection_->wayland_window_manager()->GetCurrentFocusedWindow() &&
+  if (connection_->wayland_window_manager()
+          ->GetCurrentPointerOrTouchFocusedWindow() &&
       cursor_position)
     return cursor_position->GetCursorSurfacePoint();
 
@@ -268,8 +259,8 @@ gfx::AcceleratedWidget WaylandScreen::GetAcceleratedWidgetAtScreenPoint(
     const gfx::Point& point) const {
   // It is safe to check only for focused windows and test if they contain the
   // point or not.
-  auto* window =
-      connection_->wayland_window_manager()->GetCurrentFocusedWindow();
+  auto* window = connection_->wayland_window_manager()
+                     ->GetCurrentPointerOrTouchFocusedWindow();
   if (window && window->GetBoundsInDIP().Contains(point))
     return window->GetWidget();
   return gfx::kNullAcceleratedWidget;
@@ -302,9 +293,9 @@ display::Display WaylandScreen::GetDisplayMatching(
   return display_matching ? *display_matching : GetPrimaryDisplay();
 }
 
-void WaylandScreen::SetScreenSaverSuspended(bool suspend) {
+bool WaylandScreen::SetScreenSaverSuspended(bool suspend) {
   if (!connection_->zwp_idle_inhibit_manager())
-    return;
+    return false;
 
   if (suspend) {
     // Wayland inhibits idle behaviour on certain output, and implies that a
@@ -318,7 +309,7 @@ void WaylandScreen::SetScreenSaverSuspended(bool suspend) {
     const auto* current_window = window_manager->GetCurrentFocusedWindow();
     if (!current_window) {
       LOG(WARNING) << "Cannot inhibit going idle when no window is focused";
-      return;
+      return false;
     }
     DCHECK(current_window->root_surface());
     idle_inhibitor_ = connection_->zwp_idle_inhibit_manager()->CreateInhibitor(
@@ -326,6 +317,8 @@ void WaylandScreen::SetScreenSaverSuspended(bool suspend) {
   } else {
     idle_inhibitor_.reset();
   }
+
+  return true;
 }
 
 bool WaylandScreen::IsScreenSaverActive() const {
@@ -353,7 +346,7 @@ base::TimeDelta WaylandScreen::CalculateIdleTime() const {
   NOTIMPLEMENTED_LOG_ONCE();
 
   // No providers.  Return 0 which means the system never gets idle.
-  return base::TimeDelta::FromSeconds(0);
+  return base::Seconds(0);
 }
 
 void WaylandScreen::AddObserver(display::DisplayObserver* observer) {
@@ -378,27 +371,6 @@ std::vector<base::Value> WaylandScreen::GetGpuExtraInfo(
                                  base::JoinString(protocols, " ")));
   StorePlatformNameIntoListOfValues(values, "wayland");
   return values;
-}
-
-void WaylandScreen::SetDeviceScaleFactor(float scale) {
-  // If the device scale factor is forced, ignore the one provided as it's
-  // already set.
-  if (display::Display::HasForceDeviceScaleFactor())
-    return;
-
-  // See comment near the additional_scale_ in the header file.
-  float whole = 0;
-  additional_scale_ = std::modf(scale, &whole);
-  for (const auto& display : display_list_.displays()) {
-    // display::bounds returns bounds in dip while OnOutputAddedOrUpdated
-    // expects them to be in px. Translate using current scale factor of the
-    // display.
-    OnOutputAddedOrUpdated(display.id(),
-                           gfx::ScaleToEnclosedRect(
-                               display.bounds(), display.device_scale_factor()),
-                           display.device_scale_factor(),
-                           RotationToWaylandTransform(display.rotation()));
-  }
 }
 
 }  // namespace ui

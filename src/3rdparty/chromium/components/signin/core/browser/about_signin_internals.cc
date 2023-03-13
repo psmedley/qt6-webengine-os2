@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/hash/hash.h"
 #include "base/logging.h"
+#include "base/observer_list.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time_to_iso8601.h"
 #include "base/trace_event/trace_event.h"
@@ -340,9 +341,9 @@ void AboutSigninInternals::Shutdown() {
 void AboutSigninInternals::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
-    ContentSettingsType content_type) {
+    ContentSettingsTypeSet content_type_set) {
   // If this is not a change to cookie settings, just ignore.
-  if (content_type != ContentSettingsType::COOKIES)
+  if (!content_type_set.Contains(ContentSettingsType::COOKIES))
     return;
 
   NotifyObservers();
@@ -688,7 +689,7 @@ base::Value AboutSigninInternals::SigninStatus::ToValue(
         identity_manager->GetDiagnosticsProvider()
             ->GetDelayBeforeMakingCookieRequests();
 
-    if (cookie_requests_delay > base::TimeDelta()) {
+    if (cookie_requests_delay.is_positive()) {
       base::Time next_retry_time =
           base::Time::NowFromSystemTime() + cookie_requests_delay;
       AddSectionEntry(detailed_info, "Cookie Manager Next Retry",
@@ -699,7 +700,7 @@ base::Value AboutSigninInternals::SigninStatus::ToValue(
         identity_manager->GetDiagnosticsProvider()
             ->GetDelayBeforeMakingAccessTokenRequests();
 
-    if (token_requests_delay > base::TimeDelta()) {
+    if (token_requests_delay.is_positive()) {
       base::Time next_retry_time =
           base::Time::NowFromSystemTime() + token_requests_delay;
       AddSectionEntry(detailed_info, "Token Service Next Retry",

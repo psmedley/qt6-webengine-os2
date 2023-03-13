@@ -3,8 +3,14 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/public/common/storage_key/storage_key_mojom_traits.h"
-#include "url/mojom/origin_mojom_traits.h"
 
+#include "base/stl_util.h"
+#include "base/unguessable_token.h"
+#include "mojo/public/cpp/base/unguessable_token_mojom_traits.h"
+#include "net/base/schemeful_site.h"
+#include "services/network/public/cpp/schemeful_site_mojom_traits.h"
+#include "third_party/blink/public/mojom/storage_key/ancestor_chain_bit.mojom.h"
+#include "url/mojom/origin_mojom_traits.h"
 #include "url/origin.h"
 
 namespace mojo {
@@ -17,14 +23,21 @@ bool StructTraits<blink::mojom::StorageKeyDataView, blink::StorageKey>::Read(
   if (!data.ReadOrigin(&origin))
     return false;
 
+  net::SchemefulSite top_level_site;
+  if (!data.ReadTopLevelSite(&top_level_site))
+    return false;
+
   absl::optional<base::UnguessableToken> nonce;
   if (!data.ReadNonce(&nonce))
     return false;
 
-  if (nonce.has_value())
-    *out = blink::StorageKey::CreateWithNonce(origin, *nonce);
-  else
-    *out = blink::StorageKey(origin);
+  blink::mojom::AncestorChainBit ancestor_chain_bit;
+  if (!data.ReadAncestorChainBit(&ancestor_chain_bit))
+    return false;
+
+  *out = blink::StorageKey::CreateWithOptionalNonce(
+      origin, top_level_site, base::OptionalOrNullptr(nonce),
+      ancestor_chain_bit);
   return true;
 }
 

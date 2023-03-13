@@ -56,6 +56,13 @@ default_args = {
   angle_vulkan_tools_dir = "//third_party/vulkan-deps/vulkan-tools/src"
   angle_vulkan_validation_layers_dir =
       "//third_party/vulkan-deps/vulkan-validation-layers/src"
+
+  # Overwrite default args declared in the Fuchsia sdk
+  fuchsia_sdk_readelf_exec =
+      "//third_party/llvm-build/Release+Asserts/bin/llvm-readelf"
+  fuchsia_target_api_level = 7
+
+  devtools_visibility = [ "*" ]
 }
 
 # These are the list of GN files that run exec_script. This whitelist exists

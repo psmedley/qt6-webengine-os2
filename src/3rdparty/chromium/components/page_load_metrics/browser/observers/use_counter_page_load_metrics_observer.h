@@ -7,7 +7,6 @@
 
 #include <bitset>
 #include "base/containers/flat_set.h"
-#include "base/macros.h"
 #include "components/page_load_metrics/browser/page_load_metrics_observer.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom.h"
 #include "third_party/blink/public/mojom/use_counter/css_property_id.mojom.h"
@@ -16,6 +15,7 @@
 
 namespace internal {
 
+// Histogram name definitions for the primary uses.
 const char kFeaturesHistogramName[] = "Blink.UseCounter.Features";
 const char kFeaturesHistogramMainFrameName[] =
     "Blink.UseCounter.MainFrame.Features";
@@ -25,21 +25,53 @@ const char kAnimatedCssPropertiesHistogramName[] =
 const char kPermissionsPolicyViolationHistogramName[] =
     "Blink.UseCounter.PermissionsPolicy.Violation.Enforce";
 const char kPermissionsPolicyHeaderHistogramName[] =
-    "Blink.UseCounter.PermissionsPolicy.Allow";
+    "Blink.UseCounter.PermissionsPolicy.Header2";
 const char kPermissionsPolicyIframeAttributeHistogramName[] =
-    "Blink.UseCounter.PermissionsPolicy.Header";
+    "Blink.UseCounter.PermissionsPolicy.Allow2";
+const char kUserAgentOverrideHistogramName[] =
+    "Blink.UseCounter.UserAgentOverride";
+
+// Histogram name definitions for FencedFrames page variants.
+// TODO(https://crbug.com/1301880): Generate the name dynamically rather than
+// preparing prefixed names. See review comments at https://crrev.com/c/3573433.
+const char kFeaturesHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.Features";
+const char kFeaturesHistogramFencedFramesMainFrameName[] =
+    "Blink.UseCounter.FencedFrames.MainFrame.Features";
+const char kCssPropertiesHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.CSSProperties";
+const char kAnimatedCssPropertiesHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.AnimatedCSSProperties";
+const char kPermissionsPolicyViolationHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.PermissionsPolicy.Violation.Enforce";
+const char kPermissionsPolicyHeaderHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.PermissionsPolicy.Header2";
+const char kPermissionsPolicyIframeAttributeHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.PermissionsPolicy.Allow2";
+const char kUserAgentOverrideHistogramFencedFramesName[] =
+    "Blink.UseCounter.FencedFrames.UserAgentOverride";
 
 }  // namespace internal
 
+// This class reports several use counters coming from Blink.
+// For FencedFrames, it reports the use counters with a "FencedFrames" prefix.
 class UseCounterPageLoadMetricsObserver
     : public page_load_metrics::PageLoadMetricsObserver {
  public:
   UseCounterPageLoadMetricsObserver();
+
+  UseCounterPageLoadMetricsObserver(const UseCounterPageLoadMetricsObserver&) =
+      delete;
+  UseCounterPageLoadMetricsObserver& operator=(
+      const UseCounterPageLoadMetricsObserver&) = delete;
+
   ~UseCounterPageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver.
-  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
-                         ukm::SourceId source_id) override;
+  ObservePolicy OnFencedFramesStart(
+      content::NavigationHandle* navigation_handle,
+      const GURL& currently_committed_url) override;
+  ObservePolicy OnCommit(content::NavigationHandle* navigation_handle) override;
   void OnFeaturesUsageObserved(
       content::RenderFrameHost* rfh,
       const std::vector<blink::UseCounterFeature>&) override;
@@ -75,6 +107,9 @@ class UseCounterPageLoadMetricsObserver
   // page.
   void RecordUkmFeatures();
 
+  // Holds true if this instance tracks a FencedFrames page.
+  bool is_in_fenced_frames_page_ = false;
+
   // To keep tracks of which features have been measured.
   std::bitset<static_cast<size_t>(blink::mojom::WebFeature::kNumberOfFeatures)>
       features_recorded_;
@@ -98,7 +133,11 @@ class UseCounterPageLoadMetricsObserver
                   blink::mojom::PermissionsPolicyFeature::kMaxValue) +
               1>
       header_permissions_policy_features_recorded_;
-  DISALLOW_COPY_AND_ASSIGN(UseCounterPageLoadMetricsObserver);
+  std::bitset<
+      static_cast<size_t>(
+          blink::UserAgentOverride::UserAgentOverrideHistogram::kMaxValue) +
+      1>
+      user_agent_override_features_recorded_;
 };
 
 #endif  // COMPONENTS_PAGE_LOAD_METRICS_BROWSER_OBSERVERS_USE_COUNTER_PAGE_LOAD_METRICS_OBSERVER_H_

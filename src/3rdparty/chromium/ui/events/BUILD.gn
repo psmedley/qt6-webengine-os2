@@ -44,7 +44,7 @@ static_library("dom_keyboard_layout") {
     ":events_base",
     "//base",
   ]
-  if (is_win || is_mac || use_ozone || use_x11 || is_os2) {
+  if (is_win || is_mac || use_ozone || is_os2) {
     public += [ "keycodes/dom/dom_keyboard_layout_map.h" ]
     sources += [
       "keycodes/dom/dom_keyboard_layout_map_base.cc",
@@ -76,6 +76,8 @@ source_set("event_constants") {
 }
 source_set("platform_event") {
   sources = [ "platform_event.h" ]
+
+  public_deps = [ "//base" ]
 }
 jumbo_component("events_base") {
   sources = [
@@ -84,8 +86,6 @@ jumbo_component("events_base") {
     "event_switches.cc",
     "event_switches.h",
     "events_base_export.h",
-    "fraction_of_time_without_user_input_recorder.cc",
-    "fraction_of_time_without_user_input_recorder.h",
     "gesture_curve.h",
     "gesture_event_details.cc",
     "gesture_event_details.h",
@@ -120,6 +120,8 @@ jumbo_component("events_base") {
     sources += [
       "keycodes/keyboard_code_conversion_win.cc",
       "keycodes/keyboard_code_conversion_win.h",
+      "keycodes/keyboard_codes_win.h",
+      "keycodes/keyboard_defines_win.h",
     ]
   }
   defines = [ "EVENTS_BASE_IMPLEMENTATION" ]
@@ -146,7 +148,7 @@ jumbo_component("events_base") {
     deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input3" ]
   }
 
-  if (use_x11 || ozone_platform_x11) {
+  if (ozone_platform_x11) {
     public_deps += [ "//ui/events/keycodes:x11" ]
     # TODO(https://crbug.com/1076277): This dependency on //ui/gfx/x
     # is unnecessary and should be removed.  It is included for now
@@ -252,7 +254,7 @@ jumbo_component("events") {
   # template which generates different target names on different platforms.
   friend = [ ":*" ]
 
-  if (use_x11 || ozone_platform_x11) {
+  if (ozone_platform_x11) {
     public += [ "x/x11_event_translation.h" ]
     sources += [ "x/x11_event_translation.cc" ]
     deps += [
@@ -267,7 +269,7 @@ jumbo_component("events") {
     configs += [ "//build/config/linux:glib" ]
   }
 
-  if (use_ozone || use_x11) {
+  if (use_ozone) {
     sources += [ "events_default.cc" ]
   }
 
@@ -296,7 +298,7 @@ jumbo_component("events") {
     ]
     deps += [ "//build:chromeos_buildflags" ]
   }
-  if (is_win || is_mac || use_x11 || use_ozone) {
+  if (is_win || is_mac || use_ozone) {
     sources -= [ "events_stub.cc" ]
   }
   if (is_android) {
@@ -329,9 +331,16 @@ jumbo_component("events") {
     public += [
       "fuchsia/input_event_dispatcher.h",
       "fuchsia/input_event_sink.h",
+      "fuchsia/pointer_events_handler.h",
     ]
-    sources += [ "fuchsia/input_event_dispatcher.cc" ]
-    public_deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input" ]
+    sources += [
+      "fuchsia/input_event_dispatcher.cc",
+      "fuchsia/pointer_events_handler.cc",
+    ]
+    public_deps += [
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input",
+      "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.pointer",
+    ]
   }
 }
 
@@ -374,25 +383,6 @@ jumbo_component("keyboard_hook") {
 
   if (is_mac) {
     sources += [ "mac/keyboard_hook_mac.mm" ]
-  }
-
-  if (use_x11) {
-    sources += [
-      "x/keyboard_hook_x11.cc",
-      "x/keyboard_hook_x11.h",
-    ]
-    deps += [
-      "//ui/base/x",
-      "//ui/gfx/x",
-    ]
-  }
-
-  if (use_ozone || use_x11) {
-    if (is_linux || is_chromeos) {
-      # TODO(https://crbug.com/1099225): refactor X11 kbd hook and implement
-      # that for Ozone.
-      sources += [ "keyboard_hook_linux.cc" ]
-    }
   }
 
   if (use_ozone) {
@@ -533,7 +523,7 @@ jumbo_static_library("test_support") {
     frameworks = [ "Carbon.framework" ]
   }
 
-  if (use_x11 || ozone_platform_x11) {
+  if (ozone_platform_x11) {
     sources += [
       "test/events_test_utils_x11.cc",
       "test/events_test_utils_x11.h",
@@ -554,6 +544,19 @@ jumbo_static_library("test_support") {
       "//ui/events/ozone/layout",
     ]
   }
+
+  if (is_fuchsia) {
+    sources += [
+      "fuchsia/fakes/fake_mouse_source.cc",
+      "fuchsia/fakes/fake_mouse_source.h",
+      "fuchsia/fakes/fake_touch_source.cc",
+      "fuchsia/fakes/fake_touch_source.h",
+      "fuchsia/fakes/pointer_event_utility.cc",
+      "fuchsia/fakes/pointer_event_utility.h",
+    ]
+
+    deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.pointer" ]
+  }
 }
 if (!is_ios) {
   test("events_unittests") {
@@ -568,7 +571,6 @@ if (!is_ios) {
       "event_rewriter_unittest.cc",
       "event_target_unittest.cc",
       "event_unittest.cc",
-      "fraction_of_time_without_user_input_recorder_unittest.cc",
       "gesture_detection/bitset_32_unittest.cc",
       "gesture_detection/filtered_gesture_provider_unittest.cc",
       "gesture_detection/gesture_event_data_packet_unittest.cc",
@@ -630,7 +632,7 @@ if (!is_ios) {
     } else {
       data_deps = [ "//third_party/mesa_headers" ]
     }
-    if (use_x11 || use_ozone) {
+    if (use_ozone) {
       sources += [ "devices/device_data_manager_unittest.cc" ]
     }
     if (use_ozone) {
@@ -661,12 +663,14 @@ if (!is_ios) {
     if (is_fuchsia) {
       sources += [
         "fuchsia/input_event_dispatcher_unittest.cc",
+        "fuchsia/pointer_events_handler_unittest.cc",
         "keycodes/keyboard_code_conversion_fuchsia_unittest.cc",
       ]
 
       deps += [
         "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input",
         "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.input3",
+        "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.ui.pointer",
       ]
     }
     if (is_win || is_mac || use_ozone) {

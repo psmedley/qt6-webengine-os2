@@ -4,6 +4,7 @@
 
 #include <map>
 
+#include "base/memory/raw_ptr.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler.h"
 #include "components/safe_browsing/content/browser/base_blocking_page.h"
@@ -112,7 +113,7 @@ class SafeBrowsingErrorNavigationObserver : public NavigationObserver {
 
  private:
   const GURL url_;
-  Tab* tab_;
+  raw_ptr<Tab> tab_;
   base::RunLoop run_loop_;
 };
 
@@ -166,6 +167,10 @@ class FakeSafeBrowsingApiHandler
 class SafeBrowsingBrowserTest : public WebLayerBrowserTest {
  public:
   SafeBrowsingBrowserTest() : fake_handler_(new FakeSafeBrowsingApiHandler()) {}
+
+  SafeBrowsingBrowserTest(const SafeBrowsingBrowserTest&) = delete;
+  SafeBrowsingBrowserTest& operator=(const SafeBrowsingBrowserTest&) = delete;
+
   ~SafeBrowsingBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -290,13 +295,17 @@ class SafeBrowsingBrowserTest : public WebLayerBrowserTest {
 
  private:
   TestAccessTokenFetchDelegate access_token_fetch_delegate_;
-
-  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingBrowserTest);
 };
 
 class SafeBrowsingDisabledBrowserTest : public SafeBrowsingBrowserTest {
  public:
   SafeBrowsingDisabledBrowserTest() {}
+
+  SafeBrowsingDisabledBrowserTest(const SafeBrowsingDisabledBrowserTest&) =
+      delete;
+  SafeBrowsingDisabledBrowserTest& operator=(
+      const SafeBrowsingDisabledBrowserTest&) = delete;
+
   ~SafeBrowsingDisabledBrowserTest() override = default;
 
   void SetUpOnMainThread() override {
@@ -304,9 +313,6 @@ class SafeBrowsingDisabledBrowserTest : public SafeBrowsingBrowserTest {
     SafeBrowsingBrowserTest::InitializeOnMainThread();
     ASSERT_FALSE(GetSafeBrowsingEnabled());
   }
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(SafeBrowsingDisabledBrowserTest);
 };
 
 IN_PROC_BROWSER_TEST_F(SafeBrowsingBrowserTest,

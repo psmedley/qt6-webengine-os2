@@ -337,7 +337,7 @@ const char* BuildDescriptionFromHeaders(AXPlatformNodeDelegate* delegate,
 
   std::string result = base::JoinString(names, " ");
 
-#if defined(LEAK_SANITIZER) && !defined(OS_NACL)
+#if defined(LEAK_SANITIZER) && !BUILDFLAG(IS_NACL)
   // http://crbug.com/982839
   // atk_table_get_column_description and atk_table_get_row_description return
   // const gchar*, which suggests the caller does not gain ownership of the
@@ -598,7 +598,7 @@ namespace atk_action {
 
 gboolean DoAction(AtkAction* atk_action, gint index) {
   g_return_val_if_fail(ATK_IS_ACTION(atk_action), FALSE);
-  g_return_val_if_fail(!index, FALSE);
+  g_return_val_if_fail(index >= 0, FALSE);
 
   AtkObject* atk_object = ATK_OBJECT(atk_action);
   AXPlatformNodeAuraLinux* obj =
@@ -606,7 +606,16 @@ gboolean DoAction(AtkAction* atk_action, gint index) {
   if (!obj)
     return FALSE;
 
-  return obj->DoDefaultAction();
+  const std::vector<ax::mojom::Action> actions = obj->GetSupportedActions();
+  g_return_val_if_fail(index < static_cast<gint>(actions.size()), FALSE);
+
+  if (index == 0 && obj->HasDefaultActionVerb()) {
+    // If there is a default action, it will always be at index 0.
+    return obj->DoDefaultAction();
+  }
+  AXActionData data;
+  data.action = actions[index];
+  return obj->GetDelegate()->AccessibilityPerformAction(data);
 }
 
 gint GetNActions(AtkAction* atk_action) {
@@ -618,7 +627,7 @@ gint GetNActions(AtkAction* atk_action) {
   if (!obj)
     return 0;
 
-  return 1;
+  return static_cast<gint>(obj->GetSupportedActions().size());
 }
 
 const gchar* GetDescription(AtkAction*, gint) {
@@ -629,7 +638,6 @@ const gchar* GetDescription(AtkAction*, gint) {
 
 const gchar* GetName(AtkAction* atk_action, gint index) {
   g_return_val_if_fail(ATK_IS_ACTION(atk_action), nullptr);
-  g_return_val_if_fail(!index, nullptr);
 
   AtkObject* atk_object = ATK_OBJECT(atk_action);
   AXPlatformNodeAuraLinux* obj =
@@ -637,12 +645,18 @@ const gchar* GetName(AtkAction* atk_action, gint index) {
   if (!obj)
     return nullptr;
 
-  return obj->GetDefaultActionName();
+  const std::vector<ax::mojom::Action> actions = obj->GetSupportedActions();
+  g_return_val_if_fail(index < static_cast<gint>(actions.size()), nullptr);
+
+  if (index == 0 && obj->HasDefaultActionVerb()) {
+    // If there is a default action, it will always be at index 0.
+    return obj->GetDefaultActionName();
+  }
+  return ToString(actions[index]);
 }
 
 const gchar* GetKeybinding(AtkAction* atk_action, gint index) {
   g_return_val_if_fail(ATK_IS_ACTION(atk_action), nullptr);
-  g_return_val_if_fail(!index, nullptr);
 
   AtkObject* atk_object = ATK_OBJECT(atk_action);
   AXPlatformNodeAuraLinux* obj =
@@ -650,8 +664,16 @@ const gchar* GetKeybinding(AtkAction* atk_action, gint index) {
   if (!obj)
     return nullptr;
 
-  return obj->GetStringAttribute(ax::mojom::StringAttribute::kAccessKey)
-      .c_str();
+  const std::vector<ax::mojom::Action> actions = obj->GetSupportedActions();
+  g_return_val_if_fail(index < static_cast<gint>(actions.size()), nullptr);
+
+  if (index == 0 && obj->HasDefaultActionVerb()) {
+    // If there is a default action, it will always be at index 0. Only the
+    // default action has a key binding.
+    return obj->GetStringAttribute(ax::mojom::StringAttribute::kAccessKey)
+        .c_str();
+  }
+  return nullptr;
 }
 
 void Init(AtkActionIface* iface) {
@@ -2039,7 +2061,7 @@ const gchar* GetName(AtkObject* atk_object) {
   if (!obj->IsNameExposed())
     return nullptr;
 
-  ax::mojom::NameFrom name_from = obj->GetData().GetNameFrom();
+  ax::mojom::NameFrom name_from = obj->GetNameFrom();
   if (obj->GetName().empty() &&
       name_from != ax::mojom::NameFrom::kAttributeExplicitlyEmpty) {
     return nullptr;
@@ -2811,13 +2833,16 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
     case ax::mojom::Role::kListItem:
       return ATK_ROLE_LIST_ITEM;
     case ax::mojom::Role::kListMarker:
-      if (!GetChildCount()) {
-        // There's only a name attribute when using Legacy layout. With Legacy
-        // layout, list markers have no child and are considered as StaticText.
-        // We consider a list marker as a group in LayoutNG since it has
-        // a text child node.
+      // Regular list markers only expose their alternative text, but do not
+      // expose their descendants; and the descendants should be ignored. This
+      // is because the alternative text depends on the counter style and can
+      // be different from the actual (visual) marker text, and hence,
+      // inconsistent with the descendants. We treat a list marker as non-text
+      // only if it still has non-ignored descendants, which happens only when:
+      // - The list marker itself is ignored but the descendants are not
+      // - Or the list marker contains images
+      if (!GetChildCount())
         return kStaticRole;
-      }
       return ATK_ROLE_PANEL;
     case ax::mojom::Role::kLog:
       return ATK_ROLE_LOG;
@@ -2826,7 +2851,51 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
     case ax::mojom::Role::kMark:
       return kStaticRole;
     case ax::mojom::Role::kMath:
+    case ax::mojom::Role::kMathMLMath:
       return ATK_ROLE_MATH;
+    // https://w3c.github.io/mathml-aam/#mathml-element-mappings
+    case ax::mojom::Role::kMathMLFraction:
+      return ATK_ROLE_MATH_FRACTION;
+    case ax::mojom::Role::kMathMLIdentifier:
+      return ATK_ROLE_STATIC;
+    case ax::mojom::Role::kMathMLMultiscripts:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLNoneScript:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLNumber:
+      return ATK_ROLE_STATIC;
+    case ax::mojom::Role::kMathMLPrescriptDelimiter:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLOperator:
+      return ATK_ROLE_STATIC;
+    case ax::mojom::Role::kMathMLOver:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLRoot:
+      return ATK_ROLE_MATH_ROOT;
+    case ax::mojom::Role::kMathMLRow:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLSquareRoot:
+      return ATK_ROLE_MATH_ROOT;
+    case ax::mojom::Role::kMathMLStringLiteral:
+      return ATK_ROLE_STATIC;
+    case ax::mojom::Role::kMathMLSub:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLSubSup:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLSup:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLTable:
+      return ATK_ROLE_TABLE;
+    case ax::mojom::Role::kMathMLTableCell:
+      return ATK_ROLE_TABLE_CELL;
+    case ax::mojom::Role::kMathMLTableRow:
+      return ATK_ROLE_TABLE_ROW;
+    case ax::mojom::Role::kMathMLText:
+      return ATK_ROLE_STATIC;
+    case ax::mojom::Role::kMathMLUnder:
+      return ATK_ROLE_SECTION;
+    case ax::mojom::Role::kMathMLUnderOver:
+      return ATK_ROLE_SECTION;
     case ax::mojom::Role::kMarquee:
       return ATK_ROLE_MARQUEE;
     case ax::mojom::Role::kMenu:
@@ -2908,20 +2977,14 @@ AtkRole AXPlatformNodeAuraLinux::GetAtkRole() const {
       return ATK_ROLE_SPIN_BUTTON;
     case ax::mojom::Role::kSplitter:
       return ATK_ROLE_SEPARATOR;
-    case ax::mojom::Role::kStaticText: {
-      switch (static_cast<ax::mojom::TextPosition>(
-          GetIntAttribute(ax::mojom::IntAttribute::kTextPosition))) {
-        case ax::mojom::TextPosition::kSubscript:
-          return kSubscriptRole;
-        case ax::mojom::TextPosition::kSuperscript:
-          return kSuperscriptRole;
-        default:
-          break;
-      }
+    case ax::mojom::Role::kStaticText:
       return kStaticRole;
-    }
     case ax::mojom::Role::kStatus:
       return ATK_ROLE_STATUSBAR;
+    case ax::mojom::Role::kSubscript:
+      return kSubscriptRole;
+    case ax::mojom::Role::kSuperscript:
+      return kSuperscriptRole;
     case ax::mojom::Role::kSvgRoot:
       return ATK_ROLE_DOCUMENT_FRAME;
     case ax::mojom::Role::kTab:
@@ -3089,6 +3152,12 @@ void AXPlatformNodeAuraLinux::GetAtkState(AtkStateSet* atk_state_set) {
       atk_state_set_add_state(atk_state_set, ATK_STATE_SINGLE_LINE);
   }
 
+  // Special case for indeterminate progressbar.
+  if (GetRole() == ax::mojom::Role::kProgressIndicator &&
+      !HasFloatAttribute(ax::mojom::FloatAttribute::kValueForRange)) {
+    atk_state_set_add_state(atk_state_set, ATK_STATE_INDETERMINATE);
+  }
+
   if (!GetStringAttribute(ax::mojom::StringAttribute::kAutoComplete).empty() ||
       HasState(ax::mojom::State::kAutofillAvailable)) {
     atk_state_set_add_state(atk_state_set, ATK_STATE_SUPPORTS_AUTOCOMPLETION);
@@ -3188,7 +3257,7 @@ void AXPlatformNodeAuraLinux::AddRelationToSet(AtkRelationSet* relation_set,
     max_relation_type = enum_class->maximum;
     g_type_class_unref(enum_class);
   }
-  if (relation > max_relation_type.value())
+  if (relation >= max_relation_type.value())
     return;
 
   atk_relation_set_add_relation_by_type(relation_set, relation,
@@ -3405,6 +3474,14 @@ void AXPlatformNodeAuraLinux::OnEnabledChanged() {
       GetData().GetRestriction() != ax::mojom::Restriction::kDisabled);
 }
 
+void AXPlatformNodeAuraLinux::OnBusyStateChanged(bool is_busy) {
+  AtkObject* obj = GetOrCreateAtkObject();
+  if (!obj)
+    return;
+
+  atk_object_notify_state_change(obj, ATK_STATE_BUSY, is_busy);
+}
+
 void AXPlatformNodeAuraLinux::OnExpandedStateChanged(bool is_expanded) {
   // When a list box is expanded, it becomes visible. This means that it might
   // now have a different role (the role for hidden Views is kUnknown).  We
@@ -3504,6 +3581,14 @@ void AXPlatformNodeAuraLinux::ResendFocusSignalsForCurrentlyFocusedNode() {
 
   g_signal_emit_by_name(focused_node, "focus-event", true);
   atk_object_notify_state_change(focused_node, ATK_STATE_FOCUSED, true);
+}
+
+void AXPlatformNodeAuraLinux::SetAsCurrentlyFocusedNode() {
+  AtkObject* obj = GetOrCreateAtkObject();
+  if (!obj)
+    return;
+
+  SetWeakGPtrToAtkObject(&g_current_focused, obj);
 }
 
 // All menus have closed.
@@ -3687,9 +3772,9 @@ bool AXPlatformNodeAuraLinux::SelectionAndFocusAreTheSame() {
     }
   }
 
-  // TODO(accessibility): GetSelectionContainer returns nullptr when the current
-  // object is a descendant of a select element with a size of 1. Intentional?
-  // For now, handle that scenario here.
+  // TODO(accessibility): `GetSelectionContainer()` returns nullptr when the
+  // current object is a descendant of a select element with a size of 1.
+  // Intentional? For now, handle that scenario here.
   //
   // If the selection is changing on a collapsed select element, focus remains
   // on the select element and not the newly-selected descendant.
@@ -4084,6 +4169,15 @@ void AXPlatformNodeAuraLinux::NotifyAccessibilityEvent(
       break;
     case ax::mojom::Event::kFocus:
     case ax::mojom::Event::kFocusContext:
+      OnFocused();
+      break;
+    case ax::mojom::Event::kFocusAfterMenuClose:
+      // The saved focused object is not always getting cleared when a popup
+      // becomes active. As a result, when the popup is dismissed, OnFocused()
+      // will return early thinking focus has not changed. Rather than trying
+      // to catch every case, take kFocusAfterMenuClose as a clear indication
+      // that a focus change should be presented and reset the saved focus.
+      g_current_focused = nullptr;
       OnFocused();
       break;
     case ax::mojom::Event::kSelection:
@@ -5113,6 +5207,30 @@ std::pair<int, int> AXPlatformNodeAuraLinux::GetSelectionOffsetsForAtk() {
     GetSelectionOffsets(&selection.first, &selection.second);
   }
   return selection;
+}
+
+bool AXPlatformNodeAuraLinux::HasDefaultActionVerb() const {
+  return GetData().GetDefaultActionVerb() !=
+         ax::mojom::DefaultActionVerb::kNone;
+}
+
+std::vector<ax::mojom::Action> AXPlatformNodeAuraLinux::GetSupportedActions()
+    const {
+  static const base::NoDestructor<std::vector<ax::mojom::Action>>
+      kActionsThatCanBeExposedViaAtkAction{
+          {ax::mojom::Action::kDecrement, ax::mojom::Action::kIncrement}};
+  std::vector<ax::mojom::Action> supported_actions;
+
+  // The default action, if it exists, must be listed at index 0.
+  if (HasDefaultActionVerb())
+    supported_actions.push_back(ax::mojom::Action::kDoDefault);
+
+  for (const auto& item : *kActionsThatCanBeExposedViaAtkAction) {
+    if (HasAction(item))
+      supported_actions.push_back(item);
+  }
+
+  return supported_actions;
 }
 
 }  // namespace ui

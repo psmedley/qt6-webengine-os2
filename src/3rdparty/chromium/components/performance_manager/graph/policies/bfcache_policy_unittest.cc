@@ -4,6 +4,8 @@
 
 #include "components/performance_manager/graph/policies/bfcache_policy.h"
 
+#include "base/memory/raw_ptr.h"
+#include "base/time/time.h"
 #include "components/performance_manager/graph/frame_node_impl.h"
 #include "components/performance_manager/graph/graph_impl.h"
 #include "components/performance_manager/graph/system_node_impl.h"
@@ -11,8 +13,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace performance_manager {
-namespace policies {
+namespace performance_manager::policies {
 
 namespace {
 
@@ -23,9 +24,11 @@ class LenientMockBFCachePolicy : public BFCachePolicy {
   ~LenientMockBFCachePolicy() override = default;
   LenientMockBFCachePolicy(const LenientMockBFCachePolicy& other) = delete;
   LenientMockBFCachePolicy& operator=(const LenientMockBFCachePolicy&) = delete;
-
-  MOCK_METHOD1(MaybeFlushBFCache, void(const PageNode* page_node));
+  MOCK_METHOD2(MaybeFlushBFCache,
+               void(const PageNode* page_node,
+                    MemoryPressureLevel memory_pressure_level));
 };
+using MemoryPressureLevel = base::MemoryPressureListener::MemoryPressureLevel;
 using MockBFCachePolicy = ::testing::StrictMock<LenientMockBFCachePolicy>;
 
 }  // namespace
@@ -65,49 +68,29 @@ class BFCachePolicyTest : public GraphTestHarness {
   performance_manager::TestNodeWrapper<performance_manager::FrameNodeImpl>
       frame_node_2_;
 
-  MockBFCachePolicy* policy_;
+  raw_ptr<MockBFCachePolicy> policy_;
 };
-
-TEST_F(BFCachePolicyTest, BFCacheFlushedWhenPageBecomesNonVisible) {
-  page_node_->SetIsVisible(true);
-  page_node_->SetLoadingState(PageNode::LoadingState::kLoadedBusy);
-  ::testing::Mock::VerifyAndClearExpectations(policy_);
-
-  page_node_->SetIsVisible(false);
-  // There should be no immediate call to MaybeFlushBFCache.
-  ::testing::Mock::VerifyAndClearExpectations(policy_);
-  task_env().FastForwardBy(
-      BFCachePolicy::GetDelayBeforeFlushingBFCacheAfterBackgroundForTesting() /
-      2);
-
-  // There should be no call to MaybeFlushBFCache if not enough time has passed.
-  page_node_->SetIsVisible(true);
-  ::testing::Mock::VerifyAndClearExpectations(policy_);
-
-  page_node_->SetIsVisible(false);
-  EXPECT_CALL(*policy_, MaybeFlushBFCache(page_node_.get()));
-  task_env().FastForwardBy(
-      BFCachePolicy::GetDelayBeforeFlushingBFCacheAfterBackgroundForTesting());
-  ::testing::Mock::VerifyAndClearExpectations(policy_);
-}
 
 TEST_F(BFCachePolicyTest, BFCacheFlushedOnMemoryPressure) {
   page_node_->SetIsVisible(true);
   page_node_->SetLoadingState(PageNode::LoadingState::kLoadedBusy);
   ::testing::Mock::VerifyAndClearExpectations(policy_);
 
-  EXPECT_CALL(*policy_, MaybeFlushBFCache(page_node_.get()));
+  EXPECT_CALL(
+      *policy_,
+      MaybeFlushBFCache(page_node_.get(),
+                        MemoryPressureLevel::MEMORY_PRESSURE_LEVEL_MODERATE));
   GetSystemNode()->OnMemoryPressureForTesting(
-      base::MemoryPressureListener::MemoryPressureLevel::
-          MEMORY_PRESSURE_LEVEL_MODERATE);
+      MemoryPressureLevel::MEMORY_PRESSURE_LEVEL_MODERATE);
   ::testing::Mock::VerifyAndClearExpectations(policy_);
 
-  EXPECT_CALL(*policy_, MaybeFlushBFCache(page_node_.get()));
+  EXPECT_CALL(
+      *policy_,
+      MaybeFlushBFCache(page_node_.get(),
+                        MemoryPressureLevel::MEMORY_PRESSURE_LEVEL_CRITICAL));
   GetSystemNode()->OnMemoryPressureForTesting(
-      base::MemoryPressureListener::MemoryPressureLevel::
-          MEMORY_PRESSURE_LEVEL_CRITICAL);
+      MemoryPressureLevel::MEMORY_PRESSURE_LEVEL_CRITICAL);
   ::testing::Mock::VerifyAndClearExpectations(policy_);
 }
 
-}  // namespace policies
-}  // namespace performance_manager
+}  // namespace performance_manager::policies

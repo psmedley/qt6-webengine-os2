@@ -22,6 +22,11 @@ source_set("font") {
     "fgas_fontutils.cpp",
     "fgas_fontutils.h",
   ]
+  configs += [
+    "../../../:pdfium_strict_config",
+    "../../../:pdfium_noshorten_config",
+    "../../:xfa_warnings",
+  ]
   deps = [
     "../../../core/fpdfapi/font",
     "../../../core/fpdfapi/page",
@@ -29,9 +34,14 @@ source_set("font") {
     "../../../core/fxcrt",
     "../../../core/fxge",
   ]
-  configs += [
-    "../../../:pdfium_strict_config",
-    "../../:xfa_warnings",
-  ]
   visibility = [ "../../../*" ]
+}
+
+pdfium_unittest_source_set("unittests") {
+  sources = [ "fgas_fontutils_unittest.cpp" ]
+  deps = [
+    ":font",
+    "../../../core/fxcrt",
+  ]
+  pdfium_root_dir = "../../../"
 }

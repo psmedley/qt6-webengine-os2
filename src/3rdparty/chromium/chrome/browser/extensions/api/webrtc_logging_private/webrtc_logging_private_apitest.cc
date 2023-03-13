@@ -11,6 +11,7 @@
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/json/json_writer.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_command_line.h"
@@ -87,17 +88,16 @@ std::string ParamsToString(const base::ListValue& parameters) {
 }
 
 void InitializeTestMetaData(base::ListValue* parameters) {
-  std::unique_ptr<base::DictionaryValue> meta_data_entry(
-      new base::DictionaryValue());
-  meta_data_entry->SetString("key", kTestLoggingSessionIdKey);
-  meta_data_entry->SetString("value", kTestLoggingSessionIdValue);
-  std::unique_ptr<base::ListValue> meta_data(new base::ListValue());
-  meta_data->Append(std::move(meta_data_entry));
-  meta_data_entry = std::make_unique<base::DictionaryValue>();
-  meta_data_entry->SetString("key", "url");
-  meta_data_entry->SetString("value", kTestLoggingUrl);
-  meta_data->Append(std::move(meta_data_entry));
-  parameters->Append(std::move(meta_data));
+  base::Value::Dict meta_data_entry;
+  meta_data_entry.Set("key", kTestLoggingSessionIdKey);
+  meta_data_entry.Set("value", kTestLoggingSessionIdValue);
+  base::Value::List meta_data;
+  meta_data.Append(meta_data_entry.Clone());
+  meta_data_entry.clear();
+  meta_data_entry.Set("key", "url");
+  meta_data_entry.Set("value", kTestLoggingUrl);
+  meta_data.Append(std::move(meta_data_entry));
+  parameters->Append(base::Value(std::move(meta_data)));
 }
 
 class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
@@ -147,13 +147,14 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   }
 
   void AppendTabIdAndUrl(base::ListValue* parameters) {
-    std::unique_ptr<base::DictionaryValue> request_info(
-        new base::DictionaryValue());
-    request_info->SetInteger(
-        "tabId", extensions::ExtensionTabUtil::GetTabId(web_contents()));
-    parameters->Append(std::move(request_info));
-    parameters->AppendString(
-        web_contents()->GetLastCommittedURL().GetOrigin().spec());
+    base::Value::Dict request_info;
+    request_info.Set("tabId",
+                     extensions::ExtensionTabUtil::GetTabId(web_contents()));
+    parameters->Append(base::Value(std::move(request_info)));
+    parameters->Append(web_contents()
+                           ->GetLastCommittedURL()
+                           .DeprecatedGetOriginAsURL()
+                           .spec());
   }
 
   // This function implicitly expects the function to succeed (test failure
@@ -263,8 +264,8 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   bool StartRtpDump(bool incoming, bool outgoing) {
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendBoolean(incoming);
-    params.AppendBoolean(outgoing);
+    params.Append(incoming);
+    params.Append(outgoing);
     constexpr bool value_expected = false;
     std::unique_ptr<base::Value> value =
         RunFunction<WebrtcLoggingPrivateStartRtpDumpFunction>(params);
@@ -279,8 +280,8 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   bool StopRtpDump(bool incoming, bool outgoing) {
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendBoolean(incoming);
-    params.AppendBoolean(outgoing);
+    params.Append(incoming);
+    params.Append(outgoing);
     constexpr bool value_expected = false;
     std::unique_ptr<base::Value> value =
         RunFunction<WebrtcLoggingPrivateStopRtpDumpFunction>(params);
@@ -295,7 +296,7 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   bool StoreLog(const std::string& log_id) {
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendString(log_id);
+    params.Append(log_id);
     constexpr bool value_expected = false;
     std::unique_ptr<base::Value> value =
         RunFunction<WebrtcLoggingPrivateStoreFunction>(params);
@@ -310,7 +311,7 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   bool UploadStoredLog(const std::string& log_id, std::string* report_id) {
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendString(log_id);
+    params.Append(log_id);
     constexpr bool value_expected = true;
     std::unique_ptr<base::Value> value =
         RunFunction<WebrtcLoggingPrivateUploadStoredFunction>(params);
@@ -328,7 +329,7 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
   bool StartAudioDebugRecordings(int seconds) {
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendInteger(seconds);
+    params.Append(seconds);
     constexpr bool value_expected = true;
     std::unique_ptr<base::Value> value =
         RunFunction<WebrtcLoggingPrivateStartAudioDebugRecordingsFunction>(
@@ -365,10 +366,10 @@ class WebrtcLoggingPrivateApiTest : public extensions::ExtensionApiTest {
 
     base::ListValue params;
     AppendTabIdAndUrl(&params);
-    params.AppendString(session_id);
-    params.AppendInteger(max_log_size_bytes);
-    params.AppendInteger(output_period_ms);
-    params.AppendInteger(web_app_id);
+    params.Append(session_id);
+    params.Append(max_log_size_bytes);
+    params.Append(output_period_ms);
+    params.Append(web_app_id);
 
     if (expect_success) {
       scoped_refptr<WebrtcLoggingPrivateStartEventLoggingFunction> function(
@@ -581,7 +582,7 @@ IN_PROC_BROWSER_TEST_F(WebrtcLoggingPrivateApiTest, TestStartStopRtpDump) {
 IN_PROC_BROWSER_TEST_F(WebrtcLoggingPrivateApiTest, TestStoreWithoutLog) {
   base::ListValue parameters;
   AppendTabIdAndUrl(&parameters);
-  parameters.AppendString("MyLogId");
+  parameters.Append("MyLogId");
   scoped_refptr<WebrtcLoggingPrivateStoreFunction> store(
       CreateFunction<WebrtcLoggingPrivateStoreFunction>());
   const std::string error = utils::RunFunctionAndReturnError(
@@ -670,7 +671,7 @@ IN_PROC_BROWSER_TEST_F(WebrtcLoggingPrivateApiTest,
   ASSERT_TRUE(StartAudioDebugRecordings(1));
 }
 
-#if !defined(OS_ANDROID)
+#if !BUILDFLAG(IS_ANDROID)
 
 // Fixture for various tests over StartEventLogging. Intended to be sub-classed
 // to test different scenarios.
@@ -993,7 +994,7 @@ class WebrtcLoggingPrivateApiStartEventLoggingTestInIncognitoMode
   bool WebRtcEventLogCollectionPolicy() const override { return true; }
 
  private:
-  Browser* browser_{nullptr};  // Does not own the object.
+  raw_ptr<Browser> browser_{nullptr};  // Does not own the object.
 };
 
 IN_PROC_BROWSER_TEST_F(
@@ -1008,4 +1009,4 @@ IN_PROC_BROWSER_TEST_F(
                     error_message);
 }
 
-#endif  // !defined(OS_ANDROID)
+#endif  // !BUILDFLAG(IS_ANDROID)

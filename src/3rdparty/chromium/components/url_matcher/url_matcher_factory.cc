@@ -11,16 +11,14 @@
 
 #include "base/check.h"
 #include "base/lazy_instance.h"
-#include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/url_matcher/url_matcher_constants.h"
-#include "components/url_matcher/url_matcher_helpers.h"
+#include "components/url_matcher/url_util.h"
 #include "third_party/re2/src/re2/re2.h"
 
 namespace url_matcher {
 
-namespace helpers = url_matcher_helpers;
 namespace keys = url_matcher_constants;
 
 namespace {
@@ -66,6 +64,11 @@ class URLMatcherConditionFactoryMethods {
     factory_methods_[keys::kURLMatchesKey] = &F::CreateURLMatchesCondition;
   }
 
+  URLMatcherConditionFactoryMethods(const URLMatcherConditionFactoryMethods&) =
+      delete;
+  URLMatcherConditionFactoryMethods& operator=(
+      const URLMatcherConditionFactoryMethods&) = delete;
+
   // Returns whether a factory method for the specified |pattern_type| (e.g.
   // "host_suffix") is known.
   bool Contains(const std::string& pattern_type) const {
@@ -94,8 +97,6 @@ class URLMatcherConditionFactoryMethods {
   typedef std::map<std::string, FactoryMethod> FactoryMethods;
 
   FactoryMethods factory_methods_;
-
-  DISALLOW_COPY_AND_ASSIGN(URLMatcherConditionFactoryMethods);
 };
 
 static base::LazyInstance<URLMatcherConditionFactoryMethods>::DestructorAtExit
@@ -223,7 +224,7 @@ std::unique_ptr<URLMatcherSchemeFilter>
 URLMatcherFactory::CreateURLMatcherScheme(const base::Value* value,
                                           std::string* error) {
   std::vector<std::string> schemas;
-  if (!helpers::GetAsStringVector(value, &schemas)) {
+  if (!util::GetAsStringVector(value, &schemas)) {
     *error = base::StringPrintf(kVectorOfStringsExpected, keys::kSchemesKey);
     return nullptr;
   }
@@ -246,13 +247,13 @@ std::unique_ptr<URLMatcherPortFilter> URLMatcherFactory::CreateURLMatcherPorts(
     *error = kInvalidPortRanges;
     return nullptr;
   }
-  base::Value::ConstListView value_list = value->GetList();
+  base::Value::ConstListView value_list = value->GetListDeprecated();
 
   for (const auto& entry : value_list) {
     if (entry.is_int()) {
       ranges.push_back(URLMatcherPortFilter::CreateRange(entry.GetInt()));
     } else if (entry.is_list()) {
-      base::Value::ConstListView entry_list = entry.GetList();
+      base::Value::ConstListView entry_list = entry.GetListDeprecated();
       if (entry_list.size() != 2u || !entry_list[0].is_int() ||
           !entry_list[1].is_int()) {
         *error = kInvalidPortRanges;

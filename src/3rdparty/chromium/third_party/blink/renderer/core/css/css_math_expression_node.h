@@ -68,18 +68,13 @@ class CORE_EXPORT CSSMathExpressionNode
   static CSSMathExpressionNode* Create(PixelsAndPercent pixels_and_percent);
   static CSSMathExpressionNode* Create(const CalculationExpressionNode& node);
 
-  static CSSMathExpressionNode* ParseCalc(const CSSParserTokenRange& tokens);
-  static CSSMathExpressionNode* ParseMin(const CSSParserTokenRange& tokens);
-  static CSSMathExpressionNode* ParseMax(const CSSParserTokenRange& tokens);
-  static CSSMathExpressionNode* ParseClamp(const CSSParserTokenRange& tokens);
+  static CSSMathExpressionNode* ParseMathFunction(CSSValueID function_id,
+                                                  CSSParserTokenRange tokens);
 
   virtual bool IsNumericLiteral() const { return false; }
-  virtual bool IsBinaryOperation() const { return false; }
-  virtual bool IsVariadicOperation() const { return false; }
+  virtual bool IsOperation() const { return false; }
 
-  bool IsMathFunction() const {
-    return !IsNumericLiteral() && !IsBinaryOperation();
-  }
+  virtual bool IsMathFunction() const { return false; }
 
   virtual bool IsZero() const = 0;
 
@@ -99,7 +94,7 @@ class CORE_EXPORT CSSMathExpressionNode
 
   scoped_refptr<const CalculationValue> ToCalcValue(
       const CSSToLengthConversionData& conversion_data,
-      ValueRange range,
+      Length::ValueRange range,
       bool allows_negative_percentage_reference) const;
 
   // Evaluates the expression with type conversion (e.g., cm -> px) handled, and
@@ -116,7 +111,7 @@ class CORE_EXPORT CSSMathExpressionNode
 
   virtual String CustomCSSText() const = 0;
   virtual bool operator==(const CSSMathExpressionNode& other) const {
-    return category_ == other.category_ && is_integer_ == other.is_integer_;
+    return category_ == other.category_;
   }
 
   virtual bool IsComputationallyIndependent() const = 0;
@@ -130,8 +125,6 @@ class CORE_EXPORT CSSMathExpressionNode
   // conversion* (e.g., 1px + 1em needs type conversion to resolve).
   // Returns |UnitType::kUnknown| if type conversion is required.
   virtual CSSPrimitiveValue::UnitType ResolvedUnitType() const = 0;
-
-  bool IsInteger() const { return is_integer_; }
 
   bool IsNestedCalc() const { return is_nested_calc_; }
   void SetIsNestedCalc() { is_nested_calc_ = true; }
@@ -149,17 +142,12 @@ class CORE_EXPORT CSSMathExpressionNode
   virtual void Trace(Visitor* visitor) const {}
 
  protected:
-  CSSMathExpressionNode(CalculationCategory category,
-                        bool is_integer,
-                        bool has_comparisons)
-      : category_(category),
-        is_integer_(is_integer),
-        has_comparisons_(has_comparisons) {
+  CSSMathExpressionNode(CalculationCategory category, bool has_comparisons)
+      : category_(category), has_comparisons_(has_comparisons) {
     DCHECK_NE(category, kCalcOther);
   }
 
   CalculationCategory category_;
-  bool is_integer_;
   bool is_nested_calc_ = false;
   bool has_comparisons_;
 };
@@ -168,13 +156,12 @@ class CORE_EXPORT CSSMathExpressionNumericLiteral final
     : public CSSMathExpressionNode {
  public:
   static CSSMathExpressionNumericLiteral* Create(
-      const CSSNumericLiteralValue* value,
-      bool is_integer = false);
-  static CSSMathExpressionNumericLiteral*
-  Create(double value, CSSPrimitiveValue::UnitType type, bool is_integer);
+      const CSSNumericLiteralValue* value);
+  static CSSMathExpressionNumericLiteral* Create(
+      double value,
+      CSSPrimitiveValue::UnitType type);
 
-  CSSMathExpressionNumericLiteral(const CSSNumericLiteralValue* value,
-                                  bool is_integer);
+  explicit CSSMathExpressionNumericLiteral(const CSSNumericLiteralValue* value);
 
   const CSSNumericLiteralValue& GetValue() const { return *value_; }
 
@@ -214,29 +201,47 @@ struct DowncastTraits<CSSMathExpressionNumericLiteral> {
   }
 };
 
-class CORE_EXPORT CSSMathExpressionBinaryOperation final
+class CORE_EXPORT CSSMathExpressionOperation final
     : public CSSMathExpressionNode {
  public:
-  static CSSMathExpressionNode* Create(const CSSMathExpressionNode* left_side,
-                                       const CSSMathExpressionNode* right_side,
-                                       CSSMathOperator op);
-  static CSSMathExpressionNode* CreateSimplified(
+  using Operands = HeapVector<Member<const CSSMathExpressionNode>>;
+
+  static CSSMathExpressionNode* CreateArithmeticOperation(
       const CSSMathExpressionNode* left_side,
       const CSSMathExpressionNode* right_side,
       CSSMathOperator op);
 
-  CSSMathExpressionBinaryOperation(const CSSMathExpressionNode* left_side,
-                                   const CSSMathExpressionNode* right_side,
-                                   CSSMathOperator op,
-                                   CalculationCategory category);
+  static CSSMathExpressionNode* CreateComparisonFunction(Operands&& operands,
+                                                         CSSMathOperator op);
 
-  const CSSMathExpressionNode* LeftExpressionNode() const { return left_side_; }
-  const CSSMathExpressionNode* RightExpressionNode() const {
-    return right_side_;
-  }
+  static CSSMathExpressionNode* CreateArithmeticOperationSimplified(
+      const CSSMathExpressionNode* left_side,
+      const CSSMathExpressionNode* right_side,
+      CSSMathOperator op);
+
+  CSSMathExpressionOperation(const CSSMathExpressionNode* left_side,
+                             const CSSMathExpressionNode* right_side,
+                             CSSMathOperator op,
+                             CalculationCategory category);
+
+  CSSMathExpressionOperation(CalculationCategory category,
+                             Operands&& operands,
+                             CSSMathOperator op);
+
+  const Operands& GetOperands() const { return operands_; }
   CSSMathOperator OperatorType() const { return operator_; }
 
-  bool IsBinaryOperation() const final { return true; }
+  bool IsOperation() const final { return true; }
+  bool IsMinOrMax() const {
+    return operator_ == CSSMathOperator::kMin ||
+           operator_ == CSSMathOperator::kMax;
+  }
+  bool IsClamp() const { return operator_ == CSSMathOperator::kClamp; }
+
+  // TODO(crbug.com/1284199): Check other math functions too(clamp, etc).
+  bool IsMathFunction() const final { return IsMinOrMax() || IsClamp(); }
+
+  String CSSTextAsClamp() const;
 
   bool IsZero() const final;
   scoped_refptr<const CalculationExpressionNode> ToCalculationExpression(
@@ -266,87 +271,27 @@ class CORE_EXPORT CSSMathExpressionBinaryOperation final
       const CSSMathExpressionNode* left_side,
       const CSSMathExpressionNode* right_side);
 
-  double Evaluate(double left_side, double right_side) const {
-    return EvaluateOperator(left_side, right_side, operator_);
+  double Evaluate(const Vector<double>& operands) const {
+    return EvaluateOperator(operands, operator_);
   }
 
-  static double EvaluateOperator(double left_value,
-                                 double right_value,
+  static double EvaluateOperator(const Vector<double>& operands,
                                  CSSMathOperator op);
 
-  const Member<const CSSMathExpressionNode> left_side_;
-  const Member<const CSSMathExpressionNode> right_side_;
-  const CSSMathOperator operator_;
-};
-
-template <>
-struct DowncastTraits<CSSMathExpressionBinaryOperation> {
-  static bool AllowFrom(const CSSMathExpressionNode& node) {
-    return node.IsBinaryOperation();
-  }
-};
-
-class CSSMathExpressionVariadicOperation final : public CSSMathExpressionNode {
- public:
-  using Operands = HeapVector<Member<const CSSMathExpressionNode>>;
-
-  static CSSMathExpressionVariadicOperation* Create(Operands&& operands,
-                                                    CSSMathOperator op);
-
-  CSSMathExpressionVariadicOperation(CalculationCategory category,
-                                     bool is_integer_result,
-                                     Operands&& operands,
-                                     CSSMathOperator op);
-
-  const Operands& GetOperands() const { return operands_; }
-  CSSMathOperator OperatorType() const { return operator_; }
-
-  bool IsVariadicOperation() const final { return true; }
-
-  void SetIsClamp() { is_clamp_ = true; }
-  String CSSTextAsClamp() const;
-
-  bool IsZero() const final;
-  String CustomCSSText() const final;
-  scoped_refptr<const CalculationExpressionNode> ToCalculationExpression(
-      const CSSToLengthConversionData&) const final;
-  absl::optional<PixelsAndPercent> ToPixelsAndPercent(
-      const CSSToLengthConversionData&) const final;
-  double DoubleValue() const final;
-  double ComputeLengthPx(
-      const CSSToLengthConversionData& conversion_data) const final;
-  bool AccumulateLengthArray(CSSLengthArray& length_array,
-                             double multiplier) const final;
-  void AccumulateLengthUnitTypes(
-      CSSPrimitiveValue::LengthTypeFlags& types) const final;
-  absl::optional<double> ComputeValueInCanonicalUnit() const final;
-  bool IsComputationallyIndependent() const final;
-  bool operator==(const CSSMathExpressionNode& other) const final;
-  CSSPrimitiveValue::UnitType ResolvedUnitType() const final;
-  void Trace(Visitor* visitor) const final;
-
-#if DCHECK_IS_ON()
-  bool InvolvesPercentageComparisons() const final;
-#endif
-
- private:
   // Helper for iterating from the 2nd to the last operands
   base::span<const Member<const CSSMathExpressionNode>> SecondToLastOperands()
       const {
     return base::make_span(std::next(operands_.begin()), operands_.end());
   }
 
-  double EvaluateBinary(double lhs, double rhs) const;
-
   Operands operands_;
   const CSSMathOperator operator_;
-  bool is_clamp_ = false;
 };
 
 template <>
-struct DowncastTraits<CSSMathExpressionVariadicOperation> {
+struct DowncastTraits<CSSMathExpressionOperation> {
   static bool AllowFrom(const CSSMathExpressionNode& node) {
-    return node.IsVariadicOperation();
+    return node.IsOperation();
   }
 };
 

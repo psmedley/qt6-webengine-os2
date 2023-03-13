@@ -15,6 +15,7 @@
 #include "core/fpdfdoc/cpvt_wordinfo.h"
 #include "core/fpdfdoc/ipvt_fontmap.h"
 #include "core/fxcrt/fx_codepage.h"
+#include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/stl_util.h"
 #include "third_party/base/check.h"
 #include "third_party/base/compiler_specific.h"
@@ -266,11 +267,11 @@ void CPVT_VariableText::SetText(const WideString& swText) {
   if (!m_SectionArray.empty())
     m_SectionArray.front()->SetRect(CPVT_FloatRect());
 
-  int32_t nCharCount = 0;
-  for (int32_t i = 0, sz = swText.GetLength(); i < sz; i++) {
-    if (m_nLimitChar > 0 && nCharCount >= m_nLimitChar)
+  FX_SAFE_INT32 nCharCount = 0;
+  for (size_t i = 0, sz = swText.GetLength(); i < sz; i++) {
+    if (m_nLimitChar > 0 && nCharCount.ValueOrDie() >= m_nLimitChar)
       break;
-    if (m_nCharArray > 0 && nCharCount >= m_nCharArray)
+    if (m_nCharArray > 0 && nCharCount.ValueOrDie() >= m_nCharArray)
       break;
 
     uint16_t word = swText[i];
@@ -578,16 +579,15 @@ float CPVT_VariableText::GetWordFontSize() const {
 float CPVT_VariableText::GetWordWidth(int32_t nFontIndex,
                                       uint16_t Word,
                                       uint16_t SubWord,
-                                      float fCharSpace,
                                       float fFontSize,
                                       float fWordTail) const {
   return GetCharWidth(nFontIndex, Word, SubWord) * fFontSize * kFontScale +
-         fCharSpace + fWordTail;
+         fWordTail;
 }
 
 float CPVT_VariableText::GetWordWidth(const CPVT_WordInfo& WordInfo) const {
   return GetWordWidth(WordInfo.nFontIndex, WordInfo.Word, GetSubWord(),
-                      GetCharSpace(), GetWordFontSize(), WordInfo.fWordTail);
+                      GetWordFontSize(), WordInfo.fWordTail);
 }
 
 float CPVT_VariableText::GetLineAscent() {
@@ -892,11 +892,4 @@ CFX_FloatRect CPVT_VariableText::InToOut(const CPVT_FloatRect& rect) const {
   CFX_PointF ptRightBottom = InToOut(CFX_PointF(rect.right, rect.bottom));
   return CFX_FloatRect(ptLeftTop.x, ptRightBottom.y, ptRightBottom.x,
                        ptLeftTop.y);
-}
-
-CPVT_FloatRect CPVT_VariableText::OutToIn(const CFX_FloatRect& rect) const {
-  CFX_PointF ptLeftTop = OutToIn(CFX_PointF(rect.left, rect.top));
-  CFX_PointF ptRightBottom = OutToIn(CFX_PointF(rect.right, rect.bottom));
-  return CPVT_FloatRect(ptLeftTop.x, ptLeftTop.y, ptRightBottom.x,
-                        ptRightBottom.y);
 }

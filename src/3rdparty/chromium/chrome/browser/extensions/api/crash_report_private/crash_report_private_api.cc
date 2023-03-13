@@ -4,6 +4,7 @@
 
 #include "chrome/browser/extensions/api/crash_report_private/crash_report_private_api.h"
 
+#include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -26,7 +27,7 @@ WindowType GetWindowType(content::WebContents* web_contents) {
     return WindowType::kNoBrowser;
   if (!browser->app_controller())
     return WindowType::kRegularTabbed;
-  if (browser->app_controller()->is_for_system_web_app())
+  if (browser->app_controller()->system_app())
     return WindowType::kSystemWebApp;
   return WindowType::kWebApp;
 }
@@ -47,7 +48,7 @@ ExtensionFunction::ResponseAction CrashReportPrivateReportErrorFunction::Run() {
     return RespondNow(NoArguments());
   }
 
-  const auto params = crash_report_private::ReportError::Params::Create(*args_);
+  const auto params = crash_report_private::ReportError::Params::Create(args());
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   auto processor = JsErrorReportProcessor::Get();

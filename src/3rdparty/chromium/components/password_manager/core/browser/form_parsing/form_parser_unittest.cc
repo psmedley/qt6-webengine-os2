@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "base/feature_list.h"
+#include "base/memory/raw_ptr.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/metrics/histogram_tester.h"
@@ -87,8 +88,8 @@ struct FormParsingTestCase {
   int number_of_all_possible_passwords = -1;
   int number_of_all_possible_usernames = -1;
   // null means no checking
-  const ValueElementVector* all_possible_passwords = nullptr;
-  const ValueElementVector* all_possible_usernames = nullptr;
+  raw_ptr<const ValueElementVector> all_possible_passwords = nullptr;
+  raw_ptr<const ValueElementVector> all_possible_usernames = nullptr;
   bool server_side_classification_successful = true;
   bool username_may_use_prefilled_placeholder = false;
   absl::optional<FormDataParser::ReadonlyPasswordFields> readonly_status;
@@ -101,6 +102,7 @@ struct FormParsingTestCase {
   SubmissionIndicatorEvent submission_event = SubmissionIndicatorEvent::NONE;
   absl::optional<bool> is_new_password_reliable;
   bool form_has_autofilled_value = false;
+  bool accepts_webauthn_credentials = false;
 };
 
 // Returns numbers which are distinct from each other within the scope of one
@@ -181,7 +183,7 @@ FormData GetFormDataAndExpectation(const FormParsingTestCase& test_case,
       field.name = std::u16string(field_description.name);
     }
     field.name_attribute = field.name;
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
     field.unique_id = StampUniqueSuffix(u"unique_id");
 #endif
     field.form_control_type = field_description.form_control_type;
@@ -213,7 +215,7 @@ FormData GetFormDataAndExpectation(const FormParsingTestCase& test_case,
     if (field_description.prediction.type != autofill::MAX_VALID_FIELD_TYPE) {
       predictions->fields.push_back(field_description.prediction);
       predictions->fields.back().renderer_id = renderer_id;
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
       predictions->fields.back().unique_id = field.unique_id;
 #endif
     }
@@ -265,7 +267,7 @@ void CheckField(const std::vector<FormFieldData>& fields,
 
 // On iOS |unique_id| is used for identifying DOM elements, so the parser should
 // return it. See crbug.com/896594
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   EXPECT_EQ(element_name, field_it->unique_id);
 #else
   EXPECT_EQ(element_name, field_it->name);
@@ -357,7 +359,7 @@ void CheckTestData(const std::vector<FormParsingTestCase>& test_cases) {
         ASSERT_TRUE(parsed_form) << "Expected successful parsing";
         EXPECT_EQ(PasswordForm::Scheme::kHtml, parsed_form->scheme);
         EXPECT_FALSE(parsed_form->blocked_by_user);
-        EXPECT_EQ(PasswordForm::Type::kManual, parsed_form->type);
+        EXPECT_EQ(PasswordForm::Type::kFormSubmission, parsed_form->type);
         EXPECT_EQ(test_case.server_side_classification_successful,
                   parsed_form->server_side_classification_successful);
         EXPECT_EQ(test_case.username_may_use_prefilled_placeholder,
@@ -368,6 +370,9 @@ void CheckTestData(const std::vector<FormParsingTestCase>& test_cases) {
           EXPECT_EQ(*test_case.is_new_password_reliable,
                     parsed_form->is_new_password_reliable);
         }
+        EXPECT_EQ(test_case.accepts_webauthn_credentials &&
+                      mode == FormDataParser::Mode::kFilling,
+                  parsed_form->accepts_webauthn_credentials);
         EXPECT_EQ(test_case.form_has_autofilled_value,
                   parsed_form->form_has_autofilled_value);
 
@@ -449,9 +454,6 @@ TEST(FormParserTest, SkipNotTextFields) {
 }
 
 TEST(FormParserTest, OnlyPasswordFields) {
-  const bool kTreatNewPasswordHeuristicsAsReliable =
-      base::FeatureList::IsEnabled(
-          features::kTreatNewPasswordHeuristicsAsReliable);
   CheckTestData({
       {
           .description_for_logging = "1 password field",
@@ -475,7 +477,7 @@ TEST(FormParserTest, OnlyPasswordFields) {
                    .value = u"pw",
                    .form_control_type = "password"},
               },
-          .is_new_password_reliable = kTreatNewPasswordHeuristicsAsReliable,
+          .is_new_password_reliable = false,
       },
       {
           .description_for_logging =
@@ -489,7 +491,7 @@ TEST(FormParserTest, OnlyPasswordFields) {
                    .value = u"pw2",
                    .form_control_type = "password"},
               },
-          .is_new_password_reliable = kTreatNewPasswordHeuristicsAsReliable,
+          .is_new_password_reliable = false,
       },
       {
           .description_for_logging =
@@ -506,7 +508,7 @@ TEST(FormParserTest, OnlyPasswordFields) {
                    .value = u"pw2",
                    .form_control_type = "password"},
               },
-          .is_new_password_reliable = kTreatNewPasswordHeuristicsAsReliable,
+          .is_new_password_reliable = false,
       },
       {
           .description_for_logging = "3 password fields with different values",
@@ -2848,6 +2850,29 @@ TEST(FormParserTest, UsernameWithTypePasswordAndServerPredictions) {
                    .name = u"field2",
                    .form_control_type = "password"},
               },
+      },
+  });
+}
+
+// Tests that if a field is marked as autofill="webauthn" then the
+// `accepts_webauthn_credentials` flag is set.
+TEST(FormParserTest, AcceptsWebAuthnCredentials) {
+  CheckTestData({
+      {
+          .description_for_logging = "Field tagged with autofill=\"webauthn\"",
+          .fields =
+              {
+                  {.role = ElementRole::USERNAME,
+                   .autocomplete_attribute = "webauthn",
+                   .value = u"rosalina",
+                   .name = u"username",
+                   .form_control_type = "text"},
+                  {.role = ElementRole::CURRENT_PASSWORD,
+                   .value = u"luma",
+                   .name = u"password",
+                   .form_control_type = "password"},
+              },
+          .accepts_webauthn_credentials = true,
       },
   });
 }

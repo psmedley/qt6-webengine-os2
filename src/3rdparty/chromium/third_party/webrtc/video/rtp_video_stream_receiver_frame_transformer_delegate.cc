@@ -41,8 +41,9 @@ class TransformableVideoReceiverFrame
         EncodedImageBuffer::Create(data.data(), data.size()));
   }
 
-  uint32_t GetTimestamp() const override { return frame_->Timestamp(); }
+  uint8_t GetPayloadType() const override { return frame_->PayloadType(); }
   uint32_t GetSsrc() const override { return ssrc_; }
+  uint32_t GetTimestamp() const override { return frame_->Timestamp(); }
 
   bool IsKeyFrame() const override {
     return frame_->FrameType() == VideoFrameType::kVideoFrameKey;
@@ -101,8 +102,8 @@ void RtpVideoStreamReceiverFrameTransformerDelegate::TransformFrame(
 
 void RtpVideoStreamReceiverFrameTransformerDelegate::OnTransformedFrame(
     std::unique_ptr<TransformableFrameInterface> frame) {
-  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate =
-      this;
+  rtc::scoped_refptr<RtpVideoStreamReceiverFrameTransformerDelegate> delegate(
+      this);
   network_thread_->PostTask(ToQueuedTask(
       [delegate = std::move(delegate), frame = std::move(frame)]() mutable {
         delegate->ManageFrame(std::move(frame));

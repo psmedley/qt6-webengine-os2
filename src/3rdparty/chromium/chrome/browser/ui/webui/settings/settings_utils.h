@@ -7,9 +7,8 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "build/build_config.h"
-#include "ui/base/resource/scale_factor.h"
+#include "ui/base/resource/resource_scale_factor.h"
 
 class GURL;
 class PrefService;
@@ -42,7 +41,7 @@ base::RefCountedMemory* GetFaviconResourceBytes(
 base::RefCountedMemory* GetPrivacySandboxFaviconResourceBytes(
     ui::ResourceScaleFactor scale_factor);
 
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
 void ValidateSavedFonts(PrefService* prefs);
 #endif
 

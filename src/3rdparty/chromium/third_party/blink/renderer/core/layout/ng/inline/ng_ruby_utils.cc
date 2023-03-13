@@ -78,8 +78,7 @@ PhysicalRect AdjustTextRectForEmHeight(const PhysicalRect& rect,
   const LayoutUnit line_height = IsHorizontalWritingMode(writing_mode)
                                      ? rect.size.height
                                      : rect.size.width;
-  LayoutUnit over, under;
-  std::tie(over, under) = AdjustTextOverUnderOffsetsForEmHeight(
+  auto [over, under] = AdjustTextOverUnderOffsetsForEmHeight(
       LayoutUnit(), line_height, style, *shape_view);
   const LayoutUnit over_diff = over;
   const LayoutUnit under_diff = line_height - under;
@@ -232,9 +231,9 @@ LayoutUnit CommitPendingEndOverhang(NGLineInfo* line_info) {
 NGAnnotationMetrics ComputeAnnotationOverflow(
     const NGLogicalLineItems& logical_line,
     const FontHeight& line_box_metrics,
-    LayoutUnit line_over,
     const ComputedStyle& line_style) {
   // Min/max position of content and annotations, ignoring line-height.
+  const LayoutUnit line_over;
   LayoutUnit content_over = line_over + line_box_metrics.ascent;
   LayoutUnit content_under = content_over;
 
@@ -249,8 +248,8 @@ NGAnnotationMetrics ComputeAnnotationOverflow(
       continue;
     if (item.IsControl())
       continue;
-    LayoutUnit item_over = item.BlockOffset();
-    LayoutUnit item_under = item.BlockEndOffset();
+    LayoutUnit item_over = line_box_metrics.ascent + item.BlockOffset();
+    LayoutUnit item_under = line_box_metrics.ascent + item.BlockEndOffset();
     if (item.shape_result) {
       if (const auto* style = item.Style()) {
         std::tie(item_over, item_under) = AdjustTextOverUnderOffsetsForEmHeight(
@@ -279,7 +278,7 @@ NGAnnotationMetrics ComputeAnnotationOverflow(
         }
 
         // Check if we really have an annotation.
-        if (const auto* layout_result = item.layout_result.get()) {
+        if (const auto& layout_result = item.layout_result) {
           LayoutUnit overflow = layout_result->AnnotationOverflow();
           if (IsFlippedLinesWritingMode(line_style.GetWritingMode()))
             overflow = -overflow;

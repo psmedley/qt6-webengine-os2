@@ -55,6 +55,10 @@ perfetto::TraceConfig::DataSource* AddDataSourceConfig(
   if (!strcmp(name, tracing::mojom::kTraceEventDataSourceName)) {
     base::trace_event::TraceConfig base_config(chrome_config_string);
     perfetto::protos::gen::TrackEventConfig te_cfg;
+    // If no categories are explicitly enabled, enable the default ones.
+    // Otherwise only matching categories are enabled.
+    if (!base_config.category_filter().included_categories().empty())
+      te_cfg.add_disabled_categories("*");
     for (const auto& excluded :
          base_config.category_filter().excluded_categories()) {
       te_cfg.add_disabled_categories(excluded);
@@ -120,7 +124,7 @@ void AddDataSourceConfigs(
 // TODO(crbug.com/1052397): Revisit once build flag switch of lacros-chrome is
 // complete.
 #if BUILDFLAG(IS_CHROMEOS_ASH) || \
-    (BUILDFLAG(IS_CHROMECAST) && defined(OS_LINUX))
+    (BUILDFLAG(IS_CHROMECAST) && BUILDFLAG(IS_LINUX))
     if (source_names.empty() ||
         source_names.count(tracing::mojom::kSystemTraceDataSourceName) == 1) {
       AddDataSourceConfig(

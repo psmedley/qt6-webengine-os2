@@ -26,12 +26,12 @@
 #include <stdatomic.h>
 
 #include "libavutil/buffer.h"
-#include "libavutil/md5.h"
 #include "libavutil/mem_internal.h"
 
 #include "avcodec.h"
 #include "bswapdsp.h"
 #include "cabac.h"
+#include "dovi_rpu.h"
 #include "get_bits.h"
 #include "hevcpred.h"
 #include "h2645_parse.h"
@@ -39,14 +39,11 @@
 #include "hevc_ps.h"
 #include "hevc_sei.h"
 #include "hevcdsp.h"
-#include "internal.h"
-#include "thread.h"
+#include "h274.h"
+#include "threadframe.h"
 #include "videodsp.h"
 
 #define SHIFT_CTB_WPP 2
-
-//TODO: check if this is really the maximum
-#define MAX_TRANSFORM_DEPTH 5
 
 #define MAX_TB_SIZE 32
 #define MAX_QP 51
@@ -395,7 +392,9 @@ typedef struct DBParams {
 
 typedef struct HEVCFrame {
     AVFrame *frame;
+    AVFrame *frame_grain;
     ThreadFrame tf;
+    int needs_fg; /* 1 if grain needs to be applied by the decoder */
     MvField *tab_mvf;
     RefPicList *refPicList;
     RefPicListTab **rpl_tab;
@@ -525,6 +524,7 @@ typedef struct HEVCContext {
     HEVCDSPContext hevcdsp;
     VideoDSPContext vdsp;
     BswapDSPContext bdsp;
+    H274FilmGrainDatabase h274db;
     int8_t *qp_y_tab;
     uint8_t *horizontal_bs;
     uint8_t *vertical_bs;
@@ -570,6 +570,9 @@ typedef struct HEVCContext {
 
     int nal_length_size;    ///< Number of bytes used for nal length (1, 2 or 4)
     int nuh_layer_id;
+
+    AVBufferRef *rpu_buf;       ///< 0 or 1 Dolby Vision RPUs.
+    DOVIContext dovi_ctx;       ///< Dolby Vision decoding context
 } HEVCContext;
 
 /**

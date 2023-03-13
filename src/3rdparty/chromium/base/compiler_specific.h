@@ -24,6 +24,13 @@
 #define HAS_CPP_ATTRIBUTE(x) 0
 #endif
 
+// A wrapper around `__has_attribute`, similar to HAS_CPP_ATTRIBUTE.
+#if defined(__has_attribute)
+#define HAS_ATTRIBUTE(x) __has_attribute(x)
+#else
+#define HAS_ATTRIBUTE(x) 0
+#endif
+
 // A wrapper around `__has_builtin`, similar to HAS_CPP_ATTRIBUTE.
 #if defined(__has_builtin)
 #define HAS_BUILTIN(x) __has_builtin(x)
@@ -31,27 +38,10 @@
 #define HAS_BUILTIN(x) 0
 #endif
 
-// Annotate a variable indicating it's ok if the variable is not used.
-// (Typically used to silence a compiler warning when the assignment
-// is important for some other reason.)
-// Use like:
-//   int x = ...;
-//   ALLOW_UNUSED_LOCAL(x);
-#define ALLOW_UNUSED_LOCAL(x) (void)x
-
-// Annotate a typedef or function indicating it's ok if it's not used.
-// Use like:
-//   typedef Foo Bar ALLOW_UNUSED_TYPE;
-#if defined(COMPILER_GCC) || defined(__clang__)
-#define ALLOW_UNUSED_TYPE __attribute__((unused))
-#else
-#define ALLOW_UNUSED_TYPE
-#endif
-
 // Annotate a function indicating it should not be inlined.
 // Use like:
 //   NOINLINE void DoStuff() { ... }
-#if defined(COMPILER_GCC)
+#if defined(COMPILER_GCC) || defined(__clang__)
 #define NOINLINE __attribute__((noinline))
 #elif defined(COMPILER_MSVC)
 #define NOINLINE __declspec(noinline)
@@ -75,12 +65,9 @@
 // prevent code folding, see NO_CODE_FOLDING() in base/debug/alias.h.
 // Use like:
 //   void NOT_TAIL_CALLED FooBar();
-#if defined(__clang__)
-#if __has_attribute(not_tail_called)
+#if defined(__clang__) && HAS_ATTRIBUTE(not_tail_called)
 #define NOT_TAIL_CALLED __attribute__((not_tail_called))
-#endif
-#endif
-#ifndef NOT_TAIL_CALLED
+#else
 #define NOT_TAIL_CALLED
 #endif
 
@@ -109,17 +96,6 @@
 #define ALIGNAS(byte_alignment) __declspec(align(byte_alignment))
 #elif defined(COMPILER_GCC)
 #define ALIGNAS(byte_alignment) __attribute__((aligned(byte_alignment)))
-#endif
-
-// Annotate a function indicating the caller must examine the return value.
-// Use like:
-//   int foo() WARN_UNUSED_RESULT;
-// To explicitly ignore a result, see |ignore_result()| in base/macros.h.
-#undef WARN_UNUSED_RESULT
-#if defined(COMPILER_GCC) || defined(__clang__)
-#define WARN_UNUSED_RESULT __attribute__((warn_unused_result))
-#else
-#define WARN_UNUSED_RESULT
 #endif
 
 // In case the compiler supports it NO_UNIQUE_ADDRESS evaluates to the C++20
@@ -157,17 +133,15 @@
 //   __attribute__((format(wprintf, format_param, dots_param)))
 
 // Sanitizers annotations.
-#if defined(__has_attribute)
-#if __has_attribute(no_sanitize)
+#if HAS_ATTRIBUTE(no_sanitize)
 #define NO_SANITIZE(what) __attribute__((no_sanitize(what)))
-#endif
 #endif
 #if !defined(NO_SANITIZE)
 #define NO_SANITIZE(what)
 #endif
 
 // MemorySanitizer annotations.
-#if defined(MEMORY_SANITIZER) && !defined(OS_NACL)
+#if defined(MEMORY_SANITIZER) && !BUILDFLAG(IS_NACL)
 #include <sanitizer/msan_interface.h>
 
 // Mark a memory region fully initialized.
@@ -197,7 +171,7 @@
 
 // DISABLE_CFI_ICALL -- Disable Control Flow Integrity indirect call checks.
 #if !defined(DISABLE_CFI_ICALL)
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 // Windows also needs __declspec(guard(nocf)).
 #define DISABLE_CFI_ICALL NO_SANITIZE("cfi-icall") __declspec(guard(nocf))
 #else
@@ -210,11 +184,11 @@
 
 // Macro useful for writing cross-platform function pointers.
 #if !defined(CDECL)
-#if defined(OS_WIN) && (defined(__i386) || defined(__i386__) || defined(_M_IX86))
+#if BUILDFLAG(IS_WIN) && (defined(__i386) || defined(__i386__) || defined(_M_IX86))
 #define CDECL __cdecl
-#else  // defined(OS_WIN)
+#else  // BUILDFLAG(IS_WIN)
 #define CDECL
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 #endif  // !defined(CDECL)
 
 // Macro for hinting that an expression is likely to be false.
@@ -240,13 +214,6 @@
 #define HAS_FEATURE(FEATURE) __has_feature(FEATURE)
 #else
 #define HAS_FEATURE(FEATURE) 0
-#endif
-
-// Macro for telling -Wimplicit-fallthrough that a fallthrough is intentional.
-#if defined(__clang__)
-#define FALLTHROUGH [[clang::fallthrough]]
-#else
-#define FALLTHROUGH
 #endif
 
 #if defined(COMPILER_GCC)
@@ -276,8 +243,7 @@
 #endif
 #endif
 
-#if defined(__clang__)
-#if __has_attribute(uninitialized)
+#if defined(__clang__) && HAS_ATTRIBUTE(uninitialized)
 // Attribute "uninitialized" disables -ftrivial-auto-var-init=pattern for
 // the specified variable.
 // Library-wide alternative is
@@ -311,9 +277,6 @@
 #else
 #define STACK_UNINITIALIZED
 #endif
-#else
-#define STACK_UNINITIALIZED
-#endif
 
 // Attribute "no_stack_protector" disables -fstack-protector for the specified
 // function.
@@ -327,13 +290,9 @@
 // In some cases it's desirable to remove this, e.g. on hot functions, or if
 // we have purposely changed the reference canary.
 #if defined(COMPILER_GCC) || defined(__clang__)
-#if defined(__has_attribute)
-#if __has_attribute(__no_stack_protector__)
+#if HAS_ATTRIBUTE(__no_stack_protector__)
 #define NO_STACK_PROTECTOR __attribute__((__no_stack_protector__))
-#else  // __has_attribute(__no_stack_protector__)
-#define NO_STACK_PROTECTOR __attribute__((__optimize__("-fno-stack-protector")))
-#endif
-#else  // defined(__has_attribute)
+#else
 #define NO_STACK_PROTECTOR __attribute__((__optimize__("-fno-stack-protector")))
 #endif
 #else
@@ -361,19 +320,17 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 
 #define ANALYZER_ASSUME_TRUE(arg) ::AnalyzerAssumeTrue(!!(arg))
 #define ANALYZER_SKIP_THIS_PATH() static_cast<void>(::AnalyzerNoReturn())
-#define ANALYZER_ALLOW_UNUSED(var) static_cast<void>(var);
 
 #else  // !defined(__clang_analyzer__)
 
 #define ANALYZER_ASSUME_TRUE(arg) (arg)
 #define ANALYZER_SKIP_THIS_PATH()
-#define ANALYZER_ALLOW_UNUSED(var) static_cast<void>(var);
 
 #endif  // defined(__clang_analyzer__)
 
 // Use nomerge attribute to disable optimization of merging multiple same calls.
 #if defined(__clang_major__) && (__clang_major__ >= 13)
-#if __has_attribute(nomerge)
+#if HAS_ATTRIBUTE(nomerge)
 #define NOMERGE [[clang::nomerge]]
 #else
 #define NOMERGE
@@ -403,37 +360,37 @@ inline constexpr bool AnalyzerAssumeTrue(bool arg) {
 // See also:
 //   https://clang.llvm.org/docs/AttributeReference.html#trivial-abi
 //   https://libcxx.llvm.org/docs/DesignDocs/UniquePtrTrivialAbi.html
-#if defined(__has_attribute)
-#if defined(__clang__) && __has_attribute(trivial_abi)
+#if defined(__clang__) && HAS_ATTRIBUTE(trivial_abi)
 #define TRIVIAL_ABI [[clang::trivial_abi]]
-#endif
-#endif
-#ifndef TRIVIAL_ABI
+#else
 #define TRIVIAL_ABI
 #endif
 
 // Marks a member function as reinitializing a moved-from variable.
 // See also
 // https://clang.llvm.org/extra/clang-tidy/checks/bugprone-use-after-move.html#reinitialization
-#if defined(__has_attribute)
-#if defined(__clang__) && __has_attribute(reinitializes)
+#if defined(__clang__) && HAS_ATTRIBUTE(reinitializes)
 #define REINITIALIZES_AFTER_MOVE [[clang::reinitializes]]
-#endif
-#endif
-#ifndef REINITIALIZES_AFTER_MOVE
+#else
 #define REINITIALIZES_AFTER_MOVE
 #endif
 
 // Requires constant initialization. See constinit in C++20. Allows to rely on a
 // variable being initialized before execution, and not requiring a global
 // constructor.
-#if defined(__has_attribute)
-#if __has_attribute(require_constant_initialization)
+#if HAS_ATTRIBUTE(require_constant_initialization)
 #define CONSTINIT __attribute__((require_constant_initialization))
-#endif
 #endif
 #if !defined(CONSTINIT)
 #define CONSTINIT
+#endif
+
+#if defined(__clang__)
+#define GSL_OWNER [[gsl::Owner]]
+#define GSL_POINTER [[gsl::Pointer]]
+#else
+#define GSL_OWNER
+#define GSL_POINTER
 #endif
 
 #endif  // BASE_COMPILER_SPECIFIC_H_

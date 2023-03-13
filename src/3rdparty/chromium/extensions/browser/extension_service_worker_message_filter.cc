@@ -29,6 +29,9 @@ namespace {
 class ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter
     : public BrowserContextKeyedServiceShutdownNotifierFactory {
  public:
+  ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter(const ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter&) = delete;
+  ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter& operator=(const ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter&) = delete;
+
   static ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter* GetInstance() {
     return base::Singleton<ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter>::get();
   }
@@ -43,8 +46,6 @@ class ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter
     DependsOn(ProcessManagerFactory::GetInstance());
   }
   ~ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter() override = default;
-
-  DISALLOW_COPY_AND_ASSIGN(ShutdownNotifierFactoryForExtensionServiceWorkerMessageFilter);
 };
 
 }  // namespace
@@ -142,21 +143,22 @@ void ExtensionServiceWorkerMessageFilter::OnResponseWorker(
 void ExtensionServiceWorkerMessageFilter::OnIncrementServiceWorkerActivity(
     int64_t service_worker_version_id,
     const std::string& request_uuid) {
-  DCHECK_CURRENTLY_ON(content::ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!browser_context_)
     return;
   active_request_uuids_.insert(request_uuid);
   // The worker might have already stopped before we got here, so the increment
   // below might fail legitimately. Therefore, we do not send bad_message to the
   // worker even if it fails.
-  service_worker_context_->StartingExternalRequest(service_worker_version_id,
-                                                   request_uuid);
+  service_worker_context_->StartingExternalRequest(
+      service_worker_version_id,
+      content::ServiceWorkerExternalRequestTimeoutType::kDefault, request_uuid);
 }
 
 void ExtensionServiceWorkerMessageFilter::OnDecrementServiceWorkerActivity(
     int64_t service_worker_version_id,
     const std::string& request_uuid) {
-  DCHECK_CURRENTLY_ON(content::ServiceWorkerContext::GetCoreThreadId());
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   if (!browser_context_)
     return;
   content::ServiceWorkerExternalRequestResult result =

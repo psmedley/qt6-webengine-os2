@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/run_loop.h"
 #include "base/timer/timer.h"
 #include "net/socket/socket_test_util.h"
@@ -38,6 +38,11 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
   using HeaderKeyValuePair = std::pair<std::string, std::string>;
 
   WebSocketStreamCreateTestBase();
+
+  WebSocketStreamCreateTestBase(const WebSocketStreamCreateTestBase&) = delete;
+  WebSocketStreamCreateTestBase& operator=(
+      const WebSocketStreamCreateTestBase&) = delete;
+
   virtual ~WebSocketStreamCreateTestBase();
 
   // A wrapper for CreateAndConnectStreamForTesting that knows about our default
@@ -85,7 +90,7 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
       ssl_error_callbacks_;
   SSLInfo ssl_info_;
   bool ssl_fatal_;
-  URLRequest* url_request_;
+  raw_ptr<URLRequest> url_request_;
   AuthChallengeInfo auth_challenge_info_;
   base::OnceCallback<void(const AuthCredentials*)> on_auth_required_callback_;
 
@@ -100,7 +105,6 @@ class WebSocketStreamCreateTestBase : public WithTaskEnvironment {
 
  private:
   class TestConnectDelegate;
-  DISALLOW_COPY_AND_ASSIGN(WebSocketStreamCreateTestBase);
 };
 
 }  // namespace net

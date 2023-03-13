@@ -41,6 +41,9 @@ class GPUTexture : public DawnObject<WGPUTexture> {
              WGPUTextureUsage usage,
              scoped_refptr<WebGPUMailboxTexture> mailbox_texture);
 
+  GPUTexture(const GPUTexture&) = delete;
+  GPUTexture& operator=(const GPUTexture&) = delete;
+
   // gpu_texture.idl
   GPUTextureView* createView(const GPUTextureViewDescriptor* webgpu_desc);
   void destroy();
@@ -50,11 +53,15 @@ class GPUTexture : public DawnObject<WGPUTexture> {
   WGPUTextureUsage Usage() { return usage_; }
 
  private:
+  void setLabelImpl(const String& value) override {
+    std::string utf8_label = value.Utf8();
+    GetProcs().textureSetLabel(GetHandle(), utf8_label.c_str());
+  }
+
   WGPUTextureDimension dimension_;
   WGPUTextureFormat format_;
   WGPUTextureUsage usage_;
   scoped_refptr<WebGPUMailboxTexture> mailbox_texture_;
-  DISALLOW_COPY_AND_ASSIGN(GPUTexture);
 };
 
 }  // namespace blink

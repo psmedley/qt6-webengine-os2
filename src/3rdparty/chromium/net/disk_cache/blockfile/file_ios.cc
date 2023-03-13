@@ -13,8 +13,6 @@
 #include "base/bind.h"
 #include "base/check.h"
 #include "base/location.h"
-#include "base/macros.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
 #include "net/base/net_errors.h"
 #include "net/disk_cache/blockfile/in_flight_io.h"
@@ -37,6 +35,9 @@ class FileBackgroundIO : public disk_cache::BackgroundIO {
       : disk_cache::BackgroundIO(controller), callback_(callback), file_(file),
         buf_(buf), buf_len_(buf_len), offset_(offset) {
   }
+
+  FileBackgroundIO(const FileBackgroundIO&) = delete;
+  FileBackgroundIO& operator=(const FileBackgroundIO&) = delete;
 
   disk_cache::FileIOCallback* callback() {
     return callback_;
@@ -63,8 +64,6 @@ class FileBackgroundIO : public disk_cache::BackgroundIO {
   const void* buf_;
   size_t buf_len_;
   size_t offset_;
-
-  DISALLOW_COPY_AND_ASSIGN(FileBackgroundIO);
 };
 
 
@@ -72,6 +71,10 @@ class FileBackgroundIO : public disk_cache::BackgroundIO {
 class FileInFlightIO : public disk_cache::InFlightIO {
  public:
   FileInFlightIO() {}
+
+  FileInFlightIO(const FileInFlightIO&) = delete;
+  FileInFlightIO& operator=(const FileInFlightIO&) = delete;
+
   ~FileInFlightIO() override {}
 
   // These methods start an asynchronous operation. The arguments have the same
@@ -89,9 +92,6 @@ class FileInFlightIO : public disk_cache::InFlightIO {
   // the one performing the call.
   void OnOperationComplete(disk_cache::BackgroundIO* operation,
                            bool cancel) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(FileInFlightIO);
 };
 
 // ---------------------------------------------------------------------------

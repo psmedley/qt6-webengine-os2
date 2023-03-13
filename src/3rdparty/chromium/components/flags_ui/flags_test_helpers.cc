@@ -68,11 +68,11 @@ FlagMetadataMap LoadFlagMetadata() {
   base::Value metadata_json = FileContents(FlagFile::kFlagMetadata);
 
   FlagMetadataMap metadata;
-  for (const auto& entry : metadata_json.GetList()) {
+  for (const auto& entry : metadata_json.GetListDeprecated()) {
     std::string name = entry.FindKey("name")->GetString();
     std::vector<std::string> owners;
     if (const base::Value* e = entry.FindKey("owners")) {
-      for (const auto& owner : e->GetList())
+      for (const auto& owner : e->GetListDeprecated())
         owners.push_back(owner.GetString());
     }
     int expiry_milestone = entry.FindKey("expiry_milestone")->GetInt();
@@ -86,13 +86,23 @@ std::vector<std::string> LoadFlagNeverExpireList() {
   base::Value list_json = FileContents(FlagFile::kFlagNeverExpire);
 
   std::vector<std::string> result;
-  for (const auto& entry : list_json.GetList()) {
+  for (const auto& entry : list_json.GetListDeprecated()) {
     result.push_back(entry.GetString());
   }
   return result;
 }
 
 bool IsValidLookingOwner(base::StringPiece owner) {
+  // Never allow ',' or ' ' in owner names, regardless of all other constraints.
+  // It is otherwise too easy to accidentally do this:
+  //   "owners": [ "foo@chromium.org,bar@chromium.org" ]
+  // or this:
+  //   "owners": [ "foo@chromium.org bar@chromium.org" ]
+  // Apologies to those who have spaces in their email addresses or OWNERS file
+  // path names :)
+  if (owner.find_first_of(", ") != std::string::npos)
+    return false;
+
   // Per the specification at the top of flag-metadata.json, an owner is one of:
   // 1) A string containing '@', which is treated as a full email address
   // 2) A string beginning with '//', which is a path to an OWNERS file
@@ -189,11 +199,6 @@ namespace flags_ui {
 
 namespace testing {
 
-void EnsureEveryFlagHasMetadata(const flags_ui::FeatureEntry* entries,
-                                size_t count) {
-  EnsureEveryFlagHasMetadata(base::make_span(entries, count));
-}
-
 void EnsureEveryFlagHasMetadata(
     const base::span<const flags_ui::FeatureEntry>& entries) {
   FlagMetadataMap metadata = LoadFlagMetadata();
@@ -270,7 +275,7 @@ void EnsureFlagsAreListedInAlphabeticalOrder() {
 
   std::vector<std::string> normalized_names;
   std::vector<std::string> names;
-  for (const auto& entry : metadata_json.GetList()) {
+  for (const auto& entry : metadata_json.GetListDeprecated()) {
     normalized_names.push_back(
         NormalizeName(entry.FindKey("name")->GetString()));
     names.push_back(entry.FindKey("name")->GetString());
@@ -282,7 +287,7 @@ void EnsureFlagsAreListedInAlphabeticalOrder() {
 
   normalized_names.clear();
   names.clear();
-  for (const auto& entry : expiration_json.GetList()) {
+  for (const auto& entry : expiration_json.GetListDeprecated()) {
     normalized_names.push_back(NormalizeName(entry.GetString()));
     names.push_back(entry.GetString());
   }
@@ -291,7 +296,8 @@ void EnsureFlagsAreListedInAlphabeticalOrder() {
                              FlagFile::kFlagNeverExpire);
 }
 
-// TODO(ellyjones): Does this / should this run on iOS as well?
+// TODO(https://crbug.com/1241068): Call this from the iOS flags unittests once
+// flag expiration is supported there.
 void EnsureRecentUnexpireFlagsArePresent(
     const base::span<const flags_ui::FeatureEntry>& entries,
     int current_milestone) {

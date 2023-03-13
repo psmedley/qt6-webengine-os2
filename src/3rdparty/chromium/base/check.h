@@ -109,6 +109,8 @@ class BASE_EXPORT CheckError {
 #define CHECK(condition) \
   UNLIKELY(!(condition)) ? IMMEDIATE_CRASH() : EAT_CHECK_STREAM_PARAMS()
 
+#define CHECK_WILL_STREAM() false
+
 #define PCHECK(condition)                                         \
   LAZY_CHECK_STREAM(                                              \
       ::logging::CheckError::PCheck(__FILE__, __LINE__).stream(), \
@@ -120,6 +122,8 @@ class BASE_EXPORT CheckError {
   LAZY_CHECK_STREAM(                                                         \
       ::logging::CheckError::Check(__FILE__, __LINE__, #condition).stream(), \
       !ANALYZER_ASSUME_TRUE(condition))
+
+#define CHECK_WILL_STREAM() true
 
 #define PCHECK(condition)                                                     \
   LAZY_CHECK_STREAM(                                                          \
@@ -149,6 +153,7 @@ class BASE_EXPORT CheckError {
 
 // Async signal safe checking mechanism.
 BASE_EXPORT void RawCheck(const char* message);
+BASE_EXPORT void RawError(const char* message);
 #define RAW_CHECK(condition)                                 \
   do {                                                       \
     if (!(condition))                                        \

@@ -33,6 +33,7 @@
 
 #include "base/dcheck_is_on.h"
 #include "third_party/blink/renderer/core/style/grid_positions_resolver.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
@@ -41,12 +42,13 @@
 
 namespace blink {
 
-// Recommended maximum size for both explicit and implicit grids. Note that this
-// actually allows a [-999,999] range. The limit is low on purpouse because
-// higher values easly trigger OOM situations. That will definitely improve once
-// we switch from a vector of vectors based grid representation to a more
-// efficient one memory-wise.
-const int kGridMaxTracks = 1000;
+// Legacy grid expands out auto-repeaters, so it has a lower cap than GridNG.
+// Note that this actually allows a [-999,999] range.
+const int kLegacyGridMaxTracks = 1000;
+// GridNG's cap can be higher than 100k tracks. What would prevent us from
+// having an extremely large cap (say, INT_MAX - 1) is rendering tracks but
+// being unable to query their computed style.
+const int kGridMaxTracks = 100000;
 
 // A span in a single direction (either rows or columns). Note that |start_line|
 // and |end_line| are grid lines' indexes.
@@ -146,14 +148,9 @@ struct GridSpan {
   bool IsIndefinite() const { return type_ == kIndefinite; }
 
   void Translate(wtf_size_t offset) {
-    DCHECK_EQ(type_, kUntranslatedDefinite);
-
-    type_ = kTranslatedDefinite;
-    start_line_ += offset;
-    end_line_ += offset;
-
-    DCHECK_GE(start_line_, 0);
-    DCHECK_GT(end_line_, 0);
+    DCHECK_NE(type_, kIndefinite);
+    *this =
+        GridSpan(start_line_ + offset, end_line_ + offset, kTranslatedDefinite);
   }
 
  private:
@@ -161,16 +158,18 @@ struct GridSpan {
 
   template <typename T>
   GridSpan(T start_line, T end_line, GridSpanType type) : type_(type) {
+    const int grid_max_tracks = RuntimeEnabledFeatures::LayoutNGEnabled()
+                                    ? kGridMaxTracks
+                                    : kLegacyGridMaxTracks;
+    start_line_ =
+        ClampTo<int>(start_line, -grid_max_tracks, grid_max_tracks - 1);
+    end_line_ = ClampTo<int>(end_line, -grid_max_tracks + 1, grid_max_tracks);
+
 #if DCHECK_IS_ON()
     DCHECK_LT(start_line, end_line);
-    if (type == kTranslatedDefinite) {
+    if (type == kTranslatedDefinite)
       DCHECK_GE(start_line, static_cast<T>(0));
-      DCHECK_GT(end_line, static_cast<T>(0));
-    }
 #endif
-
-    start_line_ = clampTo<int>(start_line, -kGridMaxTracks, kGridMaxTracks - 1);
-    end_line_ = clampTo<int>(end_line, -kGridMaxTracks + 1, kGridMaxTracks);
   }
 
   int start_line_;
@@ -189,6 +188,29 @@ struct GridArea {
         rows(GridSpan::IndefiniteGridSpan()) {}
 
   GridArea(const GridSpan& r, const GridSpan& c) : columns(c), rows(r) {}
+
+  const GridSpan& Span(GridTrackSizingDirection track_direction) const {
+    return (track_direction == kForColumns) ? columns : rows;
+  }
+
+  void SetSpan(const GridSpan& span, GridTrackSizingDirection track_direction) {
+    if (track_direction == kForColumns)
+      columns = span;
+    else
+      rows = span;
+  }
+
+  wtf_size_t StartLine(GridTrackSizingDirection track_direction) const {
+    return Span(track_direction).StartLine();
+  }
+
+  wtf_size_t EndLine(GridTrackSizingDirection track_direction) const {
+    return Span(track_direction).EndLine();
+  }
+
+  wtf_size_t SpanSize(GridTrackSizingDirection track_direction) const {
+    return Span(track_direction).IntegerSpan();
+  }
 
   bool operator==(const GridArea& o) const {
     return columns == o.columns && rows == o.rows;

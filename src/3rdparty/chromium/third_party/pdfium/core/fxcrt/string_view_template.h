@@ -15,7 +15,7 @@
 #include <vector>
 
 #include "core/fxcrt/fx_system.h"
-#include "third_party/base/optional.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 #include "third_party/base/span.h"
 
 namespace fxcrt {
@@ -26,6 +26,11 @@ namespace fxcrt {
 //
 // String view arguments should be passed by value, since they are small,
 // rather than const-ref, even if they are not modified.
+//
+// Front() and Back() tolerate empty strings and must return NUL in those
+// cases. Substr(), First(), and Last() tolerate out-of-range indices and
+// must return an empty string view in those cases. The aim here is allowing
+// callers to avoid range-checking first.
 template <typename T>
 class StringViewTemplate {
  public:
@@ -67,10 +72,10 @@ class StringViewTemplate {
           0) noexcept
       : m_Span(other) {}
 
-  // Deliberately implicit to avoid calling on every string literal.
+  // Deliberately implicit to avoid calling on every char literal.
   // |ch| must be an lvalue that outlives the StringViewTemplate.
   // NOLINTNEXTLINE(runtime/explicit)
-  constexpr StringViewTemplate(CharType& ch) noexcept
+  constexpr StringViewTemplate(const CharType& ch) noexcept
       : m_Span(reinterpret_cast<const UnsignedType*>(&ch), 1) {}
 
   // Any changes to |vec| invalidate the string.
@@ -189,14 +194,21 @@ class StringViewTemplate {
     return static_cast<CharType>(m_Span[index]);
   }
 
-  Optional<size_t> Find(CharType ch) const {
+  absl::optional<size_t> Find(CharType ch) const {
     const auto* found = reinterpret_cast<const UnsignedType*>(FXSYS_chr(
         reinterpret_cast<const CharType*>(m_Span.data()), ch, m_Span.size()));
 
-    return found ? Optional<size_t>(found - m_Span.data()) : Optional<size_t>();
+    return found ? absl::optional<size_t>(found - m_Span.data())
+                 : absl::nullopt;
   }
 
   bool Contains(CharType ch) const { return Find(ch).has_value(); }
+
+  StringViewTemplate Substr(size_t offset) const {
+    // Unsigned underflow is well-defined and out-of-range is handled by
+    // Substr().
+    return Substr(offset, GetLength() - offset);
+  }
 
   StringViewTemplate Substr(size_t first, size_t count) const {
     if (!m_Span.data())
@@ -274,12 +286,8 @@ inline bool operator<(const T* lhs, const StringViewTemplate<T>& rhs) {
   return rhs > lhs;
 }
 
-// Workaround for one of the cases external template classes are
-// failing in GCC before version 7 with -O0
-#if !defined(__GNUC__) || __GNUC__ >= 7
 extern template class StringViewTemplate<char>;
 extern template class StringViewTemplate<wchar_t>;
-#endif
 
 using ByteStringView = StringViewTemplate<char>;
 using WideStringView = StringViewTemplate<wchar_t>;

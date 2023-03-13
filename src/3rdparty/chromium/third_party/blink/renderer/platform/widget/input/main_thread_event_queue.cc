@@ -19,8 +19,7 @@ namespace blink {
 
 namespace {
 
-constexpr base::TimeDelta kMaxRafDelay =
-    base::TimeDelta::FromMilliseconds(5 * 1000);
+constexpr base::TimeDelta kMaxRafDelay = base::Milliseconds(5 * 1000);
 
 class QueuedClosure : public MainThreadEventQueueTask {
  public:
@@ -43,8 +42,7 @@ class QueuedClosure : public MainThreadEventQueueTask {
 
 // Time interval at which touchmove events during scroll will be skipped
 // during rAF signal.
-constexpr base::TimeDelta kAsyncTouchMoveInterval =
-    base::TimeDelta::FromMilliseconds(200);
+constexpr base::TimeDelta kAsyncTouchMoveInterval = base::Milliseconds(200);
 
 }  // namespace
 
@@ -73,7 +71,7 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
               WebInputEvent::Type::kPointerRawUpdate);
     std::unique_ptr<cc::EventMetrics> metrics =
         cc::EventMetrics::CreateFromExisting(
-            raw_event->Event().GetTypeAsUiEventType(), absl::nullopt,
+            raw_event->Event().GetTypeAsUiEventType(),
             cc::EventMetrics::DispatchStage::kRendererCompositorFinished,
             original_metrics);
     return std::make_unique<QueuedWebInputEvent>(
@@ -136,6 +134,12 @@ class QueuedWebInputEvent : public MainThreadEventQueueTask {
 
     known_by_scheduler_count_ += other_event->known_by_scheduler_count_;
     event_->CoalesceWith(*other_event->event_);
+    auto* metrics = metrics_ ? metrics_->AsScrollUpdate() : nullptr;
+    auto* other_metrics = other_event->metrics_
+                              ? other_event->metrics_->AsScrollUpdate()
+                              : nullptr;
+    if (metrics && other_metrics)
+      metrics->CoalesceWith(*other_metrics);
 
     // The newest event (|other_item|) always wins when updating fields.
     originally_cancelable_ = other_event->originally_cancelable_;
@@ -497,6 +501,9 @@ void MainThreadEventQueue::DispatchEvents() {
   }
 
   PossiblyScheduleMainFrame();
+
+  if (client_)
+    client_->InputEventsDispatched(/*raf_aligned=*/false);
 }
 
 static bool IsAsyncTouchMove(
@@ -564,6 +571,9 @@ void MainThreadEventQueue::DispatchRafAlignedInput(base::TimeTicks frame_time) {
   }
 
   PossiblyScheduleMainFrame();
+
+  if (client_)
+    client_->InputEventsDispatched(/*raf_aligned=*/true);
 }
 
 void MainThreadEventQueue::PostTaskToMainThread() {

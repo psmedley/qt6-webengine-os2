@@ -23,6 +23,7 @@
 namespace blink {
 
 enum class NGBreakStatus;
+class DeferredShapingMinimumTopScope;
 class NGConstraintSpace;
 class NGFragment;
 
@@ -61,24 +62,23 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
 
   void SetBoxType(NGPhysicalFragment::NGBoxType type);
 
-  MinMaxSizesResult ComputeMinMaxSizes(
-      const MinMaxSizesFloatInput&) const override;
-  scoped_refptr<const NGLayoutResult> Layout() override;
+  MinMaxSizesResult ComputeMinMaxSizes(const MinMaxSizesFloatInput&) override;
+  const NGLayoutResult* Layout() override;
 
  private:
-  NOINLINE scoped_refptr<const NGLayoutResult>
-  LayoutWithInlineChildLayoutContext(const NGLayoutInputNode& first_child);
-  NOINLINE scoped_refptr<const NGLayoutResult> LayoutWithItemsBuilder(
+  NOINLINE const NGLayoutResult* LayoutWithInlineChildLayoutContext(
+      const NGLayoutInputNode& first_child);
+  NOINLINE const NGLayoutResult* LayoutWithItemsBuilder(
       const NGInlineNode& first_child,
       NGInlineChildLayoutContext* context);
 
-  NOINLINE scoped_refptr<const NGLayoutResult> RelayoutIgnoringLineClamp();
+  NOINLINE const NGLayoutResult* RelayoutIgnoringLineClamp();
 
-  inline scoped_refptr<const NGLayoutResult> Layout(
+  inline const NGLayoutResult* Layout(
       NGInlineChildLayoutContext* inline_child_layout_context);
 
-  scoped_refptr<const NGLayoutResult> FinishLayout(NGPreviousInflowPosition*,
-                                                   NGInlineChildLayoutContext*);
+  const NGLayoutResult* FinishLayout(NGPreviousInflowPosition*,
+                                     NGInlineChildLayoutContext*);
 
   // Return the BFC block offset of this block.
   LayoutUnit BfcBlockOffset() const {
@@ -111,6 +111,10 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
       const absl::optional<LayoutUnit> bfc_block_offset = absl::nullopt,
       bool has_clearance_past_adjoining_floats = false,
       LayoutUnit block_start_annotation_space = LayoutUnit());
+
+  [[nodiscard]] DeferredShapingMinimumTopScope CreateMinimumTopScopeForChild(
+      const NGLayoutInputNode child,
+      const NGInflowChildData& child_data) const;
 
   // @return Estimated BFC block offset for the "to be layout" child.
   NGInflowChildData ComputeChildData(const NGPreviousInflowPosition&,
@@ -148,7 +152,7 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   bool TryReuseFragmentsFromCache(
       NGInlineNode child,
       NGPreviousInflowPosition*,
-      scoped_refptr<const NGInlineBreakToken>* inline_break_token_out);
+      const NGInlineBreakToken** inline_break_token_out);
 
   void HandleOutOfFlowPositioned(const NGPreviousInflowPosition&, NGBlockNode);
   void HandleFloat(const NGPreviousInflowPosition&,
@@ -179,7 +183,7 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
 
   // Performs the actual layout of a new formatting context. This may be called
   // multiple times from HandleNewFormattingContext.
-  scoped_refptr<const NGLayoutResult> LayoutNewFormattingContext(
+  const NGLayoutResult* LayoutNewFormattingContext(
       NGLayoutInputNode child,
       const NGBreakToken* child_break_token,
       const NGInflowChildData&,
@@ -195,18 +199,18 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
       const NGBreakToken* child_break_token,
       NGPreviousInflowPosition*,
       NGInlineChildLayoutContext*,
-      scoped_refptr<const NGInlineBreakToken>* previous_inline_break_token);
+      const NGInlineBreakToken** previous_inline_break_token);
 
   NGLayoutResult::EStatus FinishInflow(
       NGLayoutInputNode child,
       const NGBreakToken* child_break_token,
       const NGConstraintSpace&,
       bool has_clearance_past_adjoining_floats,
-      scoped_refptr<const NGLayoutResult>,
+      const NGLayoutResult*,
       NGInflowChildData*,
       NGPreviousInflowPosition*,
       NGInlineChildLayoutContext*,
-      scoped_refptr<const NGInlineBreakToken>* previous_inline_break_token);
+      const NGInlineBreakToken** previous_inline_break_token);
 
   // Performs any final adjustments for table-cells.
   void FinalizeForTableCell(LayoutUnit unconstrained_intrinsic_block_size);
@@ -246,6 +250,8 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   // Propagates the baseline from the given |child| if needed.
   void PropagateBaselineFromChild(const NGPhysicalFragment& child,
                                   LayoutUnit block_offset);
+  void PropagateBaselineFromBlockChild(const NGPhysicalFragment& child,
+                                       LayoutUnit block_offset);
 
   // If still unresolved, resolve the fragment's BFC block offset.
   //
@@ -371,7 +377,9 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   LogicalSize child_percentage_size_;
   LogicalSize replaced_child_percentage_size_;
 
-  scoped_refptr<const NGLayoutResult> previous_result_;
+  const NGLayoutResult* previous_result_ = nullptr;
+
+  const NGColumnSpannerPath* column_spanner_path_ = nullptr;
 
   // Intrinsic block size based on child layout and containment.
   LayoutUnit intrinsic_block_size_;
@@ -412,8 +420,6 @@ class CORE_EXPORT NGBlockLayoutAlgorithm
   // If set, this is the number of lines until a clamp. A value of 1 indicates
   // the current line should be clamped. This may go negative.
   absl::optional<int> lines_until_clamp_;
-
-  NGExclusionSpace exclusion_space_;
 
   // If set, one of the lines was clamped and this is the intrinsic size at the
   // time of the clamp.

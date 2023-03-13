@@ -16,13 +16,13 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/location.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/message_loop/message_pump_type.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/notreached.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/tick_clock.h"
@@ -38,7 +38,7 @@
 #include "content/public/common/content_switches.h"
 #include "media/base/video_util.h"
 #include "media/capture/content/capture_resolution_chooser.h"
-#include "media/webrtc/webrtc_switches.h"
+#include "media/webrtc/webrtc_features.h"
 #include "mojo/public/cpp/bindings/remote.h"
 #include "services/device/public/mojom/wake_lock.mojom.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
@@ -114,6 +114,10 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
   Core(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
        std::unique_ptr<webrtc::DesktopCapturer> capturer,
        DesktopMediaID::Type type);
+
+  Core(const Core&) = delete;
+  Core& operator=(const Core&) = delete;
+
   ~Core() override;
 
   // Implementation of VideoCaptureDevice methods.
@@ -180,7 +184,7 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
   // be returned to the caller directly then this is NULL.
   std::unique_ptr<webrtc::DesktopFrame> output_frame_;
 
-  const base::TickClock* tick_clock_ = nullptr;
+  raw_ptr<const base::TickClock> tick_clock_ = nullptr;
 
   // Timer used to capture the frame.
   std::unique_ptr<base::OneShotTimer> capture_timer_;
@@ -212,8 +216,6 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
   mojo::Remote<device::mojom::WakeLock> wake_lock_;
 
   base::WeakPtrFactory<Core> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(Core);
 };
 
 DesktopCaptureDevice::Core::Core(
@@ -249,11 +251,10 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
 
   client_ = std::move(client);
   requested_frame_rate_ = params.requested_format.frame_rate;
-  requested_frame_duration_ =
-      base::TimeDelta::FromMicroseconds(static_cast<int64_t>(
-          static_cast<double>(base::Time::kMicrosecondsPerSecond) /
-              requested_frame_rate_ +
-          0.5 /* round to nearest int */));
+  requested_frame_duration_ = base::Microseconds(static_cast<int64_t>(
+      static_cast<double>(base::Time::kMicrosecondsPerSecond) /
+          requested_frame_rate_ +
+      0.5 /* round to nearest int */));
 
   // Pass the min/max resolution and fixed aspect ratio settings from |params|
   // to the CaptureResolutionChooser.
@@ -329,8 +330,7 @@ void DesktopCaptureDevice::Core::OnCaptureResult(
   }
   DCHECK(frame);
 
-  base::TimeDelta capture_time(
-      base::TimeDelta::FromMilliseconds(frame->capture_time_ms()));
+  base::TimeDelta capture_time(base::Milliseconds(frame->capture_time_ms()));
 
   // The two UMA_ blocks must be put in its own scope since it creates a static
   // variable which expected constant histogram name.
@@ -521,7 +521,7 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
   std::unique_ptr<webrtc::DesktopCapturer> capturer;
   std::unique_ptr<media::VideoCaptureDevice> result;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   options.set_allow_cropping_window_capturer(true);
   if (base::FeatureList::IsEnabled(features::kWebRtcAllowWgcDesktopCapturer))
     options.set_allow_wgc_capturer(true);
@@ -567,7 +567,6 @@ std::unique_ptr<media::VideoCaptureDevice> DesktopCaptureDevice::Create(
           webrtc::DesktopCapturer::CreateWindowCapturer(options);
 #endif
       if (window_capturer && window_capturer->SelectSource(source.id)) {
-        window_capturer->FocusOnSelectedSource();
         capturer = std::make_unique<webrtc::DesktopAndCursorComposer>(
             std::move(window_capturer), options);
         IncrementDesktopCaptureCounter(WINDOW_CAPTURER_CREATED);
@@ -620,7 +619,7 @@ DesktopCaptureDevice::DesktopCaptureDevice(
     std::unique_ptr<webrtc::DesktopCapturer> capturer,
     DesktopMediaID::Type type)
     : thread_("desktopCaptureThread") {
-#if defined(OS_WIN) || defined(OS_MAC)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
   // On Windows/OSX the thread must be a UI thread.
   base::MessagePumpType thread_type = base::MessagePumpType::UI;
 #else

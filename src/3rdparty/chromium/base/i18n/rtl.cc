@@ -10,7 +10,6 @@
 #include <algorithm>
 
 #include "base/command_line.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_path.h"
 #include "base/i18n/base_i18n_switches.h"
 #include "base/logging.h"
@@ -24,7 +23,7 @@
 #include "third_party/icu/source/common/unicode/uscript.h"
 #include "third_party/icu/source/i18n/unicode/coll.h"
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
 #include "base/debug/crash_logging.h"
 #include "base/ios/ios_util.h"
 #endif
@@ -132,7 +131,7 @@ std::string ICULocaleName(const std::string& locale_string) {
 }
 
 void SetICUDefaultLocale(const std::string& locale_string) {
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   static base::debug::CrashKeyString* crash_key_locale =
       base::debug::AllocateCrashKeyString("icu_locale_input",
                                           base::debug::CrashKeySize::Size256);
@@ -170,7 +169,7 @@ bool ICUIsRTL() {
 
 TextDirection GetForcedTextDirection() {
 // On iOS, check for RTL forcing.
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   if (base::ios::IsInForcedRTL())
     return base::i18n::RIGHT_TO_LEFT;
 #endif
@@ -203,7 +202,7 @@ TextDirection GetTextDirectionForLocaleInStartUp(const char* locale_name) {
       SplitStringPiece(locale_name, "-_", KEEP_WHITESPACE, SPLIT_WANT_ALL);
   const StringPiece& language_code = locale_split[0];
   if (std::binary_search(kRTLLanguageCodes,
-                         kRTLLanguageCodes + base::size(kRTLLanguageCodes),
+                         kRTLLanguageCodes + std::size(kRTLLanguageCodes),
                          language_code))
     return RIGHT_TO_LEFT;
   return LEFT_TO_RIGHT;
@@ -280,7 +279,7 @@ TextDirection GetStringDirection(const std::u16string& text) {
   return result;
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 bool AdjustStringForLocaleDirection(std::u16string* text) {
   if (!IsRTL() || text->empty())
     return false;
@@ -382,7 +381,7 @@ bool UnadjustStringForLocaleDirection(std::u16string* text) {
   return true;
 }
 
-#endif  // !OS_WIN
+#endif  // !BUILDFLAG(IS_WIN)
 
 void EnsureTerminatedDirectionalFormatting(std::u16string* text) {
   int count = 0;
@@ -454,11 +453,11 @@ void WrapPathWithLTRFormatting(const FilePath& path,
   // string as a Left-To-Right string.
   // Inserting an LRE (Left-To-Right Embedding) mark as the first character.
   rtl_safe_path->push_back(kLeftToRightEmbeddingMark);
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   rtl_safe_path->append(UTF8ToUTF16(path.value()));
-#elif defined(OS_WIN)
+#elif BUILDFLAG(IS_WIN)
   rtl_safe_path->append(AsString16(path.value()));
-#else  // defined(OS_POSIX) && !defined(OS_APPLE)
+#else  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
   std::wstring wide_path = base::SysNativeMBToWide(path.value());
   rtl_safe_path->append(WideToUTF16(wide_path));
 #endif

@@ -87,6 +87,10 @@ source_set("lib") {
       "//chromeos/lacros",
     ]
   }
+
+  if (is_serial_enabled_platform) {
+    defines = [ "IS_SERIAL_ENABLED_PLATFORM" ]
+  }
 }
 
 # NOTE: We use a separate component target to support global binder overrides,
@@ -215,11 +219,12 @@ source_set("tests") {
   }
 
   if ((is_linux || is_chromeos_lacros) && use_dbus) {
-    sources += [
-      "battery/battery_status_manager_linux_unittest.cc",
-      "geolocation/wifi_data_provider_linux_unittest.cc",
-    ]
+    sources += [ "battery/battery_status_manager_linux_unittest.cc" ]
     deps += [ "//dbus:test_support" ]
+
+    if (is_linux) {
+      sources += [ "geolocation/wifi_data_provider_linux_unittest.cc" ]
+    }
   }
 
   if (is_chromeos_ash) {
@@ -228,8 +233,8 @@ source_set("tests") {
       "geolocation/wifi_data_provider_chromeos_unittest.cc",
     ]
     deps += [
+      "//chromeos/ash/components/dbus/biod:test_support",
       "//chromeos/dbus:test_support",
-      "//chromeos/dbus/biod:test_support",
       "//chromeos/network:test_support",
       "//services/device/bluetooth:bluetooth_system_tests",
       "//services/device/fingerprint",
@@ -238,6 +243,7 @@ source_set("tests") {
   }
 
   if (is_chromeos_lacros) {
+    sources += [ "geolocation/wifi_data_provider_lacros_unittest.cc" ]
     deps += [ "//chromeos/lacros:test_support" ]
   }
 
@@ -256,6 +262,7 @@ source_set("tests") {
   } else {
     sources += [
       "battery/battery_monitor_impl_unittest.cc",
+      "hid/hid_device_info_unittest.cc",
       "hid/hid_manager_unittest.cc",
       "public/cpp/hid/hid_blocklist_unittest.cc",
     ]
@@ -296,6 +303,7 @@ source_set("tests") {
 
   if (is_serial_enabled_platform) {
     sources += [
+      "serial/bluetooth_serial_device_enumerator_unittests.cc",
       "serial/bluetooth_serial_port_impl_unittest.cc",
       "serial/serial_device_enumerator_unittest.cc",
       "serial/serial_port_impl_unittest.cc",
@@ -356,7 +364,8 @@ source_set("tests") {
   }
 
   # UsbContext is a libusb-specific object.
-  if (is_mac || is_win) {
+  # TODO(https://crbug.com/1096743) Remove these tests.
+  if (is_mac) {
     sources += [ "usb/usb_context_unittest.cc" ]
     deps += [ "//third_party/libusb" ]
   }
@@ -471,4 +480,16 @@ source_set("usb_test_gadget") {
     "//services/device/usb",
     "//tools/usb_gadget",
   ]
+}
+
+source_set("utility") {
+  sources = []
+
+  if (is_mac) {
+    sources += [
+      "utils/mac_utils.cc",
+      "utils/mac_utils.h",
+    ]
+  }
+  deps = [ "//base" ]
 }

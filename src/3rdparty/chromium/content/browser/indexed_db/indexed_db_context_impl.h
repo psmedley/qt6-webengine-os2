@@ -14,10 +14,9 @@
 #include <string>
 #include <vector>
 
-#include "base/compiler_specific.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
-#include "base/macros.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "components/services/storage/public/mojom/blob_storage_context.mojom.h"
@@ -28,6 +27,7 @@
 #include "components/services/storage/public/mojom/storage_policy_update.mojom.h"
 #include "content/browser/indexed_db/indexed_db_backing_store.h"
 #include "content/browser/indexed_db/indexed_db_dispatcher_host.h"
+#include "content/common/content_export.h"
 #include "mojo/public/cpp/bindings/pending_remote.h"
 #include "mojo/public/cpp/bindings/receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -37,9 +37,9 @@
 
 namespace base {
 class Clock;
-class ListValue;
 class FilePath;
 class SequencedTaskRunner;
+class Value;
 }
 
 namespace blink {
@@ -80,6 +80,9 @@ class CONTENT_EXPORT IndexedDBContextImpl
           file_system_access_context,
       scoped_refptr<base::SequencedTaskRunner> io_task_runner,
       scoped_refptr<base::SequencedTaskRunner> custom_task_runner);
+
+  IndexedDBContextImpl(const IndexedDBContextImpl&) = delete;
+  IndexedDBContextImpl& operator=(const IndexedDBContextImpl&) = delete;
 
   void Bind(mojo::PendingReceiver<storage::mojom::IndexedDBControl> control);
 
@@ -172,8 +175,8 @@ class CONTENT_EXPORT IndexedDBContextImpl
   void BlobFilesCleaned(const blink::StorageKey& storage_key);
 
   // Will be null in unit tests.
-  storage::QuotaManagerProxy* quota_manager_proxy() const {
-    return quota_manager_proxy_.get();
+  const scoped_refptr<storage::QuotaManagerProxy>& quota_manager_proxy() const {
+    return quota_manager_proxy_;
   }
 
   // Returns a list of all storage_keys with backing stores.
@@ -181,7 +184,7 @@ class CONTENT_EXPORT IndexedDBContextImpl
   bool HasStorageKey(const blink::StorageKey& storage_key);
 
   // Used by IndexedDBInternalsUI to populate internals page.
-  base::ListValue* GetAllStorageKeysDetails();
+  base::Value* GetAllStorageKeysDetails();
 
   // GetStoragePaths returns all paths owned by this database, in arbitrary
   // order.
@@ -273,7 +276,7 @@ class CONTENT_EXPORT IndexedDBContextImpl
   std::map<blink::StorageKey, int64_t> storage_key_size_map_;
   // The set of storage_keys whose storage should be cleared on shutdown.
   std::set<blink::StorageKey> storage_keys_to_purge_on_shutdown_;
-  base::Clock* const clock_;
+  const raw_ptr<base::Clock> clock_;
 
   const std::unique_ptr<IndexedDBQuotaClient> quota_client_;
   const std::unique_ptr<storage::QuotaClientCallbackWrapper>
@@ -290,8 +293,6 @@ class CONTENT_EXPORT IndexedDBContextImpl
   // weak_factory_->GetWeakPtr() may be used on any thread, but the resulting
   // pointer must only be checked/used on idb_task_runner_.
   base::WeakPtrFactory<IndexedDBContextImpl> weak_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(IndexedDBContextImpl);
 };
 
 }  // namespace content

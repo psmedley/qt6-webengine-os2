@@ -25,7 +25,6 @@
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
-#include "components/viz/common/features.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "components/viz/service/display_embedder/server_shared_bitmap_manager.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
@@ -61,13 +60,12 @@
 #include "ui/views/widget/desktop_aura/desktop_screen.h"
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
 #include "ui/views/examples/examples_skia_gold_pixel_diff.h"
 #endif
 
 #if defined(USE_OZONE)
-#include "ui/base/ui_base_features.h"
 #include "ui/ozone/public/ozone_platform.h"
 #endif
 
@@ -78,7 +76,7 @@ base::LazyInstance<base::TestDiscardableMemoryAllocator>::DestructorAtExit
     g_discardable_memory_allocator = LAZY_INSTANCE_INITIALIZER;
 
 ExamplesExitCode ExamplesMainProc(bool under_test) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   ui::ScopedOleInitializer ole_initializer;
 #endif
 
@@ -92,14 +90,6 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
   // window to not render. See http://crbug.com/936249.
   command_line->AppendSwitch(switches::kDisableDirectComposition);
 
-  // Disable skia renderer to use GL instead.
-  std::string disabled =
-      command_line->GetSwitchValueASCII(switches::kDisableFeatures);
-  if (!disabled.empty())
-    disabled += ",";
-  disabled += features::kUseSkiaRenderer.name;
-  command_line->AppendSwitchASCII(switches::kDisableFeatures, disabled);
-
   base::FeatureList::InitializeInstance(
       command_line->GetSwitchValueASCII(switches::kEnableFeatures),
       command_line->GetSwitchValueASCII(switches::kDisableFeatures));
@@ -110,14 +100,12 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
   mojo::core::Init();
 
 #if defined(USE_OZONE)
-  if (features::IsUsingOzonePlatform()) {
-    ui::OzonePlatform::InitParams params;
-    params.single_process = true;
-    ui::OzonePlatform::InitializeForGPU(params);
-  }
+  ui::OzonePlatform::InitParams params;
+  params.single_process = true;
+  ui::OzonePlatform::InitializeForGPU(params);
 #endif
 
-  gl::init::InitializeGLOneOff();
+  gl::init::InitializeGLOneOff(/*system_device_id=*/0);
 
   // Viz depends on the task environment to correctly tear down.
   base::test::TaskEnvironment task_environment(
@@ -125,8 +113,8 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
 
   // The ContextFactory must exist before any Compositors are created.
   auto context_factories =
-      std::make_unique<ui::TestContextFactories>(under_test);
-  context_factories->SetUseTestSurface(false);
+      std::make_unique<ui::TestContextFactories>(under_test,
+                                                 /*output_to_window=*/true);
 
   base::i18n::InitializeICU();
 
@@ -137,18 +125,15 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
   ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 
   base::FilePath views_examples_resources_pak_path;
-  CHECK(base::PathService::Get(base::DIR_MODULE,
+  CHECK(base::PathService::Get(base::DIR_ASSETS,
                                &views_examples_resources_pak_path));
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       views_examples_resources_pak_path.AppendASCII(
           "views_examples_resources.pak"),
-      ui::SCALE_FACTOR_100P);
+      ui::k100Percent);
 
   base::DiscardableMemoryAllocator::SetInstance(
       g_discardable_memory_allocator.Pointer());
-
-  base::PowerMonitor::Initialize(
-      std::make_unique<base::PowerMonitorDeviceSource>());
 
   gfx::InitializeFonts();
 
@@ -177,7 +162,7 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
 
     base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     ExamplesSkiaGoldPixelDiff pixel_diff;
     views::AnyWidgetObserver widget_observer{
         views::test::AnyWidgetTestPasskey()};
@@ -202,7 +187,7 @@ ExamplesExitCode ExamplesMainProc(bool under_test) {
 
     run_loop.Run();
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     compare_result = pixel_diff.get_result();
 #endif
 

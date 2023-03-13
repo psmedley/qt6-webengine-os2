@@ -595,7 +595,7 @@ span<uint8_t> CBORTokenizer::GetEnvelopeContents() const {
 //   and then checking whether the sum went past it.
 //
 // See also
-// https://chromium.googlesource.com/chromium/src/+/master/docs/security/integer-semantics.md
+// https://chromium.googlesource.com/chromium/src/+/main/docs/security/integer-semantics.md
 static const uint64_t kMaxValidLength =
     std::min<uint64_t>(std::numeric_limits<uint64_t>::max() >> 2,
                        std::numeric_limits<size_t>::max());
@@ -695,8 +695,9 @@ void CBORTokenizer::ReadNextToken(bool enter_envelope) {
           // inspector protocol, it's not a CBOR limitation), so we check
           // against the signed max, so that the allowable values are
           // 0, 1, 2, ... 2^31 - 1.
-          if (!bytes_read || std::numeric_limits<int32_t>::max() <
-                                 token_start_internal_value_) {
+          if (!bytes_read ||
+              static_cast<uint64_t>(std::numeric_limits<int32_t>::max()) <
+                  static_cast<uint64_t>(token_start_internal_value_)) {
             SetError(Error::CBOR_INVALID_INT32);
             return;
           }
@@ -713,8 +714,9 @@ void CBORTokenizer::ReadNextToken(bool enter_envelope) {
           // We check the payload in token_start_internal_value_ against
           // that range (2^31-1 is also known as
           // std::numeric_limits<int32_t>::max()).
-          if (!bytes_read || token_start_internal_value_ >
-                                 std::numeric_limits<int32_t>::max()) {
+          if (!bytes_read ||
+              static_cast<uint64_t>(token_start_internal_value_) >
+                  static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
             SetError(Error::CBOR_INVALID_INT32);
             return;
           }

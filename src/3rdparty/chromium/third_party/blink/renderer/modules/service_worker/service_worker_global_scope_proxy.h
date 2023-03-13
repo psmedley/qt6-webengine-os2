@@ -33,7 +33,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/threading/thread_checker.h"
 #include "third_party/blink/public/mojom/service_worker/controller_service_worker.mojom-blink.h"
 #include "third_party/blink/public/mojom/service_worker/dispatch_fetch_event_params.mojom-blink.h"
@@ -72,6 +71,11 @@ class ServiceWorkerGlobalScopeProxy final : public WebServiceWorkerContextProxy,
                                 WebServiceWorkerContextClient&,
                                 scoped_refptr<base::SingleThreadTaskRunner>
                                     parent_thread_default_task_runner);
+
+  ServiceWorkerGlobalScopeProxy(const ServiceWorkerGlobalScopeProxy&) = delete;
+  ServiceWorkerGlobalScopeProxy& operator=(
+      const ServiceWorkerGlobalScopeProxy&) = delete;
+
   ~ServiceWorkerGlobalScopeProxy() override;
 
   // WebServiceWorkerContextProxy overrides:
@@ -158,8 +162,6 @@ class ServiceWorkerGlobalScopeProxy final : public WebServiceWorkerContextProxy,
   CrossThreadPersistent<ServiceWorkerGlobalScope> worker_global_scope_;
 
   THREAD_CHECKER(worker_thread_checker_);
-
-  DISALLOW_COPY_AND_ASSIGN(ServiceWorkerGlobalScopeProxy);
 };
 
 // TODO(leonhsl): This is only used by ServiceWorkerGlobalScope for calling

@@ -10,8 +10,8 @@
 #include <vector>
 
 #include "base/memory/ref_counted.h"
+#include "media/base/encoder_status.h"
 #include "media/base/media_export.h"
-#include "media/base/status.h"
 #include "media/base/video_types.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "ui/gfx/geometry/rect.h"
@@ -87,6 +87,11 @@ MEDIA_EXPORT gfx::Rect ComputeLetterboxRegion(const gfx::Rect& bounds,
 MEDIA_EXPORT gfx::Rect ComputeLetterboxRegionForI420(const gfx::Rect& bounds,
                                                      const gfx::Size& content);
 
+// Shrinks the given |rect| by the minimum amount necessary to align its corners
+// to even-numbered coordinates. |rect| is assumed to have bounded limit values,
+// and may have negative bounds.
+MEDIA_EXPORT gfx::Rect MinimallyShrinkRectForI420(const gfx::Rect& rect);
+
 // Return a scaled |size| whose area is less than or equal to |target|, where
 // one of its dimensions is equal to |target|'s.  The aspect ratio of |size| is
 // preserved as closely as possible.  If |size| is empty, the result will be
@@ -100,6 +105,16 @@ MEDIA_EXPORT gfx::Size ScaleSizeToFitWithinTarget(const gfx::Size& size,
 // empty.
 MEDIA_EXPORT gfx::Size ScaleSizeToEncompassTarget(const gfx::Size& size,
                                                   const gfx::Size& target);
+
+// Calculates the largest sub-rectangle of a rectangle of size |size| with
+// roughly the same aspect ratio as |target| and centered both horizontally
+// and vertically within the rectangle. It's "roughly" the same aspect ratio
+// because its dimensions may be rounded down to be a multiple of |alignment|.
+// The origin of the rectangle is also aligned down to a multiple of
+// |alignment|. Note that |alignment| must be a power of 2.
+MEDIA_EXPORT gfx::Rect CropSizeForScalingToTarget(const gfx::Size& size,
+                                                  const gfx::Size& target,
+                                                  size_t alignment = 1u);
 
 // Returns the size of a rectangle whose upper left corner is at the origin (0,
 // 0) and whose bottom right corner is the same as that of |rect|. This is
@@ -143,6 +158,17 @@ MEDIA_EXPORT scoped_refptr<VideoFrame> ReadbackTextureBackedFrameToMemorySync(
     GrDirectContext* gr_context,
     VideoFramePool* pool = nullptr);
 
+// Synchronously reads a single plane. |src_rect| is relative to the plane,
+// which may be smaller than |frame| due to subsampling.
+MEDIA_EXPORT bool ReadbackTexturePlaneToMemorySync(
+    const VideoFrame& src_frame,
+    size_t src_plane,
+    gfx::Rect& src_rect,
+    uint8_t* dest_pixels,
+    size_t dest_stride,
+    gpu::raster::RasterInterface* ri,
+    GrDirectContext* gr_context);
+
 // Converts a frame with I420A format into I420 by dropping alpha channel.
 MEDIA_EXPORT scoped_refptr<VideoFrame> WrapAsI420VideoFrame(
     scoped_refptr<VideoFrame> frame);
@@ -163,16 +189,16 @@ MEDIA_EXPORT scoped_refptr<VideoFrame> WrapAsI420VideoFrame(
 // 3. |dst_frame|'s coded size (both width and height) should be larger than or
 // equal to the visible size, since the visible region in both frames should be
 // identical.
-MEDIA_EXPORT bool I420CopyWithPadding(const VideoFrame& src_frame,
-                                      VideoFrame* dst_frame) WARN_UNUSED_RESULT;
+[[nodiscard]] MEDIA_EXPORT bool I420CopyWithPadding(const VideoFrame& src_frame,
+                                                    VideoFrame* dst_frame);
 
 // Copy pixel data from |src_frame| to |dst_frame| applying scaling and pixel
 // format conversion as needed. Both frames need to be mappabale and have either
 // I420 or NV12 pixel format.
-MEDIA_EXPORT Status ConvertAndScaleFrame(const VideoFrame& src_frame,
-                                         VideoFrame& dst_frame,
-                                         std::vector<uint8_t>& tmp_buf)
-    WARN_UNUSED_RESULT;
+[[nodiscard]] MEDIA_EXPORT EncoderStatus
+ConvertAndScaleFrame(const VideoFrame& src_frame,
+                     VideoFrame& dst_frame,
+                     std::vector<uint8_t>& tmp_buf);
 
 // Converts kRGBA_8888_SkColorType and kBGRA_8888_SkColorType to the appropriate
 // ARGB, XRGB, ABGR, or XBGR format.

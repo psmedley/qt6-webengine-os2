@@ -1,8 +1,8 @@
 #!/usr/bin/python3 -i
 #
-# Copyright (c) 2015-2020 The Khronos Group Inc.
-# Copyright (c) 2015-2020 Valve Corporation
-# Copyright (c) 2015-2020 LunarG, Inc.
+# Copyright (c) 2015-2022 The Khronos Group Inc.
+# Copyright (c) 2015-2022 Valve Corporation
+# Copyright (c) 2015-2022 LunarG, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -48,23 +48,22 @@ class LvtFileOutputGeneratorOptions(GeneratorOptions):
                  filename = None,
                  directory = '.',
                  genpath = None,
-                 apiname = None,
+                 apiname = 'vulkan',
                  profile = None,
                  versions = '.*',
                  emitversions = '.*',
-                 defaultExtensions = None,
+                 defaultExtensions = 'vulkan',
                  addExtensions = None,
                  removeExtensions = None,
                  emitExtensions = None,
                  emitSpirv = None,
                  sortProcedure = regSortFeatures,
-                 prefixText = "",
                  genFuncPointers = True,
-                 apicall = '',
-                 apientry = '',
-                 apientryp = '',
-                 alignFuncParam = 0,
-                 expandEnumerants = True,
+                 apicall = 'VKAPI_ATTR ',
+                 apientry = 'VKAPI_CALL ',
+                 apientryp = 'VKAPI_PTR *',
+                 alignFuncParam = 48,
+                 expandEnumerants = False,
                  lvt_file_type = ''):
         GeneratorOptions.__init__(self,
                 conventions = conventions,
@@ -81,9 +80,7 @@ class LvtFileOutputGeneratorOptions(GeneratorOptions):
                 emitExtensions = emitExtensions,
                 emitSpirv = emitSpirv,
                 sortProcedure = sortProcedure)
-        self.prefixText      = prefixText
         self.genFuncPointers = genFuncPointers
-        self.prefixText      = None
         self.apicall         = apicall
         self.apientry        = apientry
         self.apientryp       = apientryp
@@ -113,19 +110,15 @@ class LvtFileOutputGenerator(OutputGenerator):
         if genOpts.lvt_file_type == 'function_pointer_header':
             write("#pragma once", file=self.outFile)
 
-        # User-supplied prefix text, if any (list of strings)
-        if (genOpts.prefixText):
-            for s in genOpts.prefixText:
-                write(s, file=self.outFile)
         # File Comment
         file_comment = '// *** THIS FILE IS GENERATED - DO NOT EDIT ***\n'
         file_comment += '// See lvt_file_generator.py for modifications\n'
         write(file_comment, file=self.outFile)
         # Copyright Notice
         copyright =  '/*\n'
-        copyright += ' * Copyright (c) 2015-2020 The Khronos Group Inc.\n'
-        copyright += ' * Copyright (c) 2015-2020 Valve Corporation\n'
-        copyright += ' * Copyright (c) 2015-2020 LunarG, Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 The Khronos Group Inc.\n'
+        copyright += ' * Copyright (c) 2015-2022 Valve Corporation\n'
+        copyright += ' * Copyright (c) 2015-2022 LunarG, Inc.\n'
         copyright += ' *\n'
         copyright += ' * Licensed under the Apache License, Version 2.0 (the "License");\n'
         copyright += ' * you may not use this file except in compliance with the License.\n'

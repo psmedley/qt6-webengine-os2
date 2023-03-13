@@ -15,7 +15,9 @@ limitations under the License.
 #include "tensorflow/compiler/mlir/lite/quantization/lite/tfl_to_std.h"
 
 #include "llvm/Support/Casting.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"  // from @llvm-project
 #include "mlir/Dialect/Quant/QuantOps.h"  // from @llvm-project
+#include "mlir/IR/BuiltinAttributes.h"  // from @llvm-project
 #include "tensorflow/compiler/mlir/lite/ir/tfl_ops.h"
 #include "tensorflow/compiler/mlir/lite/quantization/quantization_utils.h"
 
@@ -36,6 +38,18 @@ void ConvertTFLQuantOpsToMlirQuantOps(FuncOp func) {
           q.getLoc(), q.output().getType(), q.input());
       q.output().replaceAllUsesWith(qcast);
       q.erase();
+    } else if (auto q = llvm::dyn_cast<ConstOp>(op)) {
+      auto value = q.value();
+      auto type = q.getResult().getType();
+      if (arith::ConstantOp::isBuildableWith(value, type)) {
+        auto c = b.create<arith::ConstantOp>(q.getLoc(), q.value());
+        q.output().replaceAllUsesWith(c);
+        q.erase();
+      } else if (TFL::NoValueOp::isBuildableWith(value, type)) {
+        auto c = b.create<TFL::NoValueOp>(q.getLoc(), type, mlir::UnitAttr());
+        q.output().replaceAllUsesWith(c);
+        q.erase();
+      }
     }
   });
 }
@@ -49,7 +63,7 @@ void ConvertMlirQuantOpsToTFLQuantOps(FuncOp func) {
                                           dq.arg());
       dq.getResult().replaceAllUsesWith(dcast);
       if (auto extra_attr = op->getAttr(mlir::quant::kVolatileOpAttrName)) {
-        dcast.setAttr(mlir::quant::kVolatileOpAttrName, extra_attr);
+        dcast->setAttr(mlir::quant::kVolatileOpAttrName, extra_attr);
       }
       dq.erase();
     } else if (auto q = llvm::dyn_cast<quant::QuantizeCastOp>(op)) {
@@ -58,7 +72,7 @@ void ConvertMlirQuantOpsToTFLQuantOps(FuncOp func) {
                                         TypeAttr::get(out_type));
       q.getResult().replaceAllUsesWith(qcast);
       if (auto extra_attr = op->getAttr(mlir::quant::kVolatileOpAttrName)) {
-        qcast.setAttr(mlir::quant::kVolatileOpAttrName, extra_attr);
+        qcast->setAttr(mlir::quant::kVolatileOpAttrName, extra_attr);
       }
       q.erase();
     }

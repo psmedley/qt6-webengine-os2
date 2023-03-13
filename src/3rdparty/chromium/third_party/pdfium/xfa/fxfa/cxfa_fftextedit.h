@@ -8,7 +8,8 @@
 #define XFA_FXFA_CXFA_FFTEXTEDIT_H_
 
 #include "core/fxcrt/fx_coordinates.h"
-#include "core/fxcrt/fx_string.h"
+#include "core/fxcrt/widestring.h"
+#include "v8/include/cppgc/prefinalizer.h"
 #include "xfa/fxfa/cxfa_fffield.h"
 
 class CFWL_Event;
@@ -19,11 +20,14 @@ class CXFA_FFWidget;
 class IFWL_WidgetDelegate;
 
 class CXFA_FFTextEdit : public CXFA_FFField {
+  CPPGC_USING_PRE_FINALIZER(CXFA_FFTextEdit, PreFinalize);
+
  public:
   CONSTRUCT_VIA_MAKE_GARBAGE_COLLECTED;
   ~CXFA_FFTextEdit() override;
 
-  void PreFinalize() override;
+  void PreFinalize();
+
   void Trace(cppgc::Visitor* visitor) const override;
 
   // CXFA_FFField
@@ -58,8 +62,8 @@ class CXFA_FFTextEdit : public CXFA_FFField {
   bool CanSelectAll() override;
   bool Undo() override;
   bool Redo() override;
-  Optional<WideString> Copy() override;
-  Optional<WideString> Cut() override;
+  absl::optional<WideString> Copy() override;
+  absl::optional<WideString> Cut() override;
   bool Paste(const WideString& wsPaste) override;
   void SelectAll() override;
   void Delete() override;

@@ -19,6 +19,7 @@ Run::Run(ParagraphImpl* owner,
          size_t firstChar,
          SkScalar heightMultiplier,
          bool useHalfLeading,
+         SkScalar baselineShift,
          size_t index,
          SkScalar offsetX)
     : fOwner(owner)
@@ -26,24 +27,27 @@ Run::Run(ParagraphImpl* owner,
     , fClusterRange(EMPTY_CLUSTERS)
     , fFont(info.fFont)
     , fClusterStart(firstChar)
+    , fGlyphData(std::make_shared<GlyphData>())
+    , fGlyphs(fGlyphData->glyphs)
+    , fPositions(fGlyphData->positions)
+    , fClusterIndexes(fGlyphData->clusterIndexes)
     , fHeightMultiplier(heightMultiplier)
     , fUseHalfLeading(useHalfLeading)
+    , fBaselineShift(baselineShift)
 {
     fBidiLevel = info.fBidiLevel;
     fAdvance = info.fAdvance;
     fIndex = index;
     fUtf8Range = info.utf8Range;
     fOffset = SkVector::Make(offsetX, 0);
+
     fGlyphs.push_back_n(info.glyphCount);
-    fBounds.push_back_n(info.glyphCount);
     fPositions.push_back_n(info.glyphCount + 1);
     fClusterIndexes.push_back_n(info.glyphCount + 1);
-    fShifts.push_back_n(info.glyphCount + 1, 0.0);
     info.fFont.getMetrics(&fFontMetrics);
 
     this->calculateMetrics();
 
-    fSpaced = false;
     // To make edge cases easier:
     fPositions[info.glyphCount] = fOffset + fAdvance;
     fClusterIndexes[info.glyphCount] = this->leftToRight() ? info.utf8Range.end() : info.utf8Range.begin();
@@ -69,14 +73,13 @@ void Run::calculateMetrics() {
         fCorrectAscent *= multiplier;
         fCorrectDescent *= multiplier;
     }
+    // If we shift the baseline we need to make sure the shifted text fits the line
+    fCorrectAscent += fBaselineShift;
+    fCorrectDescent += fBaselineShift;
 }
 
 SkShaper::RunHandler::Buffer Run::newRunBuffer() {
     return {fGlyphs.data(), fPositions.data(), nullptr, fClusterIndexes.data(), fOffset};
-}
-
-void Run::commit() {
-    fFont.getBounds(fGlyphs.data(), fGlyphs.size(), fBounds.data(), nullptr);
 }
 
 void Run::copyTo(SkTextBlobBuilder& builder, size_t pos, size_t size) const {
@@ -84,17 +87,12 @@ void Run::copyTo(SkTextBlobBuilder& builder, size_t pos, size_t size) const {
     const auto& blobBuffer = builder.allocRunPos(fFont, SkToInt(size));
     sk_careful_memcpy(blobBuffer.glyphs, fGlyphs.data() + pos, size * sizeof(SkGlyphID));
 
-    if (!fSpaced && fJustificationShifts.empty()) {
+    if (fJustificationShifts.empty()) {
         sk_careful_memcpy(blobBuffer.points(), fPositions.data() + pos, size * sizeof(SkPoint));
     } else {
         for (size_t i = 0; i < size; ++i) {
             auto point = fPositions[i + pos];
-            if (fSpaced) {
-                point.fX += fShifts[i + pos];
-            }
-            if (!fJustificationShifts.empty()) {
-                point.fX += fJustificationShifts[i + pos].fX;
-            }
+            point.fX += fJustificationShifts[i + pos].fX;
             blobBuffer.points()[i] = point;
         }
     }
@@ -144,9 +142,8 @@ SkScalar Run::addSpacesAtTheEnd(SkScalar space, Cluster* cluster) {
         return 0;
     }
 
-    fShifts[cluster->endPos() - 1] += space;
+    fPositions[cluster->endPos() - 1].fX += space;
     // Increment the run width
-    fSpaced = true;
     fAdvance.fX += space;
     // Increment the cluster width
     cluster->space(space, space);
@@ -154,19 +151,29 @@ SkScalar Run::addSpacesAtTheEnd(SkScalar space, Cluster* cluster) {
     return space;
 }
 
+SkScalar Run::addSpacesEvenly(SkScalar space) {
+    SkScalar shift = 0;
+    for (size_t i = 0; i < this->size(); ++i) {
+        fPositions[i].fX += shift;
+        shift += space;
+    }
+    fPositions[this->size()].fX += shift;
+    fAdvance.fX += shift;
+    return shift;
+}
+
 SkScalar Run::addSpacesEvenly(SkScalar space, Cluster* cluster) {
     // Offset all the glyphs in the cluster
     SkScalar shift = 0;
     for (size_t i = cluster->startPos(); i < cluster->endPos(); ++i) {
-        fShifts[i] += shift;
+        fPositions[i].fX += shift;
         shift += space;
     }
     if (this->size() == cluster->endPos()) {
         // To make calculations easier
-        fShifts[cluster->endPos()] += shift;
+        fPositions[cluster->endPos()].fX += shift;
     }
     // Increment the run width
-    fSpaced = true;
     fAdvance.fX += shift;
     // Increment the cluster width
     cluster->space(shift, space);
@@ -180,13 +187,12 @@ void Run::shift(const Cluster* cluster, SkScalar offset) {
         return;
     }
 
-    fSpaced = true;
     for (size_t i = cluster->startPos(); i < cluster->endPos(); ++i) {
-        fShifts[i] += offset;
+        fPositions[i].fX += offset;
     }
     if (this->size() == cluster->endPos()) {
         // To make calculations easier
-        fShifts[cluster->endPos()] += offset;
+        fPositions[cluster->endPos()].fX += offset;
     }
 }
 
@@ -279,8 +285,7 @@ SkScalar Cluster::trimmedWidth(size_t pos) const {
 }
 
 SkScalar Run::positionX(size_t pos) const {
-    return posX(pos) + fShifts[pos] +
-            (fJustificationShifts.empty() ? 0 : fJustificationShifts[pos].fY);
+    return posX(pos) + (fJustificationShifts.empty() ? 0 : fJustificationShifts[pos].fY);
 }
 
 PlaceholderStyle* Run::placeholderStyle() const {

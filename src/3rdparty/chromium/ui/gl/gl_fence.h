@@ -7,7 +7,6 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "ui/gfx/gpu_fence.h"
 #include "ui/gl/gl_export.h"
 
@@ -42,6 +41,10 @@ union TransferableFence {
 class GL_EXPORT GLFence {
  public:
   GLFence();
+
+  GLFence(const GLFence&) = delete;
+  GLFence& operator=(const GLFence&) = delete;
+
   virtual ~GLFence();
 
   static bool IsSupported();
@@ -78,9 +81,6 @@ class GL_EXPORT GLFence {
   // Returns a GpuFence. Only valid on a GLFence created by
   // CreateForGpuFence.
   virtual std::unique_ptr<gfx::GpuFence> GetGpuFence();
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(GLFence);
 };
 
 }  // namespace gl

@@ -37,7 +37,6 @@ if (is_win) {
 
 config("vulkan_internal_config") {
   defines = [
-    "VULKAN_NON_CMAKE_BUILD",
     "VK_ENABLE_BETA_EXTENSIONS",
   ]
   if (is_clang || !is_win) {
@@ -57,7 +56,7 @@ config("vulkan_internal_config") {
       "EXTRASYSCONFDIR=\"/pkg/data\"",
     ]
   }
-  if (is_linux || is_mac) {
+  if (is_linux || is_chromeos || is_mac) {
     defines += [
       "SYSCONFDIR=\"/etc\"",
       "FALLBACK_CONFIG_DIRS=\"/etc/xdg\"",
@@ -82,9 +81,12 @@ config("vulkan_loader_config") {
   if (is_win) {
     cflags = [ "/wd4201" ]
   }
-  if (is_linux) {
+  if (is_linux || is_chromeos) {
     # assume secure_getenv() is available
-    defines += [ "HAVE_SECURE_GETENV" ]
+    defines += [
+      "HAVE_SECURE_GETENV",
+      "LOADER_ENABLE_LINUX_SORT",
+    ]
   }
 }
 
@@ -100,6 +102,8 @@ if (!is_android) {
   target(library_type, "libvulkan") {
     sources = [
       "loader/adapters.h",
+      "loader/allocation.c",
+      "loader/allocation.h",
       "loader/asm_offset.c",
       "loader/cJSON.c",
       "loader/cJSON.h",
@@ -108,16 +112,23 @@ if (!is_android) {
       "loader/dev_ext_trampoline.c",
       "loader/extension_manual.c",
       "loader/extension_manual.h",
+      "loader/get_environment.c",
+      "loader/get_environment.h",
       "loader/generated/vk_layer_dispatch_table.h",
       "loader/generated/vk_loader_extensions.h",
       "loader/generated/vk_object_types.h",
       "loader/gpa_helper.h",
+      "loader/gpa_helper.c",
+      "loader/loader_common.h",
       "loader/loader.c",
       "loader/loader.h",
-      "loader/murmurhash.c",
-      "loader/murmurhash.h",
+      "loader/log.c",
+      "loader/log.h",
       "loader/phys_dev_ext.c",
+      "loader/terminator.c",
       "loader/trampoline.c",
+      "loader/unknown_function_handling.h",
+      "loader/unknown_function_handling.c",
       "loader/vk_loader_layer.h",
 
       # TODO(jmadill): Use assembler where available.
@@ -136,7 +147,7 @@ if (!is_android) {
         output_name = "vulkan"
 
         # Create libvulkan.so.1 on Linux instead of libvulkan.so
-        if (is_linux && vulkan_loader_shared) {
+        if ((is_linux || is_chromeos) && vulkan_loader_shared) {
           output_extension = "so.1"
         }
       }
@@ -146,6 +157,9 @@ if (!is_android) {
       sources += [
         "loader/dirent_on_windows.c",
         "loader/dirent_on_windows.h",
+        "loader/loader_windows.c",
+        "loader/loader_windows.h",
+        "loader/loader.rc",
         "loader/vulkan-1.def",
       ]
       if (!is_clang) {
@@ -169,14 +183,18 @@ if (!is_android) {
       }
       libs = [ "Cfgmgr32.lib" ]
     }
+    if (is_linux || is_chromeos) {
+      sources += [
+        "loader/loader_linux.c",
+        "loader/loader_linux.h",
+      ]
+    }
     if (is_mac) {
       frameworks = [ "CoreFoundation.framework" ]
     }
     public_deps = [ "$vulkan_headers_dir:vulkan_headers" ]
-    if (build_with_chromium) {
-      configs -= [ "//build/config/compiler:chromium_code" ]
-      configs += [ "//build/config/compiler:no_chromium_code" ]
-    }
+    configs -= [ "//build/config/compiler:chromium_code" ]
+    configs += [ "//build/config/compiler:no_chromium_code" ]
     configs += [ ":vulkan_internal_config" ]
     public_configs = [ ":vulkan_loader_config" ]
     configs -= vulkan_undefine_configs

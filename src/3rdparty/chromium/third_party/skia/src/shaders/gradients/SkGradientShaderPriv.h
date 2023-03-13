@@ -25,10 +25,8 @@ class SkWriteBuffer;
 class SkGradientShaderBase : public SkShaderBase {
 public:
     struct Descriptor {
-        Descriptor() {
-            sk_bzero(this, sizeof(*this));
-            fTileMode = SkTileMode::kClamp;
-        }
+        Descriptor();
+        ~Descriptor();
 
         const SkMatrix*     fLocalMatrix;
         const SkColor4f*    fColors;
@@ -133,8 +131,8 @@ public:
 
 private:
     // Reserve inline space for up to 4 stops.
-    static constexpr size_t kInlineStopCount   = 4;
-    static constexpr size_t kInlineStorageSize = (sizeof(SkColor4f) + sizeof(SkScalar))
+    inline static constexpr size_t kInlineStopCount   = 4;
+    inline static constexpr size_t kInlineStorageSize = (sizeof(SkColor4f) + sizeof(SkScalar))
                                                * kInlineStopCount;
     SkAutoSTMalloc<kInlineStorageSize, uint8_t> fStorage;
 

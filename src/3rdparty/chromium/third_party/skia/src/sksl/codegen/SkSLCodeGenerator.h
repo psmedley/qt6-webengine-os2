@@ -19,9 +19,9 @@ namespace SkSL {
  */
 class CodeGenerator {
 public:
-    CodeGenerator(const Program* program, ErrorReporter* errors, OutputStream* out)
-    : fProgram(*program)
-    , fErrors(*errors)
+    CodeGenerator(const Context* context, const Program* program, OutputStream* out)
+    : fContext(*context)
+    , fProgram(*program)
     , fOut(out) {}
 
     virtual ~CodeGenerator() {}
@@ -33,8 +33,23 @@ public:
     void setOutputStream(OutputStream* output) { fOut = output; }
 
 protected:
+#if defined(SK_USE_LEGACY_MIPMAP_LOD_BIAS)
+    static constexpr float kSharpenTexturesBias = -.5f;
+#else
+    // For SkMipmapMode::kLinear we want a bias such that when the unbiased LOD value is
+    // midway between levels we select just the larger level, i.e. a bias of -.5. However, using
+    // this bias with kNearest mode with a draw that is a perfect power of two downscale puts us
+    // right on the rounding edge where it could go up or down depending on the particular GPU.
+    // Experimentally we found that at -.49 most iOS devices (iPhone 7, 8, and iPad Pro
+    // [PowerVRGT7800 version]) all round to the level twice as big as the device space footprint
+    // for some such draws in our unit tests on GLES. However, the iPhone 11 still fails and so
+    // we are using -.475. They do not at -.48. All other GPUs passed tests with -.499. Though, at
+    // this time the bias is not implemented in the MSL codegen and so iOS/Metal was not tested.
+    static constexpr float kSharpenTexturesBias = -.475f;
+#endif
+
+    const Context& fContext;
     const Program& fProgram;
-    ErrorReporter& fErrors;
     OutputStream* fOut;
 };
 

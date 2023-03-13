@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/memory/raw_ptr.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
@@ -166,8 +167,6 @@ class VIEWS_EXPORT ViewAccessibility {
   // it may be a native accessible object implemented by another class.
   virtual gfx::NativeViewAccessible GetNativeObject() const;
 
-  virtual void NotifyAccessibilityEvent(ax::mojom::Event event_type);
-
   // Causes the screen reader to announce |text|. If the current user is not
   // using a screen reader, has no effect.
   virtual void AnnounceText(const std::u16string& text);
@@ -230,12 +229,17 @@ class VIEWS_EXPORT ViewAccessibility {
  protected:
   explicit ViewAccessibility(View* view);
 
+  // Used internally and by View.
+  virtual void NotifyAccessibilityEvent(ax::mojom::Event event_type);
+
   // Used for testing. Called every time an accessibility event is fired.
   AccessibilityEventsCallback accessibility_events_callback_;
 
  private:
+  friend class View;
+
   // Weak. Owns this.
-  View* const view_;
+  const raw_ptr<View> view_;
 
   // If there are any virtual children, they override any real children.
   // We own our virtual children.
@@ -244,7 +248,7 @@ class VIEWS_EXPORT ViewAccessibility {
   // The virtual child that is currently focused.
   // This is nullptr if no virtual child is focused.
   // See also OverrideFocus() and GetFocusedDescendant().
-  AXVirtualView* focused_virtual_child_;
+  raw_ptr<AXVirtualView> focused_virtual_child_;
 
   const ui::AXUniqueId unique_id_;
 
@@ -272,8 +276,8 @@ class VIEWS_EXPORT ViewAccessibility {
 
   // Used by the Views system to help some assistive technologies, such as
   // screen readers, transition focus from one widget to another.
-  Widget* next_focus_ = nullptr;
-  Widget* previous_focus_ = nullptr;
+  base::WeakPtr<Widget> next_focus_ = nullptr;
+  base::WeakPtr<Widget> previous_focus_ = nullptr;
 
   // This view's child tree id.
   absl::optional<ui::AXTreeID> child_tree_id_;

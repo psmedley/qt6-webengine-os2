@@ -11,7 +11,7 @@
 #include "base/callback_forward.h"
 #include "base/containers/flat_set.h"
 #include "base/containers/unique_ptr_adapters.h"
-#include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "components/services/storage/public/mojom/service_worker_storage_control.mojom.h"
 #include "content/browser/service_worker/fake_embedded_worker_instance_client.h"
 #include "content/browser/service_worker/fake_service_worker.h"
@@ -87,7 +87,11 @@ class EmbeddedWorkerTestHelper {
   explicit EmbeddedWorkerTestHelper(const base::FilePath& user_data_directory);
   EmbeddedWorkerTestHelper(
       const base::FilePath& user_data_directory,
-      storage::SpecialStoragePolicy* special_storage_policy);
+      scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy);
+
+  EmbeddedWorkerTestHelper(const EmbeddedWorkerTestHelper&) = delete;
+  EmbeddedWorkerTestHelper& operator=(const EmbeddedWorkerTestHelper&) = delete;
+
   virtual ~EmbeddedWorkerTestHelper();
 
   ServiceWorkerContextCore* context();
@@ -188,6 +192,7 @@ class EmbeddedWorkerTestHelper {
   std::unique_ptr<TestBrowserContext> browser_context_;
   std::unique_ptr<MockRenderProcessHost> render_process_host_;
   std::unique_ptr<MockRenderProcessHost> new_render_process_host_;
+  scoped_refptr<storage::MockQuotaManager> quota_manager_;
   scoped_refptr<storage::MockQuotaManagerProxy> quota_manager_proxy_;
 
   scoped_refptr<ServiceWorkerContextWrapper> wrapper_;
@@ -215,8 +220,6 @@ class EmbeddedWorkerTestHelper {
   int new_mock_render_process_id_;
 
   scoped_refptr<URLLoaderFactoryGetter> url_loader_factory_getter_;
-
-  DISALLOW_COPY_AND_ASSIGN(EmbeddedWorkerTestHelper);
 };
 
 template <typename MockType, typename... Args>

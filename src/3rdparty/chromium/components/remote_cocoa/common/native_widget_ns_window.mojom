@@ -8,6 +8,7 @@ import "components/remote_cocoa/common/select_file_dialog.mojom";
 import "mojo/public/mojom/base/string16.mojom";
 import "services/network/public/mojom/network_param.mojom";
 import "ui/base/mojom/ui_base_types.mojom";
+import "ui/events/mojom/event_constants.mojom";
 import "ui/gfx/geometry/mojom/geometry.mojom";
 import "ui/gfx/mojom/ca_layer_params.mojom";
 
@@ -73,6 +74,8 @@ struct NativeWidgetNSWindowInitParams {
   // NSWindowCollectionBehaviorParticipatesInCycle (this is not the
   // default for NSWindows with NSBorderlessWindowMask).
   bool force_into_collection_cycle;
+  // If true, the window was created in headless mode.
+  bool is_headless_mode_window;
   // An opaque blob of AppKit data which includes, among other things, a
   // window's workspace and fullscreen state, and can be retrieved from or
   // applied to a window.
@@ -87,6 +90,14 @@ enum WindowControlsOverlayNSViewType {
 // The interface through which a NativeWidgetMac may interact with an NSWindow
 // (possibly in a process separate from the browser process).
 interface NativeWidgetNSWindow {
+  // Enable fullscreen control through NativeWidgetNSWindowFullscreenController.
+  // This is done via a method instead of using a base::Feature because the app
+  // shim process does not synchronize its base::Features with the browser
+  // process.
+  // TODO(https://crbug.com/1302857): Remove this once FullscreenControllerMac
+  // is on by default.
+  CreateFullscreenController();
+
   // Create and set the NSWindow for the bridge.
   CreateWindow(CreateWindowParams params);
 
@@ -170,7 +181,17 @@ interface NativeWidgetNSWindow {
 
   // Called by NativeWidgetMac to initiate a transition to the specified target
   // fullscreen state.
+  // TODO(https://crbug.com/1302857): Remove this once FullscreenControllerMac
+  // is on by default.
   SetFullscreen(bool fullscreen);
+
+  // Initiate a transition to fullscreen on the specified display.  If
+  // `target_display_id` is invalid, then fullscreen should be entered on the
+  // current display.
+  EnterFullscreen(int64 target_display_id);
+
+  // Initiate a transition out of fullscreen.
+  ExitFullscreen();
 
   // Called by NativeWidgetMac; sets whether the window can share fullscreen
   // windows' spaces by changing the NSWindow's collectionBehavior.
@@ -225,6 +246,9 @@ interface NativeWidgetNSWindow {
 
   // Redispatch a keyboard event using the widget's window's CommandDispatcher.
   RedispatchKeyEvent(array<uint8> native_event_data);
+
+  // Enable or disable this widget's local event monitor.
+  SetLocalEventMonitorEnabled(bool enabled);
 
   // Add the overlay NSView for a PWA with window controls overlay
   // display override given a |overlay_type|.

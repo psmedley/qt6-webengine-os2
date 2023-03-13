@@ -6,13 +6,12 @@
 
 #include "base/bind.h"
 #include "base/compiler_specific.h"
-#include "base/cxx17_backports.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/data_url.h"
 #include "net/base/io_buffer.h"
@@ -47,15 +46,14 @@ const int kDefaultMaxResponseBytes = 1048576;  // 1 megabyte
 //
 // 30 seconds is a compromise between those competing goals. This value also
 // appears to match Microsoft Edge (based on testing).
-constexpr base::TimeDelta kDefaultMaxDuration =
-    base::TimeDelta::FromSeconds(30);
+constexpr base::TimeDelta kDefaultMaxDuration = base::Seconds(30);
 
 // Returns true if |mime_type| is one of the known PAC mime type.
 bool IsPacMimeType(const std::string& mime_type) {
   static const char* const kSupportedPacMimeTypes[] = {
       "application/x-ns-proxy-autoconfig", "application/x-javascript-config",
   };
-  for (size_t i = 0; i < base::size(kSupportedPacMimeTypes); ++i) {
+  for (size_t i = 0; i < std::size(kSupportedPacMimeTypes); ++i) {
     if (base::LowerCaseEqualsASCII(mime_type, kSupportedPacMimeTypes[i]))
       return true;
   }
@@ -329,8 +327,8 @@ PacFileFetcherImpl::PacFileFetcherImpl(URLRequestContext* url_request_context)
 }
 
 bool PacFileFetcherImpl::IsUrlSchemeAllowed(const GURL& url) const {
-  // Always allow http://, https://, data:, and ftp://.
-  if (url.SchemeIsHTTPOrHTTPS() || url.SchemeIs("ftp") || url.SchemeIs("data"))
+  // Always allow http://, https://, and data:.
+  if (url.SchemeIsHTTPOrHTTPS() || url.SchemeIs("data"))
     return true;
 
   // Disallow any other URL scheme.

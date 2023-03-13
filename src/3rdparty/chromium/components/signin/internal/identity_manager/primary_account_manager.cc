@@ -12,12 +12,12 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/observer_list.h"
 #include "build/build_config.h"
 #include "build/chromeos_buildflags.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/internal/identity_manager/account_tracker_service.h"
-#include "components/signin/internal/identity_manager/primary_account_policy_manager.h"
 #include "components/signin/internal/identity_manager/profile_oauth2_token_service.h"
 #include "components/signin/public/base/account_consistency_method.h"
 #include "components/signin/public/base/signin_client.h"
@@ -30,13 +30,10 @@ using signin::PrimaryAccountChangeEvent;
 PrimaryAccountManager::PrimaryAccountManager(
     SigninClient* client,
     ProfileOAuth2TokenService* token_service,
-    AccountTrackerService* account_tracker_service,
-    std::unique_ptr<PrimaryAccountPolicyManager> policy_manager)
+    AccountTrackerService* account_tracker_service)
     : client_(client),
       token_service_(token_service),
-      account_tracker_service_(account_tracker_service),
-      initialized_(false),
-      policy_manager_(std::move(policy_manager)) {
+      account_tracker_service_(account_tracker_service) {
   DCHECK(client_);
   DCHECK(account_tracker_service_);
 }
@@ -56,7 +53,6 @@ void PrimaryAccountManager::RegisterProfilePrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAutologinEnabled, true);
   registry->RegisterListPref(prefs::kReverseAutologinRejectedEmailList);
   registry->RegisterBooleanPref(prefs::kSigninAllowed, true);
-  registry->RegisterBooleanPref(prefs::kSigninAllowedByPolicy, true);
   registry->RegisterBooleanPref(prefs::kSignedInWithCredentialProvider, false);
 }
 
@@ -120,9 +116,6 @@ void PrimaryAccountManager::Initialize(PrefService* local_state) {
     SetPrimaryAccountInternal(account_info, consented);
   }
 
-  if (policy_manager_) {
-    policy_manager_->InitializePolicy(local_state, this);
-  }
   // It is important to only load credentials after starting to observe the
   // token service.
   token_service_->AddObserver(this);
@@ -146,18 +139,34 @@ CoreAccountId PrimaryAccountManager::GetPrimaryAccountId(
   return GetPrimaryAccountInfo(consent_level).account_id;
 }
 
-void PrimaryAccountManager::SetUnconsentedPrimaryAccountInfo(
-    const CoreAccountInfo& account_info) {
+void PrimaryAccountManager::SetPrimaryAccountInfo(
+    const CoreAccountInfo& account_info,
+    signin::ConsentLevel consent_level) {
   if (HasPrimaryAccount(signin::ConsentLevel::kSync)) {
-    DCHECK_EQ(account_info, GetPrimaryAccountInfo(signin::ConsentLevel::kSync));
+    DCHECK_EQ(account_info, GetPrimaryAccountInfo(signin::ConsentLevel::kSync))
+        << "Changing the primary sync account is not allowed.";
     return;
   }
+  DCHECK(!account_info.account_id.empty());
+  DCHECK(!account_info.gaia.empty());
+  DCHECK(!account_info.email.empty());
+  DCHECK(!account_tracker_service_->GetAccountInfo(account_info.account_id)
+              .IsEmpty())
+      << "Account must be seeded before being set as primary account";
 
-  bool account_changed = account_info != primary_account_info();
   PrimaryAccountChangeEvent::State previous_state = GetPrimaryAccountState();
-  SetPrimaryAccountInternal(account_info, /*consented_to_sync=*/false);
-  if (account_changed)
-    FirePrimaryAccountChanged(previous_state);
+  switch (consent_level) {
+    case signin::ConsentLevel::kSync:
+      SetSyncPrimaryAccountInternal(account_info);
+      FirePrimaryAccountChanged(previous_state);
+      return;
+    case signin::ConsentLevel::kSignin:
+      bool account_changed = account_info != primary_account_info();
+      SetPrimaryAccountInternal(account_info, /*consented_to_sync=*/false);
+      if (account_changed)
+        FirePrimaryAccountChanged(previous_state);
+      return;
+  }
 }
 
 void PrimaryAccountManager::SetSyncPrimaryAccountInternal(
@@ -227,28 +236,6 @@ bool PrimaryAccountManager::HasPrimaryAccount(
   }
 }
 
-void PrimaryAccountManager::SetSyncPrimaryAccountInfo(
-    const CoreAccountInfo& account_info) {
-#if DCHECK_IS_ON()
-  DCHECK(!account_info.account_id.empty());
-  DCHECK(!account_info.gaia.empty());
-  DCHECK(!account_info.email.empty());
-  DCHECK(!account_tracker_service_->GetAccountInfo(account_info.account_id)
-              .IsEmpty())
-      << "Account should have been seeded before being set as primary account";
-#endif
-  if (HasPrimaryAccount(signin::ConsentLevel::kSync)) {
-    DCHECK_EQ(account_info.account_id,
-              GetPrimaryAccountId(signin::ConsentLevel::kSync))
-        << "Changing the primary sync account is not allowed.";
-    return;
-  }
-
-  PrimaryAccountChangeEvent::State previous_state = GetPrimaryAccountState();
-  SetSyncPrimaryAccountInternal(account_info);
-  FirePrimaryAccountChanged(previous_state);
-}
-
 void PrimaryAccountManager::UpdatePrimaryAccountInfo() {
   const CoreAccountId primary_account_id = primary_account_info().account_id;
   DCHECK(!primary_account_id.empty());
@@ -290,16 +277,14 @@ void PrimaryAccountManager::RevokeSyncConsent(
 void PrimaryAccountManager::StartSignOut(
     signin_metrics::ProfileSignout signout_source_metric,
     signin_metrics::SignoutDelete signout_delete_metric,
-    RemoveAccountsOption remove_option,
-    bool assert_signout_allowed) {
+    RemoveAccountsOption remove_option) {
   VLOG(1) << "StartSignOut: " << static_cast<int>(signout_source_metric) << ", "
           << static_cast<int>(signout_delete_metric) << ", "
           << static_cast<int>(remove_option);
   client_->PreSignOut(
       base::BindOnce(&PrimaryAccountManager::OnSignoutDecisionReached,
                      base::Unretained(this), signout_source_metric,
-                     signout_delete_metric, remove_option,
-                     assert_signout_allowed),
+                     signout_delete_metric, remove_option),
       signout_source_metric);
 }
 
@@ -307,11 +292,8 @@ void PrimaryAccountManager::OnSignoutDecisionReached(
     signin_metrics::ProfileSignout signout_source_metric,
     signin_metrics::SignoutDelete signout_delete_metric,
     RemoveAccountsOption remove_option,
-    bool assert_signout_allowed,
     SigninClient::SignoutDecision signout_decision) {
   DCHECK(IsInitialized());
-  if (assert_signout_allowed)
-    DCHECK_EQ(SigninClient::SignoutDecision::ALLOW_SIGNOUT, signout_decision);
 
   VLOG(1) << "OnSignoutDecisionReached: "
           << (signout_decision == SigninClient::SignoutDecision::ALLOW_SIGNOUT);

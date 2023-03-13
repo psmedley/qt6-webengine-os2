@@ -687,8 +687,7 @@ void AUAudioInputStream::Start(AudioInputCallback* callback) {
                                             base::Unretained(this), callback));
     manager_->GetTaskRunner()->PostDelayedTask(
         FROM_HERE, deferred_start_cb_.callback(),
-        base::TimeDelta::FromSeconds(
-            AudioManagerMac::kStartDelayInSecsForPowerEvents));
+        base::Seconds(AudioManagerMac::kStartDelayInSecsForPowerEvents));
     return;
   }
 
@@ -719,8 +718,7 @@ void AUAudioInputStream::Start(AudioInputCallback* callback) {
   // true when the timer expires.
   input_callback_timer_ = std::make_unique<base::OneShotTimer>();
   input_callback_timer_->Start(
-      FROM_HERE,
-      base::TimeDelta::FromSeconds(kInputCallbackStartTimeoutInSeconds), this,
+      FROM_HERE, base::Seconds(kInputCallbackStartTimeoutInSeconds), this,
       &AUAudioInputStream::CheckInputStartupSuccess);
   DCHECK(input_callback_timer_->IsRunning());
 }
@@ -828,7 +826,7 @@ void AUAudioInputStream::SetVolume(double volume) {
   }
 
   // There is no master volume control, try to set volume for each channel.
-  int successful_channels = 0;
+  [[maybe_unused]] int successful_channels = 0;
   for (int i = 1; i <= number_of_channels_in_frame_; ++i) {
     property_address.mElement = static_cast<UInt32>(i);
     if (IsVolumeSettableOnChannel(i)) {
@@ -1123,7 +1121,7 @@ OSStatus AUAudioInputStream::OnDataIsAvailable(
       base::TimeDelta time_since_last_success =
           base::TimeTicks::Now() - last_success_time_;
       if ((time_since_last_success >
-           base::TimeDelta::FromSeconds(kMaxErrorTimeoutInSeconds))) {
+           base::Seconds(kMaxErrorTimeoutInSeconds))) {
         const char* err = (result == kAudioUnitErr_TooManyFramesToProcess)
                               ? "kAudioUnitErr_TooManyFramesToProcess"
                               : "kAudioUnitErr_CannotDoInCurrentContext";
@@ -1430,14 +1428,12 @@ void AUAudioInputStream::ReportAndResetStats() {
 
   if (glitches_detected_ != 0) {
     UMA_HISTOGRAM_LONG_TIMES("Media.Audio.Capture.LostFramesInMs",
-                             base::TimeDelta::FromMilliseconds(lost_frames_ms));
+                             base::Milliseconds(lost_frames_ms));
     auto largest_glitch_ms =
         (largest_glitch_frames_ * 1000) / format_.mSampleRate;
-    UMA_HISTOGRAM_CUSTOM_TIMES(
-        "Media.Audio.Capture.LargestGlitchMs",
-        base::TimeDelta::FromMilliseconds(largest_glitch_ms),
-        base::TimeDelta::FromMilliseconds(1), base::TimeDelta::FromMinutes(1),
-        50);
+    UMA_HISTOGRAM_CUSTOM_TIMES("Media.Audio.Capture.LargestGlitchMs",
+                               base::Milliseconds(largest_glitch_ms),
+                               base::Milliseconds(1), base::Minutes(1), 50);
     DLOG(WARNING) << log_message;
   }
 

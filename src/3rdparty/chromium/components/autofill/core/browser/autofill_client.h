@@ -20,16 +20,18 @@
 #include "components/autofill/core/browser/payments/risk_data_loader.h"
 #include "components/autofill/core/browser/ui/popup_item_ids.h"
 #include "components/autofill/core/browser/ui/popup_types.h"
+#if !defined(TOOLKIT_QT)
 #include "components/profile_metrics/browser_profile_type.h"
 #include "components/security_state/core/security_state.h"
 #include "components/translate/core/browser/language_state.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
+#endif
 #include "ui/base/window_open_disposition.h"
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/gfx/image/image.h"
 #include "url/gurl.h"
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS) && !defined(TOOLKIT_QT)
 #include "components/webauthn/core/browser/internal_authenticator.h"
 #endif
 
@@ -59,10 +61,12 @@ namespace autofill {
 
 class AddressNormalizer;
 class AutofillAblationStudy;
+struct AutofillOfferData;
 class AutofillProfile;
 class AutocompleteHistoryManager;
 class AutofillOfferManager;
 class AutofillPopupDelegate;
+struct CardUnmaskChallengeOption;
 class CardUnmaskDelegate;
 class CreditCard;
 enum class CreditCardFetchResult;
@@ -70,12 +74,16 @@ class FormDataImporter;
 class FormStructure;
 class LogManager;
 class MigratableCreditCard;
+class OtpUnmaskDelegate;
+enum class OtpUnmaskResult;
 class PersonalDataManager;
+class SingleFieldFormFillRouter;
 class StrikeDatabase;
+struct Suggestion;
+struct VirtualCardEnrollmentFields;
+class VirtualCardEnrollmentManager;
 enum class WebauthnDialogCallbackType;
 enum class WebauthnDialogState;
-struct AutofillOfferData;
-struct Suggestion;
 
 namespace payments {
 class PaymentsClient;
@@ -88,70 +96,74 @@ class PaymentsClient;
 // BrowserAutofillManager is used (e.g. a single tab), so when we say "for the
 // client" below, we mean "in the execution context the client is associated
 // with" (e.g. for the tab the BrowserAutofillManager is attached to).
+#if !defined(TOOLKIT_QT)
 class AutofillClient : public RiskDataLoader {
+#else
+class AutofillClient {
+#endif
  public:
-  enum PaymentsRpcResult {
+  enum class PaymentsRpcResult {
     // Empty result. Used for initializing variables and should generally
     // not be returned nor passed as arguments unless explicitly allowed by
     // the API.
-    NONE,
+    kNone,
 
     // Request succeeded.
-    SUCCESS,
+    kSuccess,
 
     // Request failed; try again.
-    TRY_AGAIN_FAILURE,
+    kTryAgainFailure,
 
     // Request failed; don't try again.
-    PERMANENT_FAILURE,
+    kPermanentFailure,
 
     // Unable to connect to Payments servers. Prompt user to check internet
     // connection.
-    NETWORK_ERROR,
+    kNetworkError,
 
     // Request failed in retrieving virtual card information; try again.
-    VCN_RETRIEVAL_TRY_AGAIN_FAILURE,
+    kVcnRetrievalTryAgainFailure,
 
     // Request failed in retrieving virtual card information; don't try again.
-    VCN_RETRIEVAL_PERMANENT_FAILURE,
+    kVcnRetrievalPermanentFailure,
   };
 
   // The type of the credit card the Payments RPC fetches.
-  enum PaymentsRpcCardType {
+  enum class PaymentsRpcCardType {
     // Unknown type.
-    UNKNOWN_TYPE = 0,
+    kUnknown = 0,
     // Server card.
-    SERVER_CARD = 1,
+    kServerCard = 1,
     // Virtual card.
-    VIRTUAL_CARD = 2,
+    kVirtualCard = 2,
   };
 
-  enum SaveCardOfferUserDecision {
+  enum class SaveCardOfferUserDecision {
     // The user accepted credit card save.
-    ACCEPTED,
+    kAccepted,
 
     // The user explicitly declined credit card save.
-    DECLINED,
+    kDeclined,
 
     // The user ignored the credit card save prompt.
-    IGNORED,
+    kIgnored,
   };
 
-  enum UnmaskCardReason {
+  enum class UnmaskCardReason {
     // The card is being unmasked for PaymentRequest.
-    UNMASK_FOR_PAYMENT_REQUEST,
+    kPaymentRequest,
 
     // The card is being unmasked for Autofill.
-    UNMASK_FOR_AUTOFILL,
+    kAutofill,
   };
 
   // Authentication methods for card unmasking.
-  enum UnmaskAuthMethod {
-    UNKNOWN = 0,
+  enum class UnmaskAuthMethod {
+    kUnknown = 0,
     // Require user to unmask via CVC.
-    CVC = 1,
+    kCvc = 1,
     // Suggest use of FIDO authenticator for card unmasking.
-    FIDO = 2,
+    kFido = 2,
   };
 
   enum class SaveAddressProfileOfferUserDecision {
@@ -219,11 +231,17 @@ class AutofillClient : public RiskDataLoader {
       return *this;
     }
 
+    SaveCreditCardOptions& with_has_multiple_legal_lines(bool b = true) {
+      has_multiple_legal_lines = b;
+      return *this;
+    }
+
     bool from_dynamic_change_form = false;
     bool has_non_focusable_field = false;
     bool should_request_name_from_user = false;
     bool should_request_expiration_date_from_user = false;
     bool show_prompt = false;
+    bool has_multiple_legal_lines = false;
   };
 
   // Used for options of save (and update) address profile prompt.
@@ -293,7 +311,9 @@ class AutofillClient : public RiskDataLoader {
       base::OnceCallback<void(SaveAddressProfileOfferUserDecision,
                               autofill::AutofillProfile profile)>;
 
+#if !defined(TOOLKIT_QT)
   ~AutofillClient() override = default;
+#endif
 
   // Returns the channel for the installation. In branded builds, this will be
   // version_info::Channel::{STABLE,BETA,DEV,CANARY}. In unbranded builds, or
@@ -307,10 +327,17 @@ class AutofillClient : public RiskDataLoader {
   // Gets the AutocompleteHistoryManager instance associate with the client.
   virtual AutocompleteHistoryManager* GetAutocompleteHistoryManager() = 0;
 
+#if !defined(TOOLKIT_QT)
+  // Creates and returns a SingleFieldFormFillRouter using the
+  // AutocompleteHistoryManager instance associated with the client.
+  std::unique_ptr<SingleFieldFormFillRouter> GetSingleFieldFormFillRouter();
+#endif
+
   // Gets the preferences associated with the client.
   virtual PrefService* GetPrefs() = 0;
   virtual const PrefService* GetPrefs() const = 0;
 
+#if !defined(TOOLKIT_QT)
   // Gets the sync service associated with the client.
   virtual syncer::SyncService* GetSyncService() = 0;
 
@@ -361,17 +388,25 @@ class AutofillClient : public RiskDataLoader {
   // Returns the profile type of the session.
   virtual profile_metrics::BrowserProfileType GetProfileType() const;
 
-#if !defined(OS_IOS)
+#if !BUILDFLAG(IS_IOS)
   // Creates the appropriate implementation of InternalAuthenticator. May be
   // null for platforms that don't support this, in which case standard CVC
   // authentication will be used instead.
-  virtual std::unique_ptr<InternalAuthenticator>
+  virtual std::unique_ptr<webauthn::InternalAuthenticator>
   CreateCreditCardInternalAuthenticator(content::RenderFrameHost* rfh);
 #endif
 
   // Causes the Autofill settings UI to be shown. If |show_credit_card_settings|
   // is true, will show the credit card specific subpage.
   virtual void ShowAutofillSettings(bool show_credit_card_settings) = 0;
+
+  // Show the OTP unmask dialog to accept user-input OTP value.
+  virtual void ShowCardUnmaskOtpInputDialog(
+      const size_t& otp_length,
+      base::WeakPtr<OtpUnmaskDelegate> delegate);
+
+  // Invoked when we receive the server response of the OTP unmask request.
+  virtual void OnUnmaskOtpVerificationResult(OtpUnmaskResult unmask_result);
 
   // A user has attempted to use a masked card. Prompt them for further
   // information to proceed.
@@ -380,7 +415,38 @@ class AutofillClient : public RiskDataLoader {
                                 base::WeakPtr<CardUnmaskDelegate> delegate) = 0;
   virtual void OnUnmaskVerificationResult(PaymentsRpcResult result) = 0;
 
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+  // Shows a dialog for the user to choose/confirm the authentication
+  // to use in card unmasking.
+  virtual void ShowUnmaskAuthenticatorSelectionDialog(
+      const std::vector<CardUnmaskChallengeOption>& challenge_options,
+      base::OnceCallback<void(const std::string&)>
+          confirm_unmask_challenge_option_callback,
+      base::OnceClosure cancel_unmasking_closure);
+  // This should be invoked upon server accepting the authentication method, in
+  // which case, we dismiss the selection dialog to open the authentication
+  // dialog. |server_success| dictates whether we received a success response
+  // from the server, with true representing success and false representing
+  // failure. A successful server response means that the issuer has sent an OTP
+  // and we can move on to the next portion of this flow.
+  virtual void DismissUnmaskAuthenticatorSelectionDialog(bool server_success);
+
+  // Returns a pointer to a VirtualCardEnrollmentManager that is owned by
+  // AutofillClient. VirtualCardEnrollmentManager is used for virtual card
+  // enroll and unenroll related flows. This function may return a nullptr on
+  // some platforms.
+  virtual raw_ptr<VirtualCardEnrollmentManager>
+  GetVirtualCardEnrollmentManager();
+
+  // Shows a dialog for the user to enroll in a virtual card.
+  virtual void ShowVirtualCardEnrollDialog(
+      const VirtualCardEnrollmentFields& virtual_card_enrollment_fields,
+      base::OnceClosure accept_virtual_card_callback,
+      base::OnceClosure decline_virtual_card_callback);
+
+#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+  // Hides the virtual card enroll bubble and icon if it is visible.
+  virtual void HideVirtualCardEnrollBubbleAndIconIfVisible();
+
   // Returns the list of allowed merchants and BIN ranges for virtual cards.
   virtual std::vector<std::string> GetAllowedMerchantsForVirtualCards() = 0;
   virtual std::vector<std::string> GetAllowedBinRangesForVirtualCards() = 0;
@@ -449,7 +515,7 @@ class AutofillClient : public RiskDataLoader {
       const std::vector<CreditCard*>& candidates,
       base::OnceCallback<void(const std::string&)> callback) = 0;
 
-#else  // defined(OS_ANDROID) || defined(OS_IOS)
+#else  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS)
   // Display the cardholder name fix flow prompt and run the |callback| if
   // the card should be uploaded to payments with updated name from the user.
   virtual void ConfirmAccountNameFixFlow(
@@ -520,6 +586,7 @@ class AutofillClient : public RiskDataLoader {
   // when a credit card is scanned successfully. Should be called only if
   // HasCreditCardScanFeature() returns true.
   virtual void ScanCreditCard(CreditCardScanCallback callback) = 0;
+#endif  // !defined(TOOLKIT_QT)
 
   // Shows an Autofill popup with the given |values|, |labels|, |icons|, and
   // |identifiers| for the element at |element_bounds|. |delegate| will be
@@ -553,21 +620,27 @@ class AutofillClient : public RiskDataLoader {
   // Hide the Autofill popup if one is currently showing.
   virtual void HideAutofillPopup(PopupHidingReason reason) = 0;
 
+#if !defined(TOOLKIT_QT)
   // TODO(crbug.com/1093057): Rename all the "domain" in this flow to origin.
   //                          The server is passing down full origin of the
   //                          urls. "Domain" is no longer accurate.
-  // Will show a bubble or infobar indicating that the current web domain has an
-  // eligible offer or reward if no other notification bubble is currently
-  // visible. See bubble controller for details. The bubble is sticky over a set
-  // of domains given in the offer.
-  virtual void ShowOfferNotificationIfApplicable(
-      const AutofillOfferData* offer);
+  // Notifies the client to update the offer notification when the |offer| is
+  // available. |notification_has_been_shown| indicates whether this
+  // notification has been shown since profile start-up.
+  virtual void UpdateOfferNotification(const AutofillOfferData* offer,
+                                       bool notification_has_been_shown);
+
+  // Dismiss any visible offer notification on the current tab.
+  virtual void DismissOfferNotification();
 
   // Called when the virtual card has been fetched successfully.
+  // |masked_card_identifier_string| is the network + last four digits of
+  // the card number of the corresponding masked server card.
   // |credit_card| and |cvc| include the information that allow the user to
   // manually fill payment form. |card_image| is used for manual fallback
   // bubble.
   virtual void OnVirtualCardDataAvailable(
+      const std::u16string& masked_card_identifier_string,
       const CreditCard* credit_card,
       const std::u16string& cvc,
       const gfx::Image& card_image = gfx::Image());
@@ -576,11 +649,21 @@ class AutofillClient : public RiskDataLoader {
   // error dialog with virtual card related messages.
   virtual void ShowVirtualCardErrorDialog(bool is_permanent_error);
 
+  // Show/dismiss the progress dialog which contains a throbber and a text
+  // message indicating that something is in progress.
+  virtual void ShowAutofillProgressDialog(base::OnceClosure cancel_callback);
+  virtual void CloseAutofillProgressDialog(
+      bool show_confirmation_before_closing);
+#endif  // !defined(TOOLKIT_QT)
+
   // Returns true if the Autofill Assistant UI is currently being shown.
   virtual bool IsAutofillAssistantShowing();
 
   // Whether the Autocomplete feature of Autofill should be enabled.
   virtual bool IsAutocompleteEnabled() = 0;
+
+  // Returns whether password management is enabled as per the user preferences.
+  virtual bool IsPasswordManagerEnabled() = 0;
 
   // Pass the form structures to the password manager to choose correct username
   // and to the password generation manager to detect account creation forms.
@@ -588,6 +671,7 @@ class AutofillClient : public RiskDataLoader {
       content::RenderFrameHost* rfh,
       const std::vector<FormStructure*>& forms) = 0;
 
+#if !defined(TOOLKIT_QT)
   // Inform the client that the field has been filled.
   virtual void DidFillOrPreviewField(
       const std::u16string& autofilled_value,
@@ -605,14 +689,17 @@ class AutofillClient : public RiskDataLoader {
 
   // Handles simple actions for the autofill popups.
   virtual void ExecuteCommand(int id) = 0;
+#endif  // !defined(TOOLKIT_QT)
 
   // Returns a LogManager instance. May be null for platforms that don't support
   // this.
   virtual LogManager* GetLogManager() const;
 
+#if !defined(TOOLKIT_QT)
   virtual const AutofillAblationStudy& GetAblationStudy() const;
+#endif
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // Checks whether the current query is the most recent one.
   virtual bool IsQueryIDRelevant(int query_id) = 0;
 #endif

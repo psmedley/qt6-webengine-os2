@@ -76,7 +76,7 @@
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -357,7 +357,7 @@ static bool HasEditableLevel(const Node& node, EditableLevel editable_level) {
     const ComputedStyle* style = ancestor.GetComputedStyle();
     if (!style)
       continue;
-    switch (style->UserModify()) {
+    switch (style->UsedUserModify()) {
       case EUserModify::kReadOnly:
         return false;
       case EUserModify::kReadWrite:
@@ -1204,7 +1204,7 @@ static Node* EnclosingNodeOfTypeAlgorithm(const PositionTemplate<Strategy>& p,
     return nullptr;
 
   ContainerNode* const root =
-      rule == kCannotCrossEditingBoundary ? HighestEditableRoot(p) : nullptr;
+      rule == kCannotCrossEditingBoundary ? RootEditableElementOf(p) : nullptr;
   for (Node* n = p.AnchorNode(); n; n = Strategy::Parent(*n)) {
     // Don't return a non-editable node if the input position was editable,
     // since the callers from editing will no doubt want to perform editing
@@ -1340,6 +1340,14 @@ HTMLSpanElement* CreateTabSpanElement(Document& document) {
   return CreateTabSpanElement(document, nullptr);
 }
 
+static bool IsInPlaceholder(const TextControlElement& text_control,
+                            const Position& position) {
+  const auto* const placeholder_element = text_control.PlaceholderElement();
+  if (!placeholder_element)
+    return false;
+  return placeholder_element->contains(position.ComputeContainerNode());
+}
+
 // Returns user-select:contain boundary element of specified position.
 // Because of we've not yet implemented "user-select:contain", we consider
 // following elements having "user-select:contain"
@@ -1350,6 +1358,8 @@ HTMLSpanElement* CreateTabSpanElement(Document& document) {
 // See http:/crbug.com/658129
 static Element* UserSelectContainBoundaryOf(const Position& position) {
   if (auto* text_control = EnclosingTextControl(position)) {
+    if (IsInPlaceholder(*text_control, position))
+      return nullptr;
     // for <input readonly>. See http://crbug.com/185089
     return text_control->InnerEditorElement();
   }
@@ -1374,7 +1384,7 @@ PositionWithAffinity PositionRespectingEditingBoundary(
     return hit_test_result.GetPosition();
 
   const LayoutObject* editable_object = editable_element->GetLayoutObject();
-  if (!editable_object)
+  if (!editable_object || !editable_object->VisibleToHitTesting())
     return PositionWithAffinity();
 
   // TODO(yosin): Is this kIgnoreTransforms correct here?
@@ -1675,7 +1685,7 @@ wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position& position) {
       position.ComputeOffsetInContainerNode());
 }
 
-FloatQuad LocalToAbsoluteQuadOf(const LocalCaretRect& caret_rect) {
+gfx::QuadF LocalToAbsoluteQuadOf(const LocalCaretRect& caret_rect) {
   return caret_rect.layout_object->LocalRectToAbsoluteQuad(caret_rect.rect);
 }
 

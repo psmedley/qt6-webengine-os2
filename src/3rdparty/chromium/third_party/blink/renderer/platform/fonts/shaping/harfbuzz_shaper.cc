@@ -88,13 +88,7 @@ void CheckShapeResultRange(const ShapeResult* result,
   StringBuilder log;
   log.Append("Font='");
   const FontDescription& font_description = font->GetFontDescription();
-  for (const FontFamily* family = &font_description.Family();;) {
-    log.Append(family->Family());
-    family = family->Next();
-    if (!family)
-      break;
-    log.Append(", ");
-  }
+  log.Append(font_description.Family().ToString());
   log.AppendFormat("', %f", font_description.ComputedSize());
 
   // Log the primary font with its family name in the font file.
@@ -141,7 +135,7 @@ struct TrackEmoji {
 void IdentifyBrokenEmoji(void* context,
                          unsigned character_index,
                          Glyph glyph,
-                         FloatSize,
+                         gfx::Vector2dF,
                          float,
                          bool,
                          CanvasRotationInVertical,
@@ -310,8 +304,8 @@ inline bool ShapeRange(hb_buffer_t* buffer,
   hb_font_t* hb_font =
       face->GetScaledFont(std::move(current_font_range_set),
                           HB_DIRECTION_IS_VERTICAL(direction)
-                              ? HarfBuzzFace::PrepareForVerticalLayout
-                              : HarfBuzzFace::NoVerticalLayout,
+                              ? HarfBuzzFace::kPrepareForVerticalLayout
+                              : HarfBuzzFace::kNoVerticalLayout,
                           specified_size);
   hb_shape(hb_font, buffer, font_features, font_features_size);
   if (!face->ShouldSubpixelPosition())
@@ -422,19 +416,23 @@ void HarfBuzzShaper::CommitGlyphs(RangeData* range_data,
         current_font, direction, canvas_rotation, script,
         current_slice->start_character_index, current_slice->num_glyphs,
         current_slice->num_characters);
+    unsigned next_start_glyph;
     shape_result->InsertRun(run, current_slice->start_glyph_index,
-                            current_slice->num_glyphs, range_data->buffer);
-    unsigned num_glyphs_inserted = run->NumGlyphs();
-    if (num_glyphs_inserted == current_slice->num_glyphs)
+                            current_slice->num_glyphs, &next_start_glyph,
+                            range_data->buffer);
+    DCHECK_GE(current_slice->start_glyph_index + current_slice->num_glyphs,
+              next_start_glyph);
+    unsigned next_num_glyphs =
+        current_slice->num_glyphs -
+        (next_start_glyph - current_slice->start_glyph_index);
+    if (!next_num_glyphs)
       break;
     // If the slice exceeds the limit a RunInfo can store, create another
     // RunInfo for the rest of the slice.
     DCHECK_GT(current_slice->num_characters, run->num_characters_);
-    DCHECK_GT(current_slice->num_glyphs, num_glyphs_inserted);
     next_slice = {current_slice->start_character_index + run->num_characters_,
                   current_slice->num_characters - run->num_characters_,
-                  current_slice->start_glyph_index + num_glyphs_inserted,
-                  current_slice->num_glyphs - num_glyphs_inserted};
+                  next_start_glyph, next_num_glyphs};
     current_slice = &next_slice;
   }
   if (is_last_font)
@@ -796,9 +794,11 @@ void HarfBuzzShaper::ShapeSegment(
     SmallCapsIterator::SmallCapsBehavior small_caps_behavior =
         SmallCapsIterator::kSmallCapsSameCase;
     if (needs_caps_handling) {
-      caps_support = OpenTypeCapsSupport(
-          font_data->PlatformData().GetHarfBuzzFace(),
-          font_description.VariantCaps(), ICUScriptToHBScript(segment.script));
+      caps_support =
+          OpenTypeCapsSupport(font_data->PlatformData().GetHarfBuzzFace(),
+                              font_description.VariantCaps(),
+                              font_description.GetFontSynthesisSmallCaps(),
+                              ICUScriptToHBScript(segment.script));
       if (caps_support.NeedsRunCaseSplitting()) {
         SplitUntilNextCaseChange(text_, &range_data->reshape_queue,
                                  current_queue_item, small_caps_behavior);

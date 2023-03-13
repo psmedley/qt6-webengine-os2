@@ -18,7 +18,7 @@ TestContentPaymentRequestDelegate::TestContentPaymentRequestDelegate(
 
 TestContentPaymentRequestDelegate::~TestContentPaymentRequestDelegate() {}
 
-std::unique_ptr<autofill::InternalAuthenticator>
+std::unique_ptr<webauthn::InternalAuthenticator>
 TestContentPaymentRequestDelegate::CreateInternalAuthenticator() const {
   return nullptr;
 }
@@ -30,7 +30,7 @@ TestContentPaymentRequestDelegate::GetPaymentManifestWebDataService() const {
 
 PaymentRequestDisplayManager*
 TestContentPaymentRequestDelegate::GetDisplayManager() {
-  return nullptr;
+  return &payment_request_display_manager_;
 }
 
 void TestContentPaymentRequestDelegate::ShowDialog(

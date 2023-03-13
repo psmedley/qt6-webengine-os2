@@ -21,10 +21,14 @@ there.
 ## Before you start
 
 To make sure the inclusion of a new third_party project makes sense for the
-Chromium project, you should first obtain Chrome Eng Review approval.
-Googlers should see go/chrome-eng-review and review existing topics in
-g/chrome-eng-review. Please include information about the additional checkout
-size, build times, and binary size increase of
+Chromium project, you should first obtain
+[Chrome Eng Review](../ENG_REVIEW_OWNERS) approval. Googlers should see
+[go/chrome-eng-review](https://goto.google.com/chrome-eng-review) and review
+existing topics in g/chrome-eng-review, and can also come to office hours to ask
+questions.
+
+Please include information about the additional checkout size, build times,
+and binary size increase of
 [official](https://www.chromium.org/developers/gn-build-configuration) builds
 on Android and one desktop platform. Please also make sure that the motivation
 for your project is clear, e.g., a design doc has been circulated.
@@ -32,11 +36,27 @@ for your project is clear, e.g., a design doc has been circulated.
 ## Get the code
 
 There are two common ways to depend on third-party code: you can reference a
-Git repo directly (via entries in the DEPS file), or you can check in a
-snapshot. The former is preferable if you are actively developing in it or need
-access to the history; the latter is better if you don't need the full history
-of the repo or don't need to pick up every single change. And, of course, if
-the code you need isn't in a Git repo, you have to do the latter.
+Git repo directly (via entries in the DEPS file) or you can check in a
+snapshot. The former is preferable in most cases:
+
+1. If you are actively developing in the upstream repo, then having the DEPS
+   file include the upstream (that's been mirrored to GoB, see below) can be a
+   way to include those changes into Chromium at a particular revision. The
+   DEPS file will be updated to a new revision when you are ready to "roll" the
+   new version into Chromium. This also avoids duplicate copies of the code
+   showing up in multiple repos leading to contributor confusion.
+1. This interacts favorably with our upstream tracking automation. We
+   automatically consume the upstream Git hashes and match them against a
+   database of known upstreams to tracking drift between Chromium and upstream
+   sources.
+1. This makes adding deps that don't need local changes easier. E.g. some of
+   our automation automatically converts non-GN build rules into GN build rules
+   without any additional CLs.
+
+Checking in a snapshot is useful if this is effectively taking on maintenance
+of an unmaintained project (e.g. an ancient library that we're going to GN-ify
+that hasn't been updated in years). And, of course, if the code you need isn't
+in a Git repo, then you have to snapshot.
 
 ### Node packages
 
@@ -52,7 +72,7 @@ If the code is in a Git repo that you want to mirror, please file an [infra git
 ticket](https://bugs.chromium.org/p/chromium/issues/entry?template=Infra-Git)
 to get the repo mirrored onto chromium.googlesource.com; we don't allow direct
 dependencies on non-Google-hosted repositories, so that we can still build
-if an external repository goes down..
+if an external repository goes down.
 
 Once the mirror is set up, add an entry to [//DEPS](../DEPS) so that gclient
 will pull it in. If the code is only needed on some platforms, add a condition
@@ -170,8 +190,9 @@ Non-Googlers can email one of the people in
 
 * Make sure you have the approval from Chrome Eng Review as mentioned
   [above](#before-you-start).
-* Get security@chromium.org approval. Email the list with relevant details and
-  a link to the CL. Third party code is a hot spot for security vulnerabilities.
+* Get security@chromium.org (or chrome-security@google.com, Google-only)
+  approval. Email the list with relevant details and a link to the CL.
+  Third party code is a hot spot for security vulnerabilities.
   When adding a new package that could potentially carry security risk, make
   sure to highlight risk to security@chromium.org. You may be asked to add
   a README.security or, in dangerous cases, README.SECURITY.URGENTLY file.
@@ -186,7 +207,9 @@ Non-Googlers can email one of the people in
 * Lastly, if all other steps are complete, get a positive code review from a
   member of [//third_party/OWNERS](../third_party/OWNERS) to land the change.
 
-Please send separate emails to the eng review and security lists.
+Please send separate emails to the eng review and security@chromium.org.
+You can skip the eng review and security@chromium.org when you are only moving
+existing directories in Chromium to //third_party/.
 
 Subsequent changes don't normally require third-party-owners or security
 approval; you can modify the code as much as you want. When you update code, be

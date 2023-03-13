@@ -32,14 +32,14 @@ namespace {
 constexpr size_t kExtraNumberOfChars = 20;
 
 std::unique_ptr<VirtualKeyboardController> CreateKeyboardController(
-    HWND toplevel_window_handle) {
+    HWND attached_window_handle) {
   if (base::FeatureList::IsEnabled(features::kInputPaneOnScreenKeyboard) &&
       base::win::GetVersion() >= base::win::Version::WIN10_RS4) {
     return std::make_unique<OnScreenKeyboardDisplayManagerInputPane>(
-        toplevel_window_handle);
+        attached_window_handle);
   } else if (base::win::GetVersion() >= base::win::Version::WIN8) {
     return std::make_unique<OnScreenKeyboardDisplayManagerTabTip>(
-        toplevel_window_handle);
+        attached_window_handle);
   }
   return nullptr;
 }
@@ -156,10 +156,10 @@ ui::EventDispatchDetails DispatcherDestroyedDetails() {
 }  // namespace
 
 InputMethodWinBase::InputMethodWinBase(internal::InputMethodDelegate* delegate,
-                                       HWND toplevel_window_handle)
+                                       HWND attached_window_handle)
     : InputMethodBase(delegate,
-                      CreateKeyboardController(toplevel_window_handle)),
-      toplevel_window_handle_(toplevel_window_handle),
+                      CreateKeyboardController(attached_window_handle)),
+      attached_window_handle_(attached_window_handle),
       pending_requested_direction_(base::i18n::UNKNOWN_DIRECTION) {}
 
 InputMethodWinBase::~InputMethodWinBase() {}
@@ -173,7 +173,7 @@ void InputMethodWinBase::OnDidChangeFocusedClient(
 
 ui::EventDispatchDetails InputMethodWinBase::DispatchKeyEvent(
     ui::KeyEvent* event) {
-  MSG native_key_event = MSGFromKeyEvent(event);
+  CHROME_MSG native_key_event = MSGFromKeyEvent(event);
   if (native_key_event.message == WM_CHAR) {
     auto ref = weak_ptr_factory_.GetWeakPtr();
     BOOL handled = FALSE;
@@ -187,7 +187,7 @@ ui::EventDispatchDetails InputMethodWinBase::DispatchKeyEvent(
     return ui::EventDispatchDetails();
   }
 
-  std::vector<MSG> char_msgs;
+  std::vector<CHROME_MSG> char_msgs;
   // Combines the WM_KEY* and WM_CHAR messages in the event processing flow
   // which is necessary to let Chrome IME extension to process the key event
   // and perform corresponding IME actions.
@@ -237,12 +237,13 @@ ui::EventDispatchDetails InputMethodWinBase::DispatchKeyEvent(
 bool InputMethodWinBase::HandlePeekMessage(HWND hwnd,
                                            UINT msg_filter_min,
                                            UINT msg_filter_max,
-                                           std::vector<MSG>* char_msgs) {
+                                           std::vector<CHROME_MSG>* char_msgs) {
   auto ref = weak_ptr_factory_.GetWeakPtr();
   while (true) {
-    MSG msg_found;
-    const bool result = !!::PeekMessage(&msg_found, hwnd, msg_filter_min,
-                                        msg_filter_max, PM_REMOVE);
+    CHROME_MSG msg_found;
+    const bool result =
+        !!::PeekMessage(ChromeToWindowsType(&msg_found), hwnd, msg_filter_min,
+                        msg_filter_max, PM_REMOVE);
     // PeekMessage may result in WM_NCDESTROY which will cause deletion of
     // |this|. We should use WeakPtr to check whether |this| is destroyed.
     if (!ref)
@@ -257,20 +258,24 @@ bool InputMethodWinBase::HandlePeekMessage(HWND hwnd,
 bool InputMethodWinBase::IsWindowFocused(const TextInputClient* client) const {
   if (!client)
     return false;
-  // When Aura is enabled, |attached_window_handle| should always be a top-level
-  // window. So we can safely assume that |attached_window_handle| is ready for
-  // receiving keyboard input as long as it is an active window. This works well
-  // even when the |attached_window_handle| becomes active but has not received
-  // WM_FOCUS yet.
-  return toplevel_window_handle_ &&
-         GetActiveWindow() == toplevel_window_handle_;
+  // The reason why we check |GetActiveWindow()| here was to take care of
+  // situations when this method gets called as a response to WM_NCACTIVATE as
+  // discussed at crbug.com/287620.  This approach works if and only if
+  // |attached_window_handle_| is a top-level window, which is assumed to be
+  // true for Chromium-based browser products at least.
+  // We need to relax this condition by checking |GetFocus()| so this works fine
+  // for embedded Chromium windows.
+  // TODO(crbug/1286880): Check if this can be replaced with |GetFocus()|.
+  return attached_window_handle_ &&
+         (GetActiveWindow() == attached_window_handle_ ||
+          GetFocus() == attached_window_handle_);
 }
 
 LRESULT InputMethodWinBase::OnChar(HWND window_handle,
                                    UINT message,
                                    WPARAM wparam,
                                    LPARAM lparam,
-                                   const MSG& event,
+                                   const CHROME_MSG& event,
                                    BOOL* handled) {
   *handled = TRUE;
 
@@ -469,7 +474,7 @@ LRESULT InputMethodWinBase::OnQueryCharPosition(IMECHARPOSITION* char_positon) {
     dip_rect = client->GetCaretBounds();
   }
   const gfx::Rect rect = display::win::ScreenWin::DIPToScreenRect(
-      toplevel_window_handle_, dip_rect);
+      attached_window_handle_, dip_rect);
 
   char_positon->pt.x = rect.x();
   char_positon->pt.y = rect.y();
@@ -477,9 +482,10 @@ LRESULT InputMethodWinBase::OnQueryCharPosition(IMECHARPOSITION* char_positon) {
   return 1;  // returns non-zero value when succeeded.
 }
 
-void InputMethodWinBase::ProcessKeyEventDone(ui::KeyEvent* event,
-                                             const std::vector<MSG>* char_msgs,
-                                             bool is_handled) {
+void InputMethodWinBase::ProcessKeyEventDone(
+    ui::KeyEvent* event,
+    const std::vector<CHROME_MSG>* char_msgs,
+    bool is_handled) {
   if (is_handled)
     return;
   ProcessUnhandledKeyEvent(event, char_msgs);
@@ -487,7 +493,7 @@ void InputMethodWinBase::ProcessKeyEventDone(ui::KeyEvent* event,
 
 ui::EventDispatchDetails InputMethodWinBase::ProcessUnhandledKeyEvent(
     ui::KeyEvent* event,
-    const std::vector<MSG>* char_msgs) {
+    const std::vector<CHROME_MSG>* char_msgs) {
   DCHECK(event);
   ui::EventDispatchDetails details = DispatchKeyEventPostIME(event);
   if (details.dispatcher_destroyed || details.target_destroyed ||

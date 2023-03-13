@@ -3,13 +3,12 @@
  * Copyright 2020 Google LLC
  * SPDX-License-Identifier: BSD-3-Clause
  */
-import { Directive, PartInfo } from '../directive.js';
 import { noChange } from '../lit-html.js';
-
+import { Directive, PartInfo } from '../directive.js';
 declare class TemplateContentDirective extends Directive {
     private _previousTemplate?;
     constructor(partInfo: PartInfo);
-    render(template: HTMLTemplateElement): typeof noChange | DocumentFragment;
+    render(template: HTMLTemplateElement): DocumentFragment | typeof noChange;
 }
 /**
  * Renders the content of a template element as HTML.

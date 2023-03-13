@@ -9,14 +9,13 @@
 #include <vulkan/vulkan.h>
 
 #include "base/bind.h"
-#include "base/bits.h"
+#include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
 #include "base/fuchsia/fuchsia_logging.h"
 #include "base/fuchsia/process_context.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/process/process_metrics.h"
@@ -89,6 +88,9 @@ class FuchsiaVideoDecoder::OutputMailbox {
             gmb.get(), nullptr, gfx::ColorSpace(), kTopLeft_GrSurfaceOrigin,
             kPremul_SkAlphaType, usage);
   }
+
+  OutputMailbox(const OutputMailbox&) = delete;
+  OutputMailbox& operator=(const OutputMailbox&) = delete;
 
   ~OutputMailbox() {
     raster_context_provider_->SharedImageInterface()->DestroySharedImage(
@@ -172,8 +174,6 @@ class FuchsiaVideoDecoder::OutputMailbox {
   base::OnceClosure reuse_callback_;
 
   base::WeakPtrFactory<OutputMailbox> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(OutputMailbox);
 };
 
 // static
@@ -242,7 +242,7 @@ void FuchsiaVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   // There should be no pending decode request, so DropInputQueue() is not
   // expected to fail.
-  bool result = DropInputQueue(DecodeStatus::ABORTED);
+  bool result = DropInputQueue(DecoderStatus::Codes::kAborted);
   DCHECK(result);
 
   output_cb_ = output_cb;
@@ -250,9 +250,9 @@ void FuchsiaVideoDecoder::Initialize(const VideoDecoderConfig& config,
   container_aspect_ratio_ = config.aspect_ratio();
 
   // Keep decoder and decryptor if the configuration hasn't changed.
-  if (decoder_ && current_config_.is_encrypted() == config.codec() &&
+  if (decoder_ && current_config_.codec() == config.codec() &&
       current_config_.is_encrypted() == config.is_encrypted()) {
-    std::move(done_callback).Run(OkStatus());
+    std::move(done_callback).Run(DecoderStatus::Codes::kOk);
     return;
   }
 
@@ -261,10 +261,10 @@ void FuchsiaVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   // Initialize the stream.
   bool secure_mode = false;
-  StatusCode status = InitializeSysmemBufferStream(config.is_encrypted(),
-                                                   cdm_context, &secure_mode);
-  if (status != StatusCode::kOk) {
-    std::move(done_callback).Run(StatusCode::kOk);
+  DecoderStatus status = InitializeSysmemBufferStream(
+      config.is_encrypted(), cdm_context, &secure_mode);
+  if (!status.is_ok()) {
+    std::move(done_callback).Run(status);
     return;
   }
 
@@ -275,24 +275,24 @@ void FuchsiaVideoDecoder::Initialize(const VideoDecoderConfig& config,
   decoder_params.mutable_input_details()->set_format_details_version_ordinal(0);
 
   switch (config.codec()) {
-    case kCodecH264:
+    case VideoCodec::kH264:
       decoder_params.mutable_input_details()->set_mime_type("video/h264");
       break;
-    case kCodecVP8:
+    case VideoCodec::kVP8:
       decoder_params.mutable_input_details()->set_mime_type("video/vp8");
       break;
-    case kCodecVP9:
+    case VideoCodec::kVP9:
       decoder_params.mutable_input_details()->set_mime_type("video/vp9");
       break;
-    case kCodecHEVC:
+    case VideoCodec::kHEVC:
       decoder_params.mutable_input_details()->set_mime_type("video/hevc");
       break;
-    case kCodecAV1:
+    case VideoCodec::kAV1:
       decoder_params.mutable_input_details()->set_mime_type("video/av1");
       break;
 
     default:
-      std::move(done_callback).Run(StatusCode::kDecoderUnsupportedCodec);
+      std::move(done_callback).Run(DecoderStatus::Codes::kUnsupportedCodec);
       return;
   }
 
@@ -320,7 +320,7 @@ void FuchsiaVideoDecoder::Initialize(const VideoDecoderConfig& config,
 
   current_config_ = config;
 
-  std::move(done_callback).Run(OkStatus());
+  std::move(done_callback).Run(DecoderStatus::Codes::kOk);
 }
 
 void FuchsiaVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
@@ -330,7 +330,7 @@ void FuchsiaVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
     // Decode() to complete synchronously.
     base::SequencedTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::BindOnce(std::move(decode_cb), DecodeStatus::DECODE_ERROR));
+        base::BindOnce(std::move(decode_cb), DecoderStatus::Codes::kFailed));
     return;
   }
 
@@ -340,7 +340,7 @@ void FuchsiaVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 }
 
 void FuchsiaVideoDecoder::Reset(base::OnceClosure closure) {
-  DropInputQueue(DecodeStatus::ABORTED);
+  DropInputQueue(DecoderStatus::Codes::kAborted);
   base::SequencedTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                    std::move(closure));
 }
@@ -357,7 +357,7 @@ int FuchsiaVideoDecoder::GetMaxDecodeRequests() const {
   return max_decoder_requests_;
 }
 
-StatusCode FuchsiaVideoDecoder::InitializeSysmemBufferStream(
+DecoderStatus FuchsiaVideoDecoder::InitializeSysmemBufferStream(
     bool is_encrypted,
     CdmContext* cdm_context,
     bool* out_secure_mode) {
@@ -373,7 +373,7 @@ StatusCode FuchsiaVideoDecoder::InitializeSysmemBufferStream(
     // Caller makes sure |cdm_context| is available if the stream is encrypted.
     if (!cdm_context) {
       DLOG(ERROR) << "No cdm context for encrypted stream.";
-      return StatusCode::kDecoderMissingCdmForEncryptedContent;
+      return DecoderStatus::Codes::kUnsupportedEncryptionMode;
     }
 
     // Use FuchsiaStreamDecryptor with FuchsiaCdm (it doesn't support
@@ -400,7 +400,7 @@ StatusCode FuchsiaVideoDecoder::InitializeSysmemBufferStream(
 
   sysmem_buffer_stream_->Initialize(this, kInputBufferSize, kNumInputBuffers);
 
-  return StatusCode::kOk;
+  return DecoderStatus::Codes::kOk;
 }
 
 void FuchsiaVideoDecoder::OnSysmemBufferStreamBufferCollectionToken(
@@ -597,10 +597,10 @@ void FuchsiaVideoDecoder::CallNextDecodeCallback() {
   auto cb = std::move(decode_callbacks_.front());
   decode_callbacks_.pop_front();
 
-  std::move(cb).Run(DecodeStatus::OK);
+  std::move(cb).Run(DecoderStatus::Codes::kOk);
 }
 
-bool FuchsiaVideoDecoder::DropInputQueue(DecodeStatus status) {
+bool FuchsiaVideoDecoder::DropInputQueue(DecoderStatus status) {
   // Invalidate callbacks for CallNextDecodeCallback(), so the callbacks are not
   // called when the |decoder_| is dropped below. The callbacks are called
   // explicitly later.
@@ -634,7 +634,7 @@ void FuchsiaVideoDecoder::OnError() {
 
   ReleaseOutputBuffers();
 
-  DropInputQueue(DecodeStatus::DECODE_ERROR);
+  DropInputQueue(DecoderStatus::Codes::kFailed);
 }
 
 void FuchsiaVideoDecoder::SetBufferCollectionTokenForGpu(

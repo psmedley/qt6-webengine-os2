@@ -10,7 +10,6 @@
 #include "third_party/blink/public/common/thread_safe_browser_interface_broker_proxy.h"
 #include "third_party/blink/public/mojom/fetch/fetch_api_request.mojom-blink.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/core/execution_context/agent.h"
@@ -23,6 +22,7 @@
 #include "third_party/blink/renderer/core/inspector/inspector_issue_storage.h"
 #include "third_party/blink/renderer/core/inspector/main_thread_debugger.h"
 #include "third_party/blink/renderer/core/inspector/worker_thread_debugger.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
@@ -75,6 +75,7 @@ WorkletGlobalScope::WorkletGlobalScope(
     : WorkerOrWorkletGlobalScope(
           isolate,
           SecurityOrigin::CreateUniqueOpaque(),
+          creation_params->starter_secure_context,
           MakeGarbageCollected<Agent>(
               isolate,
               creation_params->agent_cluster_id,
@@ -92,7 +93,6 @@ WorkletGlobalScope::WorkletGlobalScope(
       url_(creation_params->script_url),
       user_agent_(creation_params->user_agent),
       document_security_origin_(creation_params->starter_origin),
-      document_secure_context_(creation_params->starter_secure_context),
       module_responses_map_(creation_params->module_responses_map),
       // Step 4. "Let inheritedHTTPSState be outsideSettings's HTTPS state."
       https_state_(creation_params->starter_https_state),
@@ -129,11 +129,17 @@ WorkletGlobalScope::WorkletGlobalScope(
       std::move(creation_params->outside_content_security_policies));
   BindContentSecurityPolicyToExecutionContext();
 
-  OriginTrialContext::AddTokens(this,
-                                creation_params->origin_trial_tokens.get());
+  OriginTrialContext::ActivateWorkerInheritedFeatures(
+      this, creation_params->inherited_trial_features.get());
 
   // WorkletGlobalScopes are not currently provided with UKM source IDs.
   DCHECK_EQ(creation_params->ukm_source_id, ukm::kInvalidSourceId);
+
+  if (creation_params->code_cache_host_interface.is_valid()) {
+    code_cache_host_ =
+        std::make_unique<CodeCacheHost>(mojo::Remote<mojom::CodeCacheHost>(
+            std::move(creation_params->code_cache_host_interface)));
+  }
 }
 
 WorkletGlobalScope::~WorkletGlobalScope() = default;
@@ -223,6 +229,14 @@ const base::UnguessableToken& WorkletGlobalScope::GetDevToolsToken() const {
   return GetThread()->GetDevToolsWorkerToken();
 }
 
+CodeCacheHost* WorkletGlobalScope::GetCodeCacheHost() {
+  if (IsMainThreadWorkletGlobalScope())
+    return frame_->Loader().GetDocumentLoader()->GetCodeCacheHost();
+  if (!code_cache_host_)
+    return nullptr;
+  return code_cache_host_.get();
+}
+
 CoreProbeSink* WorkletGlobalScope::GetProbeSink() {
   if (IsMainThreadWorkletGlobalScope())
     return probe::ToCoreProbeSink(frame_);
@@ -272,14 +286,10 @@ void WorkletGlobalScope::FetchAndInvokeScript(
       ScriptController()->GetScriptState(),
       std::move(outside_settings_task_runner), pending_tasks);
 
-  // TODO(nhiroki): Pass an appropriate destination defined in each worklet
-  // spec (e.g., "paint worklet", "audio worklet") (https://crbug.com/843980,
-  // https://crbug.com/843982)
-  auto destination = mojom::blink::RequestContextType::SCRIPT;
+  auto request_context_type = mojom::blink::RequestContextType::SCRIPT;
   FetchModuleScript(module_url_record, outside_settings_object,
-                    outside_resource_timing_notifier, destination,
-                    network::mojom::RequestDestination::kScript,
-                    credentials_mode,
+                    outside_resource_timing_notifier, request_context_type,
+                    GetDestination(), credentials_mode,
                     ModuleScriptCustomFetchType::kWorkletAddModule, client);
 }
 

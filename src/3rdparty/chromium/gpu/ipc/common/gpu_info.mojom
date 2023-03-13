@@ -170,8 +170,8 @@ struct GpuInfo {
   [EnableIf=is_win]
   OverlayInfo overlay_info;
 
-  VideoDecodeAcceleratorCapabilities video_decode_accelerator_capabilities;
-  array<VideoDecodeAcceleratorSupportedProfile> video_decoder_capabilities;
+  array<VideoDecodeAcceleratorSupportedProfile>
+    video_decode_accelerator_supported_profiles;
   array<VideoEncodeAcceleratorSupportedProfile>
     video_encode_accelerator_supported_profiles;
   bool jpeg_decode_accelerator_supported;
@@ -179,7 +179,6 @@ struct GpuInfo {
   array<ImageDecodeAcceleratorSupportedProfile>
     image_decode_accelerator_supported_profiles;
 
-  bool oop_rasterization_supported;
   bool subpixel_font_rendering;
   uint32 visibility_callback_call_count;
 

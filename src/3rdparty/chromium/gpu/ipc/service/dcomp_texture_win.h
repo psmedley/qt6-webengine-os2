@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
@@ -58,7 +59,8 @@ class DCOMPTexture : public gl::GLImageDCOMPSurface,
   void StartListening(
       mojo::PendingAssociatedRemote<mojom::DCOMPTextureClient> client) override;
   void SetTextureSize(const gfx::Size& size) override;
-  void SetSurfaceHandle(const base::UnguessableToken& token) override;
+  void SetDCOMPSurfaceHandle(const base::UnguessableToken& token,
+                             SetDCOMPSurfaceHandleCallback callback) override;
 
   gpu::Mailbox CreateSharedImage();
   gfx::Rect GetParentWindowRect();
@@ -70,7 +72,7 @@ class DCOMPTexture : public gl::GLImageDCOMPSurface,
 
   bool context_lost_ = false;
   bool shared_image_mailbox_created_ = false;
-  GpuChannel* channel_ = nullptr;
+  raw_ptr<GpuChannel> channel_ = nullptr;
   const int32_t route_id_;
   scoped_refptr<SharedContextState> context_state_;
   SequenceId sequence_;

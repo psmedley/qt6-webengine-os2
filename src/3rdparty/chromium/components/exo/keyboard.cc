@@ -5,6 +5,7 @@
 #include "components/exo/keyboard.h"
 
 #include "ash/constants/app_types.h"
+#include "ash/constants/ash_features.h"
 #include "ash/keyboard/ui/keyboard_ui_controller.h"
 #include "ash/keyboard/ui/keyboard_util.h"
 #include "ash/public/cpp/accelerators.h"
@@ -30,6 +31,7 @@
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/window_util.h"
 
 namespace exo {
 namespace {
@@ -89,13 +91,15 @@ bool ProcessAcceleratorIfReserved(Surface* surface, ui::KeyEvent* event) {
 // to fix https://crbug.com/847500 without breaking ARC apps/Lacros browser.
 bool IsImeSupportedSurface(Surface* surface) {
   aura::Window* window = surface->window();
-  for (; window; window = window->parent()) {
+  while (window) {
     const auto app_type =
         static_cast<ash::AppType>(window->GetProperty(aura::client::kAppType));
     switch (app_type) {
       case ash::AppType::ARC_APP:
       case ash::AppType::LACROS:
         return true;
+      case ash::AppType::CROSTINI_APP:
+        return base::FeatureList::IsEnabled(ash::features::kCrostiniImeSupport);
       default:
         // Do nothing.
         break;
@@ -106,6 +110,12 @@ bool IsImeSupportedSurface(Surface* surface) {
     // TODO(tetsui): find a way to remove this.
     if (window->GetProperty(aura::client::kSkipImeProcessing))
       return true;
+
+    if (aura::Window* transient_parent = wm::GetTransientParent(window)) {
+      window = transient_parent;
+    } else {
+      window = window->parent();
+    }
   }
   return false;
 }
@@ -136,18 +146,22 @@ bool ProcessAshAcceleratorIfPossible(Surface* surface, ui::KeyEvent* event) {
   if (CanConsumeAshAccelerators(surface))
     return false;
 
-  // Ctrl-N (new window), Shift-Ctrl-N (new incognite window), Ctrl-T (new tab),
-  // and Shit-Ctrl-T (restore tab) need to be sent to the active client even
-  // when the active window is lacros-chrome, since the ash-chrome does not
-  // handle these new-window requests properly at this moment.
-  // TODO(fukino): Remove this workaround once ash-chrome has an implementation
-  // to handle new-window requests when lacros-chrome browser window is active.
-  // crbug.com/1172189.
+  // TODO(crbug.com/1301977): Remove this workaround on fixing acceleartor
+  // handling for lacros.
   const ui::Accelerator kAppHandlingAccelerators[] = {
+      // Ctrl-N (new window), Shift-Ctrl-N (new incognite window), Ctrl-T (new
+      // tab), and Shit-Ctrl-T (restore tab) need to be sent to the active
+      // client even when the active window is lacros-chrome, since the
+      // ash-chrome does not handle these new-window requests properly at this
+      // moment.
       {ui::VKEY_N, ui::EF_CONTROL_DOWN},
       {ui::VKEY_N, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
       {ui::VKEY_T, ui::EF_CONTROL_DOWN},
       {ui::VKEY_T, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
+      // Also forward Ctrl-/ and Shift-Ctrl-/ so Lacros processes the help app
+      // opening while it can be intercepted.
+      {ui::VKEY_OEM_2, ui::EF_CONTROL_DOWN},
+      {ui::VKEY_OEM_2, ui::EF_SHIFT_DOWN | ui::EF_CONTROL_DOWN},
   };
   ui::Accelerator accelerator(*event);
   if (base::Contains(kAppHandlingAccelerators, accelerator))
@@ -164,15 +178,16 @@ bool ProcessAshAcceleratorIfPossible(Surface* surface, ui::KeyEvent* event) {
 Keyboard::Keyboard(std::unique_ptr<KeyboardDelegate> delegate, Seat* seat)
     : delegate_(std::move(delegate)),
       seat_(seat),
-      expiration_delay_for_pending_key_acks_(base::TimeDelta::FromMilliseconds(
-          kExpirationDelayForPendingKeyAcksMs)) {
+      expiration_delay_for_pending_key_acks_(
+          base::Milliseconds(kExpirationDelayForPendingKeyAcksMs)) {
   seat_->AddObserver(this, kKeyboardSeatObserverPriority);
   ash::KeyboardController::Get()->AddObserver(this);
   ash::ImeControllerImpl* ime_controller = ash::Shell::Get()->ime_controller();
   ime_controller->AddObserver(this);
 
   delegate_->OnKeyboardLayoutUpdated(seat_->xkb_tracker()->GetKeymap().get());
-  OnSurfaceFocused(seat_->GetFocusedSurface());
+  OnSurfaceFocused(seat_->GetFocusedSurface(), nullptr,
+                   !!seat_->GetFocusedSurface());
   OnKeyRepeatSettingsChanged(
       ash::KeyboardController::Get()->GetKeyRepeatSettings());
 }
@@ -196,7 +211,7 @@ bool Keyboard::HasDeviceConfigurationDelegate() const {
 void Keyboard::SetDeviceConfigurationDelegate(
     KeyboardDeviceConfigurationDelegate* delegate) {
   device_configuration_delegate_ = delegate;
-  OnKeyboardEnabledChanged(IsVirtualKeyboardEnabled());
+  UpdateKeyboardType();
 }
 
 void Keyboard::AddObserver(KeyboardObserver* observer) {
@@ -385,7 +400,9 @@ void Keyboard::OnSurfaceDestroying(Surface* surface) {
 ////////////////////////////////////////////////////////////////////////////////
 // SeatObserver overrides:
 
-void Keyboard::OnSurfaceFocused(Surface* gained_focus) {
+void Keyboard::OnSurfaceFocused(Surface* gained_focus,
+                                Surface* lost_focused,
+                                bool has_focused_surface) {
   Surface* gained_focus_surface =
       gained_focus && delegate_->CanAcceptKeyboardEventsForSurface(gained_focus)
           ? gained_focus
@@ -397,14 +414,9 @@ void Keyboard::OnSurfaceFocused(Surface* gained_focus) {
 ////////////////////////////////////////////////////////////////////////////////
 // ash::KeyboardControllerObserver overrides:
 
-void Keyboard::OnKeyboardEnabledChanged(bool enabled) {
-  if (device_configuration_delegate_) {
-    // Ignore kAndroidDisabled which affects |enabled| and just test for a11y
-    // and touch enabled keyboards. TODO(yhanada): Fix this using an Android
-    // specific KeyboardUI implementation. https://crbug.com/897655.
-    bool is_physical = !IsVirtualKeyboardEnabled();
-    device_configuration_delegate_->OnKeyboardTypeChanged(is_physical);
-  }
+void Keyboard::OnKeyboardEnableFlagsChanged(
+    const std::set<keyboard::KeyboardEnableFlag>& flags) {
+  UpdateKeyboardType();
 }
 
 void Keyboard::OnKeyRepeatSettingsChanged(
@@ -514,6 +526,17 @@ void Keyboard::RemoveEventHandler() {
     toplevel_window->RemovePreTargetHandler(this);
   else
     toplevel_window->RemovePostTargetHandler(this);
+}
+
+void Keyboard::UpdateKeyboardType() {
+  if (!device_configuration_delegate_)
+    return;
+
+  // Ignore kAndroidDisabled which affects |enabled| and just test for a11y
+  // and touch enabled keyboards. TODO(yhanada): Fix this using an Android
+  // specific KeyboardUI implementation. https://crbug.com/897655.
+  const bool is_physical = !IsVirtualKeyboardEnabled();
+  device_configuration_delegate_->OnKeyboardTypeChanged(is_physical);
 }
 
 }  // namespace exo

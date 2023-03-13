@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "content/browser/accessibility/browser_accessibility_manager.h"
+#include "content/common/content_export.h"
 #include "content/common/render_accessibility.mojom-forward.h"
 
 namespace ui {
@@ -46,15 +47,21 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
       base::WeakPtr<WebContentsAccessibilityAndroid> web_contents_accessibility,
       BrowserAccessibilityDelegate* delegate);
 
+  BrowserAccessibilityManagerAndroid(
+      const BrowserAccessibilityManagerAndroid&) = delete;
+  BrowserAccessibilityManagerAndroid& operator=(
+      const BrowserAccessibilityManagerAndroid&) = delete;
+
   ~BrowserAccessibilityManagerAndroid() override;
 
   static ui::AXTreeUpdate GetEmptyDocument();
 
-  // Helper methods to set/check if this is running as part of a WebView.
-  void set_is_running_as_webview(bool is_webview) {
-    is_running_as_webview_ = is_webview;
+  void set_allow_image_descriptions_for_testing(bool is_allowed) {
+    allow_image_descriptions_ = is_allowed;
   }
-  bool IsRunningAsWebView() { return is_running_as_webview_; }
+  bool should_allow_image_descriptions() const {
+    return allow_image_descriptions_;
+  }
 
   // By default, the tree is pruned for a better screen reading experience,
   // including:
@@ -88,10 +95,10 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
       RetargetEventType type) const override;
   void FireFocusEvent(BrowserAccessibility* node) override;
   void FireBlinkEvent(ax::mojom::Event event_type,
-                      BrowserAccessibility* node) override;
+                      BrowserAccessibility* node,
+                      int action_request_id) override;
   void FireGeneratedEvent(ui::AXEventGenerator::Event event_type,
                           BrowserAccessibility* node) override;
-  gfx::Rect GetViewBoundsInScreenCoordinates() const override;
 
   void FireLocationChanged(BrowserAccessibility* node);
 
@@ -125,6 +132,8 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   void EnableTouchPassthrough() { touch_passthrough_enabled_ = true; }
   bool touch_passthrough_enabled() const { return touch_passthrough_enabled_; }
 
+  std::u16string GenerateAccessibilityNodeInfoString(int32_t unique_id);
+
  private:
   // AXTreeObserver overrides.
   void OnAtomicUpdateFinished(
@@ -155,8 +164,9 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   // See docs for set_prune_tree_for_screen_reader, above.
   bool prune_tree_for_screen_reader_;
 
-  // Whether this manager is running as part of a WebView.
-  bool is_running_as_webview_ = false;
+  // Whether or not image descriptions are allowed for this instance, set
+  // during construction with the value from WebContentsAccessibilityAndroid.
+  bool allow_image_descriptions_ = false;
 
   // Only set on the root BrowserAccessibilityManager. Keeps track of if
   // any node uses touch passthrough in any frame. See comment next to
@@ -167,8 +177,6 @@ class CONTENT_EXPORT BrowserAccessibilityManagerAndroid
   // with each atomic update to prevent superfluous cache clear calls.
   std::unordered_set<int32_t> nodes_already_cleared_ =
       std::unordered_set<int32_t>();
-
-  DISALLOW_COPY_AND_ASSIGN(BrowserAccessibilityManagerAndroid);
 };
 
 }  // namespace content

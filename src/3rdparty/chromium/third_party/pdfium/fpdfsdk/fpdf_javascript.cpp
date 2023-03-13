@@ -11,6 +11,7 @@
 #include "core/fpdfdoc/cpdf_action.h"
 #include "core/fpdfdoc/cpdf_nametree.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
+#include "third_party/base/numerics/safe_conversions.h"
 
 struct CPDF_JavaScript {
   WideString name;
@@ -24,7 +25,7 @@ FPDFDoc_GetJavaScriptActionCount(FPDF_DOCUMENT document) {
     return -1;
 
   auto name_tree = CPDF_NameTree::Create(doc, "JavaScript");
-  return name_tree ? name_tree->GetCount() : 0;
+  return name_tree ? pdfium::base::checked_cast<int>(name_tree->GetCount()) : 0;
 }
 
 FPDF_EXPORT FPDF_JAVASCRIPT_ACTION FPDF_CALLCONV
@@ -48,7 +49,7 @@ FPDFDoc_GetJavaScriptAction(FPDF_DOCUMENT document, int index) {
   if (action.GetType() != CPDF_Action::Type::kJavaScript)
     return nullptr;
 
-  Optional<WideString> script = action.MaybeGetJavaScript();
+  absl::optional<WideString> script = action.MaybeGetJavaScript();
   if (!script.has_value())
     return nullptr;
 

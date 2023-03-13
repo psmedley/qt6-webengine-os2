@@ -9,7 +9,7 @@
 #include "base/no_destructor.h"
 #include "base/strings/string_piece.h"
 #include "base/values.h"
-#include "build/chromeos_buildflags.h"
+#include "build/build_config.h"
 #include "components/services/storage/indexed_db/scopes/leveldb_scopes.h"
 #include "components/services/storage/indexed_db/scopes/varint_coding.h"
 #include "components/services/storage/indexed_db/transactional_leveldb/transactional_leveldb_database.h"
@@ -19,7 +19,6 @@
 #include "content/browser/indexed_db/indexed_db_data_loss_info.h"
 #include "content/browser/indexed_db/indexed_db_leveldb_env.h"
 #include "content/browser/indexed_db/indexed_db_reporting.h"
-#include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "storage/common/database/database_identifier.h"
 #include "third_party/blink/public/common/storage_key/storage_key.h"
 #include "third_party/leveldatabase/env_chromium.h"
@@ -55,10 +54,18 @@ const base::FilePath::CharType kLevelDBExtension[] =
 
 // static
 base::FilePath GetBlobStoreFileName(const blink::StorageKey& storage_key) {
-  // TODO(crbug.com/1199077): This will be replaced when the new storage is
-  // implemented.
-  std::string storage_key_id =
-      storage::GetIdentifierFromOrigin(storage_key.origin());
+  std::string storage_key_id;
+  if (storage_key.IsFirstPartyContext()) {
+    storage_key_id = storage::GetIdentifierFromOrigin(storage_key.origin());
+  } else {
+    // TODO(crbug.com/1218100): This is a stop-gap to prevent crashes, we need
+    // to point to a real storage bucket here not a transient one. We only
+    // hit this case when `kThirdPartyStoragePartitioning` is enabled.
+    storage_key_id = storage::GetIdentifierFromOrigin(url::Origin());
+  }
+  // TODO(crbug.com/1218100): Desired first and third party paths:
+  // {{storage_partition}}/IndexedDB/{{serialized_origin}}.blob/
+  // {{storage_partition}}/WebStorage/{{bucket_id}}/IndexedDB/indexeddb.blob/
   return base::FilePath()
       .AppendASCII(storage_key_id)
       .AddExtension(kIndexedDBExtension)
@@ -67,10 +74,18 @@ base::FilePath GetBlobStoreFileName(const blink::StorageKey& storage_key) {
 
 // static
 base::FilePath GetLevelDBFileName(const blink::StorageKey& storage_key) {
-  // TODO(crbug.com/1199077): This will be replaced when the new storage is
-  // implemented.
-  std::string storage_key_id =
-      storage::GetIdentifierFromOrigin(storage_key.origin());
+  std::string storage_key_id;
+  if (storage_key.IsFirstPartyContext()) {
+    storage_key_id = storage::GetIdentifierFromOrigin(storage_key.origin());
+  } else {
+    // TODO(crbug.com/1218100): This is a stop-gap to prevent crashes, we need
+    // to point to a real storage bucket here not a transient one. We only
+    // hit this case when `kThirdPartyStoragePartitioning` is enabled.
+    storage_key_id = storage::GetIdentifierFromOrigin(url::Origin());
+  }
+  // TODO(crbug.com/1218100): Desired first and third party paths:
+  // {{storage_partition}}/IndexedDB/{{serialized_origin}}.leveldb/
+  // {{storage_partition}}/WebStorage/{{bucket_id}}/IndexedDB/indexeddb.leveldb/
   return base::FilePath()
       .AppendASCII(storage_key_id)
       .AddExtension(kIndexedDBExtension)
@@ -89,7 +104,7 @@ bool IsPathTooLong(storage::FilesystemProxy* filesystem,
   if (!limit.has_value()) {
     DLOG(WARNING) << "GetMaximumPathComponentLength returned -1";
 // In limited testing, ChromeOS returns 143, other OSes 255.
-#if BUILDFLAG(IS_CHROMEOS_ASH)
+#if BUILDFLAG(IS_CHROMEOS)
     limit = 143;
 #else
     limit = 255;
@@ -138,7 +153,7 @@ std::string ReadCorruptionInfo(storage::FilesystemProxy* filesystem_proxy,
     if (file.IsValid()) {
       std::string input_js(file_info->size, '\0');
       if (file_info->size ==
-          file.Read(0, base::data(input_js), file_info->size)) {
+          file.Read(0, std::data(input_js), file_info->size)) {
         absl::optional<base::Value> val = base::JSONReader::Read(input_js);
         if (val && val->is_dict()) {
           std::string* s = val->FindStringKey("message");
@@ -581,7 +596,7 @@ Status GetEarliestSweepTime(TransactionalLevelDBDatabase* db,
     time_micros = 0;
 
   DCHECK_GE(time_micros, 0);
-  *earliest_sweep += base::TimeDelta::FromMicroseconds(time_micros);
+  *earliest_sweep += base::Microseconds(time_micros);
 
   return s;
 }
@@ -616,7 +631,7 @@ Status GetEarliestCompactionTime(TransactionalLevelDBDatabase* db,
     time_micros = 0;
 
   DCHECK_GE(time_micros, 0);
-  *earliest_compaction += base::TimeDelta::FromMicroseconds(time_micros);
+  *earliest_compaction += base::Microseconds(time_micros);
 
   return s;
 }

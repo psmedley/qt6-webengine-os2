@@ -101,31 +101,23 @@ void SkCanvasPriv::GetDstClipAndMatrixCounts(const SkCanvas::ImageSetEntry set[]
     *totalMatrixCount = maxMatrixIndex + 1;
 }
 
-bool SkCanvasPriv::ValidateMarker(const char* name) {
-    if (!name) {
-        return false;
-    }
-
-    std::locale loc(std::locale::classic());
-    if (!std::isalpha(*name, loc)) {
-        return false;
-    }
-    while (*(++name)) {
-        if (!std::isalnum(*name, loc) && *name != '_') {
-            return false;
-        }
-    }
-    return true;
+#ifdef SK_ENABLE_SKSL
+void SkCanvasPriv::DrawCustomMesh(SkCanvas* canvas,
+                                  SkCustomMesh cm,
+                                  sk_sp<SkBlender> blender,
+                                  const SkPaint& paint) {
+    canvas->drawCustomMesh(cm, std::move(blender), paint);
 }
+#endif
 
 #if GR_TEST_UTILS
 
 #if SK_SUPPORT_GPU
-#include "src/gpu/BaseDevice.h"
+#include "src/gpu/ganesh/BaseDevice.h"
 
 #if SK_GPU_V1
 skgpu::v1::SurfaceDrawContext* SkCanvasPriv::TopDeviceSurfaceDrawContext(SkCanvas* canvas) {
-    if (auto gpuDevice = canvas->topDevice()->asGpuDevice()) {
+    if (auto gpuDevice = canvas->topDevice()->asGaneshDevice()) {
         return gpuDevice->surfaceDrawContext();
     }
 
@@ -134,7 +126,7 @@ skgpu::v1::SurfaceDrawContext* SkCanvasPriv::TopDeviceSurfaceDrawContext(SkCanva
 #endif // SK_GPU_V1
 
 skgpu::SurfaceFillContext* SkCanvasPriv::TopDeviceSurfaceFillContext(SkCanvas* canvas) {
-    if (auto gpuDevice = canvas->topDevice()->asGpuDevice()) {
+    if (auto gpuDevice = canvas->topDevice()->asGaneshDevice()) {
         return gpuDevice->surfaceFillContext();
     }
 
@@ -158,10 +150,10 @@ skgpu::SurfaceFillContext* SkCanvasPriv::TopDeviceSurfaceFillContext(SkCanvas* c
 #endif // GR_TEST_UTILS
 
 #if SK_SUPPORT_GPU
-#include "src/gpu/BaseDevice.h"
+#include "src/gpu/ganesh/BaseDevice.h"
 
 GrRenderTargetProxy* SkCanvasPriv::TopDeviceTargetProxy(SkCanvas* canvas) {
-    if (auto gpuDevice = canvas->topDevice()->asGpuDevice()) {
+    if (auto gpuDevice = canvas->topDevice()->asGaneshDevice()) {
         return gpuDevice->targetProxy();
     }
 

@@ -116,7 +116,7 @@ void RspTargetWriter::Run() {
         const char* tool_type = nullptr;
         if (!target_->GetOutputFilesForSource(source, &tool_type,
                                               &tool_outputs)) {
-          if (source.type() == SourceFile::SOURCE_DEF)
+          if (source.GetType() == SourceFile::SOURCE_DEF)
             other_files.push_back(source);
           continue;  // No output for this source.
         }
@@ -149,10 +149,11 @@ void RspTargetWriter::Run() {
       EscapeOptions opts;
       opts.mode = ESCAPE_COMMAND;
       // First the ldflags from the target and its config.
-      RecursiveTargetConfigStringsToStream(target_, &ConfigValues::ldflags,
+      RecursiveTargetConfigStringsToStream(kRecursiveWriterKeepDuplicates,
+                                           target_, &ConfigValues::ldflags,
                                            opts, out_);
       // library dirs
-      const OrderedSet<SourceDir> all_lib_dirs = target_->all_lib_dirs();
+      const UniqueVector<SourceDir> all_lib_dirs = target_->all_lib_dirs();
 
       if (!all_lib_dirs.empty()) {
         PathOutput lib_path_output(settings->build_settings()->build_dir(),
@@ -190,7 +191,7 @@ void RspTargetWriter::Run() {
       EscapeOptions lib_escape_opts;
       lib_escape_opts.mode = ESCAPE_COMMAND;
 
-      const OrderedSet<LibFile> all_libs = target_->all_libs();
+      const UniqueVector<LibFile> all_libs = target_->all_libs();
       const std::string framework_ending(".framework");
       for (size_t i = 0; i < all_libs.size(); i++) {
         const LibFile& lib_file = all_libs[i];
@@ -214,7 +215,7 @@ void RspTargetWriter::Run() {
           EscapeStringToStream(out_, lib_value, lib_escape_opts);
         }
       }
-      const OrderedSet<std::string> all_frameworks = target_->all_frameworks();
+      const UniqueVector<std::string> all_frameworks = target_->all_frameworks();
       for (size_t i = 0; i < all_frameworks.size(); i++) {
         const std::string& lib_value = all_frameworks[i];
         out_ << " -framework ";
@@ -223,7 +224,7 @@ void RspTargetWriter::Run() {
             lib_value.substr(0, lib_value.size() - framework_ending.size()),
             lib_escape_opts);
       }
-      const OrderedSet<std::string> weak_frameworks =
+      const UniqueVector<std::string> weak_frameworks =
           target_->all_weak_frameworks();
       for (size_t i = 0; i < weak_frameworks.size(); i++) {
         const std::string& lib_value = weak_frameworks[i];

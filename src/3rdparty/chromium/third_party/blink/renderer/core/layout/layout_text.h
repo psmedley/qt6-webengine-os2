@@ -27,6 +27,7 @@
 
 #include "base/dcheck_is_on.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/notreached.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
@@ -41,7 +42,8 @@ namespace blink {
 class AbstractInlineTextBox;
 class ContentCaptureManager;
 class InlineTextBox;
-class NGInlineItem;
+struct NGInlineItemsData;
+struct NGInlineItemSpan;
 class NGOffsetMapping;
 
 enum class OnlyWhitespaceOrNbsp : unsigned { kUnknown = 0, kNo = 1, kYes = 2 };
@@ -82,16 +84,17 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   // doesn't re-transform the string.
   LayoutText(Node*, scoped_refptr<StringImpl>);
 
-  ~LayoutText() override;
+  void Trace(Visitor*) const override;
 
   static LayoutText* CreateEmptyAnonymous(Document&,
                                           scoped_refptr<const ComputedStyle>,
                                           LegacyLayout);
 
-  static LayoutText* CreateAnonymous(Document&,
-                                     scoped_refptr<const ComputedStyle>,
-                                     scoped_refptr<StringImpl>,
-                                     LegacyLayout legacy);
+  static LayoutText* CreateAnonymousForFormattedText(
+      Document&,
+      scoped_refptr<const ComputedStyle>,
+      scoped_refptr<StringImpl>,
+      LegacyLayout legacy);
 
   const char* GetName() const override {
     NOT_DESTROYED();
@@ -135,15 +138,15 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   void DirtyOrDeleteLineBoxesIfNeeded(bool full_layout);
   void DirtyLineBoxes();
 
-  void AbsoluteQuads(Vector<FloatQuad>&,
+  void AbsoluteQuads(Vector<gfx::QuadF>&,
                      MapCoordinatesFlags mode = 0) const final;
-  void AbsoluteQuadsForRange(Vector<FloatQuad>&,
+  void AbsoluteQuadsForRange(Vector<gfx::QuadF>&,
                              unsigned start_offset = 0,
                              unsigned end_offset = INT_MAX) const;
-  FloatRect LocalBoundingBoxRectForAccessibility() const final;
+  gfx::RectF LocalBoundingBoxRectForAccessibility() const final;
 
   enum ClippingOption { kNoClipping, kClipToEllipsis };
-  void LocalQuadsInFlippedBlocksDirection(Vector<FloatQuad>&,
+  void LocalQuadsInFlippedBlocksDirection(Vector<gfx::QuadF>&,
                                           ClippingOption = kNoClipping) const;
 
   PositionWithAffinity PositionForPoint(const PhysicalOffset&) const override;
@@ -191,7 +194,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
                       LayoutUnit x_pos,
                       TextDirection,
                       HashSet<const SimpleFontData*>* fallback_fonts = nullptr,
-                      FloatRect* glyph_bounds = nullptr,
+                      gfx::RectF* glyph_bounds = nullptr,
                       float expansion = 0) const;
   virtual float Width(unsigned from,
                       unsigned len,
@@ -199,7 +202,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
                       TextDirection,
                       bool first_line = false,
                       HashSet<const SimpleFontData*>* fallback_fonts = nullptr,
-                      FloatRect* glyph_bounds = nullptr,
+                      gfx::RectF* glyph_bounds = nullptr,
                       float expansion = 0) const;
 
   float MinLogicalWidth() const;
@@ -371,13 +374,13 @@ class CORE_EXPORT LayoutText : public LayoutObject {
     return node_id_ != kInvalidDOMNodeId;
   }
 
-  void SetInlineItems(NGInlineItem* begin, NGInlineItem* end);
+  void SetInlineItems(NGInlineItemsData* data, size_t begin, size_t size);
   void ClearInlineItems();
   bool HasValidInlineItems() const {
     NOT_DESTROYED();
     return valid_ng_items_;
   }
-  const base::span<NGInlineItem>& InlineItems() const;
+  const NGInlineItemSpan& InlineItems() const;
   // Inline items depends on context. It needs to be invalidated not only when
   // it was inserted/changed but also it was moved.
   void InvalidateInlineItems() {
@@ -398,11 +401,11 @@ class CORE_EXPORT LayoutText : public LayoutObject {
     has_bidi_control_items_ = false;
   }
 
-  virtual const base::span<NGInlineItem>* GetNGInlineItems() const {
+  virtual const NGInlineItemSpan* GetNGInlineItems() const {
     NOT_DESTROYED();
     return nullptr;
   }
-  virtual base::span<NGInlineItem>* GetNGInlineItems() {
+  virtual NGInlineItemSpan* GetNGInlineItems() {
     NOT_DESTROYED();
     return nullptr;
   }
@@ -486,7 +489,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   void ComputePreferredLogicalWidths(
       float lead_width,
       HashSet<const SimpleFontData*>& fallback_fonts,
-      FloatRect& glyph_bounds);
+      gfx::RectF& glyph_bounds);
 
   // Make length() private so that callers that have a LayoutText*
   // will use the more efficient textLength() instead, while
@@ -522,7 +525,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
                       float text_width_so_far,
                       TextDirection,
                       HashSet<const SimpleFontData*>* fallback_fonts,
-                      FloatRect* glyph_bounds_accumulation,
+                      gfx::RectF* glyph_bounds_accumulation,
                       float expansion = 0) const;
 
   void ApplyTextTransform();
@@ -573,7 +576,7 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   unsigned is_text_fragment_ : 1;
 
  private:
-  ContentCaptureManager* GetContentCaptureManager();
+  ContentCaptureManager* GetOrResetContentCaptureManager();
   void DetachAbstractInlineTextBoxes();
 
   // Used for LayoutNG with accessibility. True if inline fragments are
@@ -593,16 +596,15 @@ class CORE_EXPORT LayoutText : public LayoutObject {
   mutable LogicalOffset previous_logical_starting_point_ =
       UninitializedLogicalStartingPoint();
 
-  union {
-    // The line boxes associated with this object.
-    // Read the LINE BOXES OWNERSHIP section in the class header comment.
-    // Valid only when !IsInLayoutNGInlineFormattingContext().
-    InlineTextBoxList text_boxes_;
-    // The index of the first fragment item associated with this object in
-    // |NGFragmentItems::Items()|. Zero means there are no such item.
-    // Valid only when IsInLayoutNGInlineFormattingContext().
-    wtf_size_t first_fragment_item_index_;
-  };
+  // The line boxes associated with this object.
+  // Read the LINE BOXES OWNERSHIP section in the class header comment.
+  // Valid only when !IsInLayoutNGInlineFormattingContext().
+  InlineTextBoxList text_boxes_;
+
+  // The index of the first fragment item associated with this object in
+  // |NGFragmentItems::Items()|. Zero means there are no such item.
+  // Valid only when IsInLayoutNGInlineFormattingContext().
+  wtf_size_t first_fragment_item_index_ = 0u;
 };
 
 inline InlineTextBoxList& LayoutText::MutableTextBoxes() {

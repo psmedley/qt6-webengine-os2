@@ -61,9 +61,19 @@ void LayoutListItem::StyleDidChange(StyleDifference diff,
   LayoutBlockFlow::StyleDidChange(diff, old_style);
 
   StyleImage* current_image = StyleRef().ListStyleImage();
-  if (StyleRef().ListStyleType() ||
-      (current_image && !current_image->ErrorOccurred())) {
-    NotifyOfSubtreeChange();
+  if (old_style && (StyleRef().ListStyleType() ||
+                    (current_image && !current_image->ErrorOccurred()))) {
+    // The old_style check makes sure we don't enter here when attaching the
+    // LayoutObject.
+    DCHECK(GetDocument().InStyleRecalc());
+    DCHECK(!GetDocument().GetStyleEngine().InRebuildLayoutTree());
+    // We may enter here when propagating writing-mode and direction from body
+    // to the root element after layout tree rebuild. Skip NotifyOfSubtreeChange
+    // for that case.
+    if (GetDocument().documentElement() != GetNode() ||
+        GetDocument().GetStyleEngine().NeedsStyleRecalc()) {
+      NotifyOfSubtreeChange();
+    }
   }
 
   LayoutObject* marker = Marker();

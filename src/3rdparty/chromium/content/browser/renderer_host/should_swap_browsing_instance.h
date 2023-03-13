@@ -22,7 +22,9 @@ enum class ShouldSwapBrowsingInstance {
   // the destination URL should not affect back-forward cache eligibility, so
   // we don't need to avoid doing a proactive BrowsingInstance swap due to it.
   kNo_SameSiteNavigation = 7,
-  kNo_ReloadingErrorPage = 8,
+  // 8: kNo_ReloadingErrorPage was removed as the special case that forced
+  // reusing a SiteInstance for auto-reload was fixed. (see
+  // https://crbug.com/1045524).
   kNo_AlreadyHasMatchingBrowsingInstance = 9,
   kNo_RendererDebugURL = 10,
   kNo_NotNeededForBackForwardCache = 11,
@@ -35,8 +37,9 @@ enum class ShouldSwapBrowsingInstance {
   kNo_Guest = 18,
   kNo_HasNotComittedAnyNavigation = 19,
   kNo_UnloadHandlerExistsOnSameSiteNavigation = 20,
+  kNo_NotPrimaryMainFrame = 21,
 
-  kMaxValue = kNo_UnloadHandlerExistsOnSameSiteNavigation
+  kMaxValue = kNo_NotPrimaryMainFrame
 };
 
 }  // namespace content

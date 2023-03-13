@@ -397,7 +397,7 @@ bool EsParserH264::EmitFrame(int64_t access_unit_pos,
   DVLOG_IF(1, current_timing_desc.pts == kNoTimestamp) << "Missing timestamp";
 
   // If only the PTS is provided, copy the PTS into the DTS.
-  if (current_timing_desc.dts == kNoDecodeTimestamp()) {
+  if (current_timing_desc.dts == kNoDecodeTimestamp) {
     current_timing_desc.dts =
         DecodeTimestamp::FromPresentationTime(current_timing_desc.pts);
   }
@@ -517,7 +517,7 @@ bool EsParserH264::UpdateVideoDecoderConfig(const H264SPS* sps,
   }
 
   VideoDecoderConfig video_decoder_config(
-      kCodecH264, profile, VideoDecoderConfig::AlphaMode::kIsOpaque,
+      VideoCodec::kH264, profile, VideoDecoderConfig::AlphaMode::kIsOpaque,
       VideoColorSpace::REC709(), kNoTransformation, coded_size.value(),
       visible_rect.value(), natural_size, EmptyExtraData(), scheme);
 

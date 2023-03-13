@@ -168,7 +168,9 @@ base::Optional<Node*> PropertyAccessBuilder::FoldLoadDictPrototypeConstant(
           Map::GetConstructorFunction(
               *map_handle, *broker()->target_native_context().object())
               .value();
-      map = MakeRef(broker(), constructor.initial_map());
+      // {constructor.initial_map()} is loaded/stored with acquire-release
+      // semantics for constructors.
+      map = MakeRefAssumeMemoryFence(broker(), constructor.initial_map());
       DCHECK(map.object()->IsJSObjectMap());
     }
     dependencies()->DependOnConstantInDictionaryPrototypeChain(
@@ -235,7 +237,6 @@ Node* PropertyAccessBuilder::BuildLoadDataField(NameRef const& name,
                                           Type::Any(),
                                           MachineType::AnyTagged(),
                                           kPointerWriteBarrier,
-                                          LoadSensitivity::kCritical,
                                           field_access.const_field_info};
       storage = *effect = graph()->NewNode(
           simplified()->LoadField(storage_access), storage, *effect, *control);
@@ -263,7 +264,6 @@ Node* PropertyAccessBuilder::BuildLoadDataField(NameRef const& name,
                                           Type::OtherInternal(),
                                           MachineType::TaggedPointer(),
                                           kPointerWriteBarrier,
-                                          LoadSensitivity::kCritical,
                                           field_access.const_field_info};
       storage = *effect = graph()->NewNode(
           simplified()->LoadField(storage_access), storage, *effect, *control);
@@ -274,27 +274,6 @@ Node* PropertyAccessBuilder::BuildLoadDataField(NameRef const& name,
   Node* value = *effect = graph()->NewNode(
       simplified()->LoadField(field_access), storage, *effect, *control);
   return value;
-}
-
-Node* PropertyAccessBuilder::BuildMinimorphicLoadDataField(
-    NameRef const& name, MinimorphicLoadPropertyAccessInfo const& access_info,
-    Node* lookup_start_object, Node** effect, Node** control) {
-  DCHECK_NULL(dependencies());
-  MachineRepresentation const field_representation =
-      ConvertRepresentation(access_info.field_representation());
-
-  FieldAccess field_access = {
-      kTaggedBase,
-      access_info.offset(),
-      name.object(),
-      MaybeHandle<Map>(),
-      access_info.field_type(),
-      MachineType::TypeForRepresentation(field_representation),
-      kFullWriteBarrier,
-      LoadSensitivity::kCritical,
-      ConstFieldInfo::None()};
-  return BuildLoadDataField(name, lookup_start_object, field_access,
-                            access_info.is_inobject(), effect, control);
 }
 
 Node* PropertyAccessBuilder::BuildLoadDataField(
@@ -319,7 +298,6 @@ Node* PropertyAccessBuilder::BuildLoadDataField(
       access_info.field_type(),
       MachineType::TypeForRepresentation(field_representation),
       kFullWriteBarrier,
-      LoadSensitivity::kCritical,
       access_info.GetConstFieldInfo()};
   if (field_representation == MachineRepresentation::kTaggedPointer ||
       field_representation == MachineRepresentation::kCompressedPointer) {

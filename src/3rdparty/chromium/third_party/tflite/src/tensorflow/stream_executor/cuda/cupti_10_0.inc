@@ -1,6 +1,7 @@
 // Auto-generated, do not edit.
 
 extern "C" {
+
 CUptiResult CUPTIAPI cuptiGetResultString(CUptiResult result,
                                           const char **str) {
   using FuncPtr = CUptiResult(CUPTIAPI *)(CUptiResult, const char **);
@@ -755,6 +756,8 @@ CUptiResult CUPTIAPI cuptiActivityEnableLatencyTimestamps(uint8_t enable) {
   using FuncPtr = CUptiResult(CUPTIAPI *)(uint8_t);
   static auto func_ptr =
       LoadSymbol<FuncPtr>("cuptiActivityEnableLatencyTimestamps");
+  if (!func_ptr) return GetSymbolNotFoundError();
   return func_ptr(enable);
 }
+
 }  // extern "C"

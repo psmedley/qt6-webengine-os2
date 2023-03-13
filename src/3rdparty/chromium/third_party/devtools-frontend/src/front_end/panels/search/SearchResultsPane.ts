@@ -36,6 +36,7 @@ const i18nString = i18n.i18n.getLocalizedString.bind(undefined, str_);
 export class SearchResultsPane extends UI.Widget.VBox {
   private readonly searchConfig: SearchConfig;
   private readonly searchResults: SearchResult[];
+  private readonly treeElements: SearchResultsTreeElement[];
   private treeOutline: UI.TreeOutline.TreeOutlineInShadow;
   private matchesExpandedCount: number;
 
@@ -44,6 +45,7 @@ export class SearchResultsPane extends UI.Widget.VBox {
     this.searchConfig = searchConfig;
 
     this.searchResults = [];
+    this.treeElements = [];
     this.treeOutline = new UI.TreeOutline.TreeOutlineInShadow();
     this.treeOutline.hideOverflow();
 
@@ -57,6 +59,19 @@ export class SearchResultsPane extends UI.Widget.VBox {
     this.addTreeElement(searchResult);
   }
 
+  showAllMatches(): void {
+    this.treeElements.forEach(treeElement => {
+      treeElement.expand();
+      treeElement.showAllMatches();
+    });
+  }
+
+  collapseAllResults(): void {
+    this.treeElements.forEach(treeElement => {
+      treeElement.collapse();
+    });
+  }
+
   private addTreeElement(searchResult: SearchResult): void {
     const treeElement = new SearchResultsTreeElement(this.searchConfig, searchResult);
     this.treeOutline.appendChild(treeElement);
@@ -68,6 +83,7 @@ export class SearchResultsPane extends UI.Widget.VBox {
       treeElement.expand();
     }
     this.matchesExpandedCount += searchResult.matchesCount();
+    this.treeElements.push(treeElement);
   }
   wasShown(): void {
     super.wasShown();
@@ -75,7 +91,7 @@ export class SearchResultsPane extends UI.Widget.VBox {
   }
 }
 
-export const matchesExpandedByDefault = 20;
+export const matchesExpandedByDefault = 200;
 export const matchesShownAtOnce = 20;
 
 export class SearchResultsTreeElement extends UI.TreeOutline.TreeElement {
@@ -99,6 +115,11 @@ export class SearchResultsTreeElement extends UI.TreeOutline.TreeElement {
 
     this.updateMatchesUI();
     this.initialized = true;
+  }
+
+  showAllMatches(): void {
+    this.removeChildren();
+    this.appendSearchMatches(0, this.searchResult.matchesCount());
   }
 
   private updateMatchesUI(): void {
@@ -185,7 +206,7 @@ export class SearchResultsTreeElement extends UI.TreeOutline.TreeElement {
       searchMatchElement.listItemElement.addEventListener('keydown', event => {
         if (event.key === 'Enter') {
           event.consume(true);
-          Common.Revealer.reveal(searchResult.matchRevealable(i));
+          void Common.Revealer.reveal(searchResult.matchRevealable(i));
         }
       });
       searchMatchElement.tooltip = lineContent;
@@ -217,7 +238,7 @@ export class SearchResultsTreeElement extends UI.TreeOutline.TreeElement {
     contentSpan.className = 'search-match-content';
     contentSpan.textContent = lineContent;
     UI.ARIAUtils.setAccessibleName(contentSpan, `${lineContent} line`);
-    UI.UIUtils.highlightRangesWithStyleClass(contentSpan, matchRanges, 'highlighted-match');
+    UI.UIUtils.highlightRangesWithStyleClass(contentSpan, matchRanges, 'highlighted-search-result');
     return contentSpan;
   }
 

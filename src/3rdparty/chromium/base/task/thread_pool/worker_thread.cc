@@ -15,15 +15,17 @@
 #include "base/check_op.h"
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
+#include "base/synchronization/waitable_event.h"
 #include "base/task/thread_pool/environment_config.h"
 #include "base/task/thread_pool/task_tracker.h"
 #include "base/task/thread_pool/worker_thread_observer.h"
 #include "base/threading/hang_watcher.h"
 #include "base/time/time_override.h"
 #include "base/trace_event/base_tracing.h"
+#include "build/build_config.h"
 #include "third_party/abseil-cpp/absl/types/optional.h"
 
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
 #include "base/mac/scoped_nsautorelease_pool.h"
 #endif
 
@@ -171,6 +173,10 @@ void WorkerThread::Cleanup() {
   wake_up_event_.Signal();
 }
 
+void WorkerThread::MaybeUpdateThreadPriority() {
+  UpdateThreadPriority(GetDesiredThreadPriority());
+}
+
 void WorkerThread::BeginUnusedPeriod() {
   CheckedAutoLock auto_lock(thread_lock_);
   DCHECK(last_used_time_.is_null());
@@ -226,14 +232,14 @@ void WorkerThread::ThreadMain() {
       case ThreadLabel::DEDICATED:
         RunBackgroundDedicatedWorker();
         return;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       case ThreadLabel::SHARED_COM:
         RunBackgroundSharedCOMWorker();
         return;
       case ThreadLabel::DEDICATED_COM:
         RunBackgroundDedicatedCOMWorker();
         return;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
     }
   }
 
@@ -247,14 +253,14 @@ void WorkerThread::ThreadMain() {
     case ThreadLabel::DEDICATED:
       RunDedicatedWorker();
       return;
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
     case ThreadLabel::SHARED_COM:
       RunSharedCOMWorker();
       return;
     case ThreadLabel::DEDICATED_COM:
       RunDedicatedCOMWorker();
       return;
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
   }
 }
 
@@ -288,7 +294,7 @@ NOINLINE void WorkerThread::RunBackgroundDedicatedWorker() {
   NO_CODE_FOLDING();
 }
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
 NOINLINE void WorkerThread::RunSharedCOMWorker() {
   RunWorker();
   NO_CODE_FOLDING();
@@ -308,7 +314,7 @@ NOINLINE void WorkerThread::RunBackgroundDedicatedCOMWorker() {
   RunWorker();
   NO_CODE_FOLDING();
 }
-#endif  // defined(OS_WIN)
+#endif  // BUILDFLAG(IS_WIN)
 
 void WorkerThread::RunWorker() {
   DCHECK_EQ(self_, this);
@@ -336,12 +342,14 @@ void WorkerThread::RunWorker() {
   // A WorkerThread starts out waiting for work.
   {
     TRACE_EVENT_END0("base", "WorkerThread active");
+    // TODO(crbug.com/1021571): Remove this once fixed.
+    PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
     delegate_->WaitForWork(&wake_up_event_);
     TRACE_EVENT_BEGIN0("base", "WorkerThread active");
   }
 
   while (!ShouldExit()) {
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
     mac::ScopedNSAutoreleasePool autorelease_pool;
 #endif
     absl::optional<WatchHangsInScope> hang_watch_scope;
@@ -358,6 +366,8 @@ void WorkerThread::RunWorker() {
         break;
 
       TRACE_EVENT_END0("base", "WorkerThread active");
+      // TODO(crbug.com/1021571): Remove this once fixed.
+      PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
       hang_watch_scope.reset();
       delegate_->WaitForWork(&wake_up_event_);
       TRACE_EVENT_BEGIN0("base", "WorkerThread active");
@@ -403,6 +413,8 @@ void WorkerThread::RunWorker() {
 
   TRACE_EVENT_END0("base", "WorkerThread active");
   TRACE_EVENT_INSTANT0("base", "WorkerThread dead", TRACE_EVENT_SCOPE_THREAD);
+  // TODO(crbug.com/1021571): Remove this once fixed.
+  PERFETTO_INTERNAL_ADD_EMPTY_EVENT();
 }
 
 }  // namespace internal

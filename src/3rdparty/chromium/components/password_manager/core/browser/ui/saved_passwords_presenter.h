@@ -10,6 +10,7 @@
 
 #include "base/containers/span.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/strings/string_piece_forward.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -67,6 +68,12 @@ class SavedPasswordsPresenter : public PasswordStoreInterface::Observer,
   // Removes the credential and all its duplicates from the store.
   void RemovePassword(const PasswordForm& form);
 
+  // Adds the credential to the store specified in the |form|. Returns true
+  // if the password was added, false if |form|'s data is not valid (invalid
+  // url/empty password), or an entry with such signon_realm and username
+  // already exists in any (profile or account) store.
+  bool AddPassword(const PasswordForm& form);
+
   // Tries to edit |password|. After checking whether |form| is present in
   // |passwords_|, this will ask the password store to change the underlying
   // password_value to |new_password| in case it was found. This will also
@@ -82,12 +89,13 @@ class SavedPasswordsPresenter : public PasswordStoreInterface::Observer,
                           const std::u16string& new_username,
                           const std::u16string& new_password);
 
-  // Modifies provided password forms, with |new_username| and |new_password|.
-  // |forms| must represent single credential, with its duplicates, or the
-  // same form saved on another store type.
+  // Modifies provided password forms, with |new_username|, |new_password| and
+  // |new_note|. |forms| must represent single credential, with its duplicates,
+  // or the same form saved on another store type.
   bool EditSavedPasswords(const SavedPasswordsView forms,
                           const std::u16string& new_username,
-                          const std::u16string& new_password);
+                          const std::u16string& new_password,
+                          const std::u16string& new_note = std::u16string());
 
   // Returns a list of the currently saved credentials.
   SavedPasswordsView GetSavedPasswords() const;
@@ -149,6 +157,8 @@ class SavedPasswordsPresenter : public PasswordStoreInterface::Observer,
   DuplicatePasswordsMap sort_key_to_password_forms_;
 
   base::ObserverList<Observer, /*check_empty=*/true> observers_;
+
+  base::WeakPtrFactory<SavedPasswordsPresenter> weak_ptr_factory_{this};
 };
 
 }  // namespace password_manager

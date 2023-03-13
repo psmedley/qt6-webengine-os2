@@ -14,6 +14,7 @@
 #include "third_party/blink/public/web/modules/mediastream/media_stream_video_source.h"
 #include "third_party/blink/renderer/modules/mediastream/mock_constraint_factory.h"
 #include "third_party/blink/renderer/platform/mediastream/media_constraints.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
@@ -31,12 +32,6 @@ const char kGroupID3[] = "fake_group_3";
 const char kGroupID4[] = "fake_group_4";
 const char kGroupID5[] = "fake_group_5";
 
-const std::vector<DoubleConstraint MediaTrackConstraintSetPlatform::*>
-    kPanTiltZoomConstraints = {
-        &MediaTrackConstraintSetPlatform::pan,
-        &MediaTrackConstraintSetPlatform::tilt,
-        &MediaTrackConstraintSetPlatform::zoom,
-};
 
 void CheckTrackAdapterSettingsEqualsResolution(
     const VideoCaptureSettings& settings) {
@@ -205,6 +200,15 @@ class MediaStreamConstraintsUtilVideoDeviceTest : public testing::Test {
     return SelectSettingsVideoDeviceCapture(capabilities_, constraints);
   }
 
+  static WTF::Vector<DoubleConstraint MediaTrackConstraintSetPlatform::*>
+  PanTiltZoomConstraints() {
+    return {
+        &MediaTrackConstraintSetPlatform::pan,
+        &MediaTrackConstraintSetPlatform::tilt,
+        &MediaTrackConstraintSetPlatform::zoom,
+    };
+  }
+
   VideoDeviceCaptureCapabilities capabilities_;
   const VideoInputDeviceCapabilities* default_device_;
   const VideoInputDeviceCapabilities* low_res_device_;
@@ -289,16 +293,6 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
   auto result = SelectSettings();
   EXPECT_FALSE(result.HasValue());
   EXPECT_EQ(constraint_factory_.basic().resize_mode.GetName(),
-            result.failed_constraint_name());
-}
-
-TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, OverconstrainedOnVideoKind) {
-  constraint_factory_.Reset();
-  // No device in |capabilities_| has video kind infrared.
-  constraint_factory_.basic().video_kind.SetExact("infrared");
-  auto result = SelectSettings();
-  EXPECT_FALSE(result.HasValue());
-  EXPECT_EQ(constraint_factory_.basic().video_kind.GetName(),
             result.failed_constraint_name());
 }
 
@@ -424,7 +418,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
        OverconstrainedOnMandatoryPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     constraint_factory_.basic().device_id.SetExact(default_device_->device_id);
     (constraint_factory_.basic().*constraint).SetMin(1);
@@ -518,22 +512,6 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryFacingMode) {
   EXPECT_EQ(high_res_device_->device_id.Utf8(), result.device_id());
   EXPECT_EQ(mojom::blink::FacingMode::USER, high_res_device_->facing_mode);
   EXPECT_EQ(*high_res_closest_format_, result.Format());
-  CheckTrackAdapterSettingsEqualsFormat(result);
-}
-
-TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryVideoKind) {
-  constraint_factory_.Reset();
-  constraint_factory_.basic().video_kind.SetExact("depth");
-  auto result = SelectSettings();
-  EXPECT_TRUE(result.HasValue());
-  EXPECT_EQ(kDeviceID4, result.device_id());
-  EXPECT_EQ(media::PIXEL_FORMAT_Y16, result.Format().pixel_format);
-  CheckTrackAdapterSettingsEqualsFormat(result);
-
-  constraint_factory_.basic().video_kind.SetExact("color");
-  result = SelectSettings();
-  EXPECT_TRUE(result.HasValue());
-  EXPECT_EQ(default_device_->device_id.Utf8(), result.device_id());
   CheckTrackAdapterSettingsEqualsFormat(result);
 }
 
@@ -1883,7 +1861,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, TwoIdealResizeValues) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryExactPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetExact(3);
     auto result = SelectSettings();
@@ -1901,7 +1879,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryExactPanTiltZoom) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryMinPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetMin(2);
     auto result = SelectSettings();
@@ -1919,7 +1897,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryMinPanTiltZoom) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryMaxPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetMax(4);
     auto result = SelectSettings();
@@ -1937,7 +1915,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryMaxPanTiltZoom) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryPanTiltZoomRange) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetMin(2);
     (constraint_factory_.basic().*constraint).SetMax(4);
@@ -1956,7 +1934,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, MandatoryPanTiltZoomRange) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, IdealPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetIdeal(3);
     auto result = SelectSettings();
@@ -1974,7 +1952,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, IdealPanTiltZoom) {
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, PresentPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetIsPresent(true);
     auto result = SelectSettings();
@@ -2008,7 +1986,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
       absl::optional<bool>(false),
   };
 
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetIsPresent(true);
     auto constraints = constraint_factory_.CreateMediaConstraints();
@@ -2589,7 +2567,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
        AdvancedContradictoryPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
 
     MediaTrackConstraintSetPlatform& advanced1 =
@@ -2672,7 +2650,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
 }
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest, AdvancedPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     constraint_factory_.basic().device_id.SetExact(default_device_->device_id);
     MediaTrackConstraintSetPlatform& advanced =
@@ -2714,7 +2692,7 @@ TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
 
 TEST_F(MediaStreamConstraintsUtilVideoDeviceTest,
        BasicContradictoryPanTiltZoom) {
-  for (auto& constraint : kPanTiltZoomConstraints) {
+  for (auto& constraint : PanTiltZoomConstraints()) {
     constraint_factory_.Reset();
     (constraint_factory_.basic().*constraint).SetMin(4);
     (constraint_factory_.basic().*constraint).SetMax(2);

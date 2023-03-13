@@ -10,7 +10,6 @@
 #include <memory>
 #include <string>
 
-#include "base/macros.h"
 #include "net/base/net_export.h"
 #include "net/disk_cache/blockfile/disk_format.h"
 #include "net/disk_cache/blockfile/storage_block-inl.h"
@@ -49,6 +48,9 @@ class NET_EXPORT_PRIVATE EntryImpl
   };
 
   EntryImpl(BackendImpl* backend, Addr address, bool read_only);
+
+  EntryImpl(const EntryImpl&) = delete;
+  EntryImpl& operator=(const EntryImpl&) = delete;
 
   // Background implementation of the Entry interface.
   void DoomImpl();
@@ -307,8 +309,6 @@ class NET_EXPORT_PRIVATE EntryImpl
   bool read_only_;            // True if not yet writing.
   bool dirty_;                // True if we detected that this is a dirty entry.
   std::unique_ptr<SparseControl> sparse_;  // Support for sparse entries.
-
-  DISALLOW_COPY_AND_ASSIGN(EntryImpl);
 };
 
 }  // namespace disk_cache

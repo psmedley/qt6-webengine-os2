@@ -81,7 +81,6 @@ void av1_init_single_pass_lap(AV1_COMP *cpi);
  *
  * \param[in]    cpi           Top - level encoder instance structure
  * \param[in]    frame_params  Per frame encoding parameters
- * \param[in]    frame_input   Current and last input frame buffers
  * \param[in]    frame_flags   Frame type and coding flags
  *
  * \return No return but analyses first pass stats and assigns a target
@@ -89,7 +88,6 @@ void av1_init_single_pass_lap(AV1_COMP *cpi);
  */
 void av1_get_second_pass_params(struct AV1_COMP *cpi,
                                 struct EncodeFrameParams *const frame_params,
-                                const EncodeFrameInput *const frame_input,
                                 unsigned int frame_flags);
 
 /*!\brief Adjustments to two pass and rate control after each frame.
@@ -129,6 +127,21 @@ void av1_twopass_postencode_update(struct AV1_COMP *cpi);
 void av1_gop_bit_allocation(const AV1_COMP *cpi, RATE_CONTROL *const rc,
                             GF_GROUP *gf_group, int is_key_frame, int use_arf,
                             int64_t gf_group_bits);
+
+int av1_calc_arf_boost(const TWO_PASS *twopass,
+                       const TWO_PASS_FRAME *twopass_frame,
+                       const PRIMARY_RATE_CONTROL *p_rc, FRAME_INFO *frame_info,
+                       int offset, int f_frames, int b_frames,
+                       int *num_fpstats_used, int *num_fpstats_required,
+                       int project_gfu_boost);
+
+// Identify stable and unstable regions from first pass stats.
+// stats_start points to the first frame to analyze.
+// |offset| is the offset from the current frame to the frame stats_start is
+// pointing to.
+void av1_identify_regions(const FIRSTPASS_STATS *const stats_start,
+                          int total_frames, int offset, REGIONS *regions,
+                          int *total_regions);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -12,14 +12,16 @@ source_set("formfiller") {
     "cffl_checkbox.h",
     "cffl_combobox.cpp",
     "cffl_combobox.h",
+    "cffl_fieldaction.cpp",
+    "cffl_fieldaction.h",
     "cffl_formfield.cpp",
     "cffl_formfield.h",
     "cffl_interactiveformfiller.cpp",
     "cffl_interactiveformfiller.h",
     "cffl_listbox.cpp",
     "cffl_listbox.h",
-    "cffl_privatedata.cpp",
-    "cffl_privatedata.h",
+    "cffl_perwindowdata.cpp",
+    "cffl_perwindowdata.h",
     "cffl_pushbutton.cpp",
     "cffl_pushbutton.h",
     "cffl_radiobutton.cpp",
@@ -29,7 +31,10 @@ source_set("formfiller") {
     "cffl_textobject.cpp",
     "cffl_textobject.h",
   ]
-  configs += [ "../../:pdfium_strict_config" ]
+  configs += [
+    "../../:pdfium_strict_config",
+    "../../:pdfium_noshorten_config",
+  ]
   deps = [
     "../../:pdfium_public_headers",
     "../../constants",

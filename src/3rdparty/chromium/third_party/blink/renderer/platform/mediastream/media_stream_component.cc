@@ -31,9 +31,10 @@
 
 #include "third_party/blink/renderer/platform/mediastream/media_stream_component.h"
 
+#include "base/synchronization/lock.h"
 #include "third_party/blink/public/platform/web_audio_source_provider.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
-#include "third_party/blink/renderer/platform/heap/heap.h"
+#include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
 #include "third_party/blink/renderer/platform/wtf/uuid.h"
 
@@ -52,11 +53,27 @@ int MediaStreamComponent::GenerateUniqueId() {
 
 MediaStreamComponent::MediaStreamComponent(MediaStreamSource* source)
     : MediaStreamComponent(WTF::CreateCanonicalUUIDString(), source) {}
+
 MediaStreamComponent::MediaStreamComponent(const String& id,
                                            MediaStreamSource* source)
     : source_(source), id_(id), unique_id_(GenerateUniqueId()) {
   DCHECK(id_.length());
   DCHECK(source_);
+}
+
+MediaStreamComponent::MediaStreamComponent(
+    const String& id,
+    MediaStreamSource* source,
+    std::unique_ptr<MediaStreamTrackPlatform> platform_track)
+    : MediaStreamComponent(id, source) {
+  platform_track_ = std::move(platform_track);
+}
+
+MediaStreamComponent::MediaStreamComponent(
+    MediaStreamSource* source,
+    std::unique_ptr<MediaStreamTrackPlatform> platform_track)
+    : MediaStreamComponent(source) {
+  platform_track_ = std::move(platform_track);
 }
 
 MediaStreamComponent* MediaStreamComponent::Clone() const {
@@ -74,7 +91,7 @@ void MediaStreamComponent::Dispose() {
 
 void MediaStreamComponent::AudioSourceProviderImpl::Wrap(
     WebAudioSourceProvider* provider) {
-  MutexLocker locker(provide_input_lock_);
+  base::AutoLock locker(provide_input_lock_);
   web_audio_source_provider_ = provider;
 }
 
@@ -122,8 +139,8 @@ void MediaStreamComponent::AudioSourceProviderImpl::ProvideInput(
   if (!bus)
     return;
 
-  MutexTryLocker try_locker(provide_input_lock_);
-  if (!try_locker.Locked() || !web_audio_source_provider_) {
+  base::AutoTryLock try_locker(provide_input_lock_);
+  if (!try_locker.is_acquired() || !web_audio_source_provider_) {
     bus->Zero();
     return;
   }

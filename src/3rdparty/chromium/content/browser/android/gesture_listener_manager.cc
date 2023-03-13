@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "base/memory/raw_ptr.h"
 #include "content/browser/android/gesture_listener_manager.h"
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/web_contents/web_contents_view_android.h"
@@ -12,6 +13,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "third_party/blink/public/common/input/web_input_event.h"
 #include "ui/events/android/gesture_event_type.h"
+#include "ui/events/blink/did_overscroll_params.h"
 #include "ui/gfx/geometry/size_f.h"
 
 using blink::WebGestureEvent;
@@ -75,12 +77,15 @@ class GestureListenerManager::ResetScrollObserver : public WebContentsObserver {
   ResetScrollObserver(WebContents* web_contents,
                       GestureListenerManager* manager);
 
+  ResetScrollObserver(const ResetScrollObserver&) = delete;
+  ResetScrollObserver& operator=(const ResetScrollObserver&) = delete;
+
   void DidFinishNavigation(NavigationHandle* navigation_handle) override;
-  void RenderProcessGone(base::TerminationStatus status) override;
+  void PrimaryMainFrameRenderProcessGone(
+      base::TerminationStatus status) override;
 
  private:
-  GestureListenerManager* const manager_;
-  DISALLOW_COPY_AND_ASSIGN(ResetScrollObserver);
+  const raw_ptr<GestureListenerManager> manager_;
 };
 
 GestureListenerManager::ResetScrollObserver::ResetScrollObserver(
@@ -93,8 +98,8 @@ void GestureListenerManager::ResetScrollObserver::DidFinishNavigation(
   manager_->OnNavigationFinished(navigation_handle);
 }
 
-void GestureListenerManager::ResetScrollObserver::RenderProcessGone(
-    base::TerminationStatus status) {
+void GestureListenerManager::ResetScrollObserver::
+    PrimaryMainFrameRenderProcessGone(base::TerminationStatus status) {
   manager_->OnRenderProcessGone();
 }
 
@@ -196,18 +201,28 @@ bool GestureListenerManager::FilterInputEvent(const WebInputEvent& event) {
       gesture.PositionInWidget().y() * dip_scale);
 }
 
+void GestureListenerManager::DidOverscroll(
+    const ui::DidOverscrollParams& params) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
+  if (j_obj.is_null())
+    return;
+  float x = params.accumulated_overscroll.x();
+  float y = params.accumulated_overscroll.y();
+  return Java_GestureListenerManagerImpl_didOverscroll(env, j_obj, x, y);
+}
+
 // All positions and sizes (except |top_shown_pix|) are in CSS pixels.
 // Note that viewport_width/height is a best effort based.
-void GestureListenerManager::UpdateScrollInfo(
-    const gfx::Vector2dF& scroll_offset,
-    float page_scale_factor,
-    const float min_page_scale,
-    const float max_page_scale,
-    const gfx::SizeF& content,
-    const gfx::SizeF& viewport,
-    const float content_offset,
-    const float top_shown_pix,
-    bool top_changed) {
+void GestureListenerManager::UpdateScrollInfo(const gfx::PointF& scroll_offset,
+                                              float page_scale_factor,
+                                              const float min_page_scale,
+                                              const float max_page_scale,
+                                              const gfx::SizeF& content,
+                                              const gfx::SizeF& viewport,
+                                              const float content_offset,
+                                              const float top_shown_pix,
+                                              bool top_changed) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -230,7 +245,7 @@ void GestureListenerManager::UpdateOnTouchDown() {
 }
 
 void GestureListenerManager::OnRootScrollOffsetChanged(
-    const gfx::Vector2dF& root_scroll_offset) {
+    const gfx::PointF& root_scroll_offset) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -252,9 +267,6 @@ void GestureListenerManager::UpdateRenderProcessConnection(
 
 void GestureListenerManager::OnNavigationFinished(
     NavigationHandle* navigation_handle) {
-  // TODO(https://crbug.com/1218946): With MPArch there may be multiple main
-  // frames. This caller was converted automatically to the primary main frame
-  // to preserve its semantics. Follow up to confirm correctness.
   if (navigation_handle->IsInPrimaryMainFrame() &&
       navigation_handle->HasCommitted() &&
       !navigation_handle->IsSameDocument()) {

@@ -8,7 +8,6 @@
 #include <string>
 #include <utility>
 
-#include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -88,10 +87,9 @@ TEST(PrefHashCalculatorTest, CatchHashChanges) {
   nested_empty_dict.SetKey("a", base::DictionaryValue());
   nested_empty_dict.SetKey("b", base::ListValue());
   base::ListValue nested_empty_list;
-  nested_empty_list.Append(std::make_unique<base::DictionaryValue>());
-  nested_empty_list.Append(std::make_unique<base::ListValue>());
-  nested_empty_list.Append(
-      std::make_unique<base::Value>(nested_empty_dict.Clone()));
+  nested_empty_list.Append(base::Value(base::Value::Type::DICTIONARY));
+  nested_empty_list.Append(base::Value(base::Value::Type::LIST));
+  nested_empty_list.Append(nested_empty_dict.Clone());
 
   // A dictionary with an empty dictionary, an empty list, and nested empty
   // dictionaries/lists in it.
@@ -104,8 +102,8 @@ TEST(PrefHashCalculatorTest, CatchHashChanges) {
   dict_value.SetKey("f", std::move(nested_empty_list));
 
   base::ListValue list_value;
-  list_value.AppendBoolean(true);
-  list_value.AppendInteger(100);
+  list_value.Append(true);
+  list_value.Append(100);
   list_value.Append(1.0);
 
   ASSERT_EQ(base::Value::Type::NONE, null_value.type());

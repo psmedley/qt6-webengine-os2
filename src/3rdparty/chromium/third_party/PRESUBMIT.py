@@ -4,7 +4,7 @@
 
 import os
 
-USE_PYTHON = True
+USE_PYTHON3 = True
 
 ANDROID_ALLOWED_LICENSES = [
   'A(pple )?PSL 2(\.0)?',
@@ -65,7 +65,11 @@ def _CheckThirdPartyReadmesUpdated(input_api, output_api):
         not local_path.startswith('third_party' + input_api.os_path.sep +
                                   'feed_library' + input_api.os_path.sep) and
         not local_path.startswith('third_party' + input_api.os_path.sep +
-                                  'mojo' + input_api.os_path.sep) and
+                                  'ipcz' + input_api.os_path.sep) and
+        # TODO(danakj): We should look for the README.chromium file in
+        # third_party/rust/CRATE_NAME/vVERSION/.
+        not local_path.startswith('third_party' + input_api.os_path.sep +
+                                  'rust' + input_api.os_path.sep) and
         not local_path.startswith('third_party' + input_api.os_path.sep +
                                   'webxr_test_pages' + input_api.os_path.sep)):
       files.append(f)
@@ -86,7 +90,7 @@ def _CheckThirdPartyReadmesUpdated(input_api, output_api):
     r'^Short Name: [a-zA-Z0-9_\-\.]+\r?$',
     input_api.re.IGNORECASE | input_api.re.MULTILINE)
   version_pattern = input_api.re.compile(
-    r'^Version: [a-zA-Z0-9_\-\+\.:]+\r?$',
+    r'^Version: [a-zA-Z0-9_\-\+\.:/]+\r?$',
     input_api.re.IGNORECASE | input_api.re.MULTILINE)
   release_pattern = input_api.re.compile(
     r'^Security Critical: (yes|no)\r?$',

@@ -34,7 +34,7 @@ class StunServer : public sigslot::has_slots<> {
   ~StunServer() override;
 
  protected:
-  // Slot for AsyncSocket.PacketRead:
+  // Slot for Socket.PacketRead:
   void OnPacket(rtc::AsyncPacketSocket* socket,
                 const char* buf,
                 size_t size,
@@ -58,7 +58,7 @@ class StunServer : public sigslot::has_slots<> {
   void SendResponse(const StunMessage& msg, const rtc::SocketAddress& addr);
 
   // A helper method to compose a STUN binding response.
-  void GetStunBindResponse(StunMessage* request,
+  void GetStunBindResponse(StunMessage* message,
                            const rtc::SocketAddress& remote_addr,
                            StunMessage* response) const;
 

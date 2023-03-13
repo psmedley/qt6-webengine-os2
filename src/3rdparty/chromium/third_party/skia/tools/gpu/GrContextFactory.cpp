@@ -7,7 +7,7 @@
  */
 
 #include "include/gpu/GrDirectContext.h"
-#include "src/gpu/GrDirectContextPriv.h"
+#include "src/gpu/ganesh/GrDirectContextPriv.h"
 #include "tools/gpu/GrContextFactory.h"
 #ifdef SK_GL
 #include "tools/gpu/gl/GLTestContext.h"
@@ -29,8 +29,7 @@
 #ifdef SK_DAWN
 #include "tools/gpu/dawn/DawnTestContext.h"
 #endif
-#include "src/gpu/GrCaps.h"
-#include "src/gpu/gl/GrGLGpu.h"
+#include "src/gpu/ganesh/GrCaps.h"
 #include "tools/gpu/mock/MockTestContext.h"
 
 #if defined(SK_BUILD_FOR_WIN) && defined(SK_ENABLE_DISCRETE_GPU)
@@ -243,10 +242,10 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
             if (!testCtx) {
                 return ContextInfo();
             }
-
+#ifdef SK_GL
             // We previously had an issue where the VkDevice destruction would occasionally hang
-            // on systems with NVIDIA GPUs and having an existing GL context fixed it. Now (March
-            // 2020) we still need the GL context to keep Vulkan/TSAN bots from running incredibly
+            // on systems with NVIDIA GPUs and having an existing GL context fixed it. Now (Feb
+            // 2022) we still need the GL context to keep Vulkan/TSAN bots from running incredibly
             // slow. Perhaps this prevents repeated driver loading/unloading? Note that keeping
             // a persistent VkTestContext around instead was tried and did not work.
             if (!fSentinelGLContext) {
@@ -255,6 +254,7 @@ ContextInfo GrContextFactory::getContextInfoInternal(ContextType type, ContextOv
                     fSentinelGLContext.reset(CreatePlatformGLTestContext(kGLES_GrGLStandard));
                 }
             }
+#endif
             break;
         }
 #endif

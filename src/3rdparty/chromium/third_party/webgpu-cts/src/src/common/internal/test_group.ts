@@ -95,7 +95,6 @@ export class TestGroup<F extends Fixture> implements TestGroupBuilder<F> {
     this.seen.add(name);
   }
 
-  // TODO: This could take a fixture, too, to override the one for the group.
   test(name: string): TestBuilderWithName<F> {
     const testCreationStack = new Error(`Test created: ${name}`);
 
@@ -120,13 +119,24 @@ export class TestGroup<F extends Fixture> implements TestGroupBuilder<F> {
 
 interface TestBuilderWithName<F extends Fixture> extends TestBuilderWithParams<F, {}> {
   desc(description: string): this;
-
+  /**
+   * A noop function with the purpose of highlighting value `id`.
+   *
+   * @param id a token uniquely assigned to this test.
+   */
+  uniqueId(id: string): this;
+  /**
+   * A noop function to associate a test with the relevant part of the specification.
+   *
+   * @param url a link to the spec where test is extracted from.
+   */
+  specURL(url: string): this;
   /**
    * Parameterize the test, generating multiple cases, each possibly having subcases.
    *
    * The `unit` value passed to the `cases` callback is an immutable constant
    * `CaseParamsBuilder<{}>` representing the "unit" builder `[ {} ]`,
-   * provided for convienience. The non-callback overload can be used if `unit` is not needed.
+   * provided for convenience. The non-callback overload can be used if `unit` is not needed.
    */
   params<CaseP extends {}, SubcaseP extends {}>(
     cases: (unit: CaseParamsBuilder<{}>) => ParamsBuilderBase<CaseP, SubcaseP>
@@ -161,6 +171,7 @@ interface TestBuilderWithName<F extends Fixture> extends TestBuilderWithParams<F
 }
 
 interface TestBuilderWithParams<F extends Fixture, P extends {}> {
+  batch(b: number): this;
   fn(fn: TestFn<F, P>): void;
   unimplemented(): void;
 }
@@ -173,6 +184,7 @@ class TestBuilder {
   private readonly fixture: FixtureClass;
   private testFn: TestFn<Fixture, {}> | undefined;
   private testCases?: ParamsBuilderBase<{}, {}> = undefined;
+  private batchSize: number = 0;
 
   constructor(testPath: string[], fixture: FixtureClass, testCreationStack: Error) {
     this.testPath = testPath;
@@ -185,11 +197,26 @@ class TestBuilder {
     return this;
   }
 
+  uniqueId(id: string): this {
+    return this;
+  }
+
+  specURL(url: string): this {
+    return this;
+  }
+
   fn(fn: TestFn<Fixture, {}>): void {
-    // TODO: add TODO if there's no description? (and make sure it only ends up on actual tests,
-    // not on test parents in the tree, which is what happens if you do it here, not sure why)
+    // eslint-disable-next-line no-warning-comments
+    // MAINTENANCE_TODO: add "TODO" if there's no description? (and make sure it only ends up on
+    // actual tests, not on test parents in the tree, which is what happens if you do it here, not
+    // sure why)
     assert(this.testFn === undefined);
     this.testFn = fn;
+  }
+
+  batch(b: number): this {
+    this.batchSize = b;
+    return this;
   }
 
   unimplemented(): void {
@@ -221,6 +248,8 @@ class TestBuilder {
     for (const [caseParams, subcases] of builderIterateCasesWithSubcases(this.testCases)) {
       for (const subcaseParams of subcases ?? [{}]) {
         const params = mergeParams(caseParams, subcaseParams);
+        assert(this.batchSize === 0 || !('batch__' in params));
+
         // stringifyPublicParams also checks for invalid params values
         const testcaseString = stringifyPublicParams(params);
 
@@ -267,14 +296,39 @@ class TestBuilder {
     assert(this.testFn !== undefined, 'No test function (.fn()) for test');
     this.testCases ??= kUnitCaseParamsBuilder;
     for (const [caseParams, subcases] of builderIterateCasesWithSubcases(this.testCases)) {
-      yield new RunCaseSpecific(
-        this.testPath,
-        caseParams,
-        subcases,
-        this.fixture,
-        this.testFn,
-        this.testCreationStack
-      );
+      if (this.batchSize === 0 || subcases === undefined) {
+        yield new RunCaseSpecific(
+          this.testPath,
+          caseParams,
+          subcases,
+          this.fixture,
+          this.testFn,
+          this.testCreationStack
+        );
+      } else {
+        const subcaseArray = Array.from(subcases);
+        if (subcaseArray.length <= this.batchSize) {
+          yield new RunCaseSpecific(
+            this.testPath,
+            caseParams,
+            subcaseArray,
+            this.fixture,
+            this.testFn,
+            this.testCreationStack
+          );
+        } else {
+          for (let i = 0; i < subcaseArray.length; i = i + this.batchSize) {
+            yield new RunCaseSpecific(
+              this.testPath,
+              { ...caseParams, batch__: i / this.batchSize },
+              subcaseArray.slice(i, Math.min(subcaseArray.length, i + this.batchSize)),
+              this.fixture,
+              this.testFn,
+              this.testCreationStack
+            );
+          }
+        }
+      }
     }
   }
 }
@@ -359,7 +413,7 @@ class RunCaseSpecific implements RunCase {
         }
 
         switch (exp.expectation) {
-          // Skip takes precendence. If there is any expectation indicating a skip,
+          // Skip takes precedence. If there is any expectation indicating a skip,
           // signal it immediately.
           case 'skip':
             return 'skip';

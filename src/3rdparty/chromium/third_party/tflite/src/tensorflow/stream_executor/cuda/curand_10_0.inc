@@ -1,6 +1,7 @@
 // Auto-generated, do not edit.
 
 extern "C" {
+
 curandStatus_t CURANDAPI curandCreateGenerator(curandGenerator_t *generator,
                                                curandRngType_t rng_type) {
   using FuncPtr =

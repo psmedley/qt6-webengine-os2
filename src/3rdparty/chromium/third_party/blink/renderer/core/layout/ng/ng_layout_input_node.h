@@ -20,7 +20,6 @@
 namespace blink {
 
 class ComputedStyle;
-class DisplayLockContext;
 class Document;
 class LayoutObject;
 class LayoutBox;
@@ -77,6 +76,7 @@ class CORE_EXPORT NGLayoutInputNode {
   bool IsBlock() const { return type_ == kBlock; }
 
   bool IsBlockFlow() const { return IsBlock() && box_->IsLayoutBlockFlow(); }
+  bool IsBlockInInline() const { return box_->IsBlockInInline(); }
   bool IsLayoutNGCustom() const {
     return IsBlock() && box_->IsLayoutNGCustom();
   }
@@ -115,7 +115,7 @@ class CORE_EXPORT NGLayoutInputNode {
   }
   bool ListMarkerOccupiesWholeLine() const {
     DCHECK(IsListMarker());
-    return To<LayoutNGOutsideListMarker>(box_)->NeedsOccupyWholeLine();
+    return To<LayoutNGOutsideListMarker>(box_.Get())->NeedsOccupyWholeLine();
   }
   bool IsButton() const { return IsBlock() && box_->IsLayoutNGButton(); }
   bool IsFieldsetContainer() const {
@@ -136,7 +136,7 @@ class CORE_EXPORT NGLayoutInputNode {
   bool IsSvgText() const;
   bool IsTable() const { return IsBlock() && box_->IsTable(); }
   bool IsTextCombine() const { return box_->IsLayoutNGTextCombine(); }
-  bool IsNGTable() const { return IsTable() && box_->IsLayoutNGMixin(); }
+  bool IsNGTable() const { return IsTable() && box_->IsLayoutNGObject(); }
 
   bool IsTableCaption() const { return IsBlock() && box_->IsTableCaption(); }
 
@@ -165,6 +165,7 @@ class CORE_EXPORT NGLayoutInputNode {
   bool IsMathRoot() const { return box_->IsMathMLRoot(); }
   bool IsMathML() const { return box_->IsMathML(); }
 
+  bool IsAnonymous() const { return box_->IsAnonymous(); }
   bool IsAnonymousBlock() const { return box_->IsAnonymousBlock(); }
 
   // If the node is a quirky container for margin collapsing, see:
@@ -194,7 +195,7 @@ class CORE_EXPORT NGLayoutInputNode {
   // Returns true if this node should pass its percentage resolution block-size
   // to its children. Typically only quirks-mode, auto block-size, block nodes.
   bool UseParentPercentageResolutionBlockSizeForChildren() const {
-    auto* layout_block = DynamicTo<LayoutBlock>(box_);
+    auto* layout_block = DynamicTo<LayoutBlock>(box_.Get());
     if (IsBlock() && layout_block) {
       return LayoutBoxUtils::SkipContainingBlockForPercentHeightCalculation(
           layout_block);
@@ -238,8 +239,8 @@ class CORE_EXPORT NGLayoutInputNode {
     return box_->ShouldApplyBlockSizeContainment();
   }
 
-  bool IsContainerForContainerQueries() const {
-    return box_->IsContainerForContainerQueries();
+  bool CanMatchSizeContainerQueries() const {
+    return box_->CanMatchSizeContainerQueries();
   }
 
   LogicalAxes ContainedAxes() const {
@@ -281,11 +282,6 @@ class CORE_EXPORT NGLayoutInputNode {
     return box_->DefaultIntrinsicContentBlockSize();
   }
 
-  // Display locking functionality.
-  const DisplayLockContext& GetDisplayLockContext() const {
-    DCHECK(box_->GetDisplayLockContext());
-    return *box_->GetDisplayLockContext();
-  }
   bool ChildLayoutBlockedByDisplayLock() const {
     return box_->ChildLayoutBlockedByDisplayLock();
   }
@@ -319,6 +315,8 @@ class CORE_EXPORT NGLayoutInputNode {
   void ShowNodeTree() const;
 #endif
 
+  void Trace(Visitor* visitor) const { visitor->Trace(box_); }
+
  protected:
   NGLayoutInputNode(LayoutBox* box, NGLayoutInputNodeType type)
       : box_(box), type_(type) {}
@@ -327,7 +325,7 @@ class CORE_EXPORT NGLayoutInputNode {
       absl::optional<LayoutUnit>* computed_inline_size,
       absl::optional<LayoutUnit>* computed_block_size) const;
 
-  LayoutBox* box_;
+  Member<LayoutBox> box_;
 
   unsigned type_ : 1;  // NGLayoutInputNodeType
 };

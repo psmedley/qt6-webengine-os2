@@ -16,7 +16,7 @@ import {DownloadItem} from './download_shelf.mojom-webui.js';
 import {DownloadShelfApiProxy, DownloadShelfApiProxyImpl} from './download_shelf_api_proxy.js';
 
 export class DownloadListElement extends CustomElement {
-  static get template() {
+  static override get template() {
     return `{__html_template__}`;
   }
 
@@ -31,7 +31,7 @@ export class DownloadListElement extends CustomElement {
     super();
 
     this.apiProxy_ = DownloadShelfApiProxyImpl.getInstance();
-    this.listElement_ = this.$('#download-list') as HTMLElement;
+    this.listElement_ = this.$<HTMLElement>('#download-list')!;
     this.resizeObserver_ = new ResizeObserver(() => this.updateElements_());
     this.resizeObserver_.observe(this.listElement_);
 
@@ -123,7 +123,7 @@ export class DownloadListElement extends CustomElement {
   private clear_() {
     while (this.listenerIds_.length) {
       this.apiProxy_.getCallbackRouter().removeListener(
-          this.listenerIds_.shift());
+          this.listenerIds_.shift()!);
     }
 
     while (this.listElement_.firstChild) {

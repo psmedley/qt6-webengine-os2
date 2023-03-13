@@ -18,7 +18,10 @@
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ime/input_method.h"
 #include "ui/base/metadata/metadata_impl_macros.h"
+#include "ui/base/models/image_model.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/color/color_id.h"
+#include "ui/color/color_provider.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/canvas.h"
@@ -27,11 +30,11 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/skia_conversions.h"
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/scoped_canvas.h"
-#include "ui/gfx/skia_util.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/accessibility/ax_virtual_view.h"
@@ -43,6 +46,7 @@
 #include "ui/views/controls/textfield/textfield.h"
 #include "ui/views/controls/tree/tree_view_controller.h"
 #include "ui/views/style/platform_style.h"
+#include "ui/views/widget/widget.h"
 
 using ui::TreeModel;
 using ui::TreeModelNode;
@@ -58,6 +62,8 @@ static constexpr int kArrowRegionSize = 12;
 // Padding around the text (on each side).
 static constexpr int kTextVerticalPadding = 3;
 static constexpr int kTextHorizontalPadding = 2;
+// Padding between the auxiliary text and the end of the line, handles RTL.
+static constexpr int kAuxiliaryTextLineEndPadding = 5;
 // How much children are indented from their parent.
 static constexpr int kIndent = 20;
 
@@ -79,7 +85,7 @@ bool EventIsDoubleTapOrClick(const ui::LocatedEvent& event) {
 
 int GetSpaceThicknessForFocusRing() {
   static const int kSpaceThicknessForFocusRing =
-      FocusRing::kHaloThickness - FocusRing::kHaloInset;
+      FocusRing::kDefaultHaloThickness - FocusRing::kDefaultHaloInset;
   return kSpaceThicknessForFocusRing;
 }
 
@@ -90,26 +96,25 @@ TreeView::TreeView()
       drawing_provider_(std::make_unique<TreeViewDrawingProvider>()) {
   // Always focusable, even on Mac (consistent with NSOutlineView).
   SetFocusBehavior(FocusBehavior::ALWAYS);
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
   constexpr bool kUseMdIcons = true;
 #else
   constexpr bool kUseMdIcons = false;
 #endif
   if (kUseMdIcons) {
-    closed_icon_ = open_icon_ =
-        gfx::CreateVectorIcon(vector_icons::kFolderIcon, gfx::kChromeIconGrey);
+    closed_icon_ = open_icon_ = ui::ImageModel::FromVectorIcon(
+        vector_icons::kFolderIcon, ui::kColorIcon);
   } else {
     // TODO(ellyjones): if the pre-Harmony codepath goes away, merge
     // closed_icon_ and open_icon_.
-    closed_icon_ = *ui::ResourceBundle::GetSharedInstance()
-                        .GetImageNamed(IDR_FOLDER_CLOSED)
-                        .ToImageSkia();
-    open_icon_ = *ui::ResourceBundle::GetSharedInstance()
-                      .GetImageNamed(IDR_FOLDER_OPEN)
-                      .ToImageSkia();
+    closed_icon_ = ui::ImageModel::FromImage(
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+            IDR_FOLDER_CLOSED));
+    open_icon_ = ui::ImageModel::FromImage(
+        ui::ResourceBundle::GetSharedInstance().GetImageNamed(IDR_FOLDER_OPEN));
   }
-  text_offset_ =
-      closed_icon_.width() + kImagePadding + kImagePadding + kArrowRegionSize;
+  text_offset_ = closed_icon_.Size().width() + kImagePadding + kImagePadding +
+                 kArrowRegionSize;
 }
 
 TreeView::~TreeView() {
@@ -193,7 +198,7 @@ void TreeView::StartEditing(TreeModelNode* node) {
     editor_ = new Textfield;
     // Add the editor immediately as GetPreferredSize returns the wrong thing if
     // not parented.
-    AddChildView(editor_);
+    AddChildView(editor_.get());
     editor_->SetFontList(font_list_);
     empty_editor_size_ = editor_->GetPreferredSize();
     editor_->set_controller(this);
@@ -732,8 +737,7 @@ bool TreeView::OnKeyPressed(const ui::KeyEvent& event) {
 
 void TreeView::OnPaint(gfx::Canvas* canvas) {
   // Don't invoke View::OnPaint so that we can render our own focus border.
-  canvas->DrawColor(GetNativeTheme()->GetSystemColor(
-      ui::NativeTheme::kColorId_TreeBackground));
+  canvas->DrawColor(GetColorProvider()->GetColor(ui::kColorTreeBackground));
 
   int min_y, max_y;
   {
@@ -813,6 +817,11 @@ void TreeView::UpdateSelection(TreeModelNode* model_node,
     // GetForegroundBoundsForNode() returns RTL-flipped coordinates for paint.
     // Un-flip before passing to ScrollRectToVisible(), which uses layout
     // coordinates.
+    // TODO(crbug.com/1267807): We should not be doing synchronous layout here
+    // but instead we should call into this asynchronously after the Views
+    // tree has processed a layout pass which happens asynchronously.
+    if (auto* widget = GetWidget())
+      widget->LayoutRootViewIfNecessary();
     ScrollRectToVisible(GetMirroredRect(GetForegroundBoundsForNode(node)));
   }
 
@@ -1025,9 +1034,11 @@ void TreeView::LayoutEditor() {
       GetMirroredXWithWidthInView(row_bounds.x(), row_bounds.width()));
   row_bounds.set_x(row_bounds.x() + text_offset_);
   row_bounds.set_width(row_bounds.width() - text_offset_);
-  row_bounds.Inset(kTextHorizontalPadding, kTextVerticalPadding);
-  row_bounds.Inset(-empty_editor_size_.width() / 2,
-                   -(empty_editor_size_.height() - font_list_.GetHeight()) / 2);
+  row_bounds.Inset(
+      gfx::Insets::VH(kTextVerticalPadding, kTextHorizontalPadding));
+  row_bounds.Inset(gfx::Insets::VH(
+      -(empty_editor_size_.height() - font_list_.GetHeight()) / 2,
+      -empty_editor_size_.width() / 2));
   // Give a little extra space for editing.
   row_bounds.set_width(row_bounds.width() + 50);
   // If contained within a ScrollView, make sure the editor doesn't extend past
@@ -1042,7 +1053,7 @@ void TreeView::LayoutEditor() {
   // The visible bounds should include the focus ring which is outside the
   // |row_bounds|.
   gfx::Rect outter_bounds = row_bounds;
-  outter_bounds.Inset(gfx::Insets(-GetSpaceThicknessForFocusRing()));
+  outter_bounds.Inset(-GetSpaceThicknessForFocusRing());
   // Scroll as necessary to ensure that the editor is visible.
   ScrollRectToVisible(outter_bounds);
   editor_->SetBoundsRect(row_bounds);
@@ -1120,7 +1131,8 @@ void TreeView::PaintRow(gfx::Canvas* canvas,
                                       : gfx::Canvas::TEXT_ALIGN_RIGHT;
       canvas->DrawStringRectWithFlags(
           aux_text, font_list_,
-          drawing_provider()->GetTextColorForNode(this, node->model_node()),
+          drawing_provider()->GetAuxiliaryTextColorForNode(this,
+                                                           node->model_node()),
           aux_text_bounds, align);
     }
   }
@@ -1150,8 +1162,9 @@ void TreeView::PaintExpandControl(gfx::Canvas* canvas,
                                    : SkBitmapOperations::ROTATION_90_CW);
   }
   gfx::Rect arrow_bounds = node_bounds;
-  arrow_bounds.Inset(gfx::Insets((node_bounds.height() - arrow.height()) / 2,
-                                 (kArrowRegionSize - arrow.width()) / 2));
+  arrow_bounds.Inset(
+      gfx::Insets::VH((node_bounds.height() - arrow.height()) / 2,
+                      (kArrowRegionSize - arrow.width()) / 2));
   canvas->DrawImageInt(arrow,
                        base::i18n::IsRTL()
                            ? arrow_bounds.right() - arrow.width()
@@ -1170,12 +1183,15 @@ void TreeView::PaintNodeIcon(gfx::Canvas* canvas,
     canvas->Translate(gfx::Vector2d(bounds.x(), 0));
     scoped_canvas.FlipIfRTL(bounds.width());
     // Now paint the icon local to that flipped region.
-    PaintRowIcon(canvas, node->is_expanded() ? open_icon_ : closed_icon_,
+    PaintRowIcon(canvas,
+                 (node->is_expanded() ? open_icon_ : closed_icon_)
+                     .Rasterize(GetColorProvider()),
                  icon_x,
                  gfx::Rect(0, bounds.y(), bounds.width(), bounds.height()));
   } else {
-    const gfx::ImageSkia& icon = icons_[icon_index];
-    icon_x += (open_icon_.width() - icon.width()) / 2;
+    const gfx::ImageSkia& icon =
+        icons_[icon_index].Rasterize(GetColorProvider());
+    icon_x += (open_icon_.Size().width() - icon.width()) / 2;
     if (base::i18n::IsRTL())
       icon_x = bounds.width() - icon_x - icon.width();
     PaintRowIcon(canvas, icon, icon_x, bounds);
@@ -1238,9 +1254,9 @@ gfx::Rect TreeView::GetForegroundBoundsForNode(InternalNode* node) {
 gfx::Rect TreeView::GetTextBoundsForNode(InternalNode* node) {
   gfx::Rect bounds(GetForegroundBoundsForNode(node));
   if (drawing_provider()->ShouldDrawIconForNode(this, node->model_node()))
-    bounds.Inset(text_offset_, 0, 0, 0);
+    bounds.Inset(gfx::Insets::TLBR(0, text_offset_, 0, 0));
   else
-    bounds.Inset(kArrowRegionSize, 0, 0, 0);
+    bounds.Inset(gfx::Insets::TLBR(0, kArrowRegionSize, 0, 0));
   return bounds;
 }
 
@@ -1250,14 +1266,16 @@ gfx::Rect TreeView::GetTextBoundsForNode(InternalNode* node) {
 // leading aligned.
 gfx::Rect TreeView::GetAuxiliaryTextBoundsForNode(InternalNode* node) {
   gfx::Rect text_bounds = GetTextBoundsForNode(node);
-  int width = base::i18n::IsRTL() ? text_bounds.x() - kTextHorizontalPadding * 2
-                                  : bounds().width() - text_bounds.right() -
-                                        2 * kTextHorizontalPadding;
+  int width = base::i18n::IsRTL()
+                  ? text_bounds.x() - kTextHorizontalPadding -
+                        kAuxiliaryTextLineEndPadding
+                  : bounds().width() - text_bounds.right() -
+                        kTextHorizontalPadding - kAuxiliaryTextLineEndPadding;
   if (width < 0)
     return gfx::Rect();
   int x = base::i18n::IsRTL()
-              ? kTextHorizontalPadding
-              : bounds().right() - width - kTextHorizontalPadding;
+              ? kAuxiliaryTextLineEndPadding
+              : bounds().right() - width - kAuxiliaryTextLineEndPadding;
   return gfx::Rect(x, text_bounds.y(), width, text_bounds.height());
 }
 

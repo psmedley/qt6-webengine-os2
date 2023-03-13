@@ -31,18 +31,20 @@
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 
 #include "base/allocator/buildflags.h"
+#include "base/allocator/partition_alloc_features.h"
+#include "base/allocator/partition_alloc_support.h"
 #include "base/allocator/partition_allocator/memory_reclaimer.h"
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator.h"
 #include "base/allocator/partition_allocator/partition_alloc.h"
 #include "base/allocator/partition_allocator/partition_alloc_config.h"
-#include "base/allocator/partition_allocator/partition_alloc_features.h"
 #include "base/allocator/partition_allocator/partition_root.h"
 #include "base/debug/alias.h"
 #include "base/feature_list.h"
 #include "base/no_destructor.h"
 #include "base/strings/safe_sprintf.h"
 #include "base/thread_annotations.h"
+#include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
@@ -54,20 +56,18 @@ const char* const Partitions::kAllocatedObjectPoolName =
 
 #if defined(PA_ALLOW_PCSCAN)
 // Runs PCScan on WTF partitions.
-const base::Feature kPCScanBlinkPartitions{"PCScanBlinkPartitions",
-                                           base::FEATURE_DISABLED_BY_DEFAULT};
+const base::Feature kPCScanBlinkPartitions{
+    "PartitionAllocPCScanBlinkPartitions", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
 bool Partitions::initialized_ = false;
+bool Partitions::scan_is_enabled_ = false;
 
 // These statics are inlined, so cannot be LazyInstances. We create the values,
 // and then set the pointers correctly in Initialize().
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
 base::ThreadSafePartitionRoot* Partitions::fast_malloc_root_ = nullptr;
-#endif
 base::ThreadSafePartitionRoot* Partitions::array_buffer_root_ = nullptr;
 base::ThreadSafePartitionRoot* Partitions::buffer_root_ = nullptr;
-base::ThreadUnsafePartitionRoot* Partitions::layout_root_ = nullptr;
 
 // static
 void Partitions::Initialize() {
@@ -77,77 +77,136 @@ void Partitions::Initialize() {
 
 // static
 bool Partitions::InitializeOnce() {
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  static base::NoDestructor<base::PartitionAllocator> fast_malloc_allocator{};
-  fast_malloc_allocator->init({
-    base::PartitionOptions::AlignedAlloc::kDisallowed,
-        base::PartitionOptions::ThreadCache::kEnabled,
-        base::PartitionOptions::Quarantine::kAllowed,
-        base::PartitionOptions::Cookies::kAllowed,
-#if BUILDFLAG(ENABLE_BACKUP_REF_PTR_IN_RENDERER_PROCESS)
-        base::PartitionOptions::RefCount::kAllowed
+  const bool enable_brp =
+#if BUILDFLAG(USE_BACKUP_REF_PTR)
+      base::FeatureList::IsEnabled(
+          base::features::kPartitionAllocBackupRefPtr) &&
+      base::features::kBackupRefPtrModeParam.Get() ==
+          base::features::BackupRefPtrMode::kEnabled &&
+      (base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
+           base::features::BackupRefPtrEnabledProcesses::kAllProcesses ||
+       base::features::kBackupRefPtrEnabledProcessesParam.Get() ==
+           base::features::BackupRefPtrEnabledProcesses::kBrowserAndRenderer);
 #else
-        base::PartitionOptions::RefCount::kDisallowed
+      false;
 #endif
-  });
+  const base::PartitionOptions::BackupRefPtr brp_setting =
+      enable_brp ? base::PartitionOptions::BackupRefPtr::kEnabled
+                 : base::PartitionOptions::BackupRefPtr::kDisabled;
 
-  fast_malloc_root_ = fast_malloc_allocator->root();
-#endif  // !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+  scan_is_enabled_ =
+      !enable_brp &&
+#if defined(PA_ALLOW_PCSCAN)
+      (base::FeatureList::IsEnabled(base::features::kPartitionAllocPCScan) ||
+       base::FeatureList::IsEnabled(kPCScanBlinkPartitions));
+#else
+      false;
+#endif
 
-  static base::NoDestructor<base::PartitionAllocator> array_buffer_allocator{};
-  static base::NoDestructor<base::PartitionAllocator> buffer_allocator{};
-  static base::NoDestructor<base::ThreadUnsafePartitionAllocator>
-      layout_allocator{};
+  // FastMalloc doesn't provide isolation, only a (hopefully fast) malloc().
+  // When PartitionAlloc is already the malloc() implementation, there is
+  // nothing to do.
+  //
+  // Note that we could keep the two heaps separate, but each PartitionAlloc's
+  // root has a cost, both in used memory and in virtual address space. Don't
+  // pay it when we don't have to.
+  //
+  // In addition, enable the FastMalloc partition if
+  // --enable-features=PartitionAllocPCScanBlinkPartitions is specified.
+  if (scan_is_enabled_ || !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)) {
+    constexpr base::PartitionOptions::ThreadCache thread_cache =
+#if BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+        base::PartitionOptions::ThreadCache::kDisabled;
+#else
+        base::PartitionOptions::ThreadCache::kEnabled;
+#endif
+    static base::NoDestructor<base::PartitionAllocator> fast_malloc_allocator{};
+    fast_malloc_allocator->init({
+        base::PartitionOptions::AlignedAlloc::kDisallowed,
+        thread_cache,
+        base::PartitionOptions::Quarantine::kAllowed,
+        base::PartitionOptions::Cookie::kAllowed,
+        brp_setting,
+        base::PartitionOptions::UseConfigurablePool::kNo,
+    });
+    fast_malloc_root_ = fast_malloc_allocator->root();
+  }
 
   base::PartitionAllocGlobalInit(&Partitions::HandleOutOfMemory);
 
-  // RefCount disallowed because it will prevent allocations from being 16B
-  // aligned as required by ArrayBufferContents.
-  array_buffer_allocator->init({
-    base::PartitionOptions::AlignedAlloc::kDisallowed,
-        base::PartitionOptions::ThreadCache::kDisabled,
-        base::PartitionOptions::Quarantine::kAllowed,
-        base::PartitionOptions::Cookies::kAllowed,
-        base::PartitionOptions::RefCount::kDisallowed
-  });
+  static base::NoDestructor<base::PartitionAllocator> buffer_allocator{};
   buffer_allocator->init({
-    base::PartitionOptions::AlignedAlloc::kDisallowed,
-        base::PartitionOptions::ThreadCache::kDisabled,
-        base::PartitionOptions::Quarantine::kAllowed,
-        base::PartitionOptions::Cookies::kAllowed,
-#if BUILDFLAG(ENABLE_BACKUP_REF_PTR_IN_RENDERER_PROCESS)
-        base::PartitionOptions::RefCount::kAllowed
-#else
-        base::PartitionOptions::RefCount::kDisallowed
-#endif
+      base::PartitionOptions::AlignedAlloc::kDisallowed,
+      base::PartitionOptions::ThreadCache::kDisabled,
+      base::PartitionOptions::Quarantine::kAllowed,
+      base::PartitionOptions::Cookie::kAllowed,
+      brp_setting,
+      base::PartitionOptions::UseConfigurablePool::kNo,
   });
-  // RefCount disallowed because layout code will be excluded from raw_ptr<T>
-  // rewrite due to performance.
-  layout_allocator->init({
-    base::PartitionOptions::AlignedAlloc::kDisallowed,
-        base::PartitionOptions::ThreadCache::kDisabled,
-        base::PartitionOptions::Quarantine::kAllowed,
-        base::PartitionOptions::Cookies::kAllowed,
-        base::PartitionOptions::RefCount::kDisallowed
-  });
-
-  array_buffer_root_ = array_buffer_allocator->root();
   buffer_root_ = buffer_allocator->root();
-  layout_root_ = layout_allocator->root();
 
 #if defined(PA_ALLOW_PCSCAN)
-  if (base::FeatureList::IsEnabled(base::features::kPartitionAllocPCScan) ||
-      base::FeatureList::IsEnabled(kPCScanBlinkPartitions)) {
-    base::internal::PCScan::RegisterNonScannableRoot(array_buffer_root_);
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+  if (scan_is_enabled_) {
+    if (!base::internal::PCScan::IsInitialized()) {
+      base::internal::PCScan::Initialize(
+          {base::internal::PCScan::InitConfig::WantedWriteProtectionMode::
+               kDisabled,
+           base::internal::PCScan::InitConfig::SafepointMode::kDisabled});
+    }
     base::internal::PCScan::RegisterScannableRoot(fast_malloc_root_);
-#endif
-    base::internal::PCScan::RegisterScannableRoot(buffer_root_);
+    // Ignore other partitions for now.
   }
 #endif  // defined(PA_ALLOW_PCSCAN)
 
+  if (!base::FeatureList::IsEnabled(
+          base::features::kPartitionAllocUseAlternateDistribution)) {
+#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
+    fast_malloc_root_->SwitchToDenserBucketDistribution();
+#endif
+    buffer_root_->SwitchToDenserBucketDistribution();
+  }
+
   initialized_ = true;
   return initialized_;
+}
+
+// static
+void Partitions::InitializeArrayBufferPartition() {
+  CHECK(initialized_);
+  CHECK(!ArrayBufferPartitionInitialized());
+
+  static base::NoDestructor<base::PartitionAllocator> array_buffer_allocator{};
+
+  // BackupRefPtr disallowed because it will prevent allocations from being 16B
+  // aligned as required by ArrayBufferContents.
+  array_buffer_allocator->init({
+      base::PartitionOptions::AlignedAlloc::kDisallowed,
+      base::PartitionOptions::ThreadCache::kDisabled,
+      base::PartitionOptions::Quarantine::kAllowed,
+      base::PartitionOptions::Cookie::kAllowed,
+      base::PartitionOptions::BackupRefPtr::kDisabled,
+      // When the V8 virtual memory cage is enabled, the ArrayBuffer partition
+      // must be placed inside of it. For that, PA's ConfigurablePool is
+      // created inside the V8 Cage during initialization. As such, here all we
+      // need to do is indicate that we'd like to use that Pool if it has been
+      // created by now (if it hasn't been created, the cage isn't enabled, and
+      // so we'll use the default Pool).
+      base::PartitionOptions::UseConfigurablePool::kIfAvailable,
+  });
+
+  array_buffer_root_ = array_buffer_allocator->root();
+
+#if defined(PA_ALLOW_PCSCAN)
+  // PCScan relies on the fact that quarantinable allocations go to PA's
+  // giga-cage. This is not the case if configurable pool is available.
+  if (scan_is_enabled_ && !array_buffer_root_->uses_configurable_pool()) {
+    base::internal::PCScan::RegisterNonScannableRoot(array_buffer_root_);
+  }
+#endif  // defined(PA_ALLOW_PCSCAN)
+  if (!base::FeatureList::IsEnabled(
+          base::features::kPartitionAllocUseAlternateDistribution)) {
+    array_buffer_root_->SwitchToDenserBucketDistribution();
+  }
 }
 
 // static
@@ -156,7 +215,7 @@ void Partitions::StartPeriodicReclaim(
   CHECK(IsMainThread());
   DCHECK(initialized_);
 
-  base::PartitionAllocMemoryReclaimer::Instance()->Start(task_runner);
+  base::allocator::StartMemoryReclaimer(task_runner);
 }
 
 // static
@@ -167,14 +226,15 @@ void Partitions::DumpMemoryStats(
   // accessed only on the main thread.
   DCHECK(IsMainThread());
 
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  FastMallocPartition()->DumpStats("fast_malloc", is_light_dump,
-                                   partition_stats_dumper);
-#endif
-  ArrayBufferPartition()->DumpStats("array_buffer", is_light_dump,
-                                    partition_stats_dumper);
+  if (auto* fast_malloc_partition = FastMallocPartition()) {
+    fast_malloc_partition->DumpStats("fast_malloc", is_light_dump,
+                                     partition_stats_dumper);
+  }
+  if (ArrayBufferPartitionInitialized()) {
+    ArrayBufferPartition()->DumpStats("array_buffer", is_light_dump,
+                                      partition_stats_dumper);
+  }
   BufferPartition()->DumpStats("buffer", is_light_dump, partition_stats_dumper);
-  LayoutPartition()->DumpStats("layout", is_light_dump, partition_stats_dumper);
 }
 
 namespace {
@@ -206,16 +266,16 @@ size_t Partitions::TotalSizeOfCommittedPages() {
   DCHECK(initialized_);
   size_t total_size = 0;
   // Racy reads below: this is fine to collect statistics.
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  total_size +=
-      TS_UNCHECKED_READ(FastMallocPartition()->total_size_of_committed_pages);
-#endif
-  total_size +=
-      TS_UNCHECKED_READ(ArrayBufferPartition()->total_size_of_committed_pages);
+  if (auto* fast_malloc_partition = FastMallocPartition()) {
+    total_size +=
+        TS_UNCHECKED_READ(fast_malloc_partition->total_size_of_committed_pages);
+  }
+  if (ArrayBufferPartitionInitialized()) {
+    total_size += TS_UNCHECKED_READ(
+        ArrayBufferPartition()->total_size_of_committed_pages);
+  }
   total_size +=
       TS_UNCHECKED_READ(BufferPartition()->total_size_of_committed_pages);
-  total_size +=
-      TS_UNCHECKED_READ(LayoutPartition()->total_size_of_committed_pages);
   return total_size;
 }
 
@@ -315,30 +375,31 @@ size_t Partitions::BufferPotentialCapacity(size_t n) {
 // no-op.
 // static
 void* Partitions::FastMalloc(size_t n, const char* type_name) {
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  return FastMallocPartition()->Alloc(n, type_name);
-#else
-  return malloc(n);
-#endif
+  auto* fast_malloc_partition = FastMallocPartition();
+  if (UNLIKELY(fast_malloc_partition))
+    return fast_malloc_partition->Alloc(n, type_name);
+  else
+    return malloc(n);
 }
 
 // static
 void* Partitions::FastZeroedMalloc(size_t n, const char* type_name) {
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  return FastMallocPartition()->AllocFlags(base::PartitionAllocZeroFill, n,
-                                           type_name);
-#else
-  return calloc(n, 1);
-#endif
+  auto* fast_malloc_partition = FastMallocPartition();
+  if (UNLIKELY(fast_malloc_partition)) {
+    return fast_malloc_partition->AllocWithFlags(
+        partition_alloc::AllocFlags::kZeroFill, n, type_name);
+  } else {
+    return calloc(n, 1);
+  }
 }
 
 // static
 void Partitions::FastFree(void* p) {
-#if !BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC)
-  FastMallocPartition()->Free(p);
-#else
-  free(p);
-#endif
+  auto* fast_malloc_partition = FastMallocPartition();
+  if (UNLIKELY(fast_malloc_partition))
+    fast_malloc_partition->Free(p);
+  else
+    free(p);
 }
 
 // static

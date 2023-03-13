@@ -10,9 +10,11 @@
 
 #include "base/base_export.h"
 #include "base/message_loop/message_pump.h"
+#include "base/profiler/sample_metadata.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
 #include "base/task/sequence_manager/lazy_now.h"
+#include "base/task/sequence_manager/tasks.h"
+#include "base/task/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 
@@ -58,12 +60,13 @@ class ThreadController {
   virtual void ScheduleWork() = 0;
 
   // Notify the controller that SequencedTaskSource will have a delayed work
-  // ready to be run at |run_time|. This call cancels any previously
+  // ready to be run at |wake_up|. This call cancels any previously
   // scheduled delayed work. Can only be called from the main sequence.
-  // NOTE: DelayTillNextTask might return a different value as it also takes
+  // NOTE: GetPendingWakeUp might return a different value as it also takes
   // immediate work into account.
   // TODO(kraynov): Remove |lazy_now| parameter.
-  virtual void SetNextDelayedDoWork(LazyNow* lazy_now, TimeTicks run_time) = 0;
+  virtual void SetNextDelayedDoWork(LazyNow* lazy_now,
+                                    absl::optional<WakeUp> wake_up) = 0;
 
   // Sets the sequenced task source from which to take tasks after
   // a Schedule*Work() call is made.
@@ -93,14 +96,14 @@ class ThreadController {
   // Returns true if the current run loop should quit when idle.
   virtual bool ShouldQuitRunLoopWhenIdle() = 0;
 
-#if defined(OS_IOS) || defined(OS_ANDROID)
+#if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ANDROID)
   // On iOS, the main message loop cannot be Run().  Instead call
   // AttachToMessagePump(), which connects this ThreadController to the
   // UI thread's CFRunLoop and allows PostTask() to work.
   virtual void AttachToMessagePump() = 0;
 #endif
 
-#if defined(OS_IOS)
+#if BUILDFLAG(IS_IOS)
   // Detaches this ThreadController from the message pump, allowing the
   // controller to be shut down cleanly.
   virtual void DetachFromMessagePump() = 0;
@@ -124,7 +127,7 @@ class ThreadController {
   // with MessageLoop.
 
   virtual bool RunsTasksInCurrentSequence() = 0;
-  virtual const TickClock* GetClock() = 0;
+  virtual void SetTickClock(const TickClock* clock) = 0;
   virtual scoped_refptr<SingleThreadTaskRunner> GetDefaultTaskRunner() = 0;
   virtual void RestoreDefaultTaskRunner() = 0;
   virtual void AddNestingObserver(RunLoop::NestingObserver* observer) = 0;
@@ -214,7 +217,7 @@ class ThreadController {
    private:
     class RunLevel {
      public:
-      explicit RunLevel(State initial_state);
+      explicit RunLevel(State initial_state, bool is_nested);
       ~RunLevel();
 
       // Moveable for STL compat. Marks |other| as idle so it noops on
@@ -228,6 +231,10 @@ class ThreadController {
 
      private:
       State state_ = kIdle;
+      bool is_nested_;
+
+      SampleMetadata thread_controller_sample_metadata_;
+      size_t thread_controller_active_id_ = 0;
     };
 
     std::stack<RunLevel, std::vector<RunLevel>> run_levels_;

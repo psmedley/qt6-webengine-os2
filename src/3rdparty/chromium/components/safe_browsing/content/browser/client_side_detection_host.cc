@@ -11,12 +11,12 @@
 #include "base/check_op.h"
 #include "base/command_line.h"
 #include "base/guid.h"
-#include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/memory/raw_ptr.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/sequenced_task_runner_helpers.h"
+#include "base/task/sequenced_task_runner_helpers.h"
 #include "base/task/thread_pool.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/tick_clock.h"
@@ -25,23 +25,32 @@
 #include "components/safe_browsing/content/browser/client_side_phishing_model.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom-shared.h"
 #include "components/safe_browsing/content/common/safe_browsing.mojom.h"
+#include "components/safe_browsing/content/common/visual_utils.h"
 #include "components/safe_browsing/core/browser/db/allowlist_checker_client.h"
 #include "components/safe_browsing/core/browser/db/database_manager.h"
 #include "components/safe_browsing/core/browser/sync/sync_utils.h"
 #include "components/safe_browsing/core/common/features.h"
 #include "components/security_interstitials/content/unsafe_resource_util.h"
+#include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/common/url_constants.h"
 #include "net/base/ip_endpoint.h"
 #include "net/http/http_response_headers.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/mojom/loader/referrer.mojom.h"
 #include "url/gurl.h"
+
+#if BUILDFLAG(IS_ANDROID)
+#include "ui/android/view_android.h"
+#endif
 
 using content::BrowserThread;
 using content::WebContents;
@@ -114,19 +123,29 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     remote_endpoint_ = navigation_handle->GetSocketAddress();
   }
 
+  ShouldClassifyUrlRequest(const ShouldClassifyUrlRequest&) = delete;
+  ShouldClassifyUrlRequest& operator=(const ShouldClassifyUrlRequest&) = delete;
+
   void Start() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     // We start by doing some simple checks that can run on the UI thread.
     base::UmaHistogramBoolean("SBClientPhishing.ClassificationStart", true);
 
+    if (url_.SchemeIs(content::kChromeUIScheme)) {
+      DontClassifyForPhishing(NO_CLASSIFY_CHROME_UI_PAGE);
+    }
+
+    if (csd_service_->IsLocalResource(remote_endpoint_.address())) {
+      DontClassifyForPhishing(NO_CLASSIFY_LOCAL_RESOURCE);
+    }
+
     // Only classify [X]HTML documents.
     if (mime_type_ != "text/html" && mime_type_ != "application/xhtml+xml") {
       DontClassifyForPhishing(NO_CLASSIFY_UNSUPPORTED_MIME_TYPE);
     }
 
-    if (csd_service_->IsPrivateIPAddress(
-            remote_endpoint_.ToStringWithoutPort())) {
+    if (csd_service_->IsPrivateIPAddress(remote_endpoint_.address())) {
       DontClassifyForPhishing(NO_CLASSIFY_PRIVATE_IP);
     }
 
@@ -196,6 +215,8 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     NO_CLASSIFY_ALLOWLISTED_BY_POLICY = 12,
     CLASSIFY = 13,
     NO_CLASSIFY_HAS_DELAYED_WARNING = 14,
+    NO_CLASSIFY_LOCAL_RESOURCE = 15,
+    NO_CLASSIFY_CHROME_UI_PAGE = 16,
 
     NO_CLASSIFY_MAX  // Always add new values before this one.
   };
@@ -314,16 +335,14 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
   GURL url_;
   std::string mime_type_;
   net::IPEndPoint remote_endpoint_;
-  WebContents* web_contents_;
-  ClientSideDetectionService* csd_service_;
+  raw_ptr<WebContents> web_contents_;
+  raw_ptr<ClientSideDetectionService> csd_service_;
   // We keep a ref pointer here just to make sure the safe browsing
   // database manager stays alive long enough.
   scoped_refptr<SafeBrowsingDatabaseManager> database_manager_;
-  ClientSideDetectionHost* host_;
+  raw_ptr<ClientSideDetectionHost> host_;
 
   ShouldClassifyUrlCallback start_phishing_classification_cb_;
-
-  DISALLOW_COPY_AND_ASSIGN(ShouldClassifyUrlRequest);
 };
 
 // static
@@ -368,9 +387,19 @@ ClientSideDetectionHost::ClientSideDetectionHost(
 
   // We want to accurately track all active RenderFrameHosts, so make sure we
   // know about any pre-existings ones.
-  web_contents()->ForEachRenderFrameHost(
-      base::BindRepeating(&ClientSideDetectionHost::InitializePhishingDetector,
-                          base::Unretained(this)));
+  web_contents()->ForEachRenderFrameHost(base::BindRepeating(
+      [](ClientSideDetectionHost* csdh,
+         const content::WebContents* web_contents,
+         content::RenderFrameHost* rfh) {
+        // Don't cross into inner WebContents since we wouldn't be notified of
+        // its changes. See https://crbug.com/1308829
+        if (content::WebContents::FromRenderFrameHost(rfh) != web_contents) {
+          return content::RenderFrameHost::FrameIterationAction::kSkipChildren;
+        }
+        csdh->InitializePhishingDetector(rfh);
+        return content::RenderFrameHost::FrameIterationAction::kContinue;
+      },
+      base::Unretained(this), web_contents()));
 }
 
 ClientSideDetectionHost::~ClientSideDetectionHost() {
@@ -410,6 +439,9 @@ void ClientSideDetectionHost::DidFinishNavigation(
   }
 
   current_url_ = navigation_handle->GetURL();
+  current_outermost_main_frame_id_ = navigation_handle->GetRenderFrameHost()
+                                         ->GetOutermostMainFrame()
+                                         ->GetGlobalId();
 
   // Check whether we can cassify the current URL for phishing.
   classification_request_ = new ShouldClassifyUrlRequest(
@@ -463,7 +495,7 @@ void ClientSideDetectionHost::RenderFrameCreated(
 
 void ClientSideDetectionHost::RenderFrameDeleted(
     content::RenderFrameHost* render_frame_host) {
-  phishing_detectors_.erase(render_frame_host);
+  ClearPhishingDetector(render_frame_host->GetGlobalId());
 }
 
 void ClientSideDetectionHost::OnPhishingPreClassificationDone(
@@ -471,7 +503,7 @@ void ClientSideDetectionHost::OnPhishingPreClassificationDone(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (should_classify) {
     content::RenderFrameHost* rfh = web_contents()->GetMainFrame();
-    auto it = phishing_detectors_.find(rfh);
+    auto it = phishing_detectors_.find(rfh->GetGlobalId());
     bool remote_valid =
         (it != phishing_detectors_.end() && it->second.is_connected());
 
@@ -520,10 +552,10 @@ void ClientSideDetectionHost::PhishingDetectionDone(
   if (csd_service_ && verdict->ParseFromString(verdict_str) &&
       verdict->IsInitialized()) {
     VLOG(2) << "Phishing classification score: " << verdict->client_score();
-    for (auto& match : verdict->vision_match()) {
-      VLOG(2) << "Target Digest: " << match.matched_target_digest();
-      VLOG(2) << "Phash Score: " << match.vision_matched_phash_score();
-      VLOG(2) << "EMD Score: " << match.vision_matched_emd_score();
+    VLOG(2) << "Visual model scores:";
+    for (const ClientPhishingRequest::CategoryScore& label_and_value :
+         verdict->tflite_model_scores()) {
+      VLOG(2) << label_and_value.label() << ": " << label_and_value.value();
     }
 
     if (HasDebugFeatureDirectory()) {
@@ -532,17 +564,38 @@ void ClientSideDetectionHost::PhishingDetectionDone(
                                                 GetDebugFeatureDirectory()));
     }
 
-    if (!IsExtendedReportingEnabled(*delegate_->GetPrefs()) &&
-        !IsEnhancedProtectionEnabled(*delegate_->GetPrefs())) {
-      // These fields should only be set for SBER users.
-      verdict->clear_screenshot_digest();
-      verdict->clear_screenshot_phash();
-      verdict->clear_phash_dimension_size();
+#if BUILDFLAG(IS_ANDROID)
+    gfx::Size size;
+    content::RenderWidgetHostView* view =
+        web_contents()->GetRenderWidgetHostView();
+    if (view) {
+      gfx::SizeF viewport = view->GetNativeView()->viewport_size();
+      size = gfx::Size(static_cast<int>(viewport.width()),
+                       static_cast<int>(viewport.height()));
+    }
+    bool can_extract_visual_features = visual_utils::CanExtractVisualFeatures(
+        IsExtendedReportingEnabled(*delegate_->GetPrefs()),
+        web_contents()->GetBrowserContext()->IsOffTheRecord(), size);
+#else
+    gfx::Size size;
+    content::RenderWidgetHostView* view =
+        web_contents()->GetRenderWidgetHostView();
+    if (view) {
+      size = view->GetVisibleViewportSize();
+    }
+    bool can_extract_visual_features = visual_utils::CanExtractVisualFeatures(
+        IsExtendedReportingEnabled(*delegate_->GetPrefs()),
+        web_contents()->GetBrowserContext()->IsOffTheRecord(), size,
+        zoom::ZoomController::GetZoomLevelForWebContents(web_contents()));
+#endif
+    if (!can_extract_visual_features) {
+      verdict->clear_visual_features();
     }
 
     if (IsEnhancedProtectionEnabled(*delegate_->GetPrefs()) &&
         base::FeatureList::IsEnabled(kClientSideDetectionReferrerChain)) {
-      delegate_->AddReferrerChain(verdict.get(), current_url_);
+      delegate_->AddReferrerChain(verdict.get(), current_url_,
+                                  current_outermost_main_frame_id_);
     }
 
     base::UmaHistogramBoolean("SBClientPhishing.LocalModelDetectsPhishing",
@@ -588,8 +641,6 @@ void ClientSideDetectionHost::MaybeShowPhishingWarning(bool is_from_cache,
       resource.threat_type = SB_THREAT_TYPE_URL_CLIENT_SIDE_PHISHING;
       resource.threat_source =
           safe_browsing::ThreatSource::CLIENT_SIDE_DETECTION;
-      resource.web_contents_getter =
-          security_interstitials::GetWebContentsGetter(primary_main_frame_id);
       resource.render_process_id = primary_main_frame_id.child_id;
       resource.render_frame_id = primary_main_frame_id.frame_routing_id;
       if (!ui_manager_->IsAllowlisted(resource)) {
@@ -628,25 +679,30 @@ void ClientSideDetectionHost::OnGotAccessToken(
 void ClientSideDetectionHost::InitializePhishingDetector(
     content::RenderFrameHost* render_frame_host) {
   if (render_frame_host->IsRenderFrameCreated()) {
+    const content::GlobalRenderFrameHostId rfh_id =
+        render_frame_host->GetGlobalId();
     mojo::Remote<mojom::PhishingDetector> new_detector;
     render_frame_host->GetRemoteInterfaces()->GetInterface(
         new_detector.BindNewPipeAndPassReceiver());
     new_detector.set_disconnect_handler(
-        base::BindOnce(&ClientSideDetectionHost::RenderFrameDeleted,
-                       weak_factory_.GetWeakPtr(), render_frame_host));
-    phishing_detectors_[render_frame_host] = std::move(new_detector);
-    SetPhishingModel(phishing_detectors_[render_frame_host]);
+        base::BindOnce(&ClientSideDetectionHost::ClearPhishingDetector,
+                       weak_factory_.GetWeakPtr(), rfh_id));
+    phishing_detectors_[rfh_id] = std::move(new_detector);
+    SetPhishingModel(phishing_detectors_[rfh_id]);
   }
+}
+
+void ClientSideDetectionHost::ClearPhishingDetector(
+    content::GlobalRenderFrameHostId rfh_id) {
+  phishing_detectors_.erase(rfh_id);
 }
 
 bool ClientSideDetectionHost::CanGetAccessToken() {
   if (is_off_the_record_)
     return false;
 
-  // Return true if the finch feature is enabled for an ESB user, and if the
-  // primary user account is signed in.
-  return base::FeatureList::IsEnabled(kClientSideDetectionWithToken) &&
-         IsEnhancedProtectionEnabled(*pref_service_) &&
+  // Return true if the primary user account of an ESB user is signed in.
+  return IsEnhancedProtectionEnabled(*pref_service_) &&
          !account_signed_in_callback_.is_null() &&
          account_signed_in_callback_.Run();
 }

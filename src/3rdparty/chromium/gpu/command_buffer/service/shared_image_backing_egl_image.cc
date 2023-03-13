@@ -4,6 +4,7 @@
 
 #include "gpu/command_buffer/service/shared_image_backing_egl_image.h"
 
+#include "base/memory/raw_ptr.h"
 #include "gpu/command_buffer/service/native_image_buffer.h"
 #include "gpu/command_buffer/service/shared_context_state.h"
 #include "gpu/command_buffer/service/shared_image_batch_access_manager.h"
@@ -44,7 +45,7 @@ class SharedImageBackingEglImage::TextureHolder
       texture_->RemoveLightweightRef(!context_lost_);
   }
 
-  gles2::Texture* const texture_ = nullptr;
+  const raw_ptr<gles2::Texture> texture_ = nullptr;
   const scoped_refptr<gles2::TexturePassthrough> texture_passthrough_;
   bool context_lost_ = false;
 };
@@ -57,6 +58,9 @@ class SharedImageBackingEglImage::RepresentationGLShared {
   RepresentationGLShared(SharedImageBackingEglImage* backing,
                          scoped_refptr<TextureHolder> texture_holder)
       : backing_(backing), texture_holder_(std::move(texture_holder)) {}
+
+  RepresentationGLShared(const RepresentationGLShared&) = delete;
+  RepresentationGLShared& operator=(const RepresentationGLShared&) = delete;
 
   ~RepresentationGLShared() {
     EndAccess();
@@ -101,10 +105,9 @@ class SharedImageBackingEglImage::RepresentationGLShared {
   }
 
  private:
-  SharedImageBackingEglImage* const backing_;
+  const raw_ptr<SharedImageBackingEglImage> backing_;
   scoped_refptr<TextureHolder> texture_holder_;
   RepresentationAccessMode mode_ = RepresentationAccessMode::kNone;
-  DISALLOW_COPY_AND_ASSIGN(RepresentationGLShared);
 };
 
 class SharedImageBackingEglImage::RepresentationGLTexture
@@ -116,6 +119,9 @@ class SharedImageBackingEglImage::RepresentationGLTexture
                           scoped_refptr<TextureHolder> texture_holder)
       : SharedImageRepresentationGLTexture(manager, backing, tracker),
         shared_(backing, std::move(texture_holder)) {}
+
+  RepresentationGLTexture(const RepresentationGLTexture&) = delete;
+  RepresentationGLTexture& operator=(const RepresentationGLTexture&) = delete;
 
   ~RepresentationGLTexture() override = default;
 
@@ -131,7 +137,6 @@ class SharedImageBackingEglImage::RepresentationGLTexture
 
  private:
   RepresentationGLShared shared_;
-  DISALLOW_COPY_AND_ASSIGN(RepresentationGLTexture);
 };
 
 class SharedImageBackingEglImage::RepresentationGLTexturePassthrough
@@ -146,6 +151,11 @@ class SharedImageBackingEglImage::RepresentationGLTexturePassthrough
                                                       backing,
                                                       tracker),
         shared_(backing, std::move(texture_holder)) {}
+
+  RepresentationGLTexturePassthrough(
+      const RepresentationGLTexturePassthrough&) = delete;
+  RepresentationGLTexturePassthrough& operator=(
+      const RepresentationGLTexturePassthrough&) = delete;
 
   ~RepresentationGLTexturePassthrough() override = default;
 
@@ -164,7 +174,6 @@ class SharedImageBackingEglImage::RepresentationGLTexturePassthrough
 
  private:
   RepresentationGLShared shared_;
-  DISALLOW_COPY_AND_ASSIGN(RepresentationGLTexturePassthrough);
 };
 
 SharedImageBackingEglImage::SharedImageBackingEglImage(

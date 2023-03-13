@@ -7,7 +7,6 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/check_op.h"
-#include "base/macros.h"
 #import "components/remote_cocoa/app_shim/mouse_capture_delegate.h"
 #include "ui/base/cocoa/weak_ptr_nsobject.h"
 
@@ -20,6 +19,10 @@ namespace remote_cocoa {
 class CocoaMouseCapture::ActiveEventTap {
  public:
   explicit ActiveEventTap(CocoaMouseCapture* owner);
+
+  ActiveEventTap(const ActiveEventTap&) = delete;
+  ActiveEventTap& operator=(const ActiveEventTap&) = delete;
+
   ~ActiveEventTap();
 
   // Returns the NSWindow with capture or nil if no window has capture
@@ -39,8 +42,6 @@ class CocoaMouseCapture::ActiveEventTap {
   id local_monitor_;
   id global_monitor_;
   ui::WeakPtrNSObjectFactory<CocoaMouseCapture> factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(ActiveEventTap);
 };
 
 CocoaMouseCapture::ActiveEventTap*
@@ -87,9 +88,10 @@ void CocoaMouseCapture::ActiveEventTap::Init() {
   auto local_block = ^NSEvent*(NSEvent* event) {
     CocoaMouseCapture* owner =
         ui::WeakPtrNSObjectFactory<CocoaMouseCapture>::Get(handle);
-    if (owner)
-      owner->delegate_->PostCapturedEvent(event);
-    return nil;  // Swallow all local events.
+    if (!owner)
+      return event;
+    bool handled = owner->delegate_->PostCapturedEvent(event);
+    return handled ? nil : event;
   };
   auto global_block = ^void(NSEvent* event) {
     CocoaMouseCapture* owner =

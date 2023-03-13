@@ -66,7 +66,7 @@ class CC_EXPORT RenderFrameMetadata {
   SkColor root_background_color = SK_ColorWHITE;
 
   // Scroll offset of the root layer.
-  absl::optional<gfx::Vector2dF> root_scroll_offset;
+  absl::optional<gfx::PointF> root_scroll_offset;
 
   // Selection region relative to the current viewport. If the selection is
   // empty or otherwise unused, the bound types will indicate such.
@@ -114,7 +114,7 @@ class CC_EXPORT RenderFrameMetadata {
   viz::VerticalScrollDirection new_vertical_scroll_direction =
       viz::VerticalScrollDirection::kNull;
 
-#if defined(OS_ANDROID) || defined(TOOLKIT_QT)
+#if BUILDFLAG(IS_ANDROID) || defined(TOOLKIT_QT)
   // Used to position Android bottom bar, whose position is computed by the
   // renderer compositor.
   float bottom_controls_height = 0.f;

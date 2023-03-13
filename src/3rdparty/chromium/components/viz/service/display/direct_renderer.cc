@@ -31,16 +31,12 @@
 #include "components/viz/service/display/bsp_walk_action.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display/skia_output_surface.h"
+#include "media/base/video_util.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size.h"
-#include "ui/gfx/transform.h"
-#include "ui/gfx/transform_util.h"
-
-// From GL/gl.h
-#ifndef GL_TEXTURE_2D
-#define GL_TEXTURE_2D 0x0DE1
-#endif
+#include "ui/gfx/geometry/transform.h"
+#include "ui/gfx/geometry/transform_util.h"
 
 namespace {
 
@@ -180,6 +176,10 @@ void DirectRenderer::SetVisible(bool visible) {
     return;
   visible_ = visible;
   DidChangeVisibility();
+}
+
+void DirectRenderer::ReallocatedFrameBuffers() {
+  next_frame_needs_full_frame_redraw_ = true;
 }
 
 void DirectRenderer::DecideRenderPassAllocationsForFrame(
@@ -326,7 +326,7 @@ void DirectRenderer::DrawFrame(
       current_frame()->output_surface_plane =
           overlay_processor_->ProcessOutputSurfaceAsOverlay(
               device_viewport_size, surface_resource_size, frame_buffer_format,
-              frame_color_space, frame_has_alpha,
+              frame_color_space, frame_has_alpha, 1.0f /*opacity*/,
               output_surface_->GetOverlayMailbox());
       primary_plane = &(current_frame()->output_surface_plane.value());
     }
@@ -343,8 +343,8 @@ void DirectRenderer::DrawFrame(
         &current_frame()->root_content_bounds);
     auto overlay_processing_time = overlay_processing_timer.Elapsed();
 
-    constexpr auto kMinTime = base::TimeDelta::FromMicroseconds(5);
-    constexpr auto kMaxTime = base::TimeDelta::FromMilliseconds(10);
+    constexpr auto kMinTime = base::Microseconds(5);
+    constexpr auto kMaxTime = base::Milliseconds(10);
     constexpr int kTimeBuckets = 50;
     UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
         "Compositing.DirectRenderer.OverlayProcessingUs",
@@ -368,20 +368,25 @@ void DirectRenderer::DrawFrame(
   // viewport size is never set.
   bool use_stencil = overdraw_feedback_;
   bool needs_full_frame_redraw = false;
-  if (surface_resource_size != reshape_surface_size_ ||
+  auto display_transform = output_surface_->GetDisplayTransform();
+  if (next_frame_needs_full_frame_redraw_ ||
+      surface_resource_size != reshape_surface_size_ ||
       device_scale_factor != reshape_device_scale_factor_ ||
       frame_color_space != reshape_color_space_ ||
       frame_buffer_format != reshape_buffer_format_ ||
-      use_stencil != reshape_use_stencil_) {
+      use_stencil != reshape_use_stencil_ ||
+      display_transform != reshape_display_transform_) {
+    next_frame_needs_full_frame_redraw_ = false;
     reshape_surface_size_ = surface_resource_size;
     reshape_device_scale_factor_ = device_scale_factor;
     reshape_color_space_ = frame_color_space;
     reshape_buffer_format_ = frame_buffer_format;
     reshape_use_stencil_ = overdraw_feedback_;
+    reshape_display_transform_ = display_transform;
     output_surface_->Reshape(reshape_surface_size_,
                              reshape_device_scale_factor_, reshape_color_space_,
                              *reshape_buffer_format_, reshape_use_stencil_);
-#if defined(OS_APPLE)
+#if BUILDFLAG(IS_APPLE)
     // For Mac, all render passes will be promoted to CALayer, the redraw full
     // frame is for the main surface only.
     // TODO(penghuang): verify this logic with SkiaRenderer.
@@ -464,10 +469,7 @@ gfx::Rect DirectRenderer::DeviceViewportRectInDrawSpace() const {
 gfx::Rect DirectRenderer::OutputSurfaceRectInDrawSpace() const {
   if (current_frame()->current_render_pass ==
       current_frame()->root_render_pass) {
-    gfx::Rect output_surface_rect(current_frame()->device_viewport_size);
-    output_surface_rect -= current_viewport_rect_.OffsetFromOrigin();
-    output_surface_rect += current_draw_rect_.OffsetFromOrigin();
-    return output_surface_rect;
+    return DeviceViewportRectInDrawSpace();
   } else {
     return current_frame()->current_render_pass->output_rect;
   }
@@ -596,7 +598,13 @@ void DirectRenderer::DrawRenderPassAndExecuteCopyRequests(
                                    request->scale_from(), request->scale_to())
                              : gfx::Rect(output_rect.size());
 
-    geometry.result_selection = geometry.result_bounds;
+    // Result bounds may not satisfy the pixel format requirements for the
+    // CopyOutputRequest - we need to adjust them to something that will be
+    // compatible. Formats other than RGBA have this restriction.
+    geometry.result_selection =
+        request->result_format() == CopyOutputRequest::ResultFormat::RGBA
+            ? geometry.result_bounds
+            : media::MinimallyShrinkRectForI420(geometry.result_bounds);
     if (request->has_result_selection())
       geometry.result_selection.Intersect(request->result_selection());
     if (geometry.result_selection.IsEmpty())
@@ -608,6 +616,7 @@ void DirectRenderer::DrawRenderPassAndExecuteCopyRequests(
         MoveFromDrawToWindowSpace(geometry.result_selection +
                                   output_rect.OffsetFromOrigin())
             .OffsetFromOrigin();
+
     CopyDrawnRenderPass(geometry, std::move(request));
   }
 }
@@ -630,10 +639,6 @@ void DirectRenderer::DrawRenderPass(const AggregatedRenderPass* render_pass) {
 
   bool is_root_render_pass =
       current_frame()->current_render_pass == current_frame()->root_render_pass;
-  if (is_root_render_pass) {
-    render_pass_scissor_in_draw_space.Intersect(
-        DeviceViewportRectInDrawSpace());
-  }
 
   if (use_partial_swap_) {
     render_pass_scissor_in_draw_space.Intersect(
@@ -937,7 +942,7 @@ gfx::Size DirectRenderer::CalculateSizeForOutputSurface(
   // OutputSurface size to |device_viewport_size_|.
   if (device_viewport_size_ == requested_viewport_size &&
       (base::TimeTicks::Now() - last_viewport_resize_time_) >=
-          base::TimeDelta::FromSeconds(1)) {
+          base::Seconds(1)) {
     return requested_viewport_size;
   }
 

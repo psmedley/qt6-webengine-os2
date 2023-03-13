@@ -206,12 +206,10 @@ Response PermissionDescriptorToPermissionType(
     *permission_type = PermissionType::NFC;
   } else if (name == "window-placement") {
     *permission_type = PermissionType::WINDOW_PLACEMENT;
-  } else if (name == "font-access") {
-    *permission_type = PermissionType::FONT_ACCESS;
+  } else if (name == "local-fonts") {
+    *permission_type = PermissionType::LOCAL_FONTS;
   } else if (name == "display-capture") {
     *permission_type = PermissionType::DISPLAY_CAPTURE;
-  } else if (name == "file-handling") {
-    *permission_type = PermissionType::FILE_HANDLING;
   } else {
     return Response::InvalidParams("Invalid PermissionDescriptor name: " +
                                    name);
@@ -550,7 +548,7 @@ Response BrowserHandler::GetBrowserCommandLine(
   // contains kEnableAutomation.
   if (command_line->HasSwitch(switches::kEnableAutomation)) {
     for (const auto& arg : command_line->argv()) {
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
       (*arguments)->emplace_back(base::WideToUTF8(arg));
 #else
       (*arguments)->emplace_back(arg);

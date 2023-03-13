@@ -26,10 +26,11 @@ ZwpPrimarySelectionDevice::ZwpPrimarySelectionDevice(
 ZwpPrimarySelectionDevice::~ZwpPrimarySelectionDevice() = default;
 
 void ZwpPrimarySelectionDevice::SetSelectionSource(
-    ZwpPrimarySelectionSource* source) {
+    ZwpPrimarySelectionSource* source,
+    uint32_t serial) {
   auto* data_source = source ? source->data_source() : nullptr;
   zwp_primary_selection_device_v1_set_selection(data_device_.get(), data_source,
-                                                connection()->serial());
+                                                serial);
   connection()->ScheduleFlush();
 }
 
@@ -60,8 +61,7 @@ void ZwpPrimarySelectionDevice::OnSelection(
     self->data_offer()->EnsureTextMimeTypeIfNeeded();
   }
 
-  if (self->selection_delegate())
-    self->selection_delegate()->OnSelectionOffer(self->data_offer());
+  self->NotifySelectionOffer(self->data_offer());
 }
 
 }  // namespace ui

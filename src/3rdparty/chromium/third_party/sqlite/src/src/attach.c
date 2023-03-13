@@ -346,17 +346,18 @@ static void codeAttach(
   sName.pParse = pParse;
 
   if( 
-      SQLITE_OK!=(rc = resolveAttachExpr(&sName, pFilename)) ||
-      SQLITE_OK!=(rc = resolveAttachExpr(&sName, pDbname)) ||
-      SQLITE_OK!=(rc = resolveAttachExpr(&sName, pKey))
+      SQLITE_OK!=resolveAttachExpr(&sName, pFilename) ||
+      SQLITE_OK!=resolveAttachExpr(&sName, pDbname) ||
+      SQLITE_OK!=resolveAttachExpr(&sName, pKey)
   ){
     goto attach_end;
   }
 
 #ifndef SQLITE_OMIT_AUTHORIZATION
-  if( pAuthArg ){
+  if( ALWAYS(pAuthArg) ){
     char *zAuthArg;
     if( pAuthArg->op==TK_STRING ){
+      assert( !ExprHasProperty(pAuthArg, EP_IntValue) );
       zAuthArg = pAuthArg->u.zToken;
     }else{
       zAuthArg = 0;
@@ -479,7 +480,11 @@ static int fixSelectCb(Walker *p, Select *pSelect){
       pItem->fg.fromDDL = 1;
     }
 #if !defined(SQLITE_OMIT_VIEW) || !defined(SQLITE_OMIT_TRIGGER)
-    if( sqlite3WalkExpr(&pFix->w, pList->a[i].pOn) ) return WRC_Abort;
+    if( pList->a[i].fg.isUsing==0
+     && sqlite3WalkExpr(&pFix->w, pList->a[i].u3.pOn)
+    ){
+      return WRC_Abort;
+    }
 #endif
   }
   if( pSelect->pWith ){

@@ -5,6 +5,11 @@
 import("../../pdfium.gni")
 import("../../testing/test.gni")
 
+source_set("unowned_ptr") {
+  sources = [ "unowned_ptr.h" ]
+  configs += [ "../../:pdfium_strict_config" ]
+}
+
 source_set("fxcrt") {
   sources = [
     "autonuller.h",
@@ -54,6 +59,7 @@ source_set("fxcrt") {
     "fx_stream.h",
     "fx_string.cpp",
     "fx_string.h",
+    "fx_string_wrappers.h",
     "fx_system.cpp",
     "fx_system.h",
     "fx_types.h",
@@ -75,7 +81,6 @@ source_set("fxcrt") {
     "string_pool_template.h",
     "string_view_template.h",
     "tree_node.h",
-    "unowned_ptr.h",
     "weak_ptr.h",
     "widestring.cpp",
     "widestring.h",
@@ -94,7 +99,10 @@ source_set("fxcrt") {
     "xml/cfx_xmltext.cpp",
     "xml/cfx_xmltext.h",
   ]
-  configs += [ "../../:pdfium_strict_config" ]
+  configs += [
+    "../../:pdfium_strict_config",
+    "../../:pdfium_noshorten_config",
+  ]
   visibility = [
     "../*",
     "../../:*",
@@ -106,17 +114,17 @@ source_set("fxcrt") {
     "../../third_party:fx_agg",
     "../../third_party:fx_lcms2",
     "../../third_party:fx_libopenjpeg",
+    "../../third_party:fx_lpng",
     "../../third_party:fx_tiff",
-    "../../third_party:pdfium_base",
     "../../xfa/*",
   ]
   deps = [ "../../third_party:pdfium_base" ]
   public_deps = [
+    ":unowned_ptr",
     "../../:freetype_common",
     "../../third_party:pdfium_base",
     "//third_party/icu:icuuc",
   ]
-  allow_circular_includes_from = [ "../../third_party:pdfium_base" ]
 
   if (is_posix || is_fuchsia) {
     sources += [
@@ -157,7 +165,9 @@ pdfium_unittest_source_set("unittests") {
     "fx_memory_wrappers_unittest.cpp",
     "fx_number_unittest.cpp",
     "fx_random_unittest.cpp",
+    "fx_safe_types_unittest.cpp",
     "fx_string_unittest.cpp",
+    "fx_string_wrappers_unittest.cpp",
     "fx_system_unittest.cpp",
     "mask_unittest.cpp",
     "maybe_owned_unittest.cpp",

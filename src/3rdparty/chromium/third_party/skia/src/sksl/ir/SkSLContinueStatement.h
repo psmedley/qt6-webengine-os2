@@ -18,21 +18,21 @@ namespace SkSL {
  */
 class ContinueStatement final : public Statement {
 public:
-    static constexpr Kind kStatementKind = Kind::kContinue;
+    inline static constexpr Kind kStatementKind = Kind::kContinue;
 
-    ContinueStatement(int offset)
-    : INHERITED(offset, kStatementKind) {}
+    ContinueStatement(Position pos)
+    : INHERITED(pos, kStatementKind) {}
 
-    static std::unique_ptr<Statement> Make(int offset) {
-        return std::make_unique<ContinueStatement>(offset);
+    static std::unique_ptr<Statement> Make(Position pos) {
+        return std::make_unique<ContinueStatement>(pos);
     }
 
     std::unique_ptr<Statement> clone() const override {
-        return std::make_unique<ContinueStatement>(fOffset);
+        return std::make_unique<ContinueStatement>(fPosition);
     }
 
-    String description() const override {
-        return String("continue;");
+    std::string description() const override {
+        return "continue;";
     }
 
 private:

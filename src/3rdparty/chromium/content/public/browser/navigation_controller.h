@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
@@ -139,7 +140,8 @@ class NavigationController {
     // fields that are present in both structs (some properties are ignored
     // because they are unique to LoadURLParams or OpenURLParams).
     explicit LoadURLParams(const OpenURLParams& open_url_params);
-
+    LoadURLParams(const LoadURLParams&) = delete;
+    LoadURLParams& operator=(const LoadURLParams&) = delete;
     ~LoadURLParams();
     LoadURLParams(LoadURLParams &&) = default;
     LoadURLParams& operator=(LoadURLParams &&) = default;
@@ -218,7 +220,7 @@ class NavigationController {
     // data loads.
     GURL virtual_url_for_data_url;
 
-#if defined(OS_ANDROID)
+#if BUILDFLAG(IS_ANDROID)
     // Used in LOAD_TYPE_DATA loads only. The real data URI is represented
     // as a string to circumvent the restriction on GURL size. This is only
     // needed to pass URLs that exceed the IPC limit (kMaxURLChars). Short
@@ -293,7 +295,13 @@ class NavigationController {
     // Download policy to be applied if this navigation turns into a download.
     blink::NavigationDownloadPolicy download_policy;
 
-    DISALLOW_COPY_AND_ASSIGN(LoadURLParams);
+    // Indicates that this navigation is for PDF content in a renderer.
+    bool is_pdf = false;
+
+    // Indicates this navigation should use a new BrowsingInstance. For example,
+    // this is used in web platform tests to guarantee that each test starts in
+    // a fresh BrowsingInstance.
+    bool force_new_browsing_instance = false;
   };
 
   // Disables checking for a repost and prompting the user. This is used during
@@ -342,7 +350,7 @@ class NavigationController {
   // Returns the entry that should be displayed to the user in the address bar.
   // This is the pending entry if a navigation is in progress *and* is safe to
   // display to the user (see below), or the last committed entry otherwise.
-  // NOTE: This can be nullptr if no entry has committed!
+  // NOTE: This can be nullptr if no entry has been committed!
   //
   // A pending entry is safe to display if it started in the browser process or
   // if it's a renderer-initiated navigation in a new tab which hasn't been
@@ -418,14 +426,18 @@ class NavigationController {
   // Navigates directly to an error page in response to an event on the last
   // committed page (e.g., triggered by a subresource), with |error_page_html|
   // as the contents and |url| as the URL.
-
+  //
   // The error page will create a NavigationEntry that temporarily replaces the
   // original page's entry. The original entry will be put back into the entry
   // list after any other navigation.
-  virtual void LoadPostCommitErrorPage(RenderFrameHost* render_frame_host,
-                                       const GURL& url,
-                                       const std::string& error_page_html,
-                                       net::Error error) = 0;
+  //
+  // Returns the handle to the navigation for the error page, which may be null
+  // if the navigation is immediately canceled.
+  virtual base::WeakPtr<NavigationHandle> LoadPostCommitErrorPage(
+      RenderFrameHost* render_frame_host,
+      const GURL& url,
+      const std::string& error_page_html,
+      net::Error error) = 0;
 
   // Renavigation --------------------------------------------------------------
 
@@ -436,7 +448,8 @@ class NavigationController {
   virtual void GoBack() = 0;
   virtual void GoForward() = 0;
 
-  // Navigates to the specified absolute index.
+  // Navigates to the specified absolute index. Should only be used for
+  // browser-initiated navigations.
   virtual void GoToIndex(int index) = 0;
 
   // Navigates to the specified offset from the "current entry". Does nothing if

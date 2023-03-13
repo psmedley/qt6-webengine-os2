@@ -77,7 +77,7 @@ static constexpr char gSphereSkSL[] = R"(
             0.5 + kRPI * asin(RN.y)
         );
 
-        return apply_light(EYE, N, sample(child, UV*child_scale));
+        return apply_light(EYE, N, child.eval(UV*child_scale));
     }
 )";
 
@@ -220,7 +220,7 @@ private:
         const auto lm = SkMatrix::Translate(fCenter.fX, fCenter.fY) *
                         SkMatrix::Scale(fRadius, fRadius);
 
-        return builder.makeShader(&lm, false);
+        return builder.makeShader(&lm);
     }
 
     SkRect onRevalidate(sksg::InvalidationController* ic, const SkMatrix& ctm) override {

@@ -16,6 +16,8 @@ limitations under the License.
 #include "tensorflow/compiler/xla/service/gpu/amdgpu_compiler.h"
 
 #include "tensorflow/compiler/xla/service/algebraic_simplifier.h"
+#include "tensorflow/compiler/xla/service/call_inliner.h"
+#include "tensorflow/compiler/xla/service/gpu/cusolver_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/gemm_rewriter.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_conv_algorithm_picker.h"
 #include "tensorflow/compiler/xla/service/gpu/gpu_conv_padding_legalization.h"
@@ -45,9 +47,9 @@ namespace {
 // called in AMDGPUCompiler's constructor, so can't return an error. But
 // AMDGPUCompiler::Compile will return an error when the wanted rocdl file
 // doesn't exist in the folder this function returns.
-string GetROCDLDir(const HloModuleConfig& config) {
-  std::vector<string> potential_rocdl_dirs;
-  const string datadir = config.debug_options().xla_gpu_cuda_data_dir();
+std::string GetROCDLDir(const HloModuleConfig& config) {
+  std::vector<std::string> potential_rocdl_dirs;
+  const std::string datadir = config.debug_options().xla_gpu_cuda_data_dir();
   if (!datadir.empty()) {
     potential_rocdl_dirs.push_back(datadir);
   }
@@ -55,7 +57,7 @@ string GetROCDLDir(const HloModuleConfig& config) {
 
   // Tries all potential ROCDL directories in the order they are inserted.
   // Returns the first directory that exists in the file system.
-  for (const string& potential_rocdl_dir : potential_rocdl_dirs) {
+  for (const std::string& potential_rocdl_dir : potential_rocdl_dirs) {
     if (tensorflow::Env::Default()->IsDirectory(potential_rocdl_dir).ok()) {
       VLOG(2) << "Found ROCm-Device-Libs dir " << potential_rocdl_dir;
       return potential_rocdl_dir;
@@ -79,8 +81,32 @@ Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
   pipeline.AddInvariantCheckerDebug<HloVerifier>(
       /*layout_sensitive=*/false,
       /*allow_mixed_precision=*/false);
+  pipeline.AddPass<GpusolverRewriter>();
   pipeline.AddPass<GpuConvRewriter>();
   pipeline.AddPass<GpuConvPaddingLegalization>();
+
+  // The conv padding/vectorization passes which we need to get rid of.  They
+  // also leave behind unnecessary tuple/get-tuple-element pairs that
+  // TupleSimplifier fixes.
+  pipeline.AddPass<CallInliner>();
+  pipeline.AddPass<TupleSimplifier>();
+
+  // tf2xla bridge, DepthwiseConvolutionConverter and GpuConvRewriter
+  // introduces reshapes and transposes that can be eliminated using
+  // AlgebraicSimplifier  We run algsimp to a fixed point.
+  //
+  // When transposes appear in a fusion node, we can easily adjust the
+  // multi-dimensional index to create the one needed for the operand. This
+  // is not as easy with bitcasts, because we don't have the information
+  // readily available which dimensions are permuted. In addition to that,
+  // if we have a transpose and a reshape next to each other, they will both
+  // be replaced by a bitcast, and we replace bitcast(bitcast) with one
+  // bitcast. This leads to having to linearize and then delinearize the
+  // index.
+  AlgebraicSimplifierOptions options;
+  options.set_replace_transpose_with_bitcast(false);
+  options.set_enable_conv_operand_swap(false);
+  pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(options);
 
   pipeline.AddPass<HloConstantFolding>();
   TF_RETURN_IF_ERROR(pipeline.Run(hlo_module).status());
@@ -89,47 +115,39 @@ Status AMDGPUCompiler::OptimizeHloConvolutionCanonicalization(
 }
 
 AMDGPUCompiler::AMDGPUCompiler()
-    : GpuCompiler(stream_executor::rocm::kROCmPlatformId, amdgpu::kTargetTriple,
-                  amdgpu::kDataLayout) {}
+    : GpuCompiler(stream_executor::rocm::kROCmPlatformId,
+                  amdgpu::TargetTriple(), amdgpu::DataLayout()) {}
 
 GpuVersion AMDGPUCompiler::GetGpuVersion(se::StreamExecutor* stream_exec) {
-  int isa_version = 0;
-  if (!stream_exec->GetDeviceDescription().rocm_amdgpu_isa_version(
-          &isa_version)) {
-    LOG(WARNING)
-        << "Couldn't get AMDGPU ISA version for device; assuming gfx803.";
-    isa_version = 803;
-  }
-
-  return isa_version;
+  return stream_exec->GetDeviceDescription().rocm_compute_capability();
 }
 
-StatusOr<std::pair<std::string, std::vector<uint8>>>
-AMDGPUCompiler::CompileTargetBinary(const HloModule* module,
+StatusOr<std::pair<std::string, std::vector<uint8_t>>>
+AMDGPUCompiler::CompileTargetBinary(const HloModuleConfig& module_config,
                                     llvm::Module* llvm_module,
                                     GpuVersion gpu_version,
-                                    se::StreamExecutor* stream_exec) {
+                                    se::StreamExecutor* stream_exec,
+                                    bool relocatable,
+                                    const HloModule* debug_module) {
   if (rocdl_dir_.empty()) {
     // Compute rocdl_dir_ just once and cache it in this member.
-    rocdl_dir_ = GetROCDLDir(module->config());
+    rocdl_dir_ = GetROCDLDir(module_config);
   }
 
-  std::vector<uint8> hsaco;
+  if (relocatable) {
+    return Unimplemented("relocatable target binary is not implemented");
+  }
+
+  std::vector<uint8_t> hsaco;
   {
     XLA_SCOPED_LOGGING_TIMER(
         "AMDGPUCompiler::CompileTargetBinary - CompileToHsaco");
-    TF_ASSIGN_OR_RETURN(hsaco,
-                        amdgpu::CompileToHsaco(llvm_module, gpu_version,
-                                               module->config(), rocdl_dir_));
+    TF_ASSIGN_OR_RETURN(
+        hsaco, amdgpu::CompileToHsaco(llvm_module, gpu_version, module_config,
+                                      rocdl_dir_));
   }
 
-  llvm_ir::DumpIrIfEnabled(*module, *llvm_module, /*optimized=*/false);
-
-  if (user_post_optimization_hook_) {
-    user_post_optimization_hook_(*llvm_module);
-  }
-
-  return std::pair<std::string, std::vector<uint8>>("", std::move(hsaco));
+  return std::pair<std::string, std::vector<uint8_t>>("", std::move(hsaco));
 }
 
 }  // namespace gpu

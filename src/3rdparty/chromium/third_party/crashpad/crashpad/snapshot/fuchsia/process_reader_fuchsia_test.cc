@@ -20,7 +20,8 @@
 #include <zircon/syscalls/port.h>
 #include <zircon/types.h>
 
-#include "base/cxx17_backports.h"
+#include <iterator>
+
 #include "gtest/gtest.h"
 #include "test/multiprocess_exec.h"
 #include "test/test_paths.h"
@@ -35,7 +36,7 @@ TEST(ProcessReaderFuchsia, SelfBasic) {
   ASSERT_TRUE(process_reader.Initialize(*zx::process::self()));
 
   static constexpr char kTestMemory[] = "Some test memory";
-  char buffer[base::size(kTestMemory)];
+  char buffer[std::size(kTestMemory)];
   ASSERT_TRUE(process_reader.Memory()->Read(
       reinterpret_cast<zx_vaddr_t>(kTestMemory), sizeof(kTestMemory), &buffer));
   EXPECT_STREQ(kTestMemory, buffer);
@@ -92,6 +93,10 @@ class BasicChildTest : public MultiprocessExec {
   BasicChildTest() : MultiprocessExec() {
     SetChildTestMainFunction("ProcessReaderBasicChildTestMain");
   }
+
+  BasicChildTest(const BasicChildTest&) = delete;
+  BasicChildTest& operator=(const BasicChildTest&) = delete;
+
   ~BasicChildTest() {}
 
  private:
@@ -106,8 +111,6 @@ class BasicChildTest : public MultiprocessExec {
     ASSERT_TRUE(process_reader.Memory()->ReadCString(addr, &read_string));
     EXPECT_EQ(read_string, kTestMemory);
   }
-
-  DISALLOW_COPY_AND_ASSIGN(BasicChildTest);
 };
 
 TEST(ProcessReaderFuchsia, ChildBasic) {
@@ -156,6 +159,10 @@ class ThreadsChildTest : public MultiprocessExec {
   ThreadsChildTest() : MultiprocessExec() {
     SetChildTestMainFunction("ProcessReaderChildThreadsTestMain");
   }
+
+  ThreadsChildTest(const ThreadsChildTest&) = delete;
+  ThreadsChildTest& operator=(const ThreadsChildTest&) = delete;
+
   ~ThreadsChildTest() {}
 
  private:
@@ -178,8 +185,6 @@ class ThreadsChildTest : public MultiprocessExec {
       EXPECT_LE(threads[i].stack_regions[0].size(), i * 4096u);
     }
   }
-
-  DISALLOW_COPY_AND_ASSIGN(ThreadsChildTest);
 };
 
 // TODO(scottmg): US-553. ScopedTaskSuspend fails sometimes, with a 50ms

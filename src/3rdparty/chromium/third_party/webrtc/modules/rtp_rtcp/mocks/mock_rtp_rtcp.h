@@ -19,7 +19,6 @@
 
 #include "absl/types/optional.h"
 #include "api/video/video_bitrate_allocation.h"
-#include "modules/include/module.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/rtp_packet_to_send.h"
 #include "modules/rtp_rtcp/source/rtp_rtcp_interface.h"
@@ -49,10 +48,6 @@ class MockRtpRtcpInterface : public RtpRtcpInterface {
   MOCK_METHOD(void,
               RegisterRtpHeaderExtension,
               (absl::string_view uri, int id),
-              (override));
-  MOCK_METHOD(int32_t,
-              DeregisterSendRtpHeaderExtension,
-              (RTPExtensionType type),
               (override));
   MOCK_METHOD(void,
               DeregisterSendRtpHeaderExtension,
@@ -115,6 +110,7 @@ class MockRtpRtcpInterface : public RtpRtcpInterface {
               (rtc::ArrayView<const uint16_t> sequence_numbers),
               (const, override));
   MOCK_METHOD(size_t, ExpectedPerPacketOverhead, (), (const, override));
+  MOCK_METHOD(void, OnPacketSendingThreadSwitched, (), (override));
   MOCK_METHOD(RtcpMode, RTCP, (), (const, override));
   MOCK_METHOD(void, SetRTCPStatus, (RtcpMode method), (override));
   MOCK_METHOD(int32_t,
@@ -149,6 +145,10 @@ class MockRtpRtcpInterface : public RtpRtcpInterface {
               (const, override));
   MOCK_METHOD(absl::optional<SenderReportStats>,
               GetSenderReportStats,
+              (),
+              (const, override));
+  MOCK_METHOD(absl::optional<NonSenderRttStats>,
+              GetNonSenderRttStats,
               (),
               (const, override));
   MOCK_METHOD(void,

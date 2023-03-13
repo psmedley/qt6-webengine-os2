@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/autofill_assistant/browser/actions/action.h"
 #include "components/autofill_assistant/browser/actions/action_delegate.h"
@@ -21,6 +20,10 @@ class SelectOptionAction : public Action {
  public:
   explicit SelectOptionAction(ActionDelegate* delegate,
                               const ActionProto& proto);
+
+  SelectOptionAction(const SelectOptionAction&) = delete;
+  SelectOptionAction& operator=(const SelectOptionAction&) = delete;
+
   ~SelectOptionAction() override;
 
  private:
@@ -37,8 +40,6 @@ class SelectOptionAction : public Action {
   ProcessActionCallback process_action_callback_;
 
   base::WeakPtrFactory<SelectOptionAction> weak_ptr_factory_{this};
-
-  DISALLOW_COPY_AND_ASSIGN(SelectOptionAction);
 };
 
 }  // namespace autofill_assistant

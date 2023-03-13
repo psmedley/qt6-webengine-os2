@@ -17,8 +17,9 @@ import {produce} from 'immer';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {ConversionJobStatus} from '../common/conversion_jobs';
-import {createEmptyState, State} from '../common/state';
-import {RecordConfig, STATE_VERSION} from '../common/state';
+import {createEmptyState} from '../common/empty_state';
+import {State} from '../common/state';
+import {STATE_VERSION} from '../common/state';
 import {
   BUCKET_NAME,
   saveState,
@@ -26,10 +27,12 @@ import {
   toSha256
 } from '../common/upload_utils';
 import {publishConversionJobStatusUpdate} from '../frontend/publish';
+import {Router} from '../frontend/router';
 
 import {Controller} from './controller';
 import {globals} from './globals';
-import {validateRecordConfig} from './validate_config';
+import {RecordConfig, recordConfigValidator} from './record_config_types';
+import {runValidator} from './validators';
 
 export class PermalinkController extends Controller<'main'> {
   private lastRequestId?: string;
@@ -75,14 +78,11 @@ export class PermalinkController extends Controller<'main'> {
           if (PermalinkController.isRecordConfig(stateOrConfig)) {
             // This permalink state only contains a RecordConfig. Show the
             // recording page with the config, but keep other state as-is.
-            const validConfig = validateRecordConfig(stateOrConfig);
-            if (validConfig.errorMessage) {
-              // TODO(bsebastien): Show a warning message to the user in the UI.
-              console.warn(validConfig.errorMessage);
-            }
-            globals.dispatch(
-                Actions.setRecordConfig({config: validConfig.config}));
-            globals.dispatch(Actions.navigate({route: '/record'}));
+            const validConfig =
+                runValidator(recordConfigValidator, stateOrConfig as unknown)
+                    .result;
+            globals.dispatch(Actions.setRecordConfig({config: validConfig}));
+            Router.navigate('#!/record');
             return;
           }
           globals.dispatch(Actions.setState({newState: stateOrConfig}));

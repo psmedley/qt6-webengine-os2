@@ -27,7 +27,6 @@
 #include <vector>
 
 #include "base/files/file_path.h"
-#include "base/macros.h"
 #include "client/annotation.h"
 #include "client/annotation_list.h"
 #include "client/crashpad_info.h"
@@ -127,6 +126,11 @@ class TestMachOImageAnnotationsReader final
         break;
     }
   }
+
+  TestMachOImageAnnotationsReader(const TestMachOImageAnnotationsReader&) =
+      delete;
+  TestMachOImageAnnotationsReader& operator=(
+      const TestMachOImageAnnotationsReader&) = delete;
 
   ~TestMachOImageAnnotationsReader() {}
 
@@ -398,7 +402,6 @@ class TestMachOImageAnnotationsReader final
 
       case kCrashAbort: {
         abort();
-        break;
       }
 
       case kCrashModuleInitialization: {
@@ -411,7 +414,6 @@ class TestMachOImageAnnotationsReader final
         // the FAIL() will fail the test.
         ASSERT_NE(dl_handle, nullptr) << dlerror();
         FAIL();
-        break;
       }
 
       case kCrashDyld: {
@@ -444,8 +446,6 @@ class TestMachOImageAnnotationsReader final
   }
 
   TestType test_type_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMachOImageAnnotationsReader);
 };
 
 TEST(MachOImageAnnotationsReader, DontCrash) {
@@ -460,19 +460,16 @@ TEST(MachOImageAnnotationsReader, CrashAbort) {
   test_mach_o_image_annotations_reader.Run();
 }
 
-#if defined(ADDRESS_SANITIZER)
-// https://crbug.com/844396
-#define MAYBE_CrashModuleInitialization DISABLED_CrashModuleInitialization
-#else
-#define MAYBE_CrashModuleInitialization CrashModuleInitialization
-#endif
-TEST(MachOImageAnnotationsReader, MAYBE_CrashModuleInitialization) {
+// Flaky on ASAN https://crbug.com/844396
+// Flaky in general https://crbug.com/1334418
+TEST(MachOImageAnnotationsReader, DISABLED_CrashModuleInitialization) {
   TestMachOImageAnnotationsReader test_mach_o_image_annotations_reader(
       TestMachOImageAnnotationsReader::kCrashModuleInitialization);
   test_mach_o_image_annotations_reader.Run();
 }
 
-TEST(MachOImageAnnotationsReader, CrashDyld) {
+// Flaky in general https://crbug.com/1334418
+TEST(MachOImageAnnotationsReader, DISABLED_CrashDyld) {
   TestMachOImageAnnotationsReader test_mach_o_image_annotations_reader(
       TestMachOImageAnnotationsReader::kCrashDyld);
   test_mach_o_image_annotations_reader.Run();

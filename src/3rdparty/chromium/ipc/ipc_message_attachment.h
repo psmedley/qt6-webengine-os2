@@ -5,7 +5,6 @@
 #ifndef IPC_IPC_MESSAGE_ATTACHMENT_H_
 #define IPC_IPC_MESSAGE_ATTACHMENT_H_
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/pickle.h"
 #include "build/build_config.h"
@@ -32,6 +31,9 @@ class IPC_MESSAGE_SUPPORT_EXPORT MessageAttachment
       mojo::ScopedHandle handle,
       Type type);
 
+  MessageAttachment(const MessageAttachment&) = delete;
+  MessageAttachment& operator=(const MessageAttachment&) = delete;
+
   virtual Type GetType() const = 0;
 
   mojo::ScopedHandle TakeMojoHandle();
@@ -40,8 +42,6 @@ class IPC_MESSAGE_SUPPORT_EXPORT MessageAttachment
   friend class base::RefCountedThreadSafe<MessageAttachment>;
   MessageAttachment();
   ~MessageAttachment() override;
-
-  DISALLOW_COPY_AND_ASSIGN(MessageAttachment);
 };
 
 }  // namespace IPC

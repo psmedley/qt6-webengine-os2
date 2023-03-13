@@ -33,7 +33,9 @@
 
 #include <memory>
 
+#include "base/gtest_prod_util.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/observer_list.h"
 #include "build/build_config.h"
 #include "mojo/public/cpp/bindings/associated_receiver.h"
 #include "mojo/public/cpp/bindings/associated_remote.h"
@@ -64,16 +66,16 @@
 #include "third_party/blink/renderer/core/page/event_with_hit_test_results.h"
 #include "third_party/blink/renderer/core/page/page_widget_delegate.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
-#include "third_party/blink/renderer/platform/geometry/int_point.h"
-#include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/apply_viewport_changes.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/vector2d_f.h"
 
 namespace cc {
 class ScopedDeferMainFrameUpdate;
@@ -116,6 +118,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       mojom::blink::PageVisibilityState visibility,
       bool is_prerendering,
       bool is_inside_portal,
+      absl::optional<mojom::blink::FencedFrameMode> fenced_frame_mode,
       bool compositing_enabled,
       bool widgets_never_composited,
       WebViewImpl* opener,
@@ -182,7 +185,6 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   gfx::Size ContentsPreferredMinimumSize() override;
   void UpdatePreferredSize() override;
   void EnablePreferredSizeChangedMode() override;
-  void SetDeviceScaleFactor(float) override;
   void SetZoomFactorForDeviceScaleFactor(float) override;
   float ZoomFactorForDeviceScaleFactor() override {
     return zoom_factor_for_device_scale_factor_;
@@ -219,6 +221,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   int32_t HistoryForwardListCount() const override;
   int32_t HistoryListLength() const { return history_list_length_; }
   const SessionStorageNamespaceId& GetSessionStorageNamespaceId() override;
+  bool IsFencedFrameRoot() const override;
 
   // Functions to add and remove observers for this object.
   void AddObserver(WebViewObserver* observer);
@@ -280,7 +283,8 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       SetPageLifecycleStateCallback callback) override;
   void AudioStateChanged(bool is_audio_playing) override;
   void ActivatePrerenderedPage(
-      base::TimeTicks activation_start,
+      mojom::blink::PrerenderPageActivationParamsPtr
+          prerender_page_activation_params,
       ActivatePrerenderedPageCallback callback) override;
   void SetInsidePortal(bool is_inside_portal) override;
   void UpdateWebPreferences(
@@ -358,11 +362,11 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // with bounds |element_bounds_in_document| and caret bounds
   // |caret_bounds_in_document|.
   void ZoomAndScrollToFocusedEditableElementRect(
-      const IntRect& element_bounds_in_document,
-      const IntRect& caret_bounds_in_document,
+      const gfx::Rect& element_bounds_in_document,
+      const gfx::Rect& caret_bounds_in_document,
       bool zoom_into_legible_scale);
 
-  bool StartPageScaleAnimation(const IntPoint& target_position,
+  bool StartPageScaleAnimation(const gfx::Point& target_position,
                                bool use_anchor,
                                float new_scale,
                                base::TimeDelta duration);
@@ -397,9 +401,9 @@ class CORE_EXPORT WebViewImpl final : public WebView,
 
   bool ShouldAutoResize() const { return should_auto_resize_; }
 
-  IntSize MinAutoSize() const { return min_auto_size_; }
+  gfx::Size MinAutoSize() const { return min_auto_size_; }
 
-  IntSize MaxAutoSize() const { return max_auto_size_; }
+  gfx::Size MaxAutoSize() const { return max_auto_size_; }
 
   void UpdateMainFrameLayoutSize();
   void UpdatePageDefinedViewportConstraints(const ViewportDescription&);
@@ -439,7 +443,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       float padding,
       float default_scale_when_already_legible,
       float& scale,
-      IntPoint& scroll);
+      gfx::Point& scroll);
   Node* BestTapNode(const GestureEventWithHitTestResults& targeted_tap_event);
   void EnableTapHighlightAtPoint(
       const GestureEventWithHitTestResults& targeted_tap_event);
@@ -448,7 +452,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   bool FakeDoubleTapAnimationPendingForTesting() const {
     return double_tap_zoom_pending_;
   }
-  IntPoint FakePageScaleAnimationTargetPositionForTesting() const {
+  gfx::Point FakePageScaleAnimationTargetPositionForTesting() const {
     return fake_page_scale_animation_target_position_;
   }
   float FakePageScaleAnimationPageScaleForTesting() const {
@@ -488,11 +492,11 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   gfx::Size GetPreferredSizeForTest() override;
 
   gfx::Size Size();
-  IntSize MainFrameSize();
+  gfx::Size MainFrameSize();
 
   PageScaleConstraintsSet& GetPageScaleConstraintsSet() const;
 
-  FloatSize ElasticOverscroll() const { return elastic_overscroll_; }
+  gfx::Vector2dF ElasticOverscroll() const { return elastic_overscroll_; }
 
   class ChromeClient& GetChromeClient() const {
     return *chrome_client_.Get();
@@ -553,13 +557,18 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // Shows a previously created WebView (via window.open()).
   void Show(const LocalFrameToken& opener_frame_token,
             NavigationPolicy policy,
-            const gfx::Rect& rect,
+            const gfx::Rect& requested_rect,
+            const gfx::Rect& adjusted_rect,
             bool opened_by_user_gesture);
 
   // Send the window rect to the browser and call `ack_callback` when the
   // browser has processed it.
   void SendWindowRectToMainFrameHost(const gfx::Rect& bounds,
                                      base::OnceClosure ack_callback);
+
+  // Tells the browser that another page has accessed the DOM of the initial
+  // empty document of a main frame.
+  void DidAccessInitialMainDocument();
 
   // TODO(crbug.com/1149992): This is called from the associated widget and this
   // code should eventually move out of WebView into somewhere else.
@@ -616,7 +625,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
 
   void SetPageScaleFactorAndLocation(float scale,
                                      bool is_pinch_gesture_active,
-                                     const FloatPoint&);
+                                     const gfx::PointF&);
   void PropagateZoomFactorToLocalFrameRoots(Frame*, float);
 
   void SetPageLifecycleStateInternal(
@@ -625,12 +634,12 @@ class CORE_EXPORT WebViewImpl final : public WebView,
 
   float MaximumLegiblePageScale() const;
   void RefreshPageScaleFactor();
-  IntSize ContentsSize() const;
+  gfx::Size ContentsSize() const;
 
   void UpdateBrowserControlsConstraint(cc::BrowserControlsState constraint);
-  void UpdateICBAndResizeViewport(const IntSize& visible_viewport_size);
+  void UpdateICBAndResizeViewport(const gfx::Size& visible_viewport_size);
   void ResizeViewWhileAnchored(cc::BrowserControlsParams params,
-                               const IntSize& visible_viewport_size);
+                               const gfx::Size& visible_viewport_size);
 
   void UpdateBaseBackgroundColor();
   void UpdateFontRenderingFromRendererPrefs();
@@ -644,6 +653,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
       mojom::blink::PageVisibilityState visibility,
       bool is_prerendering,
       bool is_inside_portal,
+      absl::optional<mojom::blink::FencedFrameMode> fenced_frame_mode,
       bool does_composite,
       bool widgets_never_composite,
       WebViewImpl* opener,
@@ -672,8 +682,6 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   void EnablePopupMouseWheelEventListener(WebLocalFrameImpl* local_root);
   void DisablePopupMouseWheelEventListener();
 
-  float DeviceScaleFactor() const;
-
   LocalFrame* FocusedLocalFrameInWidget() const;
 
   // Clear focus and text input state of the page. If there was a focused
@@ -689,11 +697,11 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // bounds are projection of the original element's bounds in the main frame
   // which is inside the layout area of some remote frame in this frame tree.
   void ComputeScaleAndScrollForEditableElementRects(
-      const IntRect& element_bounds_in_document,
-      const IntRect& caret_bounds_in_document,
+      const gfx::Rect& element_bounds_in_document,
+      const gfx::Rect& caret_bounds_in_document,
       bool zoom_into_legible_scale,
       float& scale,
-      IntPoint& scroll,
+      gfx::Point& scroll,
       bool& need_animation);
 
   // Sends any outstanding TrackedFeaturesUpdate messages to the browser.
@@ -728,9 +736,9 @@ class CORE_EXPORT WebViewImpl final : public WebView,
   // If true, automatically resize the layout view around its content.
   bool should_auto_resize_ = false;
   // The lower bound on the size when auto-resizing.
-  IntSize min_auto_size_;
+  gfx::Size min_auto_size_;
   // The upper bound on the size when auto-resizing.
-  IntSize max_auto_size_;
+  gfx::Size max_auto_size_;
 
   // An object that can be used to manipulate m_page->settings() without linking
   // against WebCore. This is lazily allocated the first time GetWebSettings()
@@ -787,7 +795,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
 
   // Used for testing purposes.
   bool enable_fake_page_scale_animation_for_testing_ = false;
-  IntPoint fake_page_scale_animation_target_position_;
+  gfx::Point fake_page_scale_animation_target_position_;
   float fake_page_scale_animation_page_scale_factor_ = 0.f;
   bool fake_page_scale_animation_use_anchor_ = false;
 
@@ -842,7 +850,7 @@ class CORE_EXPORT WebViewImpl final : public WebView,
 
   float zoom_factor_override_ = 0.f;
 
-  FloatSize elastic_overscroll_;
+  gfx::Vector2dF elastic_overscroll_;
 
   // If true, we send IPC messages when |preferred_size_| changes.
   bool send_preferred_size_changes_ = false;

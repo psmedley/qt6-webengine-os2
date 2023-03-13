@@ -17,8 +17,8 @@ TODO: consider slightly revising these tests to make sure they're complete. {
 
 import { Fixture } from '../../../common/framework/fixture.js';
 import { makeTestGroup } from '../../../common/framework/test_group.js';
+import { getGPU } from '../../../common/util/navigator_gpu.js';
 import { assert, raceWithRejectOnTimeout } from '../../../common/util/util.js';
-import { getGPU } from '../../util/navigator_gpu.js';
 
 class F extends Fixture {
   _device: GPUDevice | undefined = undefined;
@@ -43,7 +43,7 @@ class F extends Fixture {
       size: 1024,
       usage: 0xffff, // Invalid GPUBufferUsage
     });
-    // TODO: Remove when chrome does it automatically.
+    // MAINTENANCE_TODO: This is a workaround for Chromium not flushing. Remove when not needed.
     this.device.queue.submit([]);
   }
 
@@ -51,7 +51,7 @@ class F extends Fixture {
   // otherwise it could erroneously pass by capturing an error from later in the test.
   async expectUncapturedError(fn: Function): Promise<GPUUncapturedErrorEvent> {
     return this.immediateAsyncExpectation(() => {
-      // TODO: Make arbitrary timeout value a test runner variable
+      // MAINTENANCE_TODO: Make arbitrary timeout value a test runner variable
       const TIMEOUT_IN_MS = 1000;
 
       const promise: Promise<GPUUncapturedErrorEvent> = new Promise(resolve => {

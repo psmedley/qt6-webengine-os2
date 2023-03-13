@@ -11,6 +11,8 @@
 #ifndef EIGEN_CXX11_TENSOR_TENSOR_TRACE_H
 #define EIGEN_CXX11_TENSOR_TENSOR_TRACE_H
 
+#include "./InternalHeaderCheck.h"
+
 namespace Eigen {
 
 /** \class TensorTrace
@@ -30,7 +32,7 @@ struct traits<TensorTraceOp<Dims, XprType> > : public traits<XprType>
   typedef typename XprTraits::StorageKind StorageKind;
   typedef typename XprTraits::Index Index;
   typedef typename XprType::Nested Nested;
-  typedef typename remove_reference<Nested>::type _Nested;
+  typedef typename remove_reference<Nested>::type Nested_;
   static const int NumDimensions = XprTraits::NumDimensions - array_size<Dims>::value;
   static const int Layout = XprTraits::Layout;
 };
@@ -108,7 +110,7 @@ struct TensorEvaluator<const TensorTraceOp<Dims, ArgType>, Device>
   typedef internal::TensorBlockNotImplemented TensorBlock;
   //===--------------------------------------------------------------------===//
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
+  EIGEN_STRONG_INLINE TensorEvaluator(const XprType& op, const Device& device)
     : m_impl(op.expression(), device), m_traceDim(1), m_device(device)
   {
 
@@ -211,12 +213,12 @@ struct TensorEvaluator<const TensorTraceOp<Dims, ArgType>, Device>
     return m_dimensions;
   }
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType /*data*/) {
+  EIGEN_STRONG_INLINE bool evalSubExprsIfNeeded(EvaluatorPointerType /*data*/) {
     m_impl.evalSubExprsIfNeeded(NULL);
     return true;
   }
 
-  EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE void cleanup() {
+  EIGEN_STRONG_INLINE void cleanup() {
     m_impl.cleanup();
   }
 
@@ -243,8 +245,6 @@ struct TensorEvaluator<const TensorTraceOp<Dims, ArgType>, Device>
 
   template<int LoadMode>
   EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE PacketReturnType packet(Index index) const {
-
-    EIGEN_STATIC_ASSERT((PacketSize > 1), YOU_MADE_A_PROGRAMMING_MISTAKE);
     eigen_assert(index + PacketSize - 1 < dimensions().TotalSize());
 
     EIGEN_ALIGN_MAX typename internal::remove_const<CoeffReturnType>::type values[PacketSize];

@@ -33,6 +33,7 @@
 #include <algorithm>
 #include <bitset>
 #include "base/auto_reset.h"
+#include "base/memory/values_equivalent.h"
 #include "third_party/blink/renderer/core/css/css_custom_ident_value.h"
 #include "third_party/blink/renderer/core/css/css_function_value.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
@@ -45,7 +46,6 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
-#include "third_party/blink/renderer/core/style/data_equivalency.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -99,6 +99,7 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoWebkitAnyLink:
     case CSSSelector::kPseudoAnyLink:
     case CSSSelector::kPseudoAutofill:
+    case CSSSelector::kPseudoWebKitAutofill:
     case CSSSelector::kPseudoAutofillPreviewed:
     case CSSSelector::kPseudoAutofillSelected:
     case CSSSelector::kPseudoHover:
@@ -125,6 +126,7 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoAfter:
     case CSSSelector::kPseudoMarker:
     case CSSSelector::kPseudoModal:
+    case CSSSelector::kPseudoSelectorFragmentAnchor:
     case CSSSelector::kPseudoBackdrop:
     case CSSSelector::kPseudoLang:
     case CSSSelector::kPseudoDir:
@@ -186,6 +188,11 @@ bool SupportsInvalidation(CSSSelector::PseudoType type) {
     case CSSSelector::kPseudoSpellingError:
     case CSSSelector::kPseudoGrammarError:
     case CSSSelector::kPseudoHas:
+    case CSSSelector::kPseudoPageTransition:
+    case CSSSelector::kPseudoPageTransitionContainer:
+    case CSSSelector::kPseudoPageTransitionImageWrapper:
+    case CSSSelector::kPseudoPageTransitionIncomingImage:
+    case CSSSelector::kPseudoPageTransitionOutgoingImage:
       return true;
     case CSSSelector::kPseudoUnknown:
     case CSSSelector::kPseudoLeftPage:
@@ -267,7 +274,7 @@ bool InvalidationSetMapsEqual(const MapType& a, const MapType& b) {
     auto it = b.find(entry.key);
     if (it == b.end())
       return false;
-    if (!DataEquivalent(entry.value, it->value))
+    if (!base::ValuesEquivalent(entry.value, it->value))
       return false;
   }
   return true;
@@ -403,6 +410,12 @@ RuleFeatureSet::~RuleFeatureSet() {
   pseudo_invalidation_sets_.clear();
   universal_sibling_invalidation_set_ = nullptr;
   nth_invalidation_set_ = nullptr;
+  classes_in_has_argument_.clear();
+  attributes_in_has_argument_.clear();
+  ids_in_has_argument_.clear();
+  tag_names_in_has_argument_.clear();
+  universal_in_has_argument_ = false;
+  pseudos_in_has_argument_.clear();
 
   is_alive_ = false;
 }
@@ -418,17 +431,24 @@ bool RuleFeatureSet::operator==(const RuleFeatureSet& other) const {
              other.attribute_invalidation_sets_) &&
          InvalidationSetMapsEqual<CSSSelector::PseudoType>(
              pseudo_invalidation_sets_, other.pseudo_invalidation_sets_) &&
-         DataEquivalent(universal_sibling_invalidation_set_,
-                        other.universal_sibling_invalidation_set_) &&
-         DataEquivalent(nth_invalidation_set_, other.nth_invalidation_set_) &&
-         DataEquivalent(universal_sibling_invalidation_set_,
-                        other.universal_sibling_invalidation_set_) &&
-         DataEquivalent(type_rule_invalidation_set_,
-                        other.type_rule_invalidation_set_) &&
+         base::ValuesEquivalent(universal_sibling_invalidation_set_,
+                                other.universal_sibling_invalidation_set_) &&
+         base::ValuesEquivalent(nth_invalidation_set_,
+                                other.nth_invalidation_set_) &&
+         base::ValuesEquivalent(universal_sibling_invalidation_set_,
+                                other.universal_sibling_invalidation_set_) &&
+         base::ValuesEquivalent(type_rule_invalidation_set_,
+                                other.type_rule_invalidation_set_) &&
          viewport_dependent_media_query_results_ ==
              other.viewport_dependent_media_query_results_ &&
          device_dependent_media_query_results_ ==
              other.device_dependent_media_query_results_ &&
+         classes_in_has_argument_ == other.classes_in_has_argument_ &&
+         attributes_in_has_argument_ == other.attributes_in_has_argument_ &&
+         ids_in_has_argument_ == other.ids_in_has_argument_ &&
+         tag_names_in_has_argument_ == other.tag_names_in_has_argument_ &&
+         universal_in_has_argument_ == other.universal_in_has_argument_ &&
+         pseudos_in_has_argument_ == other.pseudos_in_has_argument_ &&
          is_alive_ == other.is_alive_;
 }
 
@@ -574,6 +594,7 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoWebkitAnyLink:
       case CSSSelector::kPseudoAnyLink:
       case CSSSelector::kPseudoAutofill:
+      case CSSSelector::kPseudoWebKitAutofill:
       case CSSSelector::kPseudoAutofillPreviewed:
       case CSSSelector::kPseudoAutofillSelected:
       case CSSSelector::kPseudoHover:
@@ -615,6 +636,7 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoHasDatalist:
       case CSSSelector::kPseudoMultiSelectFocus:
       case CSSSelector::kPseudoModal:
+      case CSSSelector::kPseudoSelectorFragmentAnchor:
         return &EnsurePseudoInvalidationSet(selector.GetPseudoType(), type,
                                             position);
       case CSSSelector::kPseudoFirstOfType:
@@ -625,6 +647,11 @@ InvalidationSet* RuleFeatureSet::InvalidationSetForSimpleSelector(
       case CSSSelector::kPseudoNthLastChild:
       case CSSSelector::kPseudoNthLastOfType:
         return &EnsureNthInvalidationSet();
+      case CSSSelector::kPseudoHas:
+        return position == kAncestor
+                   ? &EnsurePseudoInvalidationSet(selector.GetPseudoType(),
+                                                  type, position)
+                   : nullptr;
       case CSSSelector::kPseudoPart:
       default:
         break;
@@ -737,7 +764,6 @@ void RuleFeatureSet::ExtractInvalidationSetFeaturesFromSelectorList(
   // For the :has pseudo class, we should not extract invalidation set features
   // here because the :has invalidation direction is different with others.
   // (preceding-sibling/ancestors/preceding-sibling-of-ancestors)
-  // TODO(blee@igalia.com) Need to add :has invalidation
   if (UNLIKELY(pseudo_type == CSSSelector::kPseudoHas))
     return;
 
@@ -825,11 +851,72 @@ const CSSSelector* RuleFeatureSet::ExtractInvalidationSetFeaturesFromCompound(
     if (features.invalidation_flags.InvalidatesParts())
       metadata_.invalidates_parts = true;
 
+    if (simple_selector->GetPseudoType() == CSSSelector::kPseudoHas)
+      CollectValuesInHasArgument(*simple_selector);
+
     if (!simple_selector->TagHistory() ||
         simple_selector->Relation() != CSSSelector::kSubSelector) {
       return simple_selector;
     }
   }
+}
+
+void RuleFeatureSet::CollectValuesInHasArgument(
+    const CSSSelector& has_pseudo_class) {
+  DCHECK_EQ(has_pseudo_class.GetPseudoType(), CSSSelector::kPseudoHas);
+  const CSSSelectorList* selector_list = has_pseudo_class.SelectorList();
+  DCHECK(selector_list);
+
+  for (const CSSSelector* relative_selector = selector_list->First();
+       relative_selector;
+       relative_selector = CSSSelectorList::Next(*relative_selector)) {
+    DCHECK(relative_selector);
+
+    bool value_added = false;
+    const CSSSelector* simple = relative_selector;
+    while (simple->GetPseudoType() != CSSSelector::kPseudoRelativeLeftmost) {
+      value_added |= AddValueOfSimpleSelectorInHasArgument(*simple);
+
+      if (simple->Relation() != CSSSelector::kSubSelector) {
+        if (!value_added)
+          universal_in_has_argument_ = true;
+        value_added = false;
+      }
+
+      simple = simple->TagHistory();
+      DCHECK(simple);
+    }
+  }
+}
+
+bool RuleFeatureSet::AddValueOfSimpleSelectorInHasArgument(
+    const CSSSelector& selector) {
+  if (selector.Match() == CSSSelector::kClass) {
+    classes_in_has_argument_.insert(selector.Value());
+    return true;
+  }
+  if (selector.IsAttributeSelector()) {
+    attributes_in_has_argument_.insert(selector.Attribute().LocalName());
+    return true;
+  }
+  if (selector.Match() == CSSSelector::kId) {
+    ids_in_has_argument_.insert(selector.Value());
+    return true;
+  }
+  if (selector.Match() == CSSSelector::kTag &&
+      selector.TagQName().LocalName() != CSSSelector::UniversalSelectorAtom()) {
+    tag_names_in_has_argument_.insert(selector.TagQName().LocalName());
+    return true;
+  }
+  if (selector.Match() == CSSSelector::kPseudoClass) {
+    CSSSelector::PseudoType pseudo_type = selector.GetPseudoType();
+
+    // Ignore :visited to prevent history leakage.
+    if (pseudo_type != CSSSelector::kPseudoVisited)
+      pseudos_in_has_argument_.insert(pseudo_type);
+    return true;
+  }
+  return false;
 }
 
 // Add features extracted from the rightmost compound selector to descendant
@@ -922,6 +1009,11 @@ void RuleFeatureSet::AddFeaturesToInvalidationSetsForSimpleSelector(
   if (simple_selector.IsIdClassOrAttributeSelector())
     descendant_features.has_features_for_rule_set_invalidation = true;
 
+  CSSSelector::PseudoType pseudo_type = simple_selector.GetPseudoType();
+
+  if (UNLIKELY(pseudo_type == CSSSelector::kPseudoHas))
+    CollectValuesInHasArgument(simple_selector);
+
   if (InvalidationSet* invalidation_set = InvalidationSetForSimpleSelector(
           simple_selector,
           sibling_features ? InvalidationType::kInvalidateSiblings
@@ -958,12 +1050,9 @@ void RuleFeatureSet::AddFeaturesToInvalidationSetsForSimpleSelector(
     return;
   }
 
-  CSSSelector::PseudoType pseudo_type = simple_selector.GetPseudoType();
-
   // For the :has pseudo class, we should not extract invalidation set features
   // here because the :has invalidation direction is different with others.
   // (preceding-sibling/ancestors/preceding-sibling-of-ancestors)
-  // TODO(blee@igalia.com) Need to add :has invalidation
   if (UNLIKELY(pseudo_type == CSSSelector::kPseudoHas))
     return;
 
@@ -1036,8 +1125,6 @@ RuleFeatureSet::SelectorPreMatch RuleFeatureSet::CollectFeaturesFromRuleData(
       kSelectorNeverMatches) {
     return kSelectorNeverMatches;
   }
-  metadata.uses_container_queries |=
-      static_cast<bool>(rule_data->GetContainerQuery());
 
   metadata_.Add(metadata);
 
@@ -1073,7 +1160,7 @@ RuleFeatureSet::SelectorPreMatch RuleFeatureSet::CollectFeaturesFromSelector(
           return kSelectorNeverMatches;
         }
         found_host_pseudo = true;
-        FALLTHROUGH;
+        [[fallthrough]];
       default:
         if (const CSSSelectorList* selector_list = current->SelectorList()) {
           for (const CSSSelector* sub_selector = selector_list->First();
@@ -1110,7 +1197,6 @@ RuleFeatureSet::SelectorPreMatch RuleFeatureSet::CollectFeaturesFromSelector(
 void RuleFeatureSet::FeatureMetadata::Add(const FeatureMetadata& other) {
   uses_first_line_rules |= other.uses_first_line_rules;
   uses_window_inactive_selector |= other.uses_window_inactive_selector;
-  uses_container_queries |= other.uses_container_queries;
   max_direct_adjacent_selectors = std::max(max_direct_adjacent_selectors,
                                            other.max_direct_adjacent_selectors);
 }
@@ -1118,7 +1204,6 @@ void RuleFeatureSet::FeatureMetadata::Add(const FeatureMetadata& other) {
 void RuleFeatureSet::FeatureMetadata::Clear() {
   uses_first_line_rules = false;
   uses_window_inactive_selector = false;
-  uses_container_queries = false;
   needs_full_recalc_for_rule_set_invalidation = false;
   max_direct_adjacent_selectors = 0;
   invalidates_parts = false;
@@ -1128,7 +1213,6 @@ bool RuleFeatureSet::FeatureMetadata::operator==(
     const FeatureMetadata& other) const {
   return uses_first_line_rules == other.uses_first_line_rules &&
          uses_window_inactive_selector == other.uses_window_inactive_selector &&
-         uses_container_queries == other.uses_container_queries &&
          needs_full_recalc_for_rule_set_invalidation ==
              other.needs_full_recalc_for_rule_set_invalidation &&
          max_direct_adjacent_selectors == other.max_direct_adjacent_selectors &&
@@ -1164,6 +1248,18 @@ void RuleFeatureSet::Add(const RuleFeatureSet& other) {
       other.viewport_dependent_media_query_results_);
   device_dependent_media_query_results_.AppendVector(
       other.device_dependent_media_query_results_);
+
+  for (const auto& class_name : other.classes_in_has_argument_)
+    classes_in_has_argument_.insert(class_name);
+  for (const auto& attribute_name : other.attributes_in_has_argument_)
+    attributes_in_has_argument_.insert(attribute_name);
+  for (const auto& id : other.ids_in_has_argument_)
+    ids_in_has_argument_.insert(id);
+  for (const auto& tag_name : other.tag_names_in_has_argument_)
+    tag_names_in_has_argument_.insert(tag_name);
+  universal_in_has_argument_ |= other.universal_in_has_argument_;
+  for (const auto& pseudo_type : other.pseudos_in_has_argument_)
+    pseudos_in_has_argument_.insert(pseudo_type);
 }
 
 void RuleFeatureSet::Clear() {
@@ -1178,6 +1274,18 @@ void RuleFeatureSet::Clear() {
   type_rule_invalidation_set_ = nullptr;
   viewport_dependent_media_query_results_.clear();
   device_dependent_media_query_results_.clear();
+  media_query_unit_flags_ = 0;
+  classes_in_has_argument_.clear();
+  attributes_in_has_argument_.clear();
+  ids_in_has_argument_.clear();
+  tag_names_in_has_argument_.clear();
+  universal_in_has_argument_ = false;
+  pseudos_in_has_argument_.clear();
+}
+
+bool RuleFeatureSet::HasDynamicViewportDependentMediaQueries() const {
+  return media_query_unit_flags_ &
+         MediaQueryExpValue::UnitFlags::kDynamicViewport;
 }
 
 void RuleFeatureSet::CollectInvalidationSetsForClass(
@@ -1415,6 +1523,53 @@ void RuleFeatureSet::AddFeaturesToUniversalSiblingInvalidationSet(
   }
 }
 
+bool RuleFeatureSet::NeedsHasInvalidationForClass(
+    const AtomicString& class_name) const {
+  return classes_in_has_argument_.Contains(class_name);
+}
+
+bool RuleFeatureSet::NeedsHasInvalidationForAttribute(
+    const QualifiedName& attribute_name) const {
+  return attributes_in_has_argument_.Contains(attribute_name.LocalName());
+}
+
+bool RuleFeatureSet::NeedsHasInvalidationForId(const AtomicString& id) const {
+  return ids_in_has_argument_.Contains(id);
+}
+
+bool RuleFeatureSet::NeedsHasInvalidationForTagName(
+    const AtomicString& tag_name) const {
+  return universal_in_has_argument_ ||
+         tag_names_in_has_argument_.Contains(tag_name);
+}
+
+bool RuleFeatureSet::NeedsHasInvalidationForElement(Element& element) const {
+  if (element.HasID()) {
+    if (NeedsHasInvalidationForId(element.IdForStyleResolution()))
+      return true;
+  }
+
+  if (element.HasClass()) {
+    const SpaceSplitString& class_names = element.ClassNames();
+    for (wtf_size_t i = 0; i < class_names.size(); i++) {
+      if (NeedsHasInvalidationForClass(class_names[i]))
+        return true;
+    }
+  }
+
+  for (const Attribute& attribute : element.Attributes()) {
+    if (NeedsHasInvalidationForAttribute(attribute.GetName()))
+      return true;
+  }
+
+  return NeedsHasInvalidationForTagName(element.LocalNameForSelectorMatching());
+}
+
+bool RuleFeatureSet::NeedsHasInvalidationForPseudoClass(
+    CSSSelector::PseudoType pseudo_type) const {
+  return pseudos_in_has_argument_.Contains(pseudo_type);
+}
+
 void RuleFeatureSet::InvalidationSetFeatures::Add(
     const InvalidationSetFeatures& other) {
   classes.AppendVector(other.classes);
@@ -1526,7 +1681,7 @@ String RuleFeatureSet::ToString() const {
       builder.Append(">");
     builder.Append("]");
 
-    return builder.ToString();
+    return builder.ReleaseString();
   };
 
   auto format_max_direct_adjancent = [](unsigned max) -> String {
@@ -1569,7 +1724,6 @@ String RuleFeatureSet::ToString() const {
   StringBuilder metadata;
   metadata.Append(metadata_.uses_first_line_rules ? "F" : "");
   metadata.Append(metadata_.uses_window_inactive_selector ? "W" : "");
-  metadata.Append(metadata_.uses_container_queries ? "C" : "");
   metadata.Append(metadata_.needs_full_recalc_for_rule_set_invalidation ? "R"
                                                                         : "");
   metadata.Append(metadata_.invalidates_parts ? "P" : "");
@@ -1578,10 +1732,10 @@ String RuleFeatureSet::ToString() const {
 
   if (!metadata.IsEmpty()) {
     builder.Append("META:");
-    builder.Append(metadata.ToString());
+    builder.Append(metadata.ReleaseString());
   }
 
-  return builder.ToString();
+  return builder.ReleaseString();
 }
 
 std::ostream& operator<<(std::ostream& ostream, const RuleFeatureSet& set) {

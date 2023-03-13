@@ -115,8 +115,7 @@ std::string StreamDelegateBase::TakeReceivedData() {
   size_t len = received_data_queue_.GetTotalSize();
   std::string received_data(len, '\0');
   if (len > 0) {
-    EXPECT_EQ(len,
-              received_data_queue_.Dequeue(base::data(received_data), len));
+    EXPECT_EQ(len, received_data_queue_.Dequeue(std::data(received_data), len));
   }
   return received_data;
 }
@@ -138,6 +137,17 @@ StreamDelegateDoNothing::StreamDelegateDoNothing(
     : StreamDelegateBase(stream) {}
 
 StreamDelegateDoNothing::~StreamDelegateDoNothing() = default;
+
+StreamDelegateConsumeData::StreamDelegateConsumeData(
+    const base::WeakPtr<SpdyStream>& stream)
+    : StreamDelegateBase(stream) {}
+
+StreamDelegateConsumeData::~StreamDelegateConsumeData() = default;
+
+void StreamDelegateConsumeData::OnDataReceived(
+    std::unique_ptr<SpdyBuffer> buffer) {
+  buffer->Consume(buffer->GetRemainingSize());
+}
 
 StreamDelegateSendImmediate::StreamDelegateSendImmediate(
     const base::WeakPtr<SpdyStream>& stream,

@@ -7,9 +7,9 @@
 
 #include <memory>
 
-#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "base/single_thread_task_runner.h"
+#include "base/task/single_thread_task_runner.h"
+#include "gpu/command_buffer/client/raster_implementation.h"
 #include "gpu/ipc/command_buffer_task_executor.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 
@@ -22,21 +22,18 @@ class TransferBuffer;
 struct GpuFeatureInfo;
 struct SharedMemoryLimits;
 
-namespace raster {
-class RasterInterface;
-class RasterImplementation;
-}  // namespace raster
-
 // Runs client and server side command buffer code in process. Only supports
 // RasterInterface.
 class RasterInProcessContext {
  public:
   RasterInProcessContext();
+
+  RasterInProcessContext(const RasterInProcessContext&) = delete;
+  RasterInProcessContext& operator=(const RasterInProcessContext&) = delete;
+
   ~RasterInProcessContext();
 
-  // |attrib_list| must be null or a NONE-terminated list of attribute/value
-  // pairs. |gpu_channel_manager| should be non-null when used in the GPU
-  // process.
+  // |gpu_channel_manager| should be non-null when used in the GPU process.
   ContextResult Initialize(
       CommandBufferTaskExecutor* task_executor,
       const ContextCreationAttribs& attribs,
@@ -52,7 +49,7 @@ class RasterInProcessContext {
 
   // Allows direct access to the RasterImplementation so a
   // RasterInProcessContext can be used without making it current.
-  gpu::raster::RasterInterface* GetImplementation();
+  gpu::raster::RasterImplementation* GetImplementation();
 
   ContextSupport* GetContextSupport();
 
@@ -72,8 +69,6 @@ class RasterInProcessContext {
   std::unique_ptr<TransferBuffer> transfer_buffer_;
   std::unique_ptr<raster::RasterImplementation> raster_implementation_;
   std::unique_ptr<InProcessCommandBuffer> command_buffer_;
-
-  DISALLOW_COPY_AND_ASSIGN(RasterInProcessContext);
 };
 
 }  // namespace gpu

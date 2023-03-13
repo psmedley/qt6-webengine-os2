@@ -10,7 +10,7 @@
 
 #include "include/private/SkSLString.h"
 #include "include/private/SkTArray.h"
-#include "src/sksl/SkSLASTNode.h"
+#include "include/sksl/SkSLPosition.h"
 #include "src/sksl/SkSLLexer.h"
 #include "src/sksl/SkSLModifiersPool.h"
 #include "src/sksl/SkSLPool.h"
@@ -42,19 +42,18 @@ class IRNode : public Poolable {
 public:
     virtual ~IRNode() {}
 
-    virtual String description() const = 0;
+    virtual std::string description() const = 0;
 
     // No copy construction or assignment
     IRNode(const IRNode&) = delete;
     IRNode& operator=(const IRNode&) = delete;
 
-    // character offset of this element within the program being compiled, for error reporting
-    // purposes
-    int fOffset;
+    // position of this element within the program being compiled, for error reporting purposes
+    Position fPosition;
 
 protected:
-    IRNode(int offset, int kind)
-        : fOffset(offset)
+    IRNode(Position position, int kind)
+        : fPosition(position)
         , fKind(kind) {}
 
     int fKind;

@@ -503,7 +503,7 @@ func firstSentence(paragraphs []string) string {
 
 // markupPipeWords converts |s| into an HTML string, safe to be included outside
 // a tag, while also marking up words surrounded by |.
-func markupPipeWords(allDecls map[string]string, s string) template.HTML {
+func markupPipeWords(allDecls map[string]string, s string, linkDecls bool) template.HTML {
 	// It is safe to look for '|' in the HTML-escaped version of |s|
 	// below. The escaped version cannot include '|' instead tags because
 	// there are no tags by construction.
@@ -524,12 +524,10 @@ func markupPipeWords(allDecls map[string]string, s string) template.HTML {
 		if i > 0 && (j == -1 || j > i) {
 			ret += "<tt>"
 			anchor, isLink := allDecls[s[:i]]
-			if isLink {
-				ret += fmt.Sprintf("<a href=\"%s\">", template.HTMLEscapeString(anchor))
-			}
-			ret += s[:i]
-			if isLink {
-				ret += "</a>"
+			if linkDecls && isLink {
+				ret += fmt.Sprintf("<a href=\"%s\">%s</a>", template.HTMLEscapeString(anchor), s[:i])
+			} else {
+				ret += s[:i]
 			}
 			ret += "</tt>"
 			s = s[i+1:]
@@ -565,6 +563,28 @@ again:
 	return s
 }
 
+var rfcRegexp = regexp.MustCompile("RFC ([0-9]+)")
+
+func markupRFC(html template.HTML) template.HTML {
+	s := string(html)
+	matches := rfcRegexp.FindAllStringSubmatchIndex(s, -1)
+	if len(matches) == 0 {
+		return html
+	}
+
+	var b strings.Builder
+	var idx int
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		number := s[match[2]:match[3]]
+		b.WriteString(s[idx:start])
+		fmt.Fprintf(&b, "<a href=\"https://www.rfc-editor.org/rfc/rfc%s.html\">%s</a>", number, s[start:end])
+		idx = end
+	}
+	b.WriteString(s[idx:])
+	return template.HTML(b.String())
+}
+
 func newlinesToBR(html template.HTML) template.HTML {
 	s := string(html)
 	if !strings.Contains(s, "\n") {
@@ -580,10 +600,12 @@ func generate(outPath string, config *Config) (map[string]string, error) {
 
 	headerTmpl := template.New("headerTmpl")
 	headerTmpl.Funcs(template.FuncMap{
-		"firstSentence":   firstSentence,
-		"markupPipeWords": func(s string) template.HTML { return markupPipeWords(allDecls, s) },
-		"markupFirstWord": markupFirstWord,
-		"newlinesToBR":    newlinesToBR,
+		"firstSentence":         firstSentence,
+		"markupPipeWords":       func(s string) template.HTML { return markupPipeWords(allDecls, s, true /* linkDecls */) },
+		"markupPipeWordsNoLink": func(s string) template.HTML { return markupPipeWords(allDecls, s, false /* linkDecls */) },
+		"markupFirstWord":       markupFirstWord,
+		"markupRFC":             markupRFC,
+		"newlinesToBR":          newlinesToBR,
 	})
 	headerTmpl, err := headerTmpl.Parse(`<!DOCTYPE html>
 <html>
@@ -600,12 +622,12 @@ func generate(outPath string, config *Config) (map[string]string, error) {
       <a href="headers.html">All headers</a>
     </div>
 
-    {{range .Preamble}}<p>{{. | markupPipeWords}}</p>{{end}}
+    {{range .Preamble}}<p>{{. | markupPipeWords | markupRFC}}</p>{{end}}
 
     <ol>
       {{range .Sections}}
         {{if not .IsPrivate}}
-          {{if .Anchor}}<li class="header"><a href="#{{.Anchor}}">{{.Preamble | firstSentence | markupPipeWords}}</a></li>{{end}}
+          {{if .Anchor}}<li class="header"><a href="#{{.Anchor}}">{{.Preamble | firstSentence | markupPipeWordsNoLink}}</a></li>{{end}}
           {{range .Decls}}
             {{if .Anchor}}<li><a href="#{{.Anchor}}"><tt>{{.Name}}</tt></a></li>{{end}}
           {{end}}
@@ -618,14 +640,14 @@ func generate(outPath string, config *Config) (map[string]string, error) {
         <div class="section" {{if .Anchor}}id="{{.Anchor}}"{{end}}>
         {{if .Preamble}}
           <div class="sectionpreamble">
-          {{range .Preamble}}<p>{{. | markupPipeWords}}</p>{{end}}
+          {{range .Preamble}}<p>{{. | markupPipeWords | markupRFC}}</p>{{end}}
           </div>
         {{end}}
 
         {{range .Decls}}
           <div class="decl" {{if .Anchor}}id="{{.Anchor}}"{{end}}>
           {{range .Comment}}
-            <p>{{. | markupPipeWords | newlinesToBR | markupFirstWord}}</p>
+            <p>{{. | markupPipeWords | newlinesToBR | markupFirstWord | markupRFC}}</p>
           {{end}}
           <pre>{{.Decl}}</pre>
           </div>

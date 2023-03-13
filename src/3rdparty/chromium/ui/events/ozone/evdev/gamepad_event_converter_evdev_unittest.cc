@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "base/bind.h"
-#include "base/cxx17_backports.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
 #include "base/posix/eintr_wrapper.h"
@@ -91,6 +90,11 @@ class GamepadEventConverterEvdevTest : public testing::Test {
  public:
   GamepadEventConverterEvdevTest() {}
 
+  GamepadEventConverterEvdevTest(const GamepadEventConverterEvdevTest&) =
+      delete;
+  GamepadEventConverterEvdevTest& operator=(
+      const GamepadEventConverterEvdevTest&) = delete;
+
   // Overriden from testing::Test:
   void SetUp() override {
     device_manager_ = ui::CreateDeviceManagerForTest();
@@ -127,8 +131,6 @@ class GamepadEventConverterEvdevTest : public testing::Test {
   std::unique_ptr<ui::KeyboardLayoutEngine> keyboard_layout_engine_;
   std::unique_ptr<ui::EventFactoryEvdev> event_factory_;
   std::unique_ptr<ui::DeviceEventDispatcherEvdev> dispatcher_;
-
-  DISALLOW_COPY_AND_ASSIGN(GamepadEventConverterEvdevTest);
 };
 
 struct ExpectedEvent {
@@ -207,7 +209,7 @@ TEST_F(GamepadEventConverterEvdevTest, XboxGamepadEvents) {
       {GamepadEventType::BUTTON, 307, 1}, {GamepadEventType::FRAME, 0, 0},
   };
 
-  for (unsigned i = 0; i < base::size(mock_kernel_queue); ++i) {
+  for (unsigned i = 0; i < std::size(mock_kernel_queue); ++i) {
     dev->ProcessEvent(mock_kernel_queue[i]);
   }
 

@@ -16,7 +16,6 @@
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/numerics/checked_math.h"
@@ -149,10 +148,12 @@ class DiskCacheLPMFuzzer {
  private:
   struct EntryInfo {
     EntryInfo() = default;
+
+    EntryInfo(const EntryInfo&) = delete;
+    EntryInfo& operator=(const EntryInfo&) = delete;
+
     disk_cache::Entry* entry_ptr = nullptr;
     std::unique_ptr<TestEntryResultCompletionCallback> tcb;
-
-    DISALLOW_COPY_AND_ASSIGN(EntryInfo);
   };
   void RunTaskForTest(base::OnceClosure closure);
 
@@ -861,9 +862,9 @@ void DiskCacheLPMFuzzer::RunCommands(
         break;
       }
       case disk_cache_fuzzer::FuzzCommand::kFastForwardBy: {
-        base::TimeDelta to_wait = base::TimeDelta::FromMilliseconds(
-            command.fast_forward_by().capped_num_millis() %
-            kMaxNumMillisToWait);
+        base::TimeDelta to_wait =
+            base::Milliseconds(command.fast_forward_by().capped_num_millis() %
+                               kMaxNumMillisToWait);
         MAYBE_PRINT << "FastForwardBy(" << to_wait << ")" << std::endl;
         init_globals->task_environment_->FastForwardBy(to_wait);
 
@@ -1113,7 +1114,7 @@ void DiskCacheLPMFuzzer::RunCommands(
           continue;
 
         MAYBE_PRINT << "AddRealDelay(1ms)" << std::endl;
-        base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(1));
+        base::PlatformThread::Sleep(base::Milliseconds(1));
         break;
       }
       case disk_cache_fuzzer::FuzzCommand::FUZZ_COMMAND_ONEOF_NOT_SET: {
@@ -1163,9 +1164,9 @@ void DiskCacheLPMFuzzer::CreateBackend(
           std::make_unique<disk_cache::SimpleFileTracker>(kMaxFdsSimpleCache);
     std::unique_ptr<disk_cache::SimpleBackendImpl> simple_backend =
         std::make_unique<disk_cache::SimpleBackendImpl>(
-            cache_path_, /* cleanup_tracker = */ nullptr,
-            simple_file_tracker_.get(), max_size_, type,
-            /*net_log = */ nullptr);
+            /*file_operations=*/nullptr, cache_path_,
+            /*cleanup_tracker=*/nullptr, simple_file_tracker_.get(), max_size_,
+            type, /*net_log=*/nullptr);
     int rv = simple_backend->Init(cb.callback());
     CHECK_EQ(cb.GetResult(rv), net::OK);
     simple_cache_impl_ = simple_backend.get();

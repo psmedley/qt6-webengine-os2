@@ -8,6 +8,8 @@
 #include "base/test/gtest_util.h"
 #include "base/values.h"
 #include "mojo/public/cpp/base/values_mojom_traits.h"
+#include "mojo/public/cpp/bindings/lib/validation_context.h"
+#include "mojo/public/cpp/bindings/lib/validation_errors.h"
 #include "mojo/public/cpp/test_support/test_utils.h"
 #include "mojo/public/mojom/base/values.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -100,8 +102,15 @@ TEST(ValuesStructTraitsTest, DictionaryValue) {
   EXPECT_EQ(in, out);
 
   ASSERT_TRUE(
-      mojo::test::SerializeAndDeserialize<mojom::DictionaryValue>(in, out));
+      mojo::test::SerializeAndDeserialize<mojom::DeprecatedDictionaryValue>(
+          in, out));
   EXPECT_EQ(in, out);
+
+  base::Value::Dict in_dict = in.GetDict().Clone();
+  base::Value::Dict out_dict;
+  ASSERT_TRUE(mojo::test::SerializeAndDeserialize<mojom::DictionaryValue>(
+      in_dict, out_dict));
+  EXPECT_EQ(in_dict, out_dict);
 }
 
 TEST(ValuesStructTraitsTest, SerializeInvalidDictionaryValue) {
@@ -110,7 +119,8 @@ TEST(ValuesStructTraitsTest, SerializeInvalidDictionaryValue) {
 
   base::Value out;
   EXPECT_DCHECK_DEATH(
-      mojo::test::SerializeAndDeserialize<mojom::DictionaryValue>(in, out));
+      mojo::test::SerializeAndDeserialize<mojom::DeprecatedDictionaryValue>(
+          in, out));
 }
 
 TEST(ValuesStructTraitsTest, ListValue) {
@@ -128,8 +138,15 @@ TEST(ValuesStructTraitsTest, ListValue) {
   ASSERT_TRUE(mojo::test::SerializeAndDeserialize<mojom::Value>(in, out));
   EXPECT_EQ(in, out);
 
-  ASSERT_TRUE(mojo::test::SerializeAndDeserialize<mojom::ListValue>(in, out));
+  ASSERT_TRUE(
+      mojo::test::SerializeAndDeserialize<mojom::DeprecatedListValue>(in, out));
   EXPECT_EQ(in, out);
+
+  base::Value::List in_list = in.GetList().Clone();
+  base::Value::List out_list;
+  ASSERT_TRUE(
+      mojo::test::SerializeAndDeserialize<mojom::ListValue>(in_list, out_list));
+  EXPECT_EQ(in_list, out_list);
 }
 
 TEST(ValuesStructTraitsTest, SerializeInvalidListValue) {
@@ -138,19 +155,42 @@ TEST(ValuesStructTraitsTest, SerializeInvalidListValue) {
 
   base::Value out;
   EXPECT_DCHECK_DEATH(
-      mojo::test::SerializeAndDeserialize<mojom::ListValue>(in, out));
+      mojo::test::SerializeAndDeserialize<mojom::DeprecatedListValue>(in, out));
 }
 
 // A deeply nested base::Value should trigger a deserialization error.
 TEST(ValuesStructTraitsTest, DeeplyNestedValue) {
   base::Value in;
-  for (int i = 0; i < 100; ++i) {
+  for (int i = 0; i < kMaxRecursionDepth; ++i) {
     base::Value::ListStorage storage;
     storage.emplace_back(std::move(in));
     in = base::Value(std::move(storage));
   }
-  base::Value out;
-  ASSERT_FALSE(mojo::test::SerializeAndDeserialize<mojom::Value>(in, out));
+
+  // It should work if the depth is less than kMaxRecursionDepth.
+  {
+    mojo::internal::ValidationErrorObserverForTesting warning_observer{
+        base::DoNothing()};
+    base::Value out;
+    ASSERT_TRUE(mojo::test::SerializeAndDeserialize<mojom::Value>(in, out));
+    EXPECT_EQ(mojo::internal::VALIDATION_ERROR_NONE,
+              warning_observer.last_error());
+  }
+
+  // Add one more depth.
+  base::Value::ListStorage storage;
+  storage.emplace_back(std::move(in));
+  in = base::Value(std::move(storage));
+
+  // It gets VALIDATION_ERROR_MAX_RECURSION_DEPTH error.
+  {
+    mojo::internal::ValidationErrorObserverForTesting warning_observer{
+        base::DoNothing()};
+    base::Value out;
+    ASSERT_FALSE(mojo::test::SerializeAndDeserialize<mojom::Value>(in, out));
+    EXPECT_EQ(mojo::internal::VALIDATION_ERROR_MAX_RECURSION_DEPTH,
+              warning_observer.last_error());
+  }
 }
 
 }  // namespace mojo_base

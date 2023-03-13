@@ -11,6 +11,7 @@
 #ifndef AOM_COMMON_TOOLS_COMMON_H_
 #define AOM_COMMON_TOOLS_COMMON_H_
 
+#include <stdbool.h>
 #include <stdio.h>
 
 #include "config/aom_config.h"
@@ -78,13 +79,6 @@ enum VideoFileType {
   FILE_TYPE_WEBM
 };
 
-// Used in lightfield example.
-enum {
-  YUV1D,  // 1D tile output for conformance test.
-  YUV,    // Tile output in YUV format.
-  NV12,   // Tile output in NV12 format.
-} UENUM1BYTE(OUTPUT_FORMAT);
-
 // The fourcc for large_scale_tile encoding is "LSTC".
 #define LST_FOURCC 0x4354534c
 
@@ -125,21 +119,35 @@ extern "C" {
 
 #if defined(__GNUC__)
 #define AOM_NO_RETURN __attribute__((noreturn))
+#elif defined(_MSC_VER)
+#define AOM_NO_RETURN __declspec(noreturn)
 #else
 #define AOM_NO_RETURN
+#endif
+
+// Tells the compiler to perform `printf` format string checking if the
+// compiler supports it; see the 'format' attribute in
+// <https://gcc.gnu.org/onlinedocs/gcc/Common-Function-Attributes.html>.
+#define AOM_TOOLS_FORMAT_PRINTF(string_index, first_to_check)
+#if defined(__has_attribute)
+#if __has_attribute(format)
+#undef AOM_TOOLS_FORMAT_PRINTF
+#define AOM_TOOLS_FORMAT_PRINTF(string_index, first_to_check) \
+  __attribute__((__format__(__printf__, string_index, first_to_check)))
+#endif
 #endif
 
 /* Sets a stdio stream into binary mode */
 FILE *set_binary_mode(FILE *stream);
 
-void die(const char *fmt, ...) AOM_NO_RETURN;
-void fatal(const char *fmt, ...) AOM_NO_RETURN;
-void warn(const char *fmt, ...);
+AOM_NO_RETURN void die(const char *fmt, ...) AOM_TOOLS_FORMAT_PRINTF(1, 2);
+AOM_NO_RETURN void fatal(const char *fmt, ...) AOM_TOOLS_FORMAT_PRINTF(1, 2);
+void aom_tools_warn(const char *fmt, ...) AOM_TOOLS_FORMAT_PRINTF(1, 2);
 
-void die_codec(aom_codec_ctx_t *ctx, const char *s) AOM_NO_RETURN;
+AOM_NO_RETURN void die_codec(aom_codec_ctx_t *ctx, const char *s);
 
 /* The tool including this file must define usage_exit() */
-void usage_exit(void) AOM_NO_RETURN;
+AOM_NO_RETURN void usage_exit(void);
 
 #undef AOM_NO_RETURN
 
@@ -171,7 +179,8 @@ double sse_to_psnr(double samples, double peak, double mse);
 void aom_img_upshift(aom_image_t *dst, const aom_image_t *src, int input_shift);
 void aom_img_downshift(aom_image_t *dst, const aom_image_t *src,
                        int down_shift);
-void aom_shift_img(unsigned int output_bit_depth, aom_image_t **img_ptr,
+// Returns true on success, false on failure.
+bool aom_shift_img(unsigned int output_bit_depth, aom_image_t **img_ptr,
                    aom_image_t **img_shifted_ptr);
 void aom_img_truncate_16_to_8(aom_image_t *dst, const aom_image_t *src);
 

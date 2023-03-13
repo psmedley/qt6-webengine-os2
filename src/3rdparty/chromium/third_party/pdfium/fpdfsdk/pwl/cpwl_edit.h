@@ -12,8 +12,8 @@
 
 #include "core/fpdfdoc/cpvt_wordrange.h"
 #include "core/fxcrt/fx_codepage.h"
-#include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "core/fxcrt/widestring.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
 #include "fpdfsdk/pwl/ipwl_systemhandler.h"
 
@@ -84,7 +84,6 @@ class CPWL_Edit final : public CPWL_Wnd {
   void SetAlignFormatVerticalCenter();
   void SetCharArray(int32_t nCharArray);
   void SetLimitChar(int32_t nLimitChar);
-  void SetCharSpace(float fCharSpace);
   bool CanSelectAll() const;
   bool CanCopy() const;
   bool CanCut() const;
@@ -100,7 +99,6 @@ class CPWL_Edit final : public CPWL_Wnd {
     m_pFillerNotify = pNotify;
   }
 
-  void AttachFFLData(CFFL_FormField* pData) { m_pFormFiller = pData; }
   bool SetCaret(bool bVisible,
                 const CFX_PointF& ptHead,
                 const CFX_PointF& ptFoot);
@@ -138,7 +136,6 @@ class CPWL_Edit final : public CPWL_Wnd {
   std::unique_ptr<CPWL_EditImpl> const m_pEditImpl;
   UnownedPtr<CPWL_Caret> m_pCaret;
   UnownedPtr<IPWL_FillerNotify> m_pFillerNotify;
-  UnownedPtr<CFFL_FormField> m_pFormFiller;
 };
 
 #endif  // FPDFSDK_PWL_CPWL_EDIT_H_

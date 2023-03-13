@@ -12,12 +12,12 @@
 
 namespace SkSL {
 
+class BuiltinMap;
 class SymbolTable;
-class IRIntrinsicMap;
 
 struct ParsedModule {
-    std::shared_ptr<SymbolTable>    fSymbols;
-    std::shared_ptr<IRIntrinsicMap> fIntrinsics;
+    std::shared_ptr<SymbolTable> fSymbols;
+    std::shared_ptr<BuiltinMap>  fElements;
 };
 
 } //namespace SkSL

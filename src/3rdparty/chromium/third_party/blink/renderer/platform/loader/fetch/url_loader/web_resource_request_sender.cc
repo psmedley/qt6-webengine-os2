@@ -16,8 +16,8 @@
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task/post_task.h"
 #include "base/task/thread_pool.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
@@ -38,8 +38,8 @@
 #include "third_party/blink/public/common/loader/referrer_utils.h"
 #include "third_party/blink/public/common/loader/resource_type_util.h"
 #include "third_party/blink/public/common/loader/throttling_url_loader.h"
-#include "third_party/blink/public/mojom/frame/back_forward_cache_controller.mojom-blink.h"
 #include "third_party/blink/public/mojom/loader/resource_load_info.mojom-shared.h"
+#include "third_party/blink/public/mojom/navigation/renderer_eviction_reason.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/resource_load_info_notifier_wrapper.h"
 #include "third_party/blink/public/platform/web_back_forward_cache_loader_helper.h"
@@ -52,6 +52,9 @@
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/sync_load_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/url_loader/sync_load_response.h"
 #include "third_party/blink/renderer/platform/scheduler/public/post_cross_thread_task.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_base.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_mojo.h"
+#include "third_party/blink/renderer/platform/wtf/cross_thread_copier_std.h"
 #include "third_party/blink/renderer/platform/wtf/cross_thread_functional.h"
 
 namespace WTF {
@@ -173,20 +176,7 @@ void WebResourceRequestSender::SendSync(
     mojo::PendingRemote<mojom::BlobRegistry> download_to_blob_registry,
     scoped_refptr<WebRequestPeer> peer,
     std::unique_ptr<ResourceLoadInfoNotifierWrapper>
-        resource_load_info_notifier_wrapper,
-    WebBackForwardCacheLoaderHelper back_forward_cache_loader_helper) {
-  if (IsInflightNetworkRequestBackForwardCacheSupportEnabled()) {
-    // Sync fetches are triggered by script, which should not run when a
-    // document is in back-forward cache. If we somehow made it here, we should
-    // trigger a back-forward cache eviction.
-    auto* helper =
-        back_forward_cache_loader_helper.GetBackForwardCacheLoaderHelper();
-    if (helper) {
-      helper->EvictFromBackForwardCache(
-          mojom::RendererEvictionReason::kJavaScriptExecution);
-    }
-  }
-
+        resource_load_info_notifier_wrapper) {
   CheckSchemeForReferrerPolicy(*request);
 
   DCHECK(loader_options & network::mojom::kURLLoadOptionSynchronous);
@@ -259,15 +249,6 @@ int WebResourceRequestSender::SendAsync(
     WebBackForwardCacheLoaderHelper back_forward_cache_loader_helper) {
   CheckSchemeForReferrerPolicy(*request);
 
-#if defined(OS_ANDROID)
-  // Main frame shouldn't come here.
-  DCHECK(!(request->is_main_frame &&
-           IsRequestDestinationFrame(request->destination)));
-  if (request->has_user_gesture) {
-    resource_load_info_notifier_wrapper->NotifyUpdateUserGestureCarryoverInfo();
-  }
-#endif
-
   // Compute a unique request_id for this renderer process.
   int request_id = MakeRequestID();
   request_info_ = std::make_unique<PendingRequestInfo>(
@@ -278,8 +259,6 @@ int WebResourceRequestSender::SendAsync(
       ->NotifyResourceLoadInitiated(
           request_id, request->url, request->method, request->referrer,
           request_info_->request_destination, request->priority);
-
-  request_info_->previews_state = request->previews_state;
 
   auto client = std::make_unique<MojoURLLoaderClient>(
       this, loading_task_runner, url_loader_factory->BypassRedirectChecks(),
@@ -464,8 +443,7 @@ void WebResourceRequestSender::OnReceivedResponse(
     return;
 
   request_info_->resource_load_info_notifier_wrapper
-      ->NotifyResourceResponseReceived(std::move(response_head),
-                                       request_info_->previews_state);
+      ->NotifyResourceResponseReceived(std::move(response_head));
 }
 
 void WebResourceRequestSender::OnReceivedCachedMetadata(

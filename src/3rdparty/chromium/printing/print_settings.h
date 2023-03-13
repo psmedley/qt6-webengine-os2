@@ -10,7 +10,6 @@
 
 #include "base/component_export.h"
 #include "build/build_config.h"
-#include "build/chromeos_buildflags.h"
 #include "printing/mojom/print.mojom.h"
 #include "printing/page_range.h"
 #include "printing/page_setup.h"
@@ -19,11 +18,11 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 #include <map>
 
 #include "base/values.h"
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
 namespace printing {
 
@@ -45,17 +44,12 @@ void GetColorModelForModel(mojom::ColorModel color_model,
                            std::string* color_setting_name,
                            std::string* color_value);
 
-#if defined(OS_MAC) || defined(OS_CHROMEOS)
+#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_CHROMEOS)
 // Convert from `color_model` to a print-color-mode value from PWG 5100.13.
 COMPONENT_EXPORT(PRINTING)
 std::string GetIppColorModelForModel(mojom::ColorModel color_model);
 #endif
 #endif  // defined(USE_CUPS)
-
-// Inform the printing system that it may embed this user-agent string
-// in its output's metadata.
-COMPONENT_EXPORT(PRINTING) void SetAgent(const std::string& user_agent);
-COMPONENT_EXPORT(PRINTING) const std::string& GetAgent();
 
 class COMPONENT_EXPORT(PRINTING) PrintSettings {
  public:
@@ -72,13 +66,13 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
     }
   };
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   using AdvancedSettings = std::map<std::string, base::Value>;
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
   PrintSettings();
-  PrintSettings(const PrintSettings&) = delete;
-  PrintSettings& operator=(const PrintSettings&) = delete;
+  PrintSettings(const PrintSettings&);
+  PrintSettings& operator=(const PrintSettings&);
   ~PrintSettings();
 
   // Reinitialize the settings to the default values.
@@ -115,6 +109,11 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
   const PageSetup& page_setup_device_units() const {
     return page_setup_device_units_;
   }
+  // `set_page_setup_device_units()` intended to be used only for mojom
+  // validation.
+  void set_page_setup_device_units(const PageSetup& page_setup_device_units) {
+    page_setup_device_units_ = page_setup_device_units;
+  }
 
   void set_device_name(const std::u16string& device_name) {
     device_name_ = device_name;
@@ -146,11 +145,11 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
   bool supports_alpha_blend() const { return supports_alpha_blend_; }
 
   int device_units_per_inch() const {
-#if defined(OS_MAC)
+#if BUILDFLAG(IS_MAC)
     return 72;
-#else   // defined(OS_MAC)
+#else   // BUILDFLAG(IS_MAC)
     return dpi();
-#endif  // defined(OS_MAC)
+#endif  // BUILDFLAG(IS_MAC)
   }
 
   void set_ranges(const PageRanges& ranges) { ranges_ = ranges; }
@@ -191,12 +190,12 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
   }
   mojom::DuplexMode duplex_mode() const { return duplex_mode_; }
 
-#if defined(OS_WIN)
-  void set_print_text_with_gdi(bool use_gdi) { print_text_with_gdi_ = use_gdi; }
-  bool print_text_with_gdi() const { return print_text_with_gdi_; }
-
+#if BUILDFLAG(IS_WIN)
   void set_printer_language_type(mojom::PrinterLanguageType type) {
     printer_language_type_ = type;
+  }
+  mojom::PrinterLanguageType printer_language_type() const {
+    return printer_language_type_;
   }
   bool printer_language_is_textonly() const {
     return printer_language_type_ == mojom::PrinterLanguageType::kTextOnly;
@@ -222,14 +221,14 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
     pages_per_sheet_ = pages_per_sheet;
   }
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   AdvancedSettings& advanced_settings() { return advanced_settings_; }
   const AdvancedSettings& advanced_settings() const {
     return advanced_settings_;
   }
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   void set_send_user_info(bool send_user_info) {
     send_user_info_ = send_user_info;
   }
@@ -240,7 +239,7 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
 
   void set_pin_value(const std::string& pin_value) { pin_value_ = pin_value; }
   const std::string& pin_value() const { return pin_value_; }
-#endif  // defined(OS_CHROMEOS) || defined(OS_OS2)
+#endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
   // Cookie generator. It is used to initialize `PrintedDocument` with its
   // associated `PrintSettings`, to be sure that each generated `PrintedPage`
@@ -311,10 +310,7 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
   // True if this printer supports AlphaBlend.
   bool supports_alpha_blend_;
 
-#if defined(OS_WIN)
-  // True to print text with GDI.
-  bool print_text_with_gdi_;
-
+#if BUILDFLAG(IS_WIN)
   mojom::PrinterLanguageType printer_language_type_;
 #endif
 
@@ -326,12 +322,12 @@ class COMPONENT_EXPORT(PRINTING) PrintSettings {
   // Number of pages per sheet.
   int pages_per_sheet_;
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   // Advanced settings.
   AdvancedSettings advanced_settings_;
-#endif  // defined(OS_LINUX) || defined(OS_CHROMEOS)
+#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
 
-#if defined(OS_CHROMEOS) || defined(OS_OS2)
+#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_OS2)
   // Whether to send user info.
   bool send_user_info_;
 

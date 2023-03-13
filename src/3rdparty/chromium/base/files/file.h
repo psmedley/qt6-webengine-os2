@@ -18,14 +18,14 @@
 #include "base/trace_event/base_tracing_forward.h"
 #include "build/build_config.h"
 
-#if defined(OS_BSD) || defined(OS_APPLE) || defined(OS_NACL) || \
-    defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21) || \
-    defined(OS_OS2)
+#if BUILDFLAG(IS_BSD) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_NACL) || \
+    BUILDFLAG(IS_FUCHSIA) || (BUILDFLAG(IS_ANDROID) && __ANDROID_API__ < 21) || \
+    BUILDFLAG(IS_OS2)
 struct stat;
 namespace base {
 typedef struct stat stat_wrapper_t;
 }
-#elif defined(OS_POSIX)
+#elif BUILDFLAG(IS_POSIX)
 struct stat64;
 namespace base {
 typedef struct stat64 stat_wrapper_t;
@@ -51,8 +51,6 @@ class BASE_EXPORT File {
   // a file.
   // FLAG_(WRITE|APPEND) are mutually exclusive. This is so that APPEND behavior
   // will be consistent with O_APPEND on POSIX.
-  // FLAG_EXCLUSIVE_(READ|WRITE) only grant exclusive access to the file on
-  // creation on POSIX; for existing files, consider using Lock().
   enum Flags {
     FLAG_OPEN = 1 << 0,            // Opens a file, only if it exists.
     FLAG_CREATE = 1 << 1,          // Creates a new file, only if it does not
@@ -64,18 +62,19 @@ class BASE_EXPORT File {
     FLAG_READ = 1 << 5,
     FLAG_WRITE = 1 << 6,
     FLAG_APPEND = 1 << 7,
-    FLAG_EXCLUSIVE_READ = 1 << 8,  // EXCLUSIVE is opposite of Windows SHARE.
-    FLAG_EXCLUSIVE_WRITE = 1 << 9,
+    FLAG_WIN_EXCLUSIVE_READ = 1 << 8,   // Windows only. Opposite of SHARE.
+    FLAG_WIN_EXCLUSIVE_WRITE = 1 << 9,  // Windows only. Opposite of SHARE.
     FLAG_ASYNC = 1 << 10,
-    FLAG_TEMPORARY = 1 << 11,  // Used on Windows only.
-    FLAG_HIDDEN = 1 << 12,     // Used on Windows only.
+    FLAG_WIN_TEMPORARY = 1 << 11,  // Windows only.
+    FLAG_WIN_HIDDEN = 1 << 12,     // Windows only.
     FLAG_DELETE_ON_CLOSE = 1 << 13,
-    FLAG_WRITE_ATTRIBUTES = 1 << 14,     // Used on Windows only.
-    FLAG_SHARE_DELETE = 1 << 15,         // Used on Windows only.
-    FLAG_TERMINAL_DEVICE = 1 << 16,      // Serial port flags.
-    FLAG_BACKUP_SEMANTICS = 1 << 17,     // Used on Windows only.
-    FLAG_EXECUTE = 1 << 18,              // Used on Windows only.
-    FLAG_SEQUENTIAL_SCAN = 1 << 19,      // Used on Windows only.
+    FLAG_WRITE_ATTRIBUTES = 1 << 14,  // File opened in a mode allowing writing
+                                      // attributes, such as with SetTimes().
+    FLAG_WIN_SHARE_DELETE = 1 << 15,  // Windows only.
+    FLAG_TERMINAL_DEVICE = 1 << 16,   // Serial port flags.
+    FLAG_WIN_BACKUP_SEMANTICS = 1 << 17,  // Windows only.
+    FLAG_WIN_EXECUTE = 1 << 18,           // Windows only.
+    FLAG_WIN_SEQUENTIAL_SCAN = 1 << 19,   // Windows only.
     FLAG_CAN_DELETE_ON_CLOSE = 1 << 20,  // Requests permission to delete a file
                                          // via DeleteOnClose() (Windows only).
                                          // See DeleteOnClose() for details.
@@ -125,7 +124,7 @@ class BASE_EXPORT File {
   struct BASE_EXPORT Info {
     Info();
     ~Info();
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
     // Fills this struct with values from |stat_info|.
     void FromStat(const stat_wrapper_t& stat_info);
 #endif
@@ -279,7 +278,8 @@ class BASE_EXPORT File {
   // Returns some basic information for the given file.
   bool GetInfo(Info* info);
 
-#if !defined(OS_FUCHSIA)  // Fuchsia's POSIX API does not support file locking.
+#if !BUILDFLAG( \
+    IS_FUCHSIA)  // Fuchsia's POSIX API does not support file locking.
   enum class LockMode {
     kShared,
     kExclusive,
@@ -310,7 +310,7 @@ class BASE_EXPORT File {
   // Unlock a file previously locked.
   Error Unlock();
 
-#endif  // !defined(OS_FUCHSIA)
+#endif  // !BUILDFLAG(IS_FUCHSIA)
 
   // Returns a new object referencing this file for use within the current
   // process. Handling of FLAG_DELETE_ON_CLOSE varies by OS. On POSIX, the File
@@ -324,7 +324,7 @@ class BASE_EXPORT File {
   // Serialise this object into a trace.
   void WriteIntoTrace(perfetto::TracedValue context) const;
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   // Sets or clears the DeleteFile disposition on the file. Returns true if
   // the disposition was set or cleared, as indicated by |delete_on_close|.
   //
@@ -338,11 +338,11 @@ class BASE_EXPORT File {
   //   calling DeleteOnClose(true).
   //
   // In all cases, all pre-existing handles to the file must have been opened
-  // with FLAG_SHARE_DELETE. Once the disposition has been set by any of the
+  // with FLAG_WIN_SHARE_DELETE. Once the disposition has been set by any of the
   // above means, no new File objects can be created for the file.
   //
   // So:
-  // - Use FLAG_SHARE_DELETE when creating/opening a file to allow another
+  // - Use FLAG_WIN_SHARE_DELETE when creating/opening a file to allow another
   //   entity on the system to cause it to be deleted when it is closed. (Note:
   //   another entity can delete the file the moment after it is closed, so not
   //   using this permission doesn't provide any protections.)
@@ -359,9 +359,9 @@ class BASE_EXPORT File {
   bool DeleteOnClose(bool delete_on_close);
 #endif
 
-#if defined(OS_WIN)
+#if BUILDFLAG(IS_WIN)
   static Error OSErrorToFileError(DWORD last_error);
-#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   static Error OSErrorToFileError(int saved_errno);
 #endif
 
@@ -374,7 +374,7 @@ class BASE_EXPORT File {
   // Converts an error value to a human-readable form. Used for logging.
   static std::string ErrorToString(Error error);
 
-#if defined(OS_POSIX) || defined(OS_FUCHSIA)
+#if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
   // Wrapper for stat() or stat64().
   static int Stat(const char* path, stat_wrapper_t* sb);
   static int Fstat(int fd, stat_wrapper_t* sb);

@@ -9,7 +9,6 @@
 #include "base/json/json_reader.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/version.h"
 #include "components/password_manager/core/common/password_manager_features.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -68,7 +67,8 @@ base::flat_set<ParsingResult> ParseDomainSpecificParamaters(
     }
   }
 
-  for (const base::Value& domain : supported_domains_list->GetList()) {
+  for (const base::Value& domain :
+       supported_domains_list->GetListDeprecated()) {
     if (!domain.is_string()) {
       warnings.insert(ParsingResult::kInvalidJson);
       continue;
@@ -97,13 +97,18 @@ constexpr base::FeatureParam<std::string> kScriptsListUrlParam{
     kDefaultChangePasswordScriptsListUrl};
 
 PasswordScriptsFetcherImpl::PasswordScriptsFetcherImpl(
+    const base::Version& version,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
-    : PasswordScriptsFetcherImpl(std::move(url_loader_factory),
+    : PasswordScriptsFetcherImpl(version,
+                                 std::move(url_loader_factory),
                                  kScriptsListUrlParam.Get()) {}
+
 PasswordScriptsFetcherImpl::PasswordScriptsFetcherImpl(
+    const base::Version& version,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     std::string scripts_list_url)
-    : scripts_list_url_(std::move(scripts_list_url)),
+    : version_(version),
+      scripts_list_url_(std::move(scripts_list_url)),
       url_loader_factory_(std::move(url_loader_factory)) {}
 
 PasswordScriptsFetcherImpl::~PasswordScriptsFetcherImpl() = default;
@@ -143,31 +148,33 @@ void PasswordScriptsFetcherImpl::RefreshScriptsIfNecessary(
 
 void PasswordScriptsFetcherImpl::FetchScriptAvailability(
     const url::Origin& origin,
-    const base::Version& version,
     ResponseCallback callback) {
   if (IsCacheStale()) {
     pending_callbacks_.emplace_back(
-        std::make_pair(std::make_pair(origin, version), std::move(callback)));
+        std::make_pair(origin, std::move(callback)));
     StartFetch();
     return;
   }
 
-  RunResponseCallback(origin, version, std::move(callback));
+  RunResponseCallback(origin, std::move(callback));
 }
 
 bool PasswordScriptsFetcherImpl::IsScriptAvailable(
-    const url::Origin& origin,
-    const base::Version& version) const {
+    const url::Origin& origin) const {
+  if (base::FeatureList::IsEnabled(
+          password_manager::features::kForceEnablePasswordDomainCapabilities)) {
+    return true;
+  }
   const auto& it = password_change_domains_.find(origin);
   if (it == password_change_domains_.end()) {
     return false;
   }
-  return version >= it->second;
+  return version_ >= it->second;
 }
 
 void PasswordScriptsFetcherImpl::StartFetch() {
   static const base::TimeDelta kFetchTimeout(
-      base::TimeDelta::FromSeconds(kFetchTimeoutInSeconds));
+      base::Seconds(kFetchTimeoutInSeconds));
   if (url_loader_)
     return;
   auto resource_request = std::make_unique<network::ResourceRequest>();
@@ -193,6 +200,8 @@ void PasswordScriptsFetcherImpl::StartFetch() {
           setting:
             "The user can enable or disable automatic password leak checks in "
             "Chrome's security settings. The feature is enabled by default."
+          policy_exception_justification:
+            "TODO(crbug.com/1231780): Add this field."
         })");
   url_loader_ = network::SimpleURLLoader::Create(std::move(resource_request),
                                                  traffic_annotation);
@@ -233,9 +242,7 @@ void PasswordScriptsFetcherImpl::OnFetchComplete(
   for (auto& callback : std::exchange(fetch_finished_callbacks_, {}))
     std::move(callback).Run();
   for (auto& callback : std::exchange(pending_callbacks_, {}))
-    RunResponseCallback(std::move(callback.first.first),
-                        std::move(callback.first.second),
-                        std::move(callback.second));
+    RunResponseCallback(std::move(callback.first), std::move(callback.second));
 }
 
 base::flat_set<ParsingResult> PasswordScriptsFetcherImpl::ParseResponse(
@@ -270,19 +277,25 @@ base::flat_set<ParsingResult> PasswordScriptsFetcherImpl::ParseResponse(
 
 bool PasswordScriptsFetcherImpl::IsCacheStale() const {
   static const base::TimeDelta kCacheTimeout(
-      base::TimeDelta::FromMinutes(kCacheTimeoutInMinutes));
+      base::Minutes(kCacheTimeoutInMinutes));
   return last_fetch_timestamp_.is_null() ||
          base::TimeTicks::Now() - last_fetch_timestamp_ >= kCacheTimeout;
 }
 
 void PasswordScriptsFetcherImpl::RunResponseCallback(
     url::Origin origin,
-    base::Version version,
     ResponseCallback callback) {
   DCHECK(!url_loader_);     // Fetching is not running.
   DCHECK(!IsCacheStale());  // Cache is ready.
-  bool has_script = IsScriptAvailable(origin, version);
-  std::move(callback).Run(has_script);
+  std::move(callback).Run(IsScriptAvailable(origin));
+}
+
+base::Value::Dict PasswordScriptsFetcherImpl::GetDebugInformationForInternals()
+    const {
+  base::Value::Dict result;
+  result.Set("engine", "gstatic lookup");
+  result.Set("script_list_url", scripts_list_url_);
+  return result;
 }
 
 }  // namespace password_manager

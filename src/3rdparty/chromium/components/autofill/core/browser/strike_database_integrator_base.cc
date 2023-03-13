@@ -12,7 +12,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "components/autofill/core/browser/proto/strike_data.pb.h"
 #include "components/autofill/core/common/autofill_clock.h"
@@ -30,6 +29,18 @@ bool StrikeDatabaseIntegratorBase::IsMaxStrikesLimitReached(
     const std::string& id) const {
   CheckIdUniqueness(id);
   return GetStrikes(id) >= GetMaxStrikesLimit();
+}
+
+bool StrikeDatabaseIntegratorBase::HasDelayPassedSinceLastStrike(
+    const std::string& id) const {
+  CheckIdUniqueness(id);
+  if (!GetRequiredDelaySinceLastStrike().has_value())
+    return true;
+
+  return (AutofillClock::Now() -
+          base::Time::FromDeltaSinceWindowsEpoch(base::Microseconds(
+              strike_database_->GetLastUpdatedTimestamp(GetKey(id))))) >=
+         GetRequiredDelaySinceLastStrike();
 }
 
 int StrikeDatabaseIntegratorBase::AddStrike(const std::string& id) {
@@ -100,11 +111,11 @@ void StrikeDatabaseIntegratorBase::LimitNumberOfStoredEntries() {
 
   std::vector<std::pair<std::string, int64_t>> entries;
   entries.reserve(GetStrikeCache().size());
-  for (const auto& entry : GetStrikeCache()) {
-    if (strike_database_->GetPrefixFromKey(entry.first) != GetProjectPrefix()) {
+  for (const auto& [key, data] : GetStrikeCache()) {
+    if (strike_database_->GetPrefixFromKey(key) != GetProjectPrefix()) {
       continue;
     }
-    entries.emplace_back(entry.first, entry.second.last_update_timestamp());
+    entries.push_back({key, data.last_update_timestamp()});
   }
 
   if (entries.size() <= maximum_size) {
@@ -139,18 +150,18 @@ void StrikeDatabaseIntegratorBase::RemoveExpiredStrikes() {
     return;
   }
   std::vector<std::string> expired_keys;
-  for (auto entry : strike_database_->GetStrikeCache()) {
+  for (const auto& [key, data] : strike_database_->GetStrikeCache()) {
     // Only consider keys from the current strike database integrator.
-    if (strike_database_->GetPrefixFromKey(entry.first) != GetProjectPrefix()) {
+    if (strike_database_->GetPrefixFromKey(key) != GetProjectPrefix()) {
       continue;
     }
-    if (GetEntryAge(entry.second) > GetExpiryTimeDelta().value()) {
-      if (strike_database_->GetStrikes(entry.first) > 0) {
-        expired_keys.push_back(entry.first);
+    if (GetEntryAge(data) > GetExpiryTimeDelta().value()) {
+      if (strike_database_->GetStrikes(key) > 0) {
+        expired_keys.push_back(key);
         base::UmaHistogramCounts1000(
             "Autofill.StrikeDatabase.StrikesPresentWhenStrikeExpired." +
-                strike_database_->GetPrefixFromKey(entry.first),
-            strike_database_->GetStrikes(entry.first));
+                strike_database_->GetPrefixFromKey(key),
+            strike_database_->GetStrikes(key));
       }
     }
   }
@@ -181,9 +192,9 @@ std::string StrikeDatabaseIntegratorBase::GetIdFromKey(
 
 base::TimeDelta StrikeDatabaseIntegratorBase::GetEntryAge(
     const StrikeData& strike_data) {
-  return AutofillClock::Now() - base::Time::FromDeltaSinceWindowsEpoch(
-                                    base::TimeDelta::FromMicroseconds(
-                                        strike_data.last_update_timestamp()));
+  return AutofillClock::Now() -
+         base::Time::FromDeltaSinceWindowsEpoch(
+             base::Microseconds(strike_data.last_update_timestamp()));
 }
 
 std::string StrikeDatabaseIntegratorBase::GetKey(const std::string& id) const {
@@ -196,6 +207,11 @@ absl::optional<size_t> StrikeDatabaseIntegratorBase::GetMaximumEntries() const {
 
 absl::optional<size_t>
 StrikeDatabaseIntegratorBase::GetMaximumEntriesAfterCleanup() const {
+  return absl::nullopt;
+}
+
+absl::optional<base::TimeDelta>
+StrikeDatabaseIntegratorBase::GetRequiredDelaySinceLastStrike() const {
   return absl::nullopt;
 }
 

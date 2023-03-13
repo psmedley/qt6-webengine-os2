@@ -11,6 +11,8 @@
 #if defined(WEBRTC_POSIX)
 #include <netinet/in.h>
 #include <sys/socket.h>
+
+#include "absl/strings/string_view.h"
 #if defined(OPENBSD) || defined(WEBRTC_OS2)
 #include <netinet/in_systm.h>
 #endif
@@ -312,15 +314,16 @@ bool IPFromAddrInfo(struct addrinfo* info, IPAddress* out) {
   return false;
 }
 
-bool IPFromString(const std::string& str, IPAddress* out) {
++bool IPFromString(absl::string_view str, IPAddress* out) {
   if (!out) {
     return false;
   }
   in_addr addr;
-  if (rtc::inet_pton(AF_INET, str.c_str(), &addr) == 0) {
+  const std::string str_copy = std::string(str);
+  if (rtc::inet_pton(AF_INET, str_copy.c_str(), &addr) == 0) {
 #ifndef WEBRTC_NO_INET6
     in6_addr addr6;
-    if (rtc::inet_pton(AF_INET6, str.c_str(), &addr6) == 0) {
+    if (rtc::inet_pton(AF_INET6, str_copy.c_str(), &addr6) == 0) {
 #endif
       *out = IPAddress();
       return false;
@@ -334,7 +337,7 @@ bool IPFromString(const std::string& str, IPAddress* out) {
   return true;
 }
 
-bool IPFromString(const std::string& str, int flags, InterfaceAddress* out) {
+bool IPFromString(absl::string_view str, int flags, InterfaceAddress* out) {
   IPAddress ip;
   if (!IPFromString(str, &ip)) {
     return false;

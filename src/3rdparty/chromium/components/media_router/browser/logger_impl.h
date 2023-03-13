@@ -6,7 +6,9 @@
 #define COMPONENTS_MEDIA_ROUTER_BROWSER_LOGGER_IMPL_H_
 
 #include "base/containers/circular_deque.h"
+#include "base/gtest_prod_util.h"
 #include "base/strings/string_piece_forward.h"
+#include "base/time/time.h"
 #include "components/media_router/common/mojom/logger.mojom.h"
 #include "mojo/public/cpp/bindings/pending_receiver.h"
 #include "mojo/public/cpp/bindings/receiver_set.h"
@@ -46,8 +48,7 @@ class LoggerImpl : mojom::Logger {
                 const std::string& sink_id,
                 const std::string& media_source,
                 const std::string& session_id) override;
-
-  void Bind(mojo::PendingReceiver<mojom::Logger> receiver);
+  void BindReceiver(mojo::PendingReceiver<mojom::Logger> receiver) override;
 
   std::string GetLogsAsJson() const;
   base::Value GetLogsAsValue() const;

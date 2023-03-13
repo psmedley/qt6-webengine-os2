@@ -30,6 +30,7 @@
 
 #include <memory>
 
+#include "base/notreached.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/network/public/mojom/ip_address_space.mojom-blink-forward.h"
 #include "services/network/public/mojom/referrer_policy.mojom-blink-forward.h"
@@ -38,16 +39,16 @@
 #include "third_party/blink/public/common/user_agent/user_agent_metadata.h"
 #include "third_party/blink/public/mojom/devtools/inspector_issue.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/frame/lifecycle.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/loader/code_cache.mojom-forward.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/permissions_policy/permissions_policy_feature.mojom-blink-forward.h"
 #include "third_party/blink/public/mojom/permissions_policy/policy_disposition.mojom-blink-forward.h"
-#include "third_party/blink/public/mojom/v8_cache_options.mojom-blink.h"
+#include "third_party/blink/public/mojom/v8_cache_options.mojom-blink-forward.h"
 #include "third_party/blink/renderer/bindings/core/v8/sanitize_script_errors.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/frame/dom_timer_coordinator.h"
-#include "third_party/blink/renderer/core/frame/web_feature.h"
+#include "third_party/blink/renderer/core/frame/web_feature_forward.h"
+#include "third_party/blink/renderer/platform/heap/collection_support/heap_vector.h"
 #include "third_party/blink/renderer/platform/heap_observer_set.h"
 #include "third_party/blink/renderer/platform/instrumentation/use_counter.h"
 #include "third_party/blink/renderer/platform/loader/fetch/console_logger.h"
@@ -57,7 +58,8 @@
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
-#include "v8/include/v8.h"
+#include "v8/include/v8-callbacks.h"
+#include "v8/include/v8-forward.h"
 
 namespace base {
 class UnguessableToken;
@@ -67,10 +69,15 @@ namespace ukm {
 class UkmRecorder;
 }  // namespace ukm
 
+namespace v8 {
+class MicrotaskQueue;
+}  // namespace v8
+
 namespace blink {
 
 class Agent;
 class AuditsIssue;
+class CodeCacheHost;
 class ConsoleMessage;
 class ContentSecurityPolicy;
 class ContentSecurityPolicyDelegate;
@@ -145,8 +152,7 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   // Returns the CodeCacheHost interface associated with the execution
   // context. This could return nullptr if there is no CodeCacheHost associated
   // with the current execution context.
-  static blink::mojom::CodeCacheHost* GetCodeCacheHostFromContext(
-      ExecutionContext*);
+  static CodeCacheHost* GetCodeCacheHostFromContext(ExecutionContext*);
 
   virtual bool IsWindow() const { return false; }
   virtual bool IsWorkerOrWorkletGlobalScope() const { return false; }
@@ -228,9 +234,7 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   virtual bool CanExecuteScripts(ReasonForCallingCanExecuteScripts) {
     return false;
   }
-  virtual mojom::blink::V8CacheOptions GetV8CacheOptions() const {
-    return mojom::blink::V8CacheOptions::kDefault;
-  }
+  virtual mojom::blink::V8CacheOptions GetV8CacheOptions() const;
 
   void DispatchErrorEvent(ErrorEvent*, SanitizeScriptErrors);
 
@@ -242,7 +246,9 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
 
   virtual void RemoveURLFromMemoryCache(const KURL&);
 
-  void SetIsInBackForwardCache(bool);
+  virtual void SetIsInBackForwardCache(bool);
+  bool is_in_back_forward_cache() const { return is_in_back_forward_cache_; }
+
   void SetLifecycleState(mojom::FrameLifecycleState);
   void NotifyContextDestroyed();
 
@@ -286,7 +292,7 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   }
   bool IsSecureContext(String& error_message) const;
 
-  virtual bool HasInsecureContextInAncestors() { return false; }
+  virtual bool HasInsecureContextInAncestors() const { return false; }
 
   // Returns a referrer to be used in the "Determine request's Referrer"
   // algorithm defined in the Referrer Policy spec.
@@ -334,21 +340,26 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
   // Report-To endpoints, via ReportPermissionsPolicyViolation(), if the feature
   // is disabled. The optional ConsoleMessage will be sent to the console if
   // present, or else a default message will be used instead.
+  bool IsFeatureEnabled(mojom::blink::PermissionsPolicyFeature) const;
   bool IsFeatureEnabled(
       mojom::blink::PermissionsPolicyFeature,
-      ReportOptions report_on_failure = ReportOptions::kDoNotReport,
-      const String& message = g_empty_string) const;
+      ReportOptions report_option = ReportOptions::kDoNotReport,
+      const String& message = g_empty_string);
+
+  bool IsFeatureEnabled(mojom::blink::DocumentPolicyFeature) const;
+  bool IsFeatureEnabled(mojom::blink::DocumentPolicyFeature,
+                        PolicyValue threshold_value) const;
   bool IsFeatureEnabled(
       mojom::blink::DocumentPolicyFeature,
       ReportOptions report_option = ReportOptions::kDoNotReport,
       const String& message = g_empty_string,
-      const String& source_file = g_empty_string) const;
+      const String& source_file = g_empty_string);
   bool IsFeatureEnabled(
       mojom::blink::DocumentPolicyFeature,
       PolicyValue threshold_value,
       ReportOptions report_option = ReportOptions::kDoNotReport,
       const String& message = g_empty_string,
-      const String& source_file = g_empty_string) const;
+      const String& source_file = g_empty_string);
 
   // Report policy violations is delegated to Document because in order
   // to both remain const qualified and output console message, needs
@@ -363,7 +374,6 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
       const String& message = g_empty_string,
       const String& source_file = g_empty_string) const {}
 
-  String addressSpaceForBindings() const;
   network::mojom::IPAddressSpace AddressSpace() const;
   void SetAddressSpace(network::mojom::blink::IPAddressSpace ip_address_space);
 
@@ -459,10 +469,12 @@ class CORE_EXPORT ExecutionContext : public Supplementable<ExecutionContext>,
 
  private:
   // ConsoleLogger implementation.
-  void AddConsoleMessageImpl(mojom::ConsoleMessageSource,
-                             mojom::ConsoleMessageLevel,
-                             const String& message,
-                             bool discard_duplicates) override;
+  void AddConsoleMessageImpl(
+      mojom::blink::ConsoleMessageSource,
+      mojom::blink::ConsoleMessageLevel,
+      const String& message,
+      bool discard_duplicates,
+      absl::optional<mojom::ConsoleMessageCategory> category) override;
   virtual void AddConsoleMessageImpl(ConsoleMessage*,
                                      bool discard_duplicates) = 0;
 

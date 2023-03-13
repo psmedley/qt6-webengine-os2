@@ -6,7 +6,6 @@
 
 #include <string>
 
-#include "base/macros.h"
 #include "base/metrics/histogram_base.h"
 #include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
@@ -143,6 +142,12 @@ class TestRenderWidgetHostView : public RenderWidgetHostViewAura {
 class FakeKeyboardLockWebContentsDelegate : public WebContentsDelegate {
  public:
   FakeKeyboardLockWebContentsDelegate() {}
+
+  FakeKeyboardLockWebContentsDelegate(
+      const FakeKeyboardLockWebContentsDelegate&) = delete;
+  FakeKeyboardLockWebContentsDelegate& operator=(
+      const FakeKeyboardLockWebContentsDelegate&) = delete;
+
   ~FakeKeyboardLockWebContentsDelegate() override {}
 
   // WebContentsDelegate overrides.
@@ -158,8 +163,6 @@ class FakeKeyboardLockWebContentsDelegate : public WebContentsDelegate {
  private:
   bool is_fullscreen_ = false;
   bool keyboard_lock_requested_ = false;
-
-  DISALLOW_COPY_AND_ASSIGN(FakeKeyboardLockWebContentsDelegate);
 };
 
 void FakeKeyboardLockWebContentsDelegate::EnterFullscreenModeForTab(
