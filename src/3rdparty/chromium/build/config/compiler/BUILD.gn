@@ -2578,7 +2578,7 @@ config("symbols") {
       # https://github.com/bitwiseworks/libc/issues/84 for more details.
       # Stick with no debug info at all for now.
       cflags += [ "-s" ]
-    if ((!is_nacl || is_clang) && current_os != "zos") {
+    } else if ((!is_nacl || is_clang) && current_os != "zos") {
       cflags += [ "-g2" ]
     }
 
