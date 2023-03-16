@@ -24,6 +24,10 @@ class ClientNativePixmapDmaBuf : public gfx::ClientNativePixmap {
   static GFX_EXPORT bool IsConfigurationSupported(gfx::BufferFormat format,
                                                   gfx::BufferUsage usage);
 
+  // Note: |handle| is expected to have been validated as in
+  // ClientNativePixmapFactoryDmabuf::ImportFromHandle().
+  // TODO(andrescj): consider not exposing this class outside of
+  // client_native_pixmap_factory_dmabuf.cc.
   static std::unique_ptr<gfx::ClientNativePixmap> ImportFromDmabuf(
       gfx::NativePixmapHandle handle,
       const gfx::Size& size,
@@ -61,7 +65,8 @@ class ClientNativePixmapDmaBuf : public gfx::ClientNativePixmap {
 
   const gfx::NativePixmapHandle pixmap_handle_;
   const gfx::Size size_;
-  const std::array<PlaneInfo, kMaxPlanes> plane_info_;
+  std::array<PlaneInfo, kMaxPlanes> plane_info_;
+  bool mapped_ = false;
 };
 
 }  // namespace gfx

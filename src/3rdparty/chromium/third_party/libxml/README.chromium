@@ -1,6 +1,6 @@
 Name: libxml
 URL: http://xmlsoft.org
-Version: f2987a295ff847ecb2a6a3eae1a271c9a64255b6
+Version: e85f9b98a5389c69167176ae6600091e719ec38f
 CPEPrefix: cpe:/a:xmlsoft:libxml2:2.9.13
 License: MIT
 License File: src/Copyright
@@ -21,6 +21,8 @@ Modifications:
 - chromium-issue-708434.patch: Guard against input counter overflow.
 - chromium-issue-1138555.patch: Change TRUE to 1 for ICU68 which remove the
   #define of TRUE.
+- undo-sax-deprecation.patch: Un-deprecate xmlSAXParseMemory because it is used
+  in chromium's copy of maldoca. See https://github.com/google/maldoca/issues/87
 - Add helper classes in the chromium/ subdirectory.
 - Delete various unused files, see chromium/roll.py
 
