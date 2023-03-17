@@ -1,2 +1,4 @@
 *.rej
 *.orig
+*.pyc
+build/
