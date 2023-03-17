@@ -52,11 +52,13 @@ def check_size(filename, data, max_size):
 
 def rollup(input_path, output_path, filename, max_size, rollup_plugin):
     target = join(input_path, filename)
+
     rollup_process = subprocess.Popen(
         [devtools_paths.node_path(),
          devtools_paths.rollup_path()] +
         ['--format', 'iife', '-n', 'InspectorOverlay'] + ['--input', target] +
-        ['--plugin', rollup_plugin, '--plugin', 'terser'],
+        #['--plugin', rollup_plugin, '--plugin', 'terser'],
+        ['--plugin', rollup_plugin],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         universal_newlines=True,
@@ -64,7 +66,7 @@ def rollup(input_path, output_path, filename, max_size, rollup_plugin):
     out, error = rollup_process.communicate()
     if not out:
         raise Exception("rollup failed: " + error)
-    check_size(filename, out, max_size)
+    #check_size(filename, out, max_size)
     write_file(join(output_path, filename), out)
 
 

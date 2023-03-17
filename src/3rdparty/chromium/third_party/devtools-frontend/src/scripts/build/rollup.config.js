@@ -6,7 +6,7 @@
 
 import {defaultStrategy} from 'minify-html-literals/src/strategy';  // eslint-disable-line rulesdir/es_modules_import
 import minifyHTML from 'rollup-plugin-minify-html-template-literals';
-import {terser} from 'rollup-plugin-terser';
+//import {terser} from 'rollup-plugin-terser';
 
 const devtools_plugin = require('./devtools_plugin.js');
 
@@ -52,11 +52,11 @@ export default commandLineArgs => ({
         },
       },
     }),
-    terser({
-      compress: {
-        pure_funcs: commandLineArgs.configDCHECK ? ['Platform.DCHECK'] : [],
-      },
-    }),
+//    terser({
+//      compress: {
+//        pure_funcs: commandLineArgs.configDCHECK ? ['Platform.DCHECK'] : [],
+//      },
+//    }),
     {
       name: 'devtools-plugin',
       resolveId(source, importer) {
