@@ -132,7 +132,7 @@ JMP_TABLE pal_pred_16bpc,         avx2, w4, w8, w16, w32, w64
 cextern dr_intra_derivative
 cextern filter_intra_taps
 
-SECTION .text
+SECTION_TEXT
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

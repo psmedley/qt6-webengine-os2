@@ -149,7 +149,7 @@ cextern mc_subpel_filters
 
 cextern mc_warp_filter
 
-SECTION .text
+SECTION_TEXT
 
 INIT_XMM avx2
 cglobal put_bilin_16bpc, 4, 8, 0, dst, ds, src, ss, w, h, mxy
