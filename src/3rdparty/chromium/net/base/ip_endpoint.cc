@@ -69,9 +69,10 @@ bool IPEndPoint::ToSockAddr(struct sockaddr* address,
   // By definition, socklen_t is large enough to hold both sizes.
   constexpr socklen_t kSockaddrInSize =
       static_cast<socklen_t>(sizeof(struct sockaddr_in));
+#if !defined(OS_OS2)
   constexpr socklen_t kSockaddrIn6Size =
       static_cast<socklen_t>(sizeof(struct sockaddr_in6));
-
+#endif
   DCHECK(address);
   DCHECK(address_length);
 #if BUILDFLAG(IS_WIN)
@@ -126,6 +127,7 @@ bool IPEndPoint::FromSockAddr(const struct sockaddr* sock_addr,
           base::NetToHost16(addr->sin_port));
       return true;
     }
+#if !defined(OS_OS2)
     case AF_INET6: {
       if (sock_addr_len < static_cast<socklen_t>(sizeof(struct sockaddr_in6)))
         return false;

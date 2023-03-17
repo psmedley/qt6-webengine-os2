@@ -13,7 +13,7 @@
 #include "ui/gl/gl_image.h"
 #include "ui/gl/gl_implementation.h"
 
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_MAC) && #if !BUILDFLAG(IS_OS2)
 #include "ui/gl/gl_surface_egl.h"
 #endif
 
@@ -22,7 +22,7 @@ namespace gles2 {
 
 namespace {
 
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_MAC) && #if !BUILDFLAG(IS_OS2)
 class NativeImageBufferEGL : public NativeImageBuffer {
  public:
   static scoped_refptr<NativeImageBufferEGL> Create(GLuint texture_id);
@@ -161,7 +161,7 @@ class NativeImageBufferStub : public NativeImageBuffer {
 // static
 scoped_refptr<NativeImageBuffer> NativeImageBuffer::Create(GLuint texture_id) {
   switch (gl::GetGLImplementation()) {
-#if !BUILDFLAG(IS_MAC)
+#if !BUILDFLAG(IS_MAC) && #if !BUILDFLAG(IS_OS2)
     case gl::kGLImplementationEGLGLES2:
     case gl::kGLImplementationEGLANGLE:
       return NativeImageBufferEGL::Create(texture_id);

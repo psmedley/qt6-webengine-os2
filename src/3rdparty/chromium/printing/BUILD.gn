@@ -194,7 +194,7 @@ component("printing") {
     ]
   }
 
-  if (is_chromeos) {
+  if (is_chromeos || is_os2) {
     sources += [
       "printing_context_no_system_dialog.cc",
       "printing_context_no_system_dialog.h",
@@ -247,7 +247,7 @@ component("printing") {
   }
 
   if (use_cups) {
-    if (is_chromeos) {
+    if (is_chromeos || is_os2) {
       sources += [
         "printing_context_chromeos.cc",
         "printing_context_chromeos.h",
