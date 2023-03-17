@@ -16,6 +16,12 @@
 namespace content {
 namespace internal {
 
+absl::optional<mojo::NamedPlatformChannel>
+ChildProcessLauncherHelper::CreateNamedPlatformChannelOnClientThread() {
+  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
+  return absl::nullopt;
+}
+
 void ChildProcessLauncherHelper::SetProcessPriorityOnLauncherThread(
     base::Process process,
     const ChildProcessLauncherPriority& priority) {
@@ -41,12 +47,6 @@ bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
 
 void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
   DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
-}
-
-base::Optional<mojo::NamedPlatformChannel>
-ChildProcessLauncherHelper::CreateNamedPlatformChannelOnClientThread() {
-  DCHECK(client_task_runner_->RunsTasksInCurrentSequence());
-  return base::nullopt;
 }
 
 std::unique_ptr<FileMappedForLaunch>

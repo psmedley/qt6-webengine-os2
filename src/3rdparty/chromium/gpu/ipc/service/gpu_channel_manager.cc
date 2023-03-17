@@ -801,7 +801,7 @@ scoped_refptr<SharedContextState> GpuChannelManager::GetSharedContextState(
     gl::GLContextAttribs attribs = gles2::GenerateGLContextAttribs(
         ContextCreationAttribs(), use_passthrough_decoder);
 
-#if !defined(OS_MAC)
+#if !defined(OS_MAC) && !defined(OS_OS2)
     // Disable robust resource initialization for raster decoder and compositor.
     // TODO(crbug.com/1192632): disable robust_resource_initialization for
     // SwANGLE.

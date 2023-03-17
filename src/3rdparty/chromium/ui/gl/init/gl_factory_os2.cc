@@ -16,9 +16,9 @@
 namespace gl {
 namespace init {
 
-std::vector<GLImplementation> GetAllowedGLImplementations() {
+std::vector<GLImplementationParts> GetAllowedGLImplementations() {
   // TODO: Implement it on OS/2.
-  return std::vector<GLImplementation>();
+  return std::vector<GLImplementationParts>();
 }
 
 bool GetGLWindowSystemBindingInfo(const GLVersionInfo& gl_info,

@@ -25,7 +25,7 @@ bool InitializeGLOneOffPlatform() {
   return false;
 }
 
-bool InitializeStaticGLBindings(GLImplementation implementation) {
+bool InitializeStaticGLBindings(GLImplementationParts implementation) {
   // Prevent reinitialization with a different implementation. Once the gpu
   // unit tests have initialized with kGLImplementationMock, we don't want to
   // later switch to another GL implementation.
@@ -33,10 +33,10 @@ bool InitializeStaticGLBindings(GLImplementation implementation) {
 
   // TODO: Implement it on OS/2.
 
-  switch (implementation) {
+  switch (implementation.gl) {
     case kGLImplementationMockGL:
     case kGLImplementationStubGL:
-      SetGLImplementation(implementation);
+      SetGLImplementationParts(implementation);
       InitializeStaticGLBindingsGL();
       return true;
     default:

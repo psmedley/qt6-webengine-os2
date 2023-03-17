@@ -1,4 +1,5 @@
 *.rej
 *.orig
 *.diff
+*.pyc
 
