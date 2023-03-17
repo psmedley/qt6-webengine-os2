@@ -379,7 +379,7 @@ WELS_EXTERN UpdateMbMv_sse2
 ; Code
 ;*******************************************************************************
 
-SECTION .text
+SECTION_TEXT
 
 
 

@@ -72,7 +72,7 @@ WELS_SHUFB0000111122223333:
     times 4 db 3
 
 
-SECTION .text
+SECTION_TEXT
 
 ; Unsigned byte absolute difference.
 ; a=%1 b=%2 clobber=%3

@@ -113,7 +113,7 @@ cextern mc_subpel_filters
 
 cextern mc_warp_filter
 
-SECTION .text
+SECTION_TEXT
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

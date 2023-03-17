@@ -12,7 +12,7 @@
 
 %include "aom_ports/x86_abi_support.asm"
 
-section .text
+SECTION_TEXT
 %if LIBAOM_YASM_WIN64
 globalsym(aom_winx64_fldcw)
 sym(aom_winx64_fldcw):
