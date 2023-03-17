@@ -56,7 +56,7 @@ def main():
 
   # Work-around for gold being slow-by-default. http://crbug.com/632230
   fast_env = dict(os.environ)
-  fast_env['LC_ALL'] = 'C'
+  #fast_env['LC_ALL'] = 'C'
   result = wrapper_utils.RunLinkWithOptionalMapFile(args.command, env=fast_env,
                                                     map_file=args.map_file)
   if result != 0:

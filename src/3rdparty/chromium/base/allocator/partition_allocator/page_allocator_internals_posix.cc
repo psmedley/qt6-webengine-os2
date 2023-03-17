@@ -8,12 +8,12 @@
 
 #include <sys/mman.h>
 
-+// PA_PROT_BTI requests a page that supports BTI landing pads.
-+#define PA_PROT_BTI 0x10
-+// PA_PROT_MTE requests a page that's suitable for memory tagging.
-+#define PA_PROT_MTE 0x20
+// PA_PROT_BTI requests a page that supports BTI landing pads.
+#define PA_PROT_BTI 0x10
+// PA_PROT_MTE requests a page that's suitable for memory tagging.
+#define PA_PROT_MTE 0x20
 
-+namespace partition_alloc::internal {
+namespace partition_alloc::internal {
 
 #ifndef OS_OS2
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
@@ -43,5 +43,6 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
       return PROT_NONE;
   }
 }
-#endif
+#endif // OS_OS2
+
 }  // namespace partition_alloc::internal

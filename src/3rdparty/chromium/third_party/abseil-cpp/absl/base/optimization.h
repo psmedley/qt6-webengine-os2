@@ -70,7 +70,7 @@
 //
 // See http://www.open-std.org/jtc1/sc22/wg21/docs/papers/2016/p0154r1.html
 // for more information.
-#if defined(__GNUC__)
+#if defined(__GNUC__)  && !defined(__OS2__)
 // Cache line alignment
 #if defined(__i386__) || defined(__x86_64__)
 #define ABSL_CACHELINE_SIZE 64
