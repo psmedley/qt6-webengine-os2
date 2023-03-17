@@ -77,7 +77,7 @@ pd_m4096:      dd -4096
 pd_0xf00801c7: dd 0xf00801c7
 pd_0xf00800a4: dd 0xf00800a4
 
-SECTION .text
+SECTION_TEXT
 
 %macro REPX 2-*
     %xdefine %%f(x) %1

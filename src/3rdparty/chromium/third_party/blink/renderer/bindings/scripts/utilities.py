@@ -498,6 +498,16 @@ def shorten_union_name(union_type):
         # modules/mediasource/source_buffer.idl
         'EncodedAudioChunkOrEncodedVideoChunkSequenceOrEncodedAudioChunkOrEncodedVideoChunk':
         'EncodedAVChunkSequenceOrEncodedAVChunk',
+        # Addition mangling for OS/2
+        # modules/canvas\canvas2d\canvas_rendering_context_2d.idl
+        'CSSImageValueOrHTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvasOrVideoFrame':'CanvasImageSource',
+        # modules\canvas\imagebitmap\window_create_image_bitmap.idl
+        'HTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmapOrOffscreenCanvasOrVideoFrame':'ImageBitmapSource',
+        # modules/canvas\htmlcanvas\html_canvas_element_module.idl
+        'CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContextOrGPUCanvasContext':'RenderingContext',
+'canvasrenderingcontext2d_gpucanvascontext_imagebitmaprenderingcontext_webgl2renderingcontext_webglrenderingcontext': 'canvasrenderingcontext2d_gpucanvascontext__etc',
+        # modules\canvas\offscreencanvas\offscreen_canvas_module.idl
+        'OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContextOrGPUCanvasContext':'OffscreenRenderingContext'
     }
 
     idl_type = union_type

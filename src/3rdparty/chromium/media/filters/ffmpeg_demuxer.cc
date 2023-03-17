@@ -59,13 +59,14 @@
 namespace media {
 
 namespace {
+constexpr int64_t kRelativeTsBase = static_cast<int64_t>(0x7ffeffffffffffff);
 
 void SetAVStreamDiscard(AVStream* stream, AVDiscard discard) {
   DCHECK(stream);
   stream->discard = discard;
 }
 
-#if LIBAVCODEC_VERSION_MAJOR < 59
+#if (LIBAVCODEC_VERSION_MAJOR < 59)
 auto av_stream_get_first_dts(AVStream* stream) {
   return stream->first_dts;
 }
@@ -101,7 +102,7 @@ static base::TimeDelta FramesToTimeDelta(int frames, double sample_rate) {
       frames * base::Time::kMicrosecondsPerSecond / sample_rate);
 }
 
-static base::TimeDelta ExtractStartTime(AVStream* stream) {
+static base::TimeDelta ExtractStartTime(AVStream* stream, int64_t first_dts) {
   // The default start time is zero.
   base::TimeDelta start_time;
 
@@ -111,12 +112,12 @@ static base::TimeDelta ExtractStartTime(AVStream* stream) {
 
   // Next try to use the first DTS value, for codecs where we know PTS == DTS
   // (excludes all H26x codecs). The start time must be returned in PTS.
-  if (av_stream_get_first_dts(stream) != kNoFFmpegTimestamp &&
+  if (first_dts != AV_NOPTS_VALUE &&
       stream->codecpar->codec_id != AV_CODEC_ID_HEVC &&
       stream->codecpar->codec_id != AV_CODEC_ID_H264 &&
       stream->codecpar->codec_id != AV_CODEC_ID_MPEG4) {
     const base::TimeDelta first_pts =
-        ConvertFromTimeBase(stream->time_base, av_stream_get_first_dts(stream));
+        ConvertFromTimeBase(stream->time_base, first_dts);
     if (first_pts < start_time)
       start_time = first_pts;
   }
@@ -289,6 +290,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(
       fixup_negative_timestamps_(false),
       fixup_chained_ogg_(false),
       num_discarded_packet_warnings_(0),
+      first_dts_(AV_NOPTS_VALUE),
       last_packet_pos_(AV_NOPTS_VALUE),
       last_packet_dts_(AV_NOPTS_VALUE) {
   DCHECK(demuxer_);
@@ -354,6 +356,11 @@ void FFmpegDemuxerStream::EnqueuePacket(ScopedAVPacket packet) {
   // dts == pts when dts is not present.
   int64_t packet_dts =
       packet->dts == AV_NOPTS_VALUE ? packet->pts : packet->dts;
+
+  if (first_dts_ == AV_NOPTS_VALUE && packet->dts != AV_NOPTS_VALUE &&
+      last_packet_dts_ != AV_NOPTS_VALUE) {
+    first_dts_ = packet->dts - (last_packet_dts_ + kRelativeTsBase);
+  }
 
   // Chained ogg files have non-monotonically increasing position and time stamp
   // values, which prevents us from using them to determine if a packet should
@@ -1451,7 +1458,7 @@ void FFmpegDemuxer::OnFindStreamInfoDone(int result) {
 
     max_duration = std::max(max_duration, streams_[i]->duration());
 
-    base::TimeDelta start_time = ExtractStartTime(stream);
+    base::TimeDelta start_time = ExtractStartTime(stream, streams_[i]->first_dts());
 
     // Note: This value is used for seeking, so we must take the true value and
     // not the one possibly clamped to zero below.
