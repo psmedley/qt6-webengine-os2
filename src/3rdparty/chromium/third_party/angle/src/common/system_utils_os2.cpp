@@ -9,6 +9,7 @@
 #include "system_utils.h"
 
 #include <stdlib.h>
+#include <sys/time.h>
 
 #include <array>
 
@@ -37,4 +38,12 @@ const char *GetSharedLibraryExtension()
 {
     return "dll";
 }
+
+double GetCurrentTime()
+{
+    struct timespec currentTime;
+    clock_gettime(CLOCK_MONOTONIC, &currentTime);
+    return currentTime.tv_sec + currentTime.tv_nsec * 1e-9;
+}
+
 }  // namespace angle

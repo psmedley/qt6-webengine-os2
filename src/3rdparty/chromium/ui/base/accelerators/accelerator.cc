@@ -251,7 +251,7 @@ std::u16string Accelerator::GetShortcutText() const {
     if (key != 0)
       shortcut += key;
 #elif defined(USE_AURA) || defined(OS_MAC) || defined(OS_ANDROID)
-    base::char16 c = DomCodeToUsLayoutCharacter(
+    const uint16_t c = DomCodeToUsLayoutCharacter(
         UsLayoutKeyboardCodeToDomCode(key_code_), false);
     if (c != 0)
       shortcut +=
