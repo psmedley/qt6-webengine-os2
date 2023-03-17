@@ -121,7 +121,7 @@ wels_4xp0w_4xm8000w:
     times 4 dw 0
     times 4 dw -8000h
 
-SECTION .text
+SECTION_TEXT
 
 ;***********************************************************************
 ; MMX functions

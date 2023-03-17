@@ -47,7 +47,7 @@ pw_4096: times 16 dw 4096
 
 pb_mask: dd 1, 1, 2, 2, 4, 4, 8, 8
 
-SECTION .text
+SECTION_TEXT
 
 ;        in:            out:
 ; mm%1   a b c d        a e i m

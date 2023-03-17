@@ -164,7 +164,7 @@ cextern mc_subpel_filters
 cextern mc_warp_filter
 cextern resize_filter
 
-SECTION .text
+SECTION_TEXT
 
 %if UNIX64
 DECLARE_REG_TMP 7
