@@ -7,7 +7,7 @@
 import {defaultStrategy} from 'minify-html-literals/src/strategy';  // eslint-disable-line rulesdir/es_modules_import
 import * as path from 'path';
 import minifyHTML from 'rollup-plugin-minify-html-template-literals';
-import {terser} from 'rollup-plugin-terser';
+//import {terser} from 'rollup-plugin-terser';
 
 /**
  * `path.dirname` does not include trailing slashes. If we would always
@@ -80,16 +80,16 @@ export default commandLineArgs => ({
         },
       },
     }),
-    terser({
-      compress: {
-        pure_funcs: commandLineArgs.configDCHECK ? ['Platform.DCHECK'] : [],
-      },
-      mangle: {
-        properties: {
-          regex: /^#\w+/,
-        },
-      },
-    }),
+//    terser({
+//      compress: {
+//        pure_funcs: commandLineArgs.configDCHECK ? ['Platform.DCHECK'] : [],
+//      },
+//      mangle: {
+//        properties: {
+//          regex: /^#\w+/,
+//        },
+//      },
+//    }),
     {
       name: 'devtools-plugin',
       resolveId(source, importer) {
