@@ -51,7 +51,7 @@ scoped_refptr<SimpleFontData> FontCache::PlatformFallbackFontForCharacter(
     FontFallbackPriority fallback_priority) {
   sk_sp<SkFontMgr> font_mgr(SkFontMgr::RefDefault());
   AtomicString family_name = GetFamilyNameForCharacter(
-      font_mgr.get(), c, font_description, fallback_priority);
+      font_mgr.get(), c, font_description, nullptr, fallback_priority);
   if (family_name.IsEmpty())
     return GetLastResortFallbackFont(font_description, kDoNotRetain);
   return FontDataFromFontPlatformData(
