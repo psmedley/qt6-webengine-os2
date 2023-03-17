@@ -1,0 +1,15 @@
+--- /home/psmedley/qtwebengine-everywhere-src-6.3.2/src/3rdparty/chromium/third_party/sqlite/src/src/os_unix.c	2022-09-07 16:24:19.000000000 +0930
++++ /NAS/Public/os_unix.c	2023-03-13 14:05:21.000000000 +1030
+@@ -6422,7 +6432,11 @@
+   int nPath = sqlite3Strlen30(zPath);
+   int iOff = 0;
+   int i, j;
++#ifdef SQLITE_OS_OS2
++  if( !IS_ABSOLUTE_PATH(zPath) ){
++#else
+   if( zPath[0]!='/' ){
++#endif
+     if( osGetcwd(zOut, nOut-2)==0 ){
+       return unixLogError(SQLITE_CANTOPEN_BKPT, "getcwd", zPath);
+     }
+

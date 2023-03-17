@@ -90,7 +90,11 @@ static INLINE uint16x4_t needs_filter8(const uint16x8_t abd_p0p1_q0q1,
 }
 
 // -----------------------------------------------------------------------------
+<<<<<<< HEAD
 // FilterNMasks functions.
+=======
+// filterN_masks functions.
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 static INLINE void filter4_masks(const uint16x8_t p0q0, const uint16x8_t p1q1,
                                  const uint16_t hev_thresh,
@@ -99,13 +103,21 @@ static INLINE void filter4_masks(const uint16x8_t p0q0, const uint16x8_t p1q1,
                                  uint16x4_t *const hev_mask,
                                  uint16x4_t *const needs_filter4_mask) {
   const uint16x8_t p0p1_q0q1 = vabdq_u16(p0q0, p1q1);
+<<<<<<< HEAD
   // This includes cases where needs_filter4() is not true and so Filter2() will
+=======
+  // This includes cases where needs_filter4() is not true and so filter2() will
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   // not be applied.
   const uint16x4_t hev_tmp_mask = hev(p0p1_q0q1, hev_thresh);
 
   *needs_filter4_mask = needs_filter4(p0p1_q0q1, inner_thresh, outer_mask);
 
+<<<<<<< HEAD
   // Filter2() will only be applied if both needs_filter4() and hev() are true.
+=======
+  // filter2() will only be applied if both needs_filter4() and hev() are true.
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   *hev_mask = vand_u16(hev_tmp_mask, *needs_filter4_mask);
 }
 
@@ -172,9 +184,15 @@ static INLINE void filter8_masks(
 }
 
 // -----------------------------------------------------------------------------
+<<<<<<< HEAD
 // FilterN functions.
 
 // Calculate filter4() or Filter2() based on |hev_mask|.
+=======
+// filterN functions.
+
+// Calculate filter4() or filter2() based on |hev_mask|.
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 static INLINE void filter4(const uint16x8_t p0q0, const uint16x8_t p0q1,
                            const uint16x8_t p1q1, const uint16x4_t hev_mask,
                            int bitdepth, uint16x8_t *const p1q1_result,
@@ -185,7 +203,11 @@ static INLINE void filter4(const uint16x8_t p0q0, const uint16x8_t p0q1,
   const int16x8_t q0mp0_p1mq1 = vreinterpretq_s16_u16(vsubq_u16(q0p1, p0q1));
   const int16x4_t q0mp0_3 = vmul_n_s16(vget_low_s16(q0mp0_p1mq1), 3);
 
+<<<<<<< HEAD
   // If this is for Filter2() then include |p1mq1|. Otherwise zero it.
+=======
+  // If this is for filter2() then include |p1mq1|. Otherwise zero it.
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   const int16x4_t min_signed_pixel = vdup_n_s16(-(1 << (bitdepth - 1)));
   const int16x4_t max_signed_pixel = vdup_n_s16((1 << (bitdepth - 1)) - 1);
   const int16x4_t p1mq1 = vget_high_s16(q0mp0_p1mq1);
@@ -252,6 +274,7 @@ void aom_highbd_lpf_horizontal_4_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   const uint64x1_t needs_filter4_mask64 =
       vreinterpret_u64_u16(needs_filter4_mask);
@@ -259,6 +282,8 @@ void aom_highbd_lpf_horizontal_4_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -325,6 +350,7 @@ void aom_highbd_lpf_vertical_4_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   const uint64x1_t needs_filter4_mask64 =
       vreinterpret_u64_u16(needs_filter4_mask);
@@ -332,6 +358,8 @@ void aom_highbd_lpf_vertical_4_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -456,6 +484,7 @@ void aom_highbd_lpf_horizontal_6_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -465,6 +494,8 @@ void aom_highbd_lpf_horizontal_6_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -556,6 +587,7 @@ void aom_highbd_lpf_vertical_6_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -565,6 +597,8 @@ void aom_highbd_lpf_vertical_6_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -721,6 +755,7 @@ void aom_highbd_lpf_horizontal_8_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -730,6 +765,8 @@ void aom_highbd_lpf_horizontal_8_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -829,6 +866,7 @@ void aom_highbd_lpf_vertical_8_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -838,6 +876,8 @@ void aom_highbd_lpf_vertical_8_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
 
   // Copy the masks to the high bits for packed comparisons later.
@@ -1031,6 +1071,7 @@ void aom_highbd_lpf_horizontal_14_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -1040,6 +1081,8 @@ void aom_highbd_lpf_horizontal_14_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
   const uint16x8_t p4q4 = vcombine_u16(src[2], src[11]);
   const uint16x8_t p5q5 = vcombine_u16(src[1], src[12]);
@@ -1208,6 +1251,7 @@ void aom_highbd_lpf_vertical_14_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+<<<<<<< HEAD
 #else   // !defined(__aarch64__)
   // This might be faster than vaddv (latency 3) because mov to general register
   // has latency 2.
@@ -1217,6 +1261,8 @@ void aom_highbd_lpf_vertical_14_neon(uint16_t *s, int pitch,
     // None of the values will be filtered.
     return;
   }
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif  // defined(__aarch64__)
   const uint16x8_t p4q4 =
       vcombine_u16(vget_low_u16(src_p[3]), vget_high_u16(src_q[0]));

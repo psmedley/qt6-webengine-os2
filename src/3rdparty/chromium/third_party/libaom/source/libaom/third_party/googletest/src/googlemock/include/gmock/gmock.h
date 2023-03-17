@@ -27,15 +27,23 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This is the main header file a user should include.
 
+<<<<<<< HEAD
 // GOOGLETEST_CM0002 DO NOT DELETE
 
 #ifndef GMOCK_INCLUDE_GMOCK_GMOCK_H_
 #define GMOCK_INCLUDE_GMOCK_GMOCK_H_
+=======
+#ifndef GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_H_
+#define GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // This file implements the following syntax:
 //
@@ -59,20 +67,32 @@
 #include "gmock/gmock-actions.h"
 #include "gmock/gmock-cardinalities.h"
 #include "gmock/gmock-function-mocker.h"
+<<<<<<< HEAD
 #include "gmock/gmock-generated-actions.h"
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #include "gmock/gmock-matchers.h"
 #include "gmock/gmock-more-actions.h"
 #include "gmock/gmock-more-matchers.h"
 #include "gmock/gmock-nice-strict.h"
 #include "gmock/internal/gmock-internal-utils.h"
+<<<<<<< HEAD
 
 namespace testing {
+=======
+#include "gmock/internal/gmock-port.h"
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Declares Google Mock flags that we want a user to use programmatically.
 GMOCK_DECLARE_bool_(catch_leaked_mocks);
 GMOCK_DECLARE_string_(verbose);
 GMOCK_DECLARE_int32_(default_mock_behavior);
 
+<<<<<<< HEAD
+=======
+namespace testing {
+
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Initializes Google Mock.  This must be called before running the
 // tests.  In particular, it parses the command line for the flags
 // that Google Mock recognizes.  Whenever a Google Mock flag is seen,
@@ -96,4 +116,8 @@ GTEST_API_ void InitGoogleMock();
 
 }  // namespace testing
 
+<<<<<<< HEAD
 #endif  // GMOCK_INCLUDE_GMOCK_GMOCK_H_
+=======
+#endif  // GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee

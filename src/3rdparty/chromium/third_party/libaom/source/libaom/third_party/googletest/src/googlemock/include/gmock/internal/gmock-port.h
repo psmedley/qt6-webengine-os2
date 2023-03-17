@@ -27,7 +27,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+<<<<<<< HEAD
 //
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Low-level types and utilities for porting Google Mock to various
 // platforms.  All macros ending with _ and symbols defined in an
 // internal namespace are subject to change without notice.  Code
@@ -35,10 +38,18 @@
 // end with _ are part of Google Mock's public API and can be used by
 // code outside Google Mock.
 
+<<<<<<< HEAD
 // GOOGLETEST_CM0002 DO NOT DELETE
 
 #ifndef GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
 #define GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
+=======
+// IWYU pragma: private, include "gmock/gmock.h"
+// IWYU pragma: friend gmock/.*
+
+#ifndef GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
+#define GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 #include <assert.h>
 #include <stdlib.h>
@@ -53,17 +64,32 @@
 // here, as Google Mock depends on Google Test.  Only add a utility
 // here if it's truly specific to Google Mock.
 
+<<<<<<< HEAD
 #include "gtest/internal/gtest-port.h"
 #include "gmock/internal/custom/gmock-port.h"
+=======
+#include "gmock/internal/custom/gmock-port.h"
+#include "gtest/internal/gtest-port.h"
+
+#if GTEST_HAS_ABSL
+#include "absl/flags/declare.h"
+#include "absl/flags/flag.h"
+#endif
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // For MS Visual C++, check the compiler version. At least VS 2015 is
 // required to compile Google Mock.
 #if defined(_MSC_VER) && _MSC_VER < 1900
+<<<<<<< HEAD
 # error "At least Visual C++ 2015 (14.0) is required to compile Google Mock."
+=======
+#error "At least Visual C++ 2015 (14.0) is required to compile Google Mock."
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // Macro for referencing flags.  This is public as we want the user to
 // use this syntax to reference Google Mock flags.
+<<<<<<< HEAD
 #define GMOCK_FLAG(name) FLAGS_gmock_##name
 
 #if !defined(GMOCK_DECLARE_bool_)
@@ -85,3 +111,73 @@
 #endif  // !defined(GMOCK_DECLARE_bool_)
 
 #endif  // GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
+=======
+#define GMOCK_FLAG_NAME_(name) gmock_##name
+#define GMOCK_FLAG(name) FLAGS_gmock_##name
+
+// Pick a command line flags implementation.
+#if GTEST_HAS_ABSL
+
+// Macros for defining flags.
+#define GMOCK_DEFINE_bool_(name, default_val, doc) \
+  ABSL_FLAG(bool, GMOCK_FLAG_NAME_(name), default_val, doc)
+#define GMOCK_DEFINE_int32_(name, default_val, doc) \
+  ABSL_FLAG(int32_t, GMOCK_FLAG_NAME_(name), default_val, doc)
+#define GMOCK_DEFINE_string_(name, default_val, doc) \
+  ABSL_FLAG(std::string, GMOCK_FLAG_NAME_(name), default_val, doc)
+
+// Macros for declaring flags.
+#define GMOCK_DECLARE_bool_(name) \
+  ABSL_DECLARE_FLAG(bool, GMOCK_FLAG_NAME_(name))
+#define GMOCK_DECLARE_int32_(name) \
+  ABSL_DECLARE_FLAG(int32_t, GMOCK_FLAG_NAME_(name))
+#define GMOCK_DECLARE_string_(name) \
+  ABSL_DECLARE_FLAG(std::string, GMOCK_FLAG_NAME_(name))
+
+#define GMOCK_FLAG_GET(name) ::absl::GetFlag(GMOCK_FLAG(name))
+#define GMOCK_FLAG_SET(name, value) \
+  (void)(::absl::SetFlag(&GMOCK_FLAG(name), value))
+
+#else  // GTEST_HAS_ABSL
+
+// Macros for defining flags.
+#define GMOCK_DEFINE_bool_(name, default_val, doc)  \
+  namespace testing {                               \
+  GTEST_API_ bool GMOCK_FLAG(name) = (default_val); \
+  }                                                 \
+  static_assert(true, "no-op to require trailing semicolon")
+#define GMOCK_DEFINE_int32_(name, default_val, doc)    \
+  namespace testing {                                  \
+  GTEST_API_ int32_t GMOCK_FLAG(name) = (default_val); \
+  }                                                    \
+  static_assert(true, "no-op to require trailing semicolon")
+#define GMOCK_DEFINE_string_(name, default_val, doc)         \
+  namespace testing {                                        \
+  GTEST_API_ ::std::string GMOCK_FLAG(name) = (default_val); \
+  }                                                          \
+  static_assert(true, "no-op to require trailing semicolon")
+
+// Macros for declaring flags.
+#define GMOCK_DECLARE_bool_(name)          \
+  namespace testing {                      \
+  GTEST_API_ extern bool GMOCK_FLAG(name); \
+  }                                        \
+  static_assert(true, "no-op to require trailing semicolon")
+#define GMOCK_DECLARE_int32_(name)            \
+  namespace testing {                         \
+  GTEST_API_ extern int32_t GMOCK_FLAG(name); \
+  }                                           \
+  static_assert(true, "no-op to require trailing semicolon")
+#define GMOCK_DECLARE_string_(name)                 \
+  namespace testing {                               \
+  GTEST_API_ extern ::std::string GMOCK_FLAG(name); \
+  }                                                 \
+  static_assert(true, "no-op to require trailing semicolon")
+
+#define GMOCK_FLAG_GET(name) ::testing::GMOCK_FLAG(name)
+#define GMOCK_FLAG_SET(name, value) (void)(::testing::GMOCK_FLAG(name) = value)
+
+#endif  // GTEST_HAS_ABSL
+
+#endif  // GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PORT_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee

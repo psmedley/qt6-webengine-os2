@@ -31,10 +31,18 @@
 //
 // This file implements MOCK_METHOD.
 
+<<<<<<< HEAD
 // GOOGLETEST_CM0002 DO NOT DELETE
 
 #ifndef THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_  // NOLINT
 #define THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_  // NOLINT
+=======
+// IWYU pragma: private, include "gmock/gmock.h"
+// IWYU pragma: friend gmock/.*
+
+#ifndef GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_  // NOLINT
+#define GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_  // NOLINT
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 #include <type_traits>  // IWYU pragma: keep
 #include <utility>      // IWYU pragma: keep
@@ -48,6 +56,7 @@ namespace internal {
 template <typename T>
 using identity_t = T;
 
+<<<<<<< HEAD
 template <typename MockType>
 const MockType* AdjustConstness_const(const MockType* mock) {
   return mock;
@@ -56,6 +65,55 @@ const MockType* AdjustConstness_const(const MockType* mock) {
 template <typename MockType>
 MockType* AdjustConstness_(const MockType* mock) {
   return const_cast<MockType*>(mock);
+=======
+template <typename Pattern>
+struct ThisRefAdjuster {
+  template <typename T>
+  using AdjustT = typename std::conditional<
+      std::is_const<typename std::remove_reference<Pattern>::type>::value,
+      typename std::conditional<std::is_lvalue_reference<Pattern>::value,
+                                const T&, const T&&>::type,
+      typename std::conditional<std::is_lvalue_reference<Pattern>::value, T&,
+                                T&&>::type>::type;
+
+  template <typename MockType>
+  static AdjustT<MockType> Adjust(const MockType& mock) {
+    return static_cast<AdjustT<MockType>>(const_cast<MockType&>(mock));
+  }
+};
+
+constexpr bool PrefixOf(const char* a, const char* b) {
+  return *a == 0 || (*a == *b && internal::PrefixOf(a + 1, b + 1));
+}
+
+template <int N, int M>
+constexpr bool StartsWith(const char (&prefix)[N], const char (&str)[M]) {
+  return N <= M && internal::PrefixOf(prefix, str);
+}
+
+template <int N, int M>
+constexpr bool EndsWith(const char (&suffix)[N], const char (&str)[M]) {
+  return N <= M && internal::PrefixOf(suffix, str + M - N);
+}
+
+template <int N, int M>
+constexpr bool Equals(const char (&a)[N], const char (&b)[M]) {
+  return N == M && internal::PrefixOf(a, b);
+}
+
+template <int N>
+constexpr bool ValidateSpec(const char (&spec)[N]) {
+  return internal::Equals("const", spec) ||
+         internal::Equals("override", spec) ||
+         internal::Equals("final", spec) ||
+         internal::Equals("noexcept", spec) ||
+         (internal::StartsWith("noexcept(", spec) &&
+          internal::EndsWith(")", spec)) ||
+         internal::Equals("ref(&)", spec) ||
+         internal::Equals("ref(&&)", spec) ||
+         (internal::StartsWith("Calltype(", spec) &&
+          internal::EndsWith(")", spec));
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 }
 
 }  // namespace internal
@@ -90,7 +148,12 @@ using internal::FunctionMocker;
       GMOCK_PP_NARG0 _Args, _MethodName, GMOCK_INTERNAL_HAS_CONST(_Spec),  \
       GMOCK_INTERNAL_HAS_OVERRIDE(_Spec), GMOCK_INTERNAL_HAS_FINAL(_Spec), \
       GMOCK_INTERNAL_GET_NOEXCEPT_SPEC(_Spec),                             \
+<<<<<<< HEAD
       GMOCK_INTERNAL_GET_CALLTYPE(_Spec),                                  \
+=======
+      GMOCK_INTERNAL_GET_CALLTYPE_SPEC(_Spec),                             \
+      GMOCK_INTERNAL_GET_REF_SPEC(_Spec),                                  \
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
       (GMOCK_INTERNAL_SIGNATURE(_Ret, _Args)))
 
 #define GMOCK_INTERNAL_MOCK_METHOD_ARG_5(...) \
@@ -124,19 +187,31 @@ using internal::FunctionMocker;
       ::testing::tuple_size<typename ::testing::internal::Function<    \
               __VA_ARGS__>::ArgumentTuple>::value == _N,               \
       "This method does not take " GMOCK_PP_STRINGIZE(                 \
+<<<<<<< HEAD
           _N) " arguments. Parenthesize all types with unproctected commas.")
+=======
+          _N) " arguments. Parenthesize all types with unprotected commas.")
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 #define GMOCK_INTERNAL_ASSERT_VALID_SPEC(_Spec) \
   GMOCK_PP_FOR_EACH(GMOCK_INTERNAL_ASSERT_VALID_SPEC_ELEMENT, ~, _Spec)
 
 #define GMOCK_INTERNAL_MOCK_METHOD_IMPL(_N, _MethodName, _Constness,           \
                                         _Override, _Final, _NoexceptSpec,      \
+<<<<<<< HEAD
                                         _CallType, _Signature)                 \
+=======
+                                        _CallType, _RefSpec, _Signature)       \
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   typename ::testing::internal::Function<GMOCK_PP_REMOVE_PARENS(               \
       _Signature)>::Result                                                     \
   GMOCK_INTERNAL_EXPAND(_CallType)                                             \
       _MethodName(GMOCK_PP_REPEAT(GMOCK_INTERNAL_PARAMETER, _Signature, _N))   \
+<<<<<<< HEAD
           GMOCK_PP_IF(_Constness, const, ) _NoexceptSpec                       \
+=======
+          GMOCK_PP_IF(_Constness, const, ) _RefSpec _NoexceptSpec              \
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
           GMOCK_PP_IF(_Override, override, ) GMOCK_PP_IF(_Final, final, ) {    \
     GMOCK_MOCKER_(_N, _Constness, _MethodName)                                 \
         .SetOwnerAndName(this, #_MethodName);                                  \
@@ -145,7 +220,11 @@ using internal::FunctionMocker;
   }                                                                            \
   ::testing::MockSpec<GMOCK_PP_REMOVE_PARENS(_Signature)> gmock_##_MethodName( \
       GMOCK_PP_REPEAT(GMOCK_INTERNAL_MATCHER_PARAMETER, _Signature, _N))       \
+<<<<<<< HEAD
       GMOCK_PP_IF(_Constness, const, ) {                                       \
+=======
+      GMOCK_PP_IF(_Constness, const, ) _RefSpec {                              \
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
     GMOCK_MOCKER_(_N, _Constness, _MethodName).RegisterOwner(this);            \
     return GMOCK_MOCKER_(_N, _Constness, _MethodName)                          \
         .With(GMOCK_PP_REPEAT(GMOCK_INTERNAL_MATCHER_ARGUMENT, , _N));         \
@@ -153,6 +232,7 @@ using internal::FunctionMocker;
   ::testing::MockSpec<GMOCK_PP_REMOVE_PARENS(_Signature)> gmock_##_MethodName( \
       const ::testing::internal::WithoutMatchers&,                             \
       GMOCK_PP_IF(_Constness, const, )::testing::internal::Function<           \
+<<<<<<< HEAD
           GMOCK_PP_REMOVE_PARENS(_Signature)>*) const _NoexceptSpec {          \
     return GMOCK_PP_CAT(::testing::internal::AdjustConstness_,                 \
                         GMOCK_PP_IF(_Constness, const, ))(this)                \
@@ -165,6 +245,20 @@ using internal::FunctionMocker;
 #define GMOCK_INTERNAL_EXPAND(...) __VA_ARGS__
 
 // Five Valid modifiers.
+=======
+          GMOCK_PP_REMOVE_PARENS(_Signature)>*) const _RefSpec _NoexceptSpec { \
+    return ::testing::internal::ThisRefAdjuster<GMOCK_PP_IF(                   \
+        _Constness, const, ) int _RefSpec>::Adjust(*this)                      \
+        .gmock_##_MethodName(GMOCK_PP_REPEAT(                                  \
+            GMOCK_INTERNAL_A_MATCHER_ARGUMENT, _Signature, _N));               \
+  }                                                                            \
+  mutable ::testing::FunctionMocker<GMOCK_PP_REMOVE_PARENS(_Signature)>        \
+  GMOCK_MOCKER_(_N, _Constness, _MethodName)
+
+#define GMOCK_INTERNAL_EXPAND(...) __VA_ARGS__
+
+// Valid modifiers.
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #define GMOCK_INTERNAL_HAS_CONST(_Tuple) \
   GMOCK_PP_HAS_COMMA(GMOCK_PP_FOR_EACH(GMOCK_INTERNAL_DETECT_CONST, ~, _Tuple))
 
@@ -183,6 +277,7 @@ using internal::FunctionMocker;
       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_NOEXCEPT(_i, _, _elem)), \
       _elem, )
 
+<<<<<<< HEAD
 #define GMOCK_INTERNAL_GET_CALLTYPE(_Tuple) \
   GMOCK_PP_FOR_EACH(GMOCK_INTERNAL_GET_CALLTYPE_IMPL, ~, _Tuple)
 
@@ -195,6 +290,42 @@ using internal::FunctionMocker;
        GMOCK_INTERNAL_IS_CALLTYPE(_elem)) == 1,                           \
       GMOCK_PP_STRINGIZE(                                                 \
           _elem) " cannot be recognized as a valid specification modifier.");
+=======
+#define GMOCK_INTERNAL_GET_CALLTYPE_SPEC(_Tuple) \
+  GMOCK_PP_FOR_EACH(GMOCK_INTERNAL_CALLTYPE_SPEC_IF_CALLTYPE, ~, _Tuple)
+
+#define GMOCK_INTERNAL_CALLTYPE_SPEC_IF_CALLTYPE(_i, _, _elem)          \
+  GMOCK_PP_IF(                                                          \
+      GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_CALLTYPE(_i, _, _elem)), \
+      GMOCK_PP_CAT(GMOCK_INTERNAL_UNPACK_, _elem), )
+
+#define GMOCK_INTERNAL_GET_REF_SPEC(_Tuple) \
+  GMOCK_PP_FOR_EACH(GMOCK_INTERNAL_REF_SPEC_IF_REF, ~, _Tuple)
+
+#define GMOCK_INTERNAL_REF_SPEC_IF_REF(_i, _, _elem)                       \
+  GMOCK_PP_IF(GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_REF(_i, _, _elem)), \
+              GMOCK_PP_CAT(GMOCK_INTERNAL_UNPACK_, _elem), )
+
+#ifdef GMOCK_INTERNAL_STRICT_SPEC_ASSERT
+#define GMOCK_INTERNAL_ASSERT_VALID_SPEC_ELEMENT(_i, _, _elem) \
+  static_assert(                                                     \
+      ::testing::internal::ValidateSpec(GMOCK_PP_STRINGIZE(_elem)),  \
+      "Token \'" GMOCK_PP_STRINGIZE(                                 \
+          _elem) "\' cannot be recognized as a valid specification " \
+                 "modifier. Is a ',' missing?");
+#else
+#define GMOCK_INTERNAL_ASSERT_VALID_SPEC_ELEMENT(_i, _, _elem)                 \
+  static_assert(                                                               \
+      (GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_CONST(_i, _, _elem)) +         \
+       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_OVERRIDE(_i, _, _elem)) +      \
+       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_FINAL(_i, _, _elem)) +         \
+       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_NOEXCEPT(_i, _, _elem)) +      \
+       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_REF(_i, _, _elem)) +           \
+       GMOCK_PP_HAS_COMMA(GMOCK_INTERNAL_DETECT_CALLTYPE(_i, _, _elem))) == 1, \
+      GMOCK_PP_STRINGIZE(                                                      \
+          _elem) " cannot be recognized as a valid specification modifier.");
+#endif  // GMOCK_INTERNAL_STRICT_SPEC_ASSERT
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Modifiers implementation.
 #define GMOCK_INTERNAL_DETECT_CONST(_i, _, _elem) \
@@ -217,6 +348,7 @@ using internal::FunctionMocker;
 
 #define GMOCK_INTERNAL_DETECT_NOEXCEPT_I_noexcept ,
 
+<<<<<<< HEAD
 #define GMOCK_INTERNAL_GET_CALLTYPE_IMPL(_i, _, _elem)           \
   GMOCK_PP_IF(GMOCK_INTERNAL_IS_CALLTYPE(_elem),                 \
               GMOCK_INTERNAL_GET_VALUE_CALLTYPE, GMOCK_PP_EMPTY) \
@@ -237,6 +369,21 @@ using internal::FunctionMocker;
   GMOCK_PP_CAT(GMOCK_PP_IDENTITY, _arg)
 
 #define GMOCK_INTERNAL_IS_CALLTYPE_HELPER_Calltype
+=======
+#define GMOCK_INTERNAL_DETECT_REF(_i, _, _elem) \
+  GMOCK_PP_CAT(GMOCK_INTERNAL_DETECT_REF_I_, _elem)
+
+#define GMOCK_INTERNAL_DETECT_REF_I_ref ,
+
+#define GMOCK_INTERNAL_UNPACK_ref(x) x
+
+#define GMOCK_INTERNAL_DETECT_CALLTYPE(_i, _, _elem) \
+  GMOCK_PP_CAT(GMOCK_INTERNAL_DETECT_CALLTYPE_I_, _elem)
+
+#define GMOCK_INTERNAL_DETECT_CALLTYPE_I_Calltype ,
+
+#define GMOCK_INTERNAL_UNPACK_Calltype(...) __VA_ARGS__
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Note: The use of `identity_t` here allows _Ret to represent return types that
 // would normally need to be specified in a different way. For example, a method
@@ -449,10 +596,18 @@ using internal::FunctionMocker;
   GMOCK_INTERNAL_ASSERT_VALID_SIGNATURE(                                  \
       args_num, ::testing::internal::identity_t<__VA_ARGS__>);            \
   GMOCK_INTERNAL_MOCK_METHOD_IMPL(                                        \
+<<<<<<< HEAD
       args_num, Method, GMOCK_PP_NARG0(constness), 0, 0, , ct,            \
+=======
+      args_num, Method, GMOCK_PP_NARG0(constness), 0, 0, , ct, ,          \
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
       (::testing::internal::identity_t<__VA_ARGS__>))
 
 #define GMOCK_MOCKER_(arity, constness, Method) \
   GTEST_CONCAT_TOKEN_(gmock##constness##arity##_##Method##_, __LINE__)
 
+<<<<<<< HEAD
 #endif  // THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_
+=======
+#endif  // GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_FUNCTION_MOCKER_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee

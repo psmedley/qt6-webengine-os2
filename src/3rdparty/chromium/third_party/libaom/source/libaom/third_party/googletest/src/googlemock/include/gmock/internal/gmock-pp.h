@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 #ifndef THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_PP_H_
 #define THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_PP_H_
+=======
+#ifndef GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PP_H_
+#define GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PP_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Expands and concatenates the arguments. Constructed macros reevaluate.
 #define GMOCK_PP_CAT(_1, _2) GMOCK_PP_INTERNAL_CAT(_1, _2)
@@ -28,16 +33,27 @@
 // Requires: the number of arguments after expansion is at most 15.
 #define GMOCK_PP_NARG(...) \
   GMOCK_PP_INTERNAL_16TH(  \
+<<<<<<< HEAD
       (__VA_ARGS__, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1))
+=======
+      (__VA_ARGS__, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Returns 1 if the expansion of arguments has an unprotected comma. Otherwise
 // returns 0. Requires no more than 15 unprotected commas.
 #define GMOCK_PP_HAS_COMMA(...) \
   GMOCK_PP_INTERNAL_16TH(       \
+<<<<<<< HEAD
       (__VA_ARGS__, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0))
 
 // Returns the first argument.
 #define GMOCK_PP_HEAD(...) GMOCK_PP_INTERNAL_HEAD((__VA_ARGS__))
+=======
+      (__VA_ARGS__, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0))
+
+// Returns the first argument.
+#define GMOCK_PP_HEAD(...) GMOCK_PP_INTERNAL_HEAD((__VA_ARGS__, unusedArg))
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Returns the tail. A variadic list of all arguments minus the first. Requires
 // at least one argument.
@@ -276,4 +292,8 @@
   GMOCK_PP_INTERNAL_FOR_EACH_IMPL_14(GMOCK_PP_INC(_i), _Macro, _Data,   \
                                      (GMOCK_PP_TAIL _Tuple))
 
+<<<<<<< HEAD
 #endif  // THIRD_PARTY_GOOGLETEST_GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PP_H_
+=======
+#endif  // GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_PP_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee

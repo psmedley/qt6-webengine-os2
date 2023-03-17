@@ -27,7 +27,10 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This file implements some matchers that depend on gmock-matchers.h.
@@ -35,10 +38,18 @@
 // Note that tests are implemented in gmock-matchers_test.cc rather than
 // gmock-more-matchers-test.cc.
 
+<<<<<<< HEAD
 // GOOGLETEST_CM0002 DO NOT DELETE
 
 #ifndef GMOCK_INCLUDE_GMOCK_MORE_MATCHERS_H_
 #define GMOCK_INCLUDE_GMOCK_MORE_MATCHERS_H_
+=======
+// IWYU pragma: private, include "gmock/gmock.h"
+// IWYU pragma: friend gmock/.*
+
+#ifndef GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_MORE_MATCHERS_H_
+#define GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_MORE_MATCHERS_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 #include "gmock/gmock-matchers.h"
 
@@ -47,6 +58,7 @@ namespace testing {
 // Silence C4100 (unreferenced formal
 // parameter) for MSVC
 #ifdef _MSC_VER
+<<<<<<< HEAD
 # pragma warning(push)
 # pragma warning(disable:4100)
 #if (_MSC_VER == 1900)
@@ -54,6 +66,15 @@ namespace testing {
 // to bool 'true' or 'false') for MSVC 14
 # pragma warning(disable:4800)
   #endif
+=======
+#pragma warning(push)
+#pragma warning(disable : 4100)
+#if (_MSC_VER == 1900)
+// and silence C4800 (C4800: 'int *const ': forcing value
+// to bool 'true' or 'false') for MSVC 14
+#pragma warning(disable : 4800)
+#endif
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // Defines a matcher that matches an empty container. The container must
@@ -83,6 +104,7 @@ MATCHER(IsFalse, negation ? "is true" : "is false") {
 }
 
 #ifdef _MSC_VER
+<<<<<<< HEAD
 # pragma warning(pop)
 #endif
 
@@ -90,3 +112,11 @@ MATCHER(IsFalse, negation ? "is true" : "is false") {
 }  // namespace testing
 
 #endif  // GMOCK_INCLUDE_GMOCK_MORE_MATCHERS_H_
+=======
+#pragma warning(pop)
+#endif
+
+}  // namespace testing
+
+#endif  // GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_MORE_MATCHERS_H_
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee

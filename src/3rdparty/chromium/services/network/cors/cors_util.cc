@@ -21,7 +21,11 @@ std::vector<std::string> CorsUnsafeNotForbiddenRequestHeaderNames(
   size_t safe_list_value_size = 0;
 
   for (const auto& header : headers) {
+<<<<<<< HEAD
     if (!net::HttpUtil::IsSafeHeader(header.key))
+=======
+    if (!net::HttpUtil::IsSafeHeader(header.key, header.value))
+>>>>>>> 261f176c356a8020065064fb262b73710c7210ee
       continue;
 
     const std::string name = base::ToLowerASCII(header.key);
