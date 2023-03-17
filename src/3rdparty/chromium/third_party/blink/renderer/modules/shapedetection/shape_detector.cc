@@ -8,13 +8,10 @@
 
 #include "base/numerics/checked_math.h"
 #include "skia/ext/skia_utils_base.h"
-<<<<<<< HEAD
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_traits.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
-=======
 #ifndef __OS2__
->>>>>>> cad2c0fb4e (Hacks to shorten long filenames on OS/2)
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitmap_imagedata_offscreencanvas_svgimageelement_videoframe.h"
 #else
 #include "third_party/blink/renderer/bindings/modules/v8/v8_union_blob_htmlcanvaselement_htmlimageelement_htmlvideoelement_imagebitm.h"
