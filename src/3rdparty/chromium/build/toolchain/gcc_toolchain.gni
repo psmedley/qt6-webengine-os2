@@ -647,8 +647,10 @@ template("gcc_toolchain") {
 
       description = "LINK $outfile"
 
-      whole_archive_flag = ""
-      no_whole_archive_flag = ""
+      if (!is_os2) {
+        whole_archive_flag = ""
+        no_whole_archive_flag = ""
+      }
       if (current_os != "aix" && current_os != "os2") {
         # --whole-archive, --no-whole-archive flags are not available on aix ld
         whole_archive_flag = "-Wl,--whole-archive"
@@ -668,7 +670,7 @@ template("gcc_toolchain") {
       if (is_os2) {
         # OS/2 EMX ld expects new line separators in response files.
         rspfile_content =
-           "{{inputs_newline}} $whole_archive_flag {{rlibs}} $no_whole_archive_flag "
+           "{{inputs_newline}}"
       } else {
         rspfile_content =
            "{{inputs}} $whole_archive_flag {{rlibs}} $no_whole_archive_flag "
