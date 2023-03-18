@@ -27,10 +27,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This file defines some utilities useful for implementing Google
@@ -40,10 +36,6 @@
 #include "gmock/internal/gmock-internal-utils.h"
 
 #include <ctype.h>
-<<<<<<< HEAD
-#include <ostream>  // NOLINT
-#include <string>
-=======
 
 #include <array>
 #include <cctype>
@@ -53,7 +45,6 @@
 #include <string>
 #include <vector>
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #include "gmock/gmock.h"
 #include "gmock/internal/gmock-port.h"
 #include "gtest/gtest.h"
@@ -63,23 +54,6 @@ namespace internal {
 
 // Joins a vector of strings as if they are fields of a tuple; returns
 // the joined string.
-<<<<<<< HEAD
-GTEST_API_ std::string JoinAsTuple(const Strings& fields) {
-  switch (fields.size()) {
-    case 0:
-      return "";
-    case 1:
-      return fields[0];
-    default:
-      std::string result = "(" + fields[0];
-      for (size_t i = 1; i < fields.size(); i++) {
-        result += ", ";
-        result += fields[i];
-      }
-      result += ")";
-      return result;
-  }
-=======
 GTEST_API_ std::string JoinAsKeyValueTuple(
     const std::vector<const char*>& names, const Strings& values) {
   GTEST_CHECK_(names.size() == values.size());
@@ -96,7 +70,6 @@ GTEST_API_ std::string JoinAsKeyValueTuple(
   }
   result += ")";
   return result;
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 }
 
 // Converts an identifier name to a space-separated list of lower-case
@@ -110,20 +83,11 @@ GTEST_API_ std::string ConvertIdentifierNameToWords(const char* id_name) {
     // We don't care about the current locale as the input is
     // guaranteed to be a valid C++ identifier name.
     const bool starts_new_word = IsUpper(*p) ||
-<<<<<<< HEAD
-        (!IsAlpha(prev_char) && IsLower(*p)) ||
-        (!IsDigit(prev_char) && IsDigit(*p));
-
-    if (IsAlNum(*p)) {
-      if (starts_new_word && result != "")
-        result += ' ';
-=======
                                  (!IsAlpha(prev_char) && IsLower(*p)) ||
                                  (!IsDigit(prev_char) && IsDigit(*p));
 
     if (IsAlNum(*p)) {
       if (starts_new_word && result != "") result += ' ';
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
       result += ToLower(*p);
     }
   }
@@ -137,18 +101,9 @@ class GoogleTestFailureReporter : public FailureReporterInterface {
  public:
   void ReportFailure(FailureType type, const char* file, int line,
                      const std::string& message) override {
-<<<<<<< HEAD
-    AssertHelper(type == kFatal ?
-                 TestPartResult::kFatalFailure :
-                 TestPartResult::kNonFatalFailure,
-                 file,
-                 line,
-                 message.c_str()) = Message();
-=======
     AssertHelper(type == kFatal ? TestPartResult::kFatalFailure
                                 : TestPartResult::kNonFatalFailure,
                  file, line, message.c_str()) = Message();
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
     if (type == kFatal) {
       posix::Abort();
     }
@@ -174,17 +129,10 @@ static GTEST_DEFINE_STATIC_MUTEX_(g_log_mutex);
 // Returns true if and only if a log with the given severity is visible
 // according to the --gmock_verbose flag.
 GTEST_API_ bool LogIsVisible(LogSeverity severity) {
-<<<<<<< HEAD
-  if (GMOCK_FLAG(verbose) == kInfoVerbosity) {
-    // Always show the log if --gmock_verbose=info.
-    return true;
-  } else if (GMOCK_FLAG(verbose) == kErrorVerbosity) {
-=======
   if (GMOCK_FLAG_GET(verbose) == kInfoVerbosity) {
     // Always show the log if --gmock_verbose=info.
     return true;
   } else if (GMOCK_FLAG_GET(verbose) == kErrorVerbosity) {
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
     // Always hide it if --gmock_verbose=error.
     return false;
   } else {
@@ -203,12 +151,7 @@ GTEST_API_ bool LogIsVisible(LogSeverity severity) {
 // conservative.
 GTEST_API_ void Log(LogSeverity severity, const std::string& message,
                     int stack_frames_to_skip) {
-<<<<<<< HEAD
-  if (!LogIsVisible(severity))
-    return;
-=======
   if (!LogIsVisible(severity)) return;
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
   // Ensures that logs from different threads don't interleave.
   MutexLock l(&g_log_mutex);
@@ -237,13 +180,8 @@ GTEST_API_ void Log(LogSeverity severity, const std::string& message,
       std::cout << "\n";
     }
     std::cout << "Stack trace:\n"
-<<<<<<< HEAD
-         << ::testing::internal::GetCurrentOsStackTraceExceptTop(
-             ::testing::UnitTest::GetInstance(), actual_to_skip);
-=======
               << ::testing::internal::GetCurrentOsStackTraceExceptTop(
                      ::testing::UnitTest::GetInstance(), actual_to_skip);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   }
   std::cout << ::std::flush;
 }
@@ -260,8 +198,6 @@ GTEST_API_ void IllegalDoDefault(const char* file, int line) {
       "the variable in various places.");
 }
 
-<<<<<<< HEAD
-=======
 constexpr char UnBase64Impl(char c, const char* const base64, char carry) {
   return *base64 == 0   ? static_cast<char>(65)
          : *base64 == c ? carry
@@ -310,6 +246,5 @@ bool Base64Unescape(const std::string& encoded, std::string* decoded) {
   return true;
 }
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 }  // namespace internal
 }  // namespace testing

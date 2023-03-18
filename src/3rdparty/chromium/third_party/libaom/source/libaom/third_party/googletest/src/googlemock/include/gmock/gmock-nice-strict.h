@@ -27,10 +27,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Implements class templates NiceMock, NaggyMock, and StrictMock.
 //
 // Given a mock class MockFoo that is created using Google Mock,
@@ -61,12 +57,6 @@
 // In particular, nesting NiceMock, NaggyMock, and StrictMock is NOT
 // supported.
 
-<<<<<<< HEAD
-// GOOGLETEST_CM0002 DO NOT DELETE
-
-#ifndef GMOCK_INCLUDE_GMOCK_GMOCK_NICE_STRICT_H_
-#define GMOCK_INCLUDE_GMOCK_GMOCK_NICE_STRICT_H_
-=======
 // IWYU pragma: private, include "gmock/gmock.h"
 // IWYU pragma: friend gmock/.*
 
@@ -75,21 +65,11 @@
 
 #include <cstdint>
 #include <type_traits>
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 #include "gmock/gmock-spec-builders.h"
 #include "gmock/internal/gmock-port.h"
 
 namespace testing {
-<<<<<<< HEAD
-
-template <class MockClass>
-class NiceMock : public MockClass {
- public:
-  NiceMock() : MockClass() {
-    ::testing::Mock::AllowUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-=======
 template <class MockClass>
 class NiceMock;
 template <class MockClass>
@@ -178,7 +158,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS NiceMock
   NiceMock() : MockClass() {
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   }
 
   // Ideally, we would inherit base class's constructors through a using
@@ -190,35 +169,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS NiceMock
   // made explicit.
   template <typename A>
   explicit NiceMock(A&& arg) : MockClass(std::forward<A>(arg)) {
-<<<<<<< HEAD
-    ::testing::Mock::AllowUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  template <typename A1, typename A2, typename... An>
-  NiceMock(A1&& arg1, A2&& arg2, An&&... args)
-      : MockClass(std::forward<A1>(arg1), std::forward<A2>(arg2),
-                  std::forward<An>(args)...) {
-    ::testing::Mock::AllowUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  ~NiceMock() {  // NOLINT
-    ::testing::Mock::UnregisterCallReaction(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
- private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(NiceMock);
-};
-
-template <class MockClass>
-class NaggyMock : public MockClass {
- public:
-  NaggyMock() : MockClass() {
-    ::testing::Mock::WarnUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-=======
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
   }
@@ -250,7 +200,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS NaggyMock
   NaggyMock() : MockClass() {
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   }
 
   // Ideally, we would inherit base class's constructors through a using
@@ -262,35 +211,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS NaggyMock
   // made explicit.
   template <typename A>
   explicit NaggyMock(A&& arg) : MockClass(std::forward<A>(arg)) {
-<<<<<<< HEAD
-    ::testing::Mock::WarnUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  template <typename A1, typename A2, typename... An>
-  NaggyMock(A1&& arg1, A2&& arg2, An&&... args)
-      : MockClass(std::forward<A1>(arg1), std::forward<A2>(arg2),
-                  std::forward<An>(args)...) {
-    ::testing::Mock::WarnUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  ~NaggyMock() {  // NOLINT
-    ::testing::Mock::UnregisterCallReaction(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
- private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(NaggyMock);
-};
-
-template <class MockClass>
-class StrictMock : public MockClass {
- public:
-  StrictMock() : MockClass() {
-    ::testing::Mock::FailUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-=======
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
   }
@@ -322,7 +242,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS StrictMock
   StrictMock() : MockClass() {
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   }
 
   // Ideally, we would inherit base class's constructors through a using
@@ -334,60 +253,6 @@ class GTEST_INTERNAL_EMPTY_BASE_CLASS StrictMock
   // made explicit.
   template <typename A>
   explicit StrictMock(A&& arg) : MockClass(std::forward<A>(arg)) {
-<<<<<<< HEAD
-    ::testing::Mock::FailUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  template <typename A1, typename A2, typename... An>
-  StrictMock(A1&& arg1, A2&& arg2, An&&... args)
-      : MockClass(std::forward<A1>(arg1), std::forward<A2>(arg2),
-                  std::forward<An>(args)...) {
-    ::testing::Mock::FailUninterestingCalls(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
-  ~StrictMock() {  // NOLINT
-    ::testing::Mock::UnregisterCallReaction(
-        internal::ImplicitCast_<MockClass*>(this));
-  }
-
- private:
-  GTEST_DISALLOW_COPY_AND_ASSIGN_(StrictMock);
-};
-
-// The following specializations catch some (relatively more common)
-// user errors of nesting nice and strict mocks.  They do NOT catch
-// all possible errors.
-
-// These specializations are declared but not defined, as NiceMock,
-// NaggyMock, and StrictMock cannot be nested.
-
-template <typename MockClass>
-class NiceMock<NiceMock<MockClass> >;
-template <typename MockClass>
-class NiceMock<NaggyMock<MockClass> >;
-template <typename MockClass>
-class NiceMock<StrictMock<MockClass> >;
-
-template <typename MockClass>
-class NaggyMock<NiceMock<MockClass> >;
-template <typename MockClass>
-class NaggyMock<NaggyMock<MockClass> >;
-template <typename MockClass>
-class NaggyMock<StrictMock<MockClass> >;
-
-template <typename MockClass>
-class StrictMock<NiceMock<MockClass> >;
-template <typename MockClass>
-class StrictMock<NaggyMock<MockClass> >;
-template <typename MockClass>
-class StrictMock<StrictMock<MockClass> >;
-
-}  // namespace testing
-
-#endif  // GMOCK_INCLUDE_GMOCK_GMOCK_NICE_STRICT_H_
-=======
     static_assert(sizeof(*this) == sizeof(MockClass),
                   "The impl subclass shouldn't introduce any padding");
   }
@@ -410,4 +275,3 @@ class StrictMock<StrictMock<MockClass> >;
 }  // namespace testing
 
 #endif  // GOOGLEMOCK_INCLUDE_GMOCK_GMOCK_NICE_STRICT_H_
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee

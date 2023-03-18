@@ -8,13 +8,9 @@
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
-<<<<<<< HEAD
-
-=======
 #include "av1/encoder/thirdpass.h"
 
 #if CONFIG_THREE_PASS && CONFIG_AV1_DECODER
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #include "aom/aom_codec.h"
 #include "aom/aomdx.h"
 #include "aom_dsp/psnr.h"
@@ -22,20 +18,9 @@
 #include "av1/av1_iface_common.h"
 #include "av1/encoder/encoder.h"
 #include "av1/encoder/firstpass.h"
-<<<<<<< HEAD
-#include "av1/encoder/thirdpass.h"
-#include "av1/common/blockd.h"
-
-#if CONFIG_THREE_PASS
-#include "common/ivfdec.h"
-#endif
-
-#if CONFIG_THREE_PASS
-=======
 #include "av1/common/blockd.h"
 #include "common/ivfdec.h"
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 static void setup_two_pass_stream_input(
     struct AvxInputContext **input_ctx_ptr, const char *input_file_name,
     struct aom_internal_error_info *err_info) {
@@ -76,10 +61,6 @@ static void init_third_pass(THIRD_PASS_DEC_CTX *ctx) {
                                 ctx->err_info);
   }
 
-<<<<<<< HEAD
-#if CONFIG_AV1_DECODER
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   if (!ctx->decoder.iface) {
     aom_codec_iface_t *decoder_iface = &aom_codec_av1_inspect_algo;
     if (aom_codec_dec_init(&ctx->decoder, decoder_iface, NULL, 0)) {
@@ -87,26 +68,12 @@ static void init_third_pass(THIRD_PASS_DEC_CTX *ctx) {
                          "Failed to initialize decoder.");
     }
   }
-<<<<<<< HEAD
-#else
-  aom_internal_error(ctx->err_info, AOM_CODEC_ERROR,
-                     "To utilize three-pass encoding, libaom must be built "
-                     "with CONFIG_AV1_DECODER=1.");
-#endif
 }
-#endif  // CONFIG_THREE_PASS
-=======
-}
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Return 0: success
 //        1: cannot read because this is end of file
 //       -1: failure to read the frame
 static int read_frame(THIRD_PASS_DEC_CTX *ctx) {
-<<<<<<< HEAD
-#if CONFIG_THREE_PASS
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   if (!ctx->input_ctx || !ctx->decoder.iface) {
     init_third_pass(ctx);
   }
@@ -123,14 +90,7 @@ static int read_frame(THIRD_PASS_DEC_CTX *ctx) {
     ctx->end_frame = ctx->frame + ctx->bytes_in_buffer;
     ctx->have_frame = 1;
   }
-<<<<<<< HEAD
-#else
-  aom_internal_error(ctx->err_info, AOM_CODEC_ERROR,
-                     "Cannot parse bitstream without CONFIG_THREE_PASS.");
-#endif
-=======
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   Av1DecodeReturn adr;
   if (aom_codec_decode(&ctx->decoder, ctx->frame,
                        (unsigned int)ctx->bytes_in_buffer,
@@ -430,15 +390,8 @@ void av1_free_thirdpass_ctx(THIRD_PASS_DEC_CTX *ctx) {
   if (ctx->decoder.iface) {
     aom_codec_destroy(&ctx->decoder);
   }
-<<<<<<< HEAD
-#if CONFIG_THREE_PASS
   if (ctx->input_ctx && ctx->input_ctx->file) fclose(ctx->input_ctx->file);
   aom_free(ctx->input_ctx);
-#endif
-=======
-  if (ctx->input_ctx && ctx->input_ctx->file) fclose(ctx->input_ctx->file);
-  aom_free(ctx->input_ctx);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   if (ctx->buf) free(ctx->buf);
   for (int i = 0; i < MAX_THIRD_PASS_BUF; i++) {
     free_frame_info(&ctx->frame_info[i]);
@@ -737,8 +690,6 @@ PARTITION_TYPE av1_third_pass_get_sb_part_type(THIRD_PASS_DEC_CTX *ctx,
   return corner_mi->partition;
 }
 
-<<<<<<< HEAD
-=======
 #else   // !(CONFIG_THREE_PASS && CONFIG_AV1_DECODER)
 void av1_init_thirdpass_ctx(AV1_COMMON *cm, THIRD_PASS_DEC_CTX **ctx,
                             const char *file) {
@@ -852,7 +803,6 @@ PARTITION_TYPE av1_third_pass_get_sb_part_type(THIRD_PASS_DEC_CTX *ctx,
 }
 #endif  // CONFIG_THREE_PASS && CONFIG_AV1_DECODER
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #if CONFIG_BITRATE_ACCURACY
 static void fwrite_and_check(const void *ptr, size_t size, size_t nmemb,
                              FILE *stream,

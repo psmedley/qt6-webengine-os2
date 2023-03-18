@@ -27,10 +27,6 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This file implements Matcher<const string&>, Matcher<string>, and
@@ -39,17 +35,11 @@
 #include "gmock/gmock-matchers.h"
 
 #include <string.h>
-<<<<<<< HEAD
-#include <iostream>
-#include <sstream>
-#include <string>
-=======
 
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 namespace testing {
 namespace internal {
@@ -59,13 +49,6 @@ namespace internal {
 // 'negation' is false; otherwise returns the description of the
 // negation of the matcher.  'param_values' contains a list of strings
 // that are the print-out of the matcher's parameters.
-<<<<<<< HEAD
-GTEST_API_ std::string FormatMatcherDescription(bool negation,
-                                                const char* matcher_name,
-                                                const Strings& param_values) {
-  std::string result = ConvertIdentifierNameToWords(matcher_name);
-  if (param_values.size() >= 1) result += " " + JoinAsTuple(param_values);
-=======
 GTEST_API_ std::string FormatMatcherDescription(
     bool negation, const char* matcher_name,
     const std::vector<const char*>& param_names, const Strings& param_values) {
@@ -73,7 +56,6 @@ GTEST_API_ std::string FormatMatcherDescription(
   if (param_values.size() >= 1) {
     result += " " + JoinAsKeyValueTuple(param_names, param_values);
   }
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   return negation ? "not (" + result + ")" : result;
 }
 
@@ -239,11 +221,6 @@ class MaxBipartiteMatchState {
   // right_[left_[i]] = i.
   ::std::vector<size_t> left_;
   ::std::vector<size_t> right_;
-<<<<<<< HEAD
-
-  GTEST_DISALLOW_ASSIGN_(MaxBipartiteMatchState);
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 };
 
 const size_t MaxBipartiteMatchState::kUnused;

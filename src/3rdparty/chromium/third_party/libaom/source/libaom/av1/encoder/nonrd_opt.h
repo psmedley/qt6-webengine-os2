@@ -14,8 +14,6 @@
 
 #include "av1/encoder/rdopt_utils.h"
 
-<<<<<<< HEAD
-=======
 #define RTC_INTER_MODES (4)
 #define RTC_INTRA_MODES (4)
 #define RTC_MODES (AOMMAX(RTC_INTER_MODES, RTC_INTRA_MODES))
@@ -37,7 +35,6 @@ static const THR_MODES mode_idx[REF_FRAMES][RTC_MODES] = {
   { THR_NEARESTA, THR_NEARA, THR_GLOBALA, THR_NEWA },
 };
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 /*!\brief Finds predicted motion vectors for a block.
  *
  * \ingroup nonrd_mode_search
@@ -61,11 +58,7 @@ static const THR_MODES mode_idx[REF_FRAMES][RTC_MODES] = {
  *                                        prune for low temporal variance block
  * \param[in]    skip_pred_mv             Flag indicating to skip av1_mv_pred
  *
-<<<<<<< HEAD
- * \return Nothing is returned. Instead, predicted MVs are placed into
-=======
  * \remark Nothing is returned. Instead, predicted MVs are placed into
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
  * \c frame_mv array
  */
 static INLINE void find_predictors(
@@ -108,13 +101,9 @@ static INLINE void find_predictors(
                   bsize);
     }
   }
-<<<<<<< HEAD
-  av1_count_overlappable_neighbors(cm, xd);
-=======
   if (cm->features.switchable_motion_mode) {
     av1_count_overlappable_neighbors(cm, xd);
   }
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   mbmi->num_proj_ref = 1;
 }
 

@@ -27,27 +27,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This file defines some utilities useful for implementing Google
 // Mock.  They are subject to change without notice, so please DO NOT
 // USE THEM IN USER CODE.
 
-<<<<<<< HEAD
-// GOOGLETEST_CM0002 DO NOT DELETE
-
-#ifndef GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
-#define GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
-
-#include <stdio.h>
-#include <ostream>  // NOLINT
-#include <string>
-#include <type_traits>
-=======
 // IWYU pragma: private, include "gmock/gmock.h"
 // IWYU pragma: friend gmock/.*
 
@@ -61,7 +46,6 @@
 #include <type_traits>
 #include <vector>
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #include "gmock/internal/gmock-port.h"
 #include "gtest/gtest.h"
 
@@ -75,25 +59,15 @@ namespace internal {
 // Silence MSVC C4100 (unreferenced formal parameter) and
 // C4805('==': unsafe mix of type 'const int' and type 'const bool')
 #ifdef _MSC_VER
-<<<<<<< HEAD
-# pragma warning(push)
-# pragma warning(disable:4100)
-# pragma warning(disable:4805)
-=======
 #pragma warning(push)
 #pragma warning(disable : 4100)
 #pragma warning(disable : 4805)
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // Joins a vector of strings as if they are fields of a tuple; returns
 // the joined string.
-<<<<<<< HEAD
-GTEST_API_ std::string JoinAsTuple(const Strings& fields);
-=======
 GTEST_API_ std::string JoinAsKeyValueTuple(
     const std::vector<const char*>& names, const Strings& values);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Converts an identifier name to a space-separated list of lower-case
 // words.  Each maximum substring of the form [A-Za-z][a-z]*|\d+ is
@@ -101,23 +75,6 @@ GTEST_API_ std::string JoinAsKeyValueTuple(
 // "foo_bar_123" are converted to "foo bar 123".
 GTEST_API_ std::string ConvertIdentifierNameToWords(const char* id_name);
 
-<<<<<<< HEAD
-// PointeeOf<Pointer>::type is the type of a value pointed to by a
-// Pointer, which can be either a smart pointer or a raw pointer.  The
-// following default implementation is for the case where Pointer is a
-// smart pointer.
-template <typename Pointer>
-struct PointeeOf {
-  // Smart pointer classes define type element_type as the type of
-  // their pointees.
-  typedef typename Pointer::element_type type;
-};
-// This specialization is for the raw pointer case.
-template <typename T>
-struct PointeeOf<T*> { typedef T type; };  // NOLINT
-
-=======
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 // GetRawPointer(p) returns the raw pointer underlying p when p is a
 // smart pointer, or returns p itself when p is already a raw pointer.
 // The following default implementation is for the smart pointer case.
@@ -125,11 +82,6 @@ template <typename Pointer>
 inline const typename Pointer::element_type* GetRawPointer(const Pointer& p) {
   return p.get();
 }
-<<<<<<< HEAD
-// This overloaded version is for the raw pointer case.
-template <typename Element>
-inline Element* GetRawPointer(Element* p) { return p; }
-=======
 // This overload version is for std::reference_wrapper, which does not work with
 // the overload above, as it does not have an `element_type`.
 template <typename Element>
@@ -142,7 +94,6 @@ template <typename Element>
 inline Element* GetRawPointer(Element* p) {
   return p;
 }
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // MSVC treats wchar_t as a native type usually, but treats it as the
 // same as unsigned short when the compiler option /Zc:wchar_t- is
@@ -151,11 +102,7 @@ inline Element* GetRawPointer(Element* p) {
 #if defined(_MSC_VER) && !defined(_NATIVE_WCHAR_T_DEFINED)
 // wchar_t is a typedef.
 #else
-<<<<<<< HEAD
-# define GMOCK_WCHAR_T_IS_NATIVE_ 1
-=======
 #define GMOCK_WCHAR_T_IS_NATIVE_ 1
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // In what follows, we use the term "kind" to indicate whether a type
@@ -163,33 +110,20 @@ inline Element* GetRawPointer(Element* p) {
 // or none of them.  This categorization is useful for determining
 // when a matcher argument type can be safely converted to another
 // type in the implementation of SafeMatcherCast.
-<<<<<<< HEAD
-enum TypeKind {
-  kBool, kInteger, kFloatingPoint, kOther
-};
-
-// KindOf<T>::value is the kind of type T.
-template <typename T> struct KindOf {
-=======
 enum TypeKind { kBool, kInteger, kFloatingPoint, kOther };
 
 // KindOf<T>::value is the kind of type T.
 template <typename T>
 struct KindOf {
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   enum { value = kOther };  // The default kind.
 };
 
 // This macro declares that the kind of 'type' is 'kind'.
 #define GMOCK_DECLARE_KIND_(type, kind) \
-<<<<<<< HEAD
-  template <> struct KindOf<type> { enum { value = kind }; }
-=======
   template <>                           \
   struct KindOf<type> {                 \
     enum { value = kind };              \
   }
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 GMOCK_DECLARE_KIND_(bool, kBool);
 
@@ -197,15 +131,6 @@ GMOCK_DECLARE_KIND_(bool, kBool);
 GMOCK_DECLARE_KIND_(char, kInteger);
 GMOCK_DECLARE_KIND_(signed char, kInteger);
 GMOCK_DECLARE_KIND_(unsigned char, kInteger);
-<<<<<<< HEAD
-GMOCK_DECLARE_KIND_(short, kInteger);  // NOLINT
-GMOCK_DECLARE_KIND_(unsigned short, kInteger);  // NOLINT
-GMOCK_DECLARE_KIND_(int, kInteger);
-GMOCK_DECLARE_KIND_(unsigned int, kInteger);
-GMOCK_DECLARE_KIND_(long, kInteger);  // NOLINT
-GMOCK_DECLARE_KIND_(unsigned long, kInteger);  // NOLINT
-GMOCK_DECLARE_KIND_(long long, kInteger);  // NOLINT
-=======
 GMOCK_DECLARE_KIND_(short, kInteger);           // NOLINT
 GMOCK_DECLARE_KIND_(unsigned short, kInteger);  // NOLINT
 GMOCK_DECLARE_KIND_(int, kInteger);
@@ -213,7 +138,6 @@ GMOCK_DECLARE_KIND_(unsigned int, kInteger);
 GMOCK_DECLARE_KIND_(long, kInteger);                // NOLINT
 GMOCK_DECLARE_KIND_(unsigned long, kInteger);       // NOLINT
 GMOCK_DECLARE_KIND_(long long, kInteger);           // NOLINT
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 GMOCK_DECLARE_KIND_(unsigned long long, kInteger);  // NOLINT
 
 #if GMOCK_WCHAR_T_IS_NATIVE_
@@ -228,11 +152,7 @@ GMOCK_DECLARE_KIND_(long double, kFloatingPoint);
 #undef GMOCK_DECLARE_KIND_
 
 // Evaluates to the kind of 'type'.
-<<<<<<< HEAD
-#define GMOCK_KIND_OF_(type) \
-=======
 #define GMOCK_KIND_OF_(type)                   \
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   static_cast< ::testing::internal::TypeKind>( \
       ::testing::internal::KindOf<type>::value)
 
@@ -288,13 +208,7 @@ using LosslessArithmeticConvertible =
 class FailureReporterInterface {
  public:
   // The type of a failure (either non-fatal or fatal).
-<<<<<<< HEAD
-  enum FailureType {
-    kNonfatal, kFatal
-  };
-=======
   enum FailureType { kNonfatal, kFatal };
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
   virtual ~FailureReporterInterface() {}
 
@@ -314,13 +228,8 @@ GTEST_API_ FailureReporterInterface* GetFailureReporter();
 inline void Assert(bool condition, const char* file, int line,
                    const std::string& msg) {
   if (!condition) {
-<<<<<<< HEAD
-    GetFailureReporter()->ReportFailure(FailureReporterInterface::kFatal,
-                                        file, line, msg);
-=======
     GetFailureReporter()->ReportFailure(FailureReporterInterface::kFatal, file,
                                         line, msg);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   }
 }
 inline void Assert(bool condition, const char* file, int line) {
@@ -341,14 +250,7 @@ inline void Expect(bool condition, const char* file, int line) {
 }
 
 // Severity level of a log.
-<<<<<<< HEAD
-enum LogSeverity {
-  kInfo = 0,
-  kWarning = 1
-};
-=======
 enum LogSeverity { kInfo = 0, kWarning = 1 };
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // Valid values for the --gmock_verbose flag.
 
@@ -389,17 +291,10 @@ class WithoutMatchers {
 GTEST_API_ WithoutMatchers GetWithoutMatchers();
 
 // Disable MSVC warnings for infinite recursion, since in this case the
-<<<<<<< HEAD
-// the recursion is unreachable.
-#ifdef _MSC_VER
-# pragma warning(push)
-# pragma warning(disable:4717)
-=======
 // recursion is unreachable.
 #ifdef _MSC_VER
 #pragma warning(push)
 #pragma warning(disable : 4717)
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // Invalid<T>() is usable as an expression of type T, but will terminate
@@ -410,16 +305,6 @@ GTEST_API_ WithoutMatchers GetWithoutMatchers();
 template <typename T>
 inline T Invalid() {
   Assert(false, "", -1, "Internal error: attempt to return invalid value");
-<<<<<<< HEAD
-  // This statement is unreachable, and would never terminate even if it
-  // could be reached. It is provided only to placate compiler warnings
-  // about missing return statements.
-  return Invalid<T>();
-}
-
-#ifdef _MSC_VER
-# pragma warning(pop)
-=======
 #if defined(__GNUC__) || defined(__clang__)
   __builtin_unreachable();
 #elif defined(_MSC_VER)
@@ -431,7 +316,6 @@ inline T Invalid() {
 
 #ifdef _MSC_VER
 #pragma warning(pop)
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 // Given a raw type (i.e. having no top-level reference or const
@@ -493,12 +377,8 @@ template <typename ElementPointer, typename Size>
 class StlContainerView< ::std::tuple<ElementPointer, Size> > {
  public:
   typedef typename std::remove_const<
-<<<<<<< HEAD
-      typename internal::PointeeOf<ElementPointer>::type>::type RawElement;
-=======
       typename std::pointer_traits<ElementPointer>::element_type>::type
       RawElement;
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   typedef internal::NativeArray<RawElement> type;
   typedef const type const_reference;
 
@@ -514,12 +394,8 @@ class StlContainerView< ::std::tuple<ElementPointer, Size> > {
 
 // The following specialization prevents the user from instantiating
 // StlContainer with a reference type.
-<<<<<<< HEAD
-template <typename T> class StlContainerView<T&>;
-=======
 template <typename T>
 class StlContainerView<T&>;
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 
 // A type transform to remove constness from the first part of a pair.
 // Pairs like that are used as the value_type of associative containers,
@@ -540,26 +416,14 @@ struct RemoveConstFromKey<std::pair<const K, V> > {
 GTEST_API_ void IllegalDoDefault(const char* file, int line);
 
 template <typename F, typename Tuple, size_t... Idx>
-<<<<<<< HEAD
-auto ApplyImpl(F&& f, Tuple&& args, IndexSequence<Idx...>) -> decltype(
-    std::forward<F>(f)(std::get<Idx>(std::forward<Tuple>(args))...)) {
-=======
 auto ApplyImpl(F&& f, Tuple&& args, IndexSequence<Idx...>)
     -> decltype(std::forward<F>(f)(
         std::get<Idx>(std::forward<Tuple>(args))...)) {
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
   return std::forward<F>(f)(std::get<Idx>(std::forward<Tuple>(args))...);
 }
 
 // Apply the function to a tuple of arguments.
 template <typename F, typename Tuple>
-<<<<<<< HEAD
-auto Apply(F&& f, Tuple&& args)
-    -> decltype(ApplyImpl(std::forward<F>(f), std::forward<Tuple>(args),
-                          MakeIndexSequence<std::tuple_size<Tuple>::value>())) {
-  return ApplyImpl(std::forward<F>(f), std::forward<Tuple>(args),
-                   MakeIndexSequence<std::tuple_size<Tuple>::value>());
-=======
 auto Apply(F&& f, Tuple&& args) -> decltype(ApplyImpl(
     std::forward<F>(f), std::forward<Tuple>(args),
     MakeIndexSequence<std::tuple_size<
@@ -567,7 +431,6 @@ auto Apply(F&& f, Tuple&& args) -> decltype(ApplyImpl(
   return ApplyImpl(std::forward<F>(f), std::forward<Tuple>(args),
                    MakeIndexSequence<std::tuple_size<
                        typename std::remove_reference<Tuple>::type>::value>());
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 }
 
 // Template struct Function<F>, where F must be a function type, contains
@@ -601,22 +464,13 @@ struct Function<R(Args...)> {
 template <typename R, typename... Args>
 constexpr size_t Function<R(Args...)>::ArgumentCount;
 
-<<<<<<< HEAD
-#ifdef _MSC_VER
-# pragma warning(pop)
-=======
 bool Base64Unescape(const std::string& encoded, std::string* decoded);
 
 #ifdef _MSC_VER
 #pragma warning(pop)
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 #endif
 
 }  // namespace internal
 }  // namespace testing
 
-<<<<<<< HEAD
-#endif  // GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
-=======
 #endif  // GOOGLEMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
