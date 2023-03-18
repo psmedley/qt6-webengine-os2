@@ -318,7 +318,11 @@ base::Optional<size_t> GetFileSize(const std::string& file_path) {
   }
   return static_cast<size_t>(file_size.QuadPart);
 #else
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_OS2)
+  base::ScopedFile fd(base::OpenFile(file_path, O_RDONLY));
+#else
   base::ScopedFile fd(base::OpenFile(file_path, O_RDONLY | O_CLOEXEC));
+#endif
   if (!fd) {
     return nullopt;
   }
