@@ -84,22 +84,6 @@ bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
-                                               size_t size,
-                                               void** memory,
-                                               size_t* mapped_size) const {
-  SHMEM handle = handle_.get();
-
-  *memory = shmem_map(handle, offset, size);
-  if (!*memory) {
-    DPLOG(ERROR) << "shmem_mmap(" << handle << ") failed";
-    return false;
-  }
-
-  *mapped_size = size;
-  return true;
-}
-
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
                                                               size_t size) {
@@ -120,7 +104,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
 
 // static
 bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
-    PlatformHandle handle,
+    PlatformSharedMemoryHandle handle,
     Mode mode,
     size_t size) {
   int flags;

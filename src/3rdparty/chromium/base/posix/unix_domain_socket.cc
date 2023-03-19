@@ -58,8 +58,6 @@ bool UnixDomainSocket::EnableReceiveProcessId(int fd) {
   return true;
 #endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
 }
-#endif  // !defined(OS_NACL_NONSFI)
-
 // static
 bool UnixDomainSocket::SendMsg(int fd,
                                const void* buf,
@@ -144,11 +142,11 @@ ssize_t UnixDomainSocket::RecvMsgWithFlags(int fd,
 
   const size_t kControlBufferSize =
       CMSG_SPACE(sizeof(int) * kMaxFileDescriptors)
-#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_APPLE)
+#if !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       // macOS & OS/2 do not support ucred.
       // macOS supports xucred, but this structure is insufficient.
       + CMSG_SPACE(sizeof(struct ucred))
-#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_APPLE)
+#endif  // !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_OS2)
       ;
   char control_buffer[kControlBufferSize];
   msg.msg_control = control_buffer;

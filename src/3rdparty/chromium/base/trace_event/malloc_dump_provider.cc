@@ -177,7 +177,8 @@ void ReportAppleAllocStats(size_t* total_virtual_size,
 
 #if (BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && BUILDFLAG(IS_ANDROID)) || \
     (!BUILDFLAG(USE_PARTITION_ALLOC_AS_MALLOC) && !BUILDFLAG(IS_WIN) &&    \
-     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_FUCHSIA))
+     !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_WIN) && !BUILDFLAG(IS_FUCHSIA)) \
+     && !BUILDFLAG(IS_OS2)
 void ReportMallinfoStats(ProcessMemoryDump* pmd,
                          size_t* total_virtual_size,
                          size_t* resident_size,
@@ -324,10 +325,10 @@ bool MallocDumpProvider::OnMemoryDump(const MemoryDumpArgs& args,
 
   // Even when PartitionAlloc is used, WinHeap / System malloc is still used as
   // well, report its statistics.
-+#if BUILDFLAG(IS_ANDROID)
-+  ReportMallinfoStats(pmd, &total_virtual_size, &resident_size,
-+                      &allocated_objects_size, &allocated_objects_count);
-+#elif BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_ANDROID)
+  ReportMallinfoStats(pmd, &total_virtual_size, &resident_size,
+                      &allocated_objects_size, &allocated_objects_count);
+#elif BUILDFLAG(IS_WIN)
   ReportWinHeapStats(args.level_of_detail, pmd, &total_virtual_size,
                      &resident_size, &allocated_objects_size,
                      &allocated_objects_count);

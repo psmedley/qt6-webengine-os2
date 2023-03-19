@@ -15,6 +15,8 @@
 #elif BUILDFLAG(IS_WIN)
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_types.h"
+#elif BUILDFLAG(IS_OS2)
+#include "base/os2/scoped_shmem_handle.h"
 #elif BUILDFLAG(IS_POSIX)
 #include <sys/types.h>
 #include "base/files/scoped_file.h"
@@ -22,7 +24,7 @@
 
 namespace base::subtle {
 
-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
+#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_OS2)
 // Helper structs to keep two descriptors on POSIX. It's needed to support
 // ConvertToReadOnly().
 struct BASE_EXPORT FDPair {
@@ -58,6 +60,9 @@ using ScopedPlatformSharedMemoryHandle = zx::vmo;
 #elif BUILDFLAG(IS_WIN)
 using PlatformSharedMemoryHandle = HANDLE;
 using ScopedPlatformSharedMemoryHandle = win::ScopedHandle;
+#elif BUILDFLAG(IS_OS2)
+using PlatformSharedMemoryHandle = SHMEM;
+using ScopedPlatformSharedMemoryHandle = os2::ScopedShmemHandle;
 #elif BUILDFLAG(IS_ANDROID)
 using PlatformSharedMemoryHandle = int;
 using ScopedPlatformSharedMemoryHandle = ScopedFD;

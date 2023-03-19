@@ -132,12 +132,8 @@ absl::optional<size_t> ProcessMemoryDump::CountResidentBytes(
       resident_page_count += vec[i].VirtualAttributes.Valid;
 #elif BUILDFLAG(IS_FUCHSIA)
     // TODO(fuchsia): Port, see https://crbug.com/706592.
-    ALLOW_UNUSED_LOCAL(chunk_start);
-    ALLOW_UNUSED_LOCAL(page_count);
 #elif BUILDFLAG(IS_OS2)
     // TODO(os2): Port
-    ALLOW_UNUSED_LOCAL(chunk_start);
-    ALLOW_UNUSED_LOCAL(page_count);
 #elif BUILDFLAG(IS_APPLE)
     // mincore in MAC does not fail with EAGAIN.
     failure =

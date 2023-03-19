@@ -285,7 +285,7 @@ void PlatformHandle::release() {
   std::ignore = mach_send_.release();
   std::ignore = mach_receive_.release();
 #elif BUILDFLAG(IS_OS2)
-  std::ignore = ignore_result(handle_.release();
+  std::ignore = handle_.release();
 #endif
 
 #if BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)

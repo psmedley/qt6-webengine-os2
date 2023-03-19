@@ -99,7 +99,7 @@ void ConditionVariable::TimedWait(const TimeDelta& max_time) {
   user_lock_->CheckHeldAndUnmark();
 #endif
 
-+#if BUILDFLAG(IS_APPLE)
+#if BUILDFLAG(IS_APPLE)
   int rv = pthread_cond_timedwait_relative_np(
       &condition_, user_mutex_, &relative_time);
 #else

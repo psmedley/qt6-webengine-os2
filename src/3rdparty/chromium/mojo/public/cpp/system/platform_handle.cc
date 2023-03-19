@@ -66,7 +66,7 @@ ScopedSharedBufferHandle WrapPlatformSharedMemoryRegion(
 #elif BUILDFLAG(IS_FUCHSIA)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_FUCHSIA_HANDLE;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
-#elif BUILDFLAG(IS_OS2
+#elif BUILDFLAG(IS_OS2)
   platform_handles[0].type = MOJO_PLATFORM_HANDLE_TYPE_OS2_SHMEM_HANDLE;
   platform_handles[0].value = static_cast<uint64_t>(handle.release());
 #elif BUILDFLAG(IS_MAC)

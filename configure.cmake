@@ -618,7 +618,7 @@ qt_configure_add_summary_entry(ARGS "qtpdf-widgets-build")
 qt_configure_add_summary_entry(ARGS "qtpdf-quick-build")
 qt_configure_end_summary_section()
 # >> Optional system libraries
-if(UNIX)
+if(UNIX OR OS2)
     qt_configure_add_summary_section(NAME "Optional system libraries")
     qt_configure_add_summary_entry(ARGS "webengine-system-re2")
     qt_configure_add_summary_entry(ARGS "webengine-system-icu")

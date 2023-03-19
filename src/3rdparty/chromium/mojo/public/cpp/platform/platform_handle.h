@@ -183,7 +183,7 @@ class COMPONENT_EXPORT(MOJO_CPP_PLATFORM) PlatformHandle {
       type_ = Type::kNone;
     return std::move(handle_);
   }
-  SHMEM ReleaseShmemHandle() WARN_UNUSED_RESULT {
+  [[nodiscard]] SHMEM ReleaseShmemHandle() {
     if (type_ == Type::kShmemHandle)
       type_ = Type::kNone;
     return handle_.release();

@@ -1210,6 +1210,7 @@ jumbo_component("base") {
       "process/process_metrics_os2.cc",
       "profiler/stack_sampler_posix.cc",
       "threading/platform_thread_os2.cc",
+      "memory/platform_shared_memory_mapper_os2.cc",
     ]
   }
 

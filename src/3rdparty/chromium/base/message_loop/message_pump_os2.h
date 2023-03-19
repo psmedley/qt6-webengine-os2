@@ -132,7 +132,8 @@ class BASE_EXPORT MessagePumpForUI : public MessagePumpOS2 {
 
   // MessagePump methods:
   void ScheduleWork() override;
-  void ScheduleDelayedWork(const TimeTicks& delayed_work_time) override;
+  void ScheduleDelayedWork(
+      const Delegate::NextWorkInfo& next_work_info) override;
 
   // Make the MessagePumpForUI respond to WM_QUIT messages.
   void EnableWmQuit();

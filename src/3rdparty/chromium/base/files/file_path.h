@@ -124,9 +124,9 @@
 // To print path names portably use PRFilePath (based on PRIuS and friends from
 // C99 and format_macros.h) like this:
 // base::StringPrintf("Path is %" PRFilePath ".\n", path.value().c_str());
-#if BUILDFLAG(IS_WIN)
+#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_OS2)
 #define PRFilePath "ls"
-+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
+#elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
 #define PRFilePath "s"
 #endif  // BUILDFLAG(IS_WIN)
 

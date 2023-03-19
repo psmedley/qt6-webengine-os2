@@ -663,7 +663,7 @@ class BASE_EXPORT FieldTrialList {
   friend int SerializeSharedMemoryRegionMetadata();
   FRIEND_TEST_ALL_PREFIXES(FieldTrialListTest, CheckReadOnlySharedMemoryRegion);
 
-#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS)
+#if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_OS2)
   // Serialization is used to pass information about the shared memory handle
   // to child processes. This is achieved by passing a stringified reference to
   // the relevant OS resources to the child process.

@@ -117,7 +117,7 @@ DiscardableMemoryBacking GetDiscardableMemoryBacking() {
       base::GetMadvFreeSupport() == base::MadvFreeSupport::kSupported) {
     return DiscardableMemoryBacking::kMadvFree;
   }
-+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
+#endif  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_OS2)
 
   return DiscardableMemoryBacking::kSharedMemory;
 }
