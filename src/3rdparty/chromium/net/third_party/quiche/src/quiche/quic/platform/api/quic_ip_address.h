@@ -15,6 +15,18 @@
 #include <sys/types.h>
 #endif
 
+#ifdef __OS2__
+struct in6_addr {
+	union {
+	uint8_t         __u6_addr8[16];
+	uint16_t        __u6_addr16[8];
+	uint32_t        __u6_addr32[4];
+	} __u6_addr;                    /* 128-bit IP6 address */
+};
+#define s6_addr   __u6_addr.__u6_addr8
+#define 	INET6_ADDRSTRLEN   (48)
+#endif
+
 #include <ostream>
 #include <string>
 

@@ -139,6 +139,7 @@ bool IPEndPoint::FromSockAddr(const struct sockaddr* sock_addr,
           base::NetToHost16(addr->sin6_port));
       return true;
     }
+#endif
 #if BUILDFLAG(IS_WIN)
     case AF_BTH: {
       if (sock_addr_len < static_cast<socklen_t>(sizeof(SOCKADDR_BTH)))

@@ -7,7 +7,6 @@
 
 #include "base/check_op.h"
 #include "base/containers/flat_map.h"
-#include "base/macros.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/dom/dom_keyboard_layout_map_base.h"
@@ -29,8 +28,6 @@ class DomKeyboardLayoutMapOS2 : public DomKeyboardLayoutMapBase {
   ui::DomKey GetDomKeyFromDomCodeForLayout(
       ui::DomCode dom_code,
       uint32_t keyboard_layout_index) override;
-
-  DISALLOW_COPY_AND_ASSIGN(DomKeyboardLayoutMapOS2);
 };
 
 DomKeyboardLayoutMapOS2::DomKeyboardLayoutMapOS2() = default;

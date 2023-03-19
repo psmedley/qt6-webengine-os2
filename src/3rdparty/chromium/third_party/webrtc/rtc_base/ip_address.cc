@@ -314,7 +314,7 @@ bool IPFromAddrInfo(struct addrinfo* info, IPAddress* out) {
   return false;
 }
 
-+bool IPFromString(absl::string_view str, IPAddress* out) {
+bool IPFromString(absl::string_view str, IPAddress* out) {
   if (!out) {
     return false;
   }

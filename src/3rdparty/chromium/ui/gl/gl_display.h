@@ -7,7 +7,7 @@
 
 #include "ui/gl/gl_export.h"
 
-#if defined(USE_EGL)
+#if defined(USE_EGL) || BUILDFLAG(IS_OS2) // errors on OS2 with EGLDisplay not defined
 typedef void* EGLDisplay;
 #endif  // defined(USE_EGL)
 
@@ -25,7 +25,7 @@ class GL_EXPORT GLDisplay {
   virtual void* GetDisplay() = 0;
 };
 
-#if defined(USE_EGL)
+#if defined(USE_EGL) || BUILDFLAG(IS_OS2) // errors on OS2 with GLDisplayEGL not defined
 class GL_EXPORT GLDisplayEGL : public GLDisplay {
  public:
   GLDisplayEGL();
