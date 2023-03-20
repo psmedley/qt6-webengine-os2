@@ -609,7 +609,11 @@ struct HashTableAddResult final {
   STACK_ALLOCATED();
 
  public:
+#ifndef __OS2__ //FIXME
   HashTableAddResult([[maybe_unused]] const HashTableType* container,
+#else
+  HashTableAddResult(const HashTableType* container,
+#endif
                      ValueType* stored_value,
                      bool is_new_entry)
       : stored_value(stored_value),

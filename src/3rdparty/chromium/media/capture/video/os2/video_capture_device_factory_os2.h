@@ -5,7 +5,11 @@
 #ifndef MEDIA_CAPTURE_VIDEO_FUCHSIA_VIDEO_CAPTURE_DEVICE_FACTORY_OS2_H_
 #define MEDIA_CAPTURE_VIDEO_FUCHSIA_VIDEO_CAPTURE_DEVICE_FACTORY_OS2_H_
 
+#include <map>
+
+#include "base/containers/small_map.h"
 #include "media/capture/video/video_capture_device_factory.h"
+#include "third_party/abseil-cpp/absl/types/optional.h"
 
 namespace media {
 
@@ -15,15 +19,14 @@ class CAPTURE_EXPORT VideoCaptureDeviceFactoryOS2
   VideoCaptureDeviceFactoryOS2();
   ~VideoCaptureDeviceFactoryOS2() override;
 
-  std::unique_ptr<VideoCaptureDevice> CreateDevice(
+  // VideoCaptureDeviceFactory implementation.
+  VideoCaptureErrorOrDevice CreateDevice(
       const VideoCaptureDeviceDescriptor& device_descriptor) override;
   void GetDevicesInfo(GetDevicesInfoCallback callback);
   void GetDeviceDescriptors(
       VideoCaptureDeviceDescriptors* device_descriptors);
   void GetSupportedFormats(const VideoCaptureDeviceDescriptor& device,
                            VideoCaptureFormats* supported_formats);
- private:
-  DISALLOW_COPY_AND_ASSIGN(VideoCaptureDeviceFactoryOS2);
 };
 
 }  // namespace media

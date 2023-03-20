@@ -230,6 +230,10 @@ mojom("mojom_platform") {
     sources += [ "input/synchronous_compositor.mojom" ]
   }
 
+  if (is_os2) {
+    sources -= [ "chromeos/system_extensions/window_management/cros_window_management.mojom" ]
+  }
+
   if (is_win) {
     sources += [ "dwrite_font_proxy/dwrite_font_proxy.mojom" ]
   }

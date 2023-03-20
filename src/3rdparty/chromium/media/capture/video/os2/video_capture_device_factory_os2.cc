@@ -11,12 +11,13 @@ namespace media {
 VideoCaptureDeviceFactoryOS2::VideoCaptureDeviceFactoryOS2() = default;
 VideoCaptureDeviceFactoryOS2::~VideoCaptureDeviceFactoryOS2() = default;
 
-std::unique_ptr<VideoCaptureDevice>
-VideoCaptureDeviceFactoryOS2::CreateDevice(
+VideoCaptureErrorOrDevice VideoCaptureDeviceFactoryOS2::CreateDevice(
     const VideoCaptureDeviceDescriptor& device_descriptor) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   NOTIMPLEMENTED();
-  return nullptr;
+  return VideoCaptureErrorOrDevice(
+      VideoCaptureError::
+          kVideoCaptureControllerInvalidOrUnsupportedVideoCaptureParametersRequested);
 }
 
 void VideoCaptureDeviceFactoryOS2::GetDeviceDescriptors(
