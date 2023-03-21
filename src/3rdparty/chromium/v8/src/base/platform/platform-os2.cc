@@ -5,6 +5,7 @@
 #define INCL_BASE
 #define INCL_EXAPIS
 #include <os2.h>
+#include <sys/mman.h>
 
 #include "src/base/macros.h"
 #include "src/base/platform/platform-posix-time.h"
@@ -19,6 +20,7 @@ namespace {
 ULONG GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
     case OS::MemoryPermission::kNoAccess:
+    case OS::MemoryPermission::kNoAccessWillJitLater:
       return 0;  // no permissions
     case OS::MemoryPermission::kRead:
       return PAG_READ;
@@ -83,7 +85,7 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   if (base == aligned_base) return base;
 
   // Otherwise, free it and try a larger allocation.
-  CHECK(Free(base, size));
+  Free(base, size);
 
   // Clear the hint. It's unlikely we can allocate at this address.
   address = nullptr;
@@ -102,7 +104,7 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
 
     // Try to trim the allocation by freeing the padded allocation and then
     // calling VirtualAlloc at the aligned base.
-    CHECK(Free(base, padded_size));
+    Free(base, padded_size);
     aligned_base = reinterpret_cast<void*>(
         RoundUp(reinterpret_cast<uintptr_t>(base), alignment));
     base = aligned_base;
@@ -118,18 +120,35 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
 }
 
 // static
-bool OS::Free(void* address, const size_t size) {
+void OS::Free(void* address, const size_t size) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % AllocatePageSize());
   DCHECK_EQ(0, size % AllocatePageSize());
   USE(size);
-  return DosFreeMemEx(address) == NO_ERROR;
+  CHECK_NE(0,DosFreeMemEx(address) == NO_ERROR);
 }
 
 // static
-bool OS::Release(void* address, size_t size) {
+void* OS::AllocateShared(void* hint, size_t size, MemoryPermission access,
+                         PlatformSharedMemoryHandle handle, uint64_t offset) {
+  DCHECK_EQ(0, size % AllocatePageSize());
+  int prot = GetProtectionFromMemoryPermission(access);
+  int fd = FileDescriptorFromSharedMemoryHandle(handle);
+  void* result = mmap(hint, size, prot, MAP_SHARED, fd, offset);
+  if (result == MAP_FAILED) return nullptr;
+  return result;
+}
+
+// static
+void OS::FreeShared(void* address, size_t size) {
+  DCHECK_EQ(0, size % AllocatePageSize());
+  CHECK_EQ(0, munmap(address, size));
+}
+
+// static
+void OS::Release(void* address, size_t size) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
   DCHECK_EQ(0, size % CommitPageSize());
-  return DosSetMem(address, size, PAG_DECOMMIT) == NO_ERROR;
+  CHECK_NE(0, DosSetMem(address, size, PAG_DECOMMIT) == NO_ERROR);
 }
 
 // static
@@ -152,6 +171,15 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
     }
   }
   return arc == NO_ERROR;
+}
+
+// static
+bool OS::DecommitPages(void* address, size_t size) {
+  // We rely on DiscardSystemPages decommitting the pages immediately (via
+  // ZX_VMO_OP_DECOMMIT) so that they are guaranteed to be zero-initialized
+  // should they be accessed again later on.
+  // TODO: OS/2 doen't seem to have madvise/MEM_RESET semantics.
+  return true;
 }
 
 // static
@@ -183,6 +211,22 @@ Stack::StackSlot Stack::GetStackStart() {
     return nullptr;
   return ptib->tib_pstack;
 }
+
+// static
+bool OS::CanReserveAddressSpace() { return false; }
+
+// static
+Optional<AddressSpaceReservation> OS::CreateAddressSpaceReservation(
+    void* hint, size_t size, size_t alignment,
+    MemoryPermission max_permission) {
+  // TODO: Port to OS/2.
+}
+
+// static
+void OS::FreeAddressSpaceReservation(AddressSpaceReservation reservation) {
+  // TODO: Port to OS/2.
+}
+
 
 }  // namespace base
 }  // namespace v8

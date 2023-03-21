@@ -4,12 +4,15 @@
 
 #include "content/browser/speech/tts_platform_impl.h"
 
+#include "base/callback.h"
 #include "base/no_destructor.h"
 
 namespace content {
 
 // Dummy implementation to prevent a browser crash, see crbug.com/1019511
 // TODO : Provide an implementation for OS/2
+// Dummy implementation to prevent a browser crash, see crbug.com/1019511
+// TODO(crbug.com/1019819): Provide an implementation for Fuchsia.
 class TtsPlatformImplOS2 : public TtsPlatformImpl {
  public:
   TtsPlatformImplOS2() = default;

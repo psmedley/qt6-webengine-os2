@@ -32,6 +32,10 @@
 #include <android/log.h>
 #endif
 
+#if defined(__OS2__)
+#include <unistd.h>
+#endif
+
 #include <cmath>
 #include <cstdlib>
 
@@ -966,7 +970,7 @@ bool AddressSpaceReservation::Free(void* address, size_t size) {
 }
 
 // macOS specific implementation in platform-macos.cc.
-#if !defined(V8_OS_MACOS)
+#if !defined(V8_OS_MACOS) && !defined(V8_OS_OS2)
 bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
                                              OS::MemoryPermission access,
                                              PlatformSharedMemoryHandle handle,
@@ -977,7 +981,7 @@ bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
   return mmap(address, size, prot, MAP_SHARED | MAP_FIXED, fd, offset) !=
          MAP_FAILED;
 }
-#endif  // !defined(V8_OS_MACOS)
+#endif  // !defined(V8_OS_MACOS) && !defined(V8_OS_OS2)
 
 bool AddressSpaceReservation::FreeShared(void* address, size_t size) {
   DCHECK(Contains(address, size));
