@@ -227,6 +227,13 @@ void OS::FreeAddressSpaceReservation(AddressSpaceReservation reservation) {
   // TODO: Port to OS/2.
 }
 
+bool AddressSpaceReservation::AllocateShared(void* address, size_t size,
+                                             OS::MemoryPermission access,
+                                             PlatformSharedMemoryHandle handle,
+                                             uint64_t offset) {
+  // TODO: Port to OS/2.
+return false;
+}
 
 }  // namespace base
 }  // namespace v8

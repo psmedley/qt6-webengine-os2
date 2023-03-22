@@ -38,12 +38,9 @@ public:
 
     void SetStatus(PermissionStatus status);
 
-<<<<<<< HEAD
-=======
 protected:
     ~FileSystemAccessPermissionGrantQt() override;
 
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
 private:
     void OnPermissionRequestResult(base::OnceCallback<void(PermissionRequestOutcome)> callback,
                                    PermissionAction result);

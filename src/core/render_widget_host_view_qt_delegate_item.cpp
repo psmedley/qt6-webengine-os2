@@ -199,11 +199,8 @@ void RenderWidgetHostViewQtDelegateItem::focusInEvent(QFocusEvent *event)
     if (QAccessibleInterface *iface = QAccessible::queryAccessibleInterface(this)) {
         if (auto *focusChild = iface->focusChild()) {
             QAccessibleEvent focusEvent(focusChild, QAccessible::Focus);
-<<<<<<< HEAD
-=======
             if (focusEvent.object())
                 focusEvent.setChild(-1);
->>>>>>> 261f176c356a8020065064fb262b73710c7210ee
             QAccessible::updateAccessibility(&focusEvent);
         }
     }
