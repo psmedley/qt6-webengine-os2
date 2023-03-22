@@ -53,7 +53,7 @@ uv_offset_mul:         dd 256
                        dd 1024
 pb_8_9_0_1:            db 8, 9, 0, 1
 
-SECTION .text
+SECTION_TEXT
 
 INIT_ZMM avx512icl
 cglobal fgy_32x32xn_16bpc, 6, 15, 21, dst, src, stride, fg_data, w, scaling, \

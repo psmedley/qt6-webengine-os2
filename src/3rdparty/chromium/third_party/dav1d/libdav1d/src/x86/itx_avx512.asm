@@ -238,7 +238,7 @@ COEF_PAIR 3406, 2276
             COEF_X8  -301,  4085,  2675,  3102, -1842,  3659,  1285,  3889
 dw    -1189, -3920,  3920, -1189,  1189,  3920, -2276, -3406,  3406, -2276
 
-SECTION .text
+SECTION_TEXT
 
 %define o_base int8_permA+64*18
 %define o(x) (r5 - (o_base) + (x))

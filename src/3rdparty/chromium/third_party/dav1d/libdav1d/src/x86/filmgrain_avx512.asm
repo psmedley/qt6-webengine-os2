@@ -57,7 +57,7 @@ noise_rnd:     times 2 dw 128
                times 2 dw 32
                times 2 dw 16
 
-SECTION .text
+SECTION_TEXT
 
 INIT_ZMM avx512icl
 cglobal fgy_32x32xn_8bpc, 6, 13, 22, dst, src, stride, fg_data, w, scaling, \

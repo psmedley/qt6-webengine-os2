@@ -55,7 +55,7 @@ pd_8421376:    dd 8421376
 
 cextern sgr_x_by_x
 
-SECTION .text
+SECTION_TEXT
 
 DECLARE_REG_TMP 8, 7, 9, 11, 12, 13, 14 ; ring buffer pointers
 

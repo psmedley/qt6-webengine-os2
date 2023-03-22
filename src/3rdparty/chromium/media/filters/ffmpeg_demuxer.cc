@@ -112,7 +112,7 @@ static base::TimeDelta ExtractStartTime(AVStream* stream, int64_t first_dts) {
 
   // Next try to use the first DTS value, for codecs where we know PTS == DTS
   // (excludes all H26x codecs). The start time must be returned in PTS.
-  if (av_stream_get_first_dts(stream) != kInvalidPTSMarker &&
+  if (first_dts != AV_NOPTS_VALUE &&
       stream->codecpar->codec_id != AV_CODEC_ID_HEVC &&
       stream->codecpar->codec_id != AV_CODEC_ID_H264 &&
       stream->codecpar->codec_id != AV_CODEC_ID_MPEG4) {
@@ -1613,7 +1613,7 @@ FFmpegDemuxerStream* FFmpegDemuxer::FindStreamWithLowestStartTimestamp(
   for (const auto& stream : streams_) {
     if (!stream || stream->IsEnabled() != enabled)
       continue;
-    if (av_stream_get_first_dts(stream->av_stream()) == kInvalidPTSMarker)
+    if (stream->first_dts() == AV_NOPTS_VALUE)
       continue;
     if (!lowest_start_time_stream ||
         stream->start_time() < lowest_start_time_stream->start_time()) {
@@ -1634,7 +1634,7 @@ FFmpegDemuxerStream* FFmpegDemuxer::FindPreferredStreamForSeeking(
     if (stream->type() != DemuxerStream::VIDEO)
       continue;
 
-    if (av_stream_get_first_dts(stream->av_stream()) == kInvalidPTSMarker)
+    if (stream->first_dts() == AV_NOPTS_VALUE)
       continue;
 
     if (!stream->IsEnabled())

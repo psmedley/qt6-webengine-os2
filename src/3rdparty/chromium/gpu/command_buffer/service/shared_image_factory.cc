@@ -219,7 +219,11 @@ SharedImageFactory::SharedImageFactory(
                             VK_EXT_IMAGE_DRM_FORMAT_MODIFIER_EXTENSION_NAME);
     }
 #endif
+#if !BUILDFLAG(IS_OS2)
     bool gl_ext_supported = gl::GLSurfaceEGL::HasEGLExtension("EGL_KHR_image");
+#else
+    bool gl_ext_supported = false;
+#endif
     ReportDmaBufSupportMetric(pixmap_supported, vulkan_ext_supported,
                               gl_ext_supported);
     set_dmabuf_supported_metric_ = true;

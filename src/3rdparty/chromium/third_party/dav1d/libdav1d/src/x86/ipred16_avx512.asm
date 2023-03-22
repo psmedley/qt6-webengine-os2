@@ -78,7 +78,7 @@ cextern smooth_weights_1d_16bpc
 cextern smooth_weights_2d_16bpc
 cextern filter_intra_taps
 
-SECTION .text
+SECTION_TEXT
 
 %macro PAETH 3 ; top, signed_ldiff, ldiff
     paddw               m0, m%2, m2

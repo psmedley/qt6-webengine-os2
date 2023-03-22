@@ -673,8 +673,10 @@ void OnKeySystemSupportUpdated(media::GetSupportedKeySystemsCB cb,
 
 void ContentRendererClientQt::GetSupportedKeySystems(media::GetSupportedKeySystemsCB cb)
 {
+#if BUILDFLAG(ENABLE_LIBRARY_CDMS)
     content::ObserveKeySystemSupportUpdate(
         base::BindRepeating(&OnKeySystemSupportUpdated, std::move(cb)));
+#endif
 }
 
 #if QT_CONFIG(webengine_spellchecker)

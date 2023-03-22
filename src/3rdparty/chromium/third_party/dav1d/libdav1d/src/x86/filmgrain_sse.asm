@@ -67,7 +67,7 @@ JMP_TABLE generate_grain_uv_420, ssse3, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_422, ssse3, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_444, ssse3, 0, 1, 2, 3
 
-SECTION .text
+SECTION_TEXT
 
 %if ARCH_X86_32
 %define PIC_ptr(a) base+a
