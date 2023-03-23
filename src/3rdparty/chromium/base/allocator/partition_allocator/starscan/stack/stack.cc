@@ -57,13 +57,8 @@ void* GetStackTop() {
   // based on third_party/blink/renderer/platform/wtf/stack_util.cc
   PTIB ptib;
   DosGetInfoBlocks(&ptib, NULL);
-  // Reduce the stack size by two pages to avoid hitting a stack overflow
-  // exception when the second last page (protected by the guard flag) is
-  // accessed.
-  return
-    reinterpret_cast<ULONG>(ptib->tib_pstacklimit) -
-    reinterpret_cast<ULONG>(ptib->tib_pstack) -
-    0x1000 * 2;
+  // tib_pstacklimit is the high stack address - just what we need.
+  return ptib->tib_pstacklimit;
 }
 
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
