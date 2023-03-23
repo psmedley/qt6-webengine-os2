@@ -13,6 +13,9 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #else
 #include <pthread.h>
 #endif
@@ -51,8 +54,16 @@ void* GetStackTop() {
 
 #elif BUILDFLAG(IS_OS2)
 void* GetStackTop() {
-  /* FIXME! Stub Only */
-  return nullptr;
+  // based on third_party/blink/renderer/platform/wtf/stack_util.cc
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // Reduce the stack size by two pages to avoid hitting a stack overflow
+  // exception when the second last page (protected by the guard flag) is
+  // accessed.
+  return
+    reinterpret_cast<ULONG>(ptib->tib_pstacklimit) -
+    reinterpret_cast<ULONG>(ptib->tib_pstack) -
+    0x1000 * 2;
 }
 
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)
