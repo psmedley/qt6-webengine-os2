@@ -13,6 +13,9 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #else
 #include <pthread.h>
 #endif
@@ -48,6 +51,21 @@ void* GetStackTop() {
 
 void* GetStackTop() {
   return pthread_get_stackaddr_np(pthread_self());
+}
+
+#elif defined(OS_OS2)
+
+void* GetStackTop() {
+  // based on third_party/blink/renderer/platform/wtf/stack_util.cc
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // Reduce the stack size by two pages to avoid hitting a stack overflow
+  // exception when the second last page (protected by the guard flag) is
+  // accessed.
+  return
+    reinterpret_cast<ULONG>(ptib->tib_pstacklimit) -
+    reinterpret_cast<ULONG>(ptib->tib_pstack) -
+    0x1000 * 2;
 }
 
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
