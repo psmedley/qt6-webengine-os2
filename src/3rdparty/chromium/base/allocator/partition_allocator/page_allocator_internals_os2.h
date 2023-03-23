@@ -5,8 +5,6 @@
 #ifndef BASE_ALLOCATOR_PARTITION_ALLOCATOR_PAGE_ALLOCATOR_INTERNALS_OS2_H_
 #define BASE_ALLOCATOR_PARTITION_ALLOCATOR_PAGE_ALLOCATOR_INTERNALS_OS2_H_
 
-#include <sys/mman.h>
-
 #include "base/allocator/partition_allocator/oom.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
 #include "base/logging.h"
@@ -166,16 +164,7 @@ void DecommitSystemPagesInternal(
 }
 
 void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
-  // https://pubs.opengroup.org/onlinepubs/9699919799/functions/mmap.html: "If
-  // a MAP_FIXED request is successful, then any previous mappings [...] for
-  // those whole pages containing any part of the address range [pa,pa+len)
-  // shall be removed, as if by an appropriate call to munmap(), before the
-  // new mapping is established." As a consequence, the memory will be
-  // zero-initialized on next access.
-  void* ptr = reinterpret_cast<void*>(address);
-  void* ret = mmap(ptr, length, PROT_NONE,
-                   MAP_FIXED | MAP_ANONYMOUS | MAP_PRIVATE, -1, 0);
-  PA_CHECK(ptr == ret);
+  PA_CHECK(MyDosSetMem(reinterpret_cast<void*>(address), length, PAG_DECOMMIT));
 }
 
 void RecommitSystemPagesInternal(
