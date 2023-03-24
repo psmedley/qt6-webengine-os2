@@ -70,7 +70,7 @@ int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   }
 }
 
-void* SystemAllocPagesInternal(void* hint,
+uintptr_t SystemAllocPagesInternal(void* hint,
                                size_t length,
                                PageAccessibilityConfiguration accessibility,
                                PageTag page_tag) {
@@ -93,7 +93,7 @@ void* SystemAllocPagesInternal(void* hint,
   }
   if (arc != NO_ERROR) {
     s_allocPageErrorCode = arc;
-    return nullptr;
+    return 0;
   }
   return base;
 }
