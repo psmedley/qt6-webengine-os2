@@ -13,6 +13,9 @@
 
 #if BUILDFLAG(IS_WIN)
 #include <windows.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #else
 #include <pthread.h>
 #endif
@@ -51,8 +54,11 @@ void* GetStackTop() {
 
 #elif BUILDFLAG(IS_OS2)
 void* GetStackTop() {
-  /* FIXME! Stub Only */
-  return nullptr;
+  // based on third_party/blink/renderer/platform/wtf/stack_util.cc
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // tib_pstacklimit is the high stack address - just what we need.
+  return ptib->tib_pstacklimit;
 }
 
 #elif BUILDFLAG(IS_POSIX) || BUILDFLAG(IS_FUCHSIA)

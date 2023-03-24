@@ -82,7 +82,7 @@ JMP_TABLE generate_grain_uv_420_16bpc_avx2, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_422_16bpc_avx2, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_444_16bpc_avx2, 0, 1, 2, 3
 
-SECTION .text
+SECTION_TEXT
 
 %define m(x) mangle(private_prefix %+ _ %+ x %+ SUFFIX)
 

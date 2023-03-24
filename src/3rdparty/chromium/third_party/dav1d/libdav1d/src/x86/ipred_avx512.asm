@@ -128,7 +128,7 @@ JMP_TABLE ipred_dc_8bpc,         avx512icl, h4, h8, h16, h32, h64, w4, w8, w16, 
 JMP_TABLE ipred_dc_left_8bpc,    avx512icl, h4, h8, h16, h32, h64
 JMP_TABLE pal_pred_8bpc,         avx512icl, w4, w8, w16, w32, w64
 
-SECTION .text
+SECTION_TEXT
 
 INIT_ZMM avx512icl
 cglobal ipred_dc_top_8bpc, 3, 7, 5, dst, stride, tl, w, h

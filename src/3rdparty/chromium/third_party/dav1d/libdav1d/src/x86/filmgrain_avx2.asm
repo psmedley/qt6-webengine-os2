@@ -75,7 +75,7 @@ JMP_TABLE generate_grain_uv_420, avx2, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_422, avx2, 0, 1, 2, 3
 JMP_TABLE generate_grain_uv_444, avx2, 0, 1, 2, 3
 
-SECTION .text
+SECTION_TEXT
 
 INIT_YMM avx2
 cglobal generate_grain_y_8bpc, 2, 9, 8, buf, fg_data

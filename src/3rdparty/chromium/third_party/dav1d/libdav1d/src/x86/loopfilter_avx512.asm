@@ -61,7 +61,7 @@ pb_m1_2: times 2 db -1, 2
 pw_2048: times 2 dw 2048
 pw_4096: times 2 dw 4096
 
-SECTION .text
+SECTION_TEXT
 
 %macro ABSSUB 4 ; dst, a, b, tmp
     psubusb           %1, %2, %3

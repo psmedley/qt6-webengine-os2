@@ -49,7 +49,7 @@ JMP_TABLE splat_mv_avx2,      1, 2, 4, 8, 16, 32
 %endif
 JMP_TABLE splat_mv_sse2,      1, 2, 4, 8, 16, 32
 
-SECTION .text
+SECTION_TEXT
 
 INIT_XMM sse2
 ; refmvs_block **rr, refmvs_block *a, int bx4, int bw4, int bh4

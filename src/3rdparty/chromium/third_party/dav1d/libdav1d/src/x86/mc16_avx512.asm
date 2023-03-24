@@ -252,7 +252,7 @@ cextern mc_warp_filter
 cextern obmc_masks_avx2
 cextern resize_filter
 
-SECTION .text
+SECTION_TEXT
 
 %if WIN64
 DECLARE_REG_TMP 4
