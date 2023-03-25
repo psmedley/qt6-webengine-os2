@@ -119,9 +119,10 @@ bool TrySetSystemPagesAccessInternal(
     uintptr_t address,
     size_t length,
     PageAccessibilityConfiguration accessibility) {
+  void* ptr = reinterpret_cast<void*>(address);
   if (accessibility == PageAccessibilityConfiguration::kInaccessible)
-    return MyDosSetMem(address, length, PAG_DECOMMIT) == NO_ERROR;
-  return MyDosSetMem(address, length, PAG_COMMIT |
+    return MyDosSetMem(ptr, length, PAG_DECOMMIT) == NO_ERROR;
+  return MyDosSetMem(ptr, length, PAG_COMMIT |
                      GetAccessFlags(accessibility)) == NO_ERROR;
 }
 
@@ -160,7 +161,8 @@ void DecommitSystemPagesInternal(
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  SetSystemPagesAccess(address, length, PageAccessibilityConfiguration::kInaccessible);
+  SetSystemPagesAccess(address, length,
+                       PageAccessibilityConfiguration::kInaccessible);
 }
 
 void DecommitAndZeroSystemPagesInternal(uintptr_t address, size_t length) {
@@ -174,7 +176,7 @@ void RecommitSystemPagesInternal(
     PageAccessibilityDisposition accessibility_disposition) {
   // Ignore accessibility_disposition, because decommitting is equivalent to
   // making pages inaccessible.
-  return TrySetSystemPagesAccess(address, length, accessibility);
+  SetSystemPagesAccess(address, length, accessibility);
 }
 
 bool TryRecommitSystemPagesInternal(

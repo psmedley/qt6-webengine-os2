@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "base/numerics/safe_conversions.h"
 
-#include <sys/mman.h>
+#include <libcx/shmem.h>
 
 namespace base {
 
@@ -19,12 +19,10 @@ bool PlatformSharedMemoryMapper::MapInternal(
     size_t size,
     void** memory,
     size_t* mapped_size) {
-  *memory = mmap(nullptr, size, PROT_READ | (write_allowed ? PROT_WRITE : 0),
-                 MAP_SHARED, handle, checked_cast<off_t>(offset));
 
-  bool mmap_succeeded = *memory && *memory != MAP_FAILED;
-  if (!mmap_succeeded) {
-    DPLOG(ERROR) << "mmap " << handle << " failed";
+  *memory = shmem_map(handle, offset, size);
+  if (!*memory) {
+    DPLOG(ERROR) << "shmem_mmap(" << handle << ") failed";
     return false;
   }
 
@@ -34,8 +32,8 @@ bool PlatformSharedMemoryMapper::MapInternal(
 
 // static
 void PlatformSharedMemoryMapper::UnmapInternal(void* memory, size_t size) {
-  if (munmap(memory, size) < 0)
-    DPLOG(ERROR) << "munmap";
+  if (shmem_unmap(memory) == -1)
+    DPLOG(ERROR) << "shmem_unmap";
 }
 
 }  // namespace base
