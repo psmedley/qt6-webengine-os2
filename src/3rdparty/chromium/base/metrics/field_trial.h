@@ -675,7 +675,6 @@ class BASE_EXPORT FieldTrialList {
   // descriptor for the shared memory separately. It can be accessed via the
   // GetFieldTrialDescriptor() API.
   static std::string SerializeSharedMemoryRegionMetadata(
-      const ReadOnlySharedMemoryRegion& shm);
       const ReadOnlySharedMemoryRegion& shm,
       LaunchOptions* launch_options);
 

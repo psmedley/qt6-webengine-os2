@@ -768,6 +768,7 @@ void FieldTrialList::CreateTrialsFromCommandLine(const CommandLine& cmd_line,
 
 #if !BUILDFLAG(IS_NACL) && !BUILDFLAG(IS_IOS) && !BUILDFLAG(IS_OS2)
   if (cmd_line.HasSwitch(switches::kFieldTrialHandle)) {
+    std::string switch_value =
         cmd_line.GetSwitchValueASCII(switches::kFieldTrialHandle);
     bool result = CreateTrialsFromSwitchValue(switch_value, fd_key);
     UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromShmemSuccess",
@@ -1281,7 +1282,7 @@ bool FieldTrialList::CreateTrialsFromSwitchValue(
     return false;
 #endif  // BUILDFLAG(IS_POSIX)
   ReadOnlySharedMemoryRegion shm =
-      DeserializeSharedMemoryRegionMetadata(fd, switch_value);
+      DeserializeSharedMemoryRegionMetadata(switch_value, fd);
   if (!shm.IsValid())
     return false;
   return FieldTrialList::CreateTrialsFromSharedMemoryRegion(shm);
