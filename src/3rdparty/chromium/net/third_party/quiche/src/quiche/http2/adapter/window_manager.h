@@ -1,6 +1,8 @@
 #ifndef QUICHE_HTTP2_ADAPTER_WINDOW_MANAGER_H_
 #define QUICHE_HTTP2_ADAPTER_WINDOW_MANAGER_H_
 
+#include <cstdint> // Needed for GCC12
+
 #include <stddef.h>
 
 #include <functional>

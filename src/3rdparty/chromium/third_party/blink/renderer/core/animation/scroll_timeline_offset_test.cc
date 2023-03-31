@@ -5,7 +5,11 @@
 #include "third_party/blink/renderer/core/animation/scroll_timeline_offset.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
+#ifndef __OS2__
 #include "third_party/blink/renderer/bindings/core/v8/v8_union_csskeywordvalue_cssnumericvalue_scrolltimelineelementbasedoffset_string.h"
+#else
+#include "third_party/blink/renderer/bindings/core/v8/v8_union_csskeywordvalue_cssnumericvalue_scrolltimelineelementbasedoffset_s.h"
+#endif
 #include "third_party/blink/renderer/core/animation/animation_test_helpers.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_offset.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
