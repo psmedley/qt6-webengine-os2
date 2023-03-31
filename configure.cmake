@@ -466,8 +466,8 @@ add_check_for_support(
 )
 add_check_for_support(
    MODULES QtPdf
-   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS OR OS2
-   MESSAGE "Build can be done only on Linux, Windows, macOS, OS/2 or iOS."
+   CONDITION LINUX OR (WIN32 AND NOT WIN_ARM_64) OR MACOS OR IOS
+   MESSAGE "Build can be done only on Linux, Windows, macOS, or iOS."
 )
 if(LINUX AND CMAKE_CROSSCOMPILING)
    get_gn_arch(testArch ${TEST_architecture_arch})
