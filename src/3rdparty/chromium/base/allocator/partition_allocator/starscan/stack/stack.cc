@@ -13,6 +13,9 @@
 
 #if defined(OS_WIN)
 #include <windows.h>
+#elif defined(OS_OS2)
+#define INCL_DOS
+#include <os2.h>
 #else
 #include <pthread.h>
 #endif
@@ -52,8 +55,11 @@ void* GetStackTop() {
 
 #elif defined(OS_OS2)
 void* GetStackTop() {
-  /* FIXME! Stub Only */
-  return nullptr;
+  // based on third_party/blink/renderer/platform/wtf/stack_util.cc
+  PTIB ptib;
+  DosGetInfoBlocks(&ptib, NULL);
+  // tib_pstacklimit is the high stack address - just what we need.
+  return ptib->tib_pstacklimit;
 }
 
 #elif defined(OS_POSIX) || defined(OS_FUCHSIA)
